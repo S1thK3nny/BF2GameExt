@@ -2,6 +2,8 @@
 #include "pch.h"
 
 #include "apply_patches.hpp"
+#include "class_limit.hpp"
+#include "lua_hooks.hpp"
 #include "slim_vector.hpp"
 
 void install_patches();
@@ -14,7 +16,9 @@ BOOL __declspec(dllexport) APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for
    } break;
    case DLL_THREAD_ATTACH:
    case DLL_THREAD_DETACH:
+      break;
    case DLL_PROCESS_DETACH:
+      lua_hooks_uninstall();
       break;
    }
    return TRUE;
@@ -66,6 +70,11 @@ void install_patches()
    if (not apply_patches((uintptr_t)game_address, sections)) {
       FatalAppExitA(0, "Failed to apply patches! Check \"BF2GameExt.log\" for more info.");
    }
+
+   patch_class_limit((uintptr_t)game_address, 20); // raise max class count from 10 to 20
+
+   // Resolve Lua API addresses and register our custom functions into the live Lua state.
+   lua_hooks_install((uintptr_t)game_address);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

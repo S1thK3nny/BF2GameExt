@@ -67,6 +67,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <ExceptionHandling>false</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(SolutionDir)Detours\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -91,6 +92,7 @@
       <ControlFlowGuard>Guard</ControlFlowGuard>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <AdditionalIncludeDirectories>$(SolutionDir)Detours\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -104,6 +106,8 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="src\apply_patches.hpp" />
     <ClInclude Include="src\cfile.hpp" />
+    <ClInclude Include="src\lua_hooks.hpp" />
+    <ClInclude Include="src\lua_funcs.hpp" />
     <ClInclude Include="src\framework.h" />
     <ClInclude Include="src\patch_table.hpp" />
     <ClInclude Include="src\pch.h" />
@@ -114,6 +118,8 @@
     <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\patch_table.cpp" />
+    <ClCompile Include="src\lua_hooks.cpp" />
+    <ClCompile Include="src\lua_funcs.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
@@ -121,6 +127,11 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(SolutionDir)Detours\Detours.vcxproj">
+      <Project>{e140ad5e-f779-4799-8d8d-f3913091f84a}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

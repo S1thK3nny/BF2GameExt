@@ -20,8 +20,16 @@ void cfile::printf(char const* const format, ...) const
    va_start(args, format);
 
    vfprintf(file, format, args);
+   fflush(file);
 
    va_end(args);
+}
+
+void cfile::vprintf(char const* const format, va_list args) const
+{
+   if (not file) return;
+   vfprintf(file, format, args);
+   fflush(file);
 }
 
 cfile::operator bool() const noexcept
