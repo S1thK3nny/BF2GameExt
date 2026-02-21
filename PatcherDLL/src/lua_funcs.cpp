@@ -97,6 +97,162 @@ static int lua_HttpGet(lua_State* L)
    return 1;
 }
 
+// HttpPut(url, body) - performs a synchronous HTTP PUT, returns response body as a string.
+// Returns nil on failure. Supports http and https.
+// Uses the lower-level WinINet API (InternetConnect + HttpOpenRequest) because
+// InternetOpenUrlA does not support specifying an HTTP method.
+// Example: local resp = HttpPut("http://example.com/api/data", "{\"key\":\"value\"}")
+static int lua_HttpPut(lua_State* L)
+{
+   const char* url = g_lua.tolstring(L, 1, nullptr);
+   if (!url) { g_lua.pushnil(L); return 1; }
+
+   size_t bodyLen = 0;
+   const char* body = g_lua.tolstring(L, 2, &bodyLen);
+   // body may be nil (PUT with empty body is valid)
+
+   // Parse URL into host, path, port, scheme
+   URL_COMPONENTSA uc = {};
+   uc.dwStructSize = sizeof(uc);
+   char hostBuf[256]  = {};
+   char pathBuf[2048] = {};
+   uc.lpszHostName     = hostBuf;
+   uc.dwHostNameLength = sizeof(hostBuf);
+   uc.lpszUrlPath      = pathBuf;
+   uc.dwUrlPathLength  = sizeof(pathBuf);
+   if (!InternetCrackUrlA(url, 0, 0, &uc)) { g_lua.pushnil(L); return 1; }
+
+   const BOOL   isHttps = (uc.nScheme == INTERNET_SCHEME_HTTPS);
+   const DWORD  flags   = INTERNET_FLAG_RELOAD |
+                          (isHttps ? INTERNET_FLAG_SECURE |
+                                     INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+                                     INTERNET_FLAG_IGNORE_CERT_DATE_INVALID : 0);
+   const INTERNET_PORT port = uc.nPort ? uc.nPort
+                            : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
+                                       : INTERNET_DEFAULT_HTTP_PORT);
+
+   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   if (!hNet) { g_lua.pushnil(L); return 1; }
+
+   HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
+                                      nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+   if (!hConn) { InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   const char* path = pathBuf[0] ? pathBuf : "/";
+   HINTERNET hReq = HttpOpenRequestA(hConn, "PUT", path,
+                                     nullptr, nullptr, nullptr, flags, 0);
+   if (!hReq) { InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   if (!HttpSendRequestA(hReq, nullptr, 0,
+                         (LPVOID)body, body ? (DWORD)bodyLen : 0)) {
+      InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet);
+      g_lua.pushnil(L); return 1;
+   }
+
+   // Read response into a growable buffer
+   char chunk[4096];
+   DWORD bytes_read = 0;
+   size_t total = 0;
+   size_t capacity = 65536;
+   char* buf = (char*)malloc(capacity);
+   if (!buf) { InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   while (InternetReadFile(hReq, chunk, sizeof(chunk), &bytes_read) && bytes_read > 0) {
+      if (total + bytes_read > capacity) {
+         capacity *= 2;
+         char* newbuf = (char*)realloc(buf, capacity);
+         if (!newbuf) { free(buf); InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+         buf = newbuf;
+      }
+      memcpy(buf + total, chunk, bytes_read);
+      total += bytes_read;
+   }
+
+   InternetCloseHandle(hReq);
+   InternetCloseHandle(hConn);
+   InternetCloseHandle(hNet);
+
+   g_lua.pushlstring(L, buf, total);
+   free(buf);
+   return 1;
+}
+
+// HttpPost(url, body) - performs a synchronous HTTP POST with Content-Type: application/json.
+// Returns response body as a string, or nil on failure. Supports http and https.
+// Example: local resp = HttpPost("http://example.com/api", "{\"key\":\"value\"}")
+static int lua_HttpPost(lua_State* L)
+{
+   const char* url = g_lua.tolstring(L, 1, nullptr);
+   if (!url) { g_lua.pushnil(L); return 1; }
+
+   size_t bodyLen = 0;
+   const char* body = g_lua.tolstring(L, 2, &bodyLen);
+
+   URL_COMPONENTSA uc = {};
+   uc.dwStructSize = sizeof(uc);
+   char hostBuf[256]  = {};
+   char pathBuf[2048] = {};
+   uc.lpszHostName     = hostBuf;
+   uc.dwHostNameLength = sizeof(hostBuf);
+   uc.lpszUrlPath      = pathBuf;
+   uc.dwUrlPathLength  = sizeof(pathBuf);
+   if (!InternetCrackUrlA(url, 0, 0, &uc)) { g_lua.pushnil(L); return 1; }
+
+   const BOOL  isHttps = (uc.nScheme == INTERNET_SCHEME_HTTPS);
+   const DWORD flags   = INTERNET_FLAG_RELOAD |
+                         (isHttps ? INTERNET_FLAG_SECURE |
+                                    INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+                                    INTERNET_FLAG_IGNORE_CERT_DATE_INVALID : 0);
+   const INTERNET_PORT port = uc.nPort ? uc.nPort
+                            : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
+                                       : INTERNET_DEFAULT_HTTP_PORT);
+
+   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   if (!hNet) { g_lua.pushnil(L); return 1; }
+
+   HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
+                                      nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+   if (!hConn) { InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   const char* path = pathBuf[0] ? pathBuf : "/";
+   HINTERNET hReq = HttpOpenRequestA(hConn, "POST", path,
+                                     nullptr, nullptr, nullptr, flags, 0);
+   if (!hReq) { InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   static const char headers[] = "Content-Type: application/json\r\n";
+   if (!HttpSendRequestA(hReq, headers, (DWORD)(sizeof(headers) - 1),
+                         (LPVOID)body, body ? (DWORD)bodyLen : 0)) {
+      InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet);
+      g_lua.pushnil(L); return 1;
+   }
+
+   char chunk[4096];
+   DWORD bytes_read = 0;
+   size_t total = 0;
+   size_t capacity = 65536;
+   char* buf = (char*)malloc(capacity);
+   if (!buf) { InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+
+   while (InternetReadFile(hReq, chunk, sizeof(chunk), &bytes_read) && bytes_read > 0) {
+      if (total + bytes_read > capacity) {
+         capacity *= 2;
+         char* newbuf = (char*)realloc(buf, capacity);
+         if (!newbuf) { free(buf); InternetCloseHandle(hReq); InternetCloseHandle(hConn); InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
+         buf = newbuf;
+      }
+      memcpy(buf + total, chunk, bytes_read);
+      total += bytes_read;
+   }
+
+   InternetCloseHandle(hReq);
+   InternetCloseHandle(hConn);
+   InternetCloseHandle(hNet);
+
+   g_lua.pushlstring(L, buf, total);
+   free(buf);
+   return 1;
+}
+
 // ---------------------------------------------------------------------------
 // GetCharacterWeapon(unit) - returns the ODF class name of the active weapon
 // held by a character unit.
@@ -159,8 +315,11 @@ static int lua_RemoveUnitClass(lua_State* L)
    const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
 
    if (!g_lua.isnumber(L, 1)) return 0;
-   const char* unitClass = g_lua.tolstring(L, 2, nullptr);
-   if (!unitClass) return 0;
+
+   // arg2 can be a string (ODF name) or a number (0-based slot index within the team).
+   const bool byIndex   = g_lua.isnumber(L, 2) != 0;
+   const char* unitClass = byIndex ? nullptr : g_lua.tolstring(L, 2, nullptr);
+   if (!byIndex && !unitClass) return 0;
 
    const int teamIndex = g_lua.tointeger(L, 1);
    if (teamIndex < 0 || teamIndex >= 8) {
@@ -177,67 +336,240 @@ static int lua_RemoveUnitClass(lua_State* L)
       return 0;
    }
 
-   // Step 1: Walk g_ClassDefList to find the classDef pointer for unitClass.
-   // The head node pointer is stored at res(0xACD2C8).
-   // Node layout: +0x04 = next node ptr, +0x0c = classDef ptr (null = end of list).
-   // classDef layout: +0x18 = integer name hash (NOT a char* — do not dereference as string).
-   //
-   // Compute the target hash using the game's own HashString (FUN_007e1bd0).
-   // HashString is __thiscall: ECX = 8-byte stack buffer, stack arg = class name string.
-   // Returns EAX = ECX (the buffer); first dword of the buffer is the hash.
-   typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
-   const auto fn_HashString = (HashString_t)res(0x7E1BD0);
-   alignas(4) int hashBuf[2] = {};
-   fn_HashString(hashBuf, unitClass);
-   const int targetHash = hashBuf[0];
-
-   uintptr_t node = *(uintptr_t*)res(0xACD2C8);
-   void* classDef = nullptr;
-   for (int guard = 0; guard < 1024; ++guard) {
-      void* element = *(void**)(node + 0x0c);
-      if (!element) break;
-      if (*(int*)((char*)element + 0x18) == targetHash) {
-         classDef = element;
-         break;
-      }
-      node = *(uintptr_t*)(node + 0x04);
-   }
-   if (!classDef) {
-      fn_GameLog("RemoveUnitClass(): class \"%s\" not found in global registry (check the side's .req file)\n", unitClass);
-      return 0;
-   }
-
-   // Step 2: Find classDef in team->classDefArray (parallel array at team+0x50).
    const int classCount = *(int*)((char*)teamPtr + 0x48);
-   void** classDefArr = *(void***)((char*)teamPtr + 0x50);
+   void** classDefArr   = *(void***)((char*)teamPtr + 0x50);
+
    int foundSlot = -1;
-   for (int i = 0; i < classCount; ++i) {
-      if (classDefArr[i] == classDef) { foundSlot = i; break; }
-   }
-   if (foundSlot < 0) {
-      fn_GameLog("RemoveUnitClass(): class \"%s\" is not assigned to team %d\n", unitClass, teamIndex);
-      return 0;
+
+   if (byIndex) {
+      // Direct slot index — no global registry lookup needed.
+      const int classIndex = g_lua.tointeger(L, 2);
+      if (classIndex < 0 || classIndex >= classCount) {
+         fn_GameLog("RemoveUnitClass(): class index %d out of range (team %d has %d classes)\n",
+                    classIndex, teamIndex, classCount);
+         return 0;
+      }
+      foundSlot = classIndex;
+   } else {
+      // ODF name — walk g_ClassDefList to get the classDef pointer, then match by pointer.
+      // Node layout: +0x04 = next, +0x0c = classDef ptr (null = end of list).
+      // classDef+0x18 = integer name hash (NOT a char* — do not dereference as string).
+      //
+      // HashString: __thiscall, ECX = 8-byte stack buffer, stack arg = name string.
+      // buf[0] is the resulting integer hash.
+      typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
+      const auto fn_HashString = (HashString_t)res(0x7E1BD0);
+      alignas(4) int hashBuf[2] = {};
+      fn_HashString(hashBuf, unitClass);
+      const int targetHash = hashBuf[0];
+
+      uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+      void* classDef = nullptr;
+      for (int guard = 0; guard < 1024; ++guard) {
+         void* element = *(void**)(node + 0x0c);
+         if (!element) break;
+         if (*(int*)((char*)element + 0x18) == targetHash) { classDef = element; break; }
+         node = *(uintptr_t*)(node + 0x04);
+      }
+      if (!classDef) {
+         fn_GameLog("RemoveUnitClass(): class \"%s\" not found in global registry (check the side's .req file)\n", unitClass);
+         return 0;
+      }
+
+      for (int i = 0; i < classCount; ++i) {
+         if (classDefArr[i] == classDef) { foundSlot = i; break; }
+      }
+      if (foundSlot < 0) {
+         fn_GameLog("RemoveUnitClass(): class \"%s\" is not assigned to team %d\n", unitClass, teamIndex);
+         return 0;
+      }
    }
 
-   // Step 3: Left-shift removal.
-   // Slide every entry after foundSlot one position to the left, preserving
-   // order. The list is capped at classCapacity entries so this is always cheap.
+   // Left-shift removal: slide every entry after foundSlot one position left,
+   // preserving spawn menu order. classCount is decremented so the freed slot
+   // is immediately available for a subsequent AddUnitClass call.
+   //
+   // NOTE: the spawner (FUN_006470f0) pre-caches slot indices for characters
+   // already queued to spawn. After the shift, any character cached on the old
+   // lastSlot index will call Character::SetClass(lastSlot) → null → a one-time
+   // "Trying to spawn a character with no class" warning in the log. That
+   // character is skipped for that spawn tick and respawns normally on the next
+   // cycle. The warning is harmless and the alternative (tombstoning) prevents
+   // slot reuse, breaking the add/remove cycle.
    int* minArr = *(int**)((char*)teamPtr + 0x54);
    int* maxArr = *(int**)((char*)teamPtr + 0x58);
    const int lastSlot = classCount - 1;
-   const auto fn_SetMinMax = (SetUnitClassMinMax_t)res(0x662C20);
 
    for (int i = foundSlot; i < lastSlot; ++i) {
       classDefArr[i] = classDefArr[i + 1];
-      fn_SetMinMax(teamPtr, i, minArr[i + 1], maxArr[i + 1]);
+      minArr[i]      = minArr[i + 1];
+      maxArr[i]      = maxArr[i + 1];
    }
 
-   // Clear the vacated last slot and decrement count.
    classDefArr[lastSlot] = nullptr;
-   minArr[lastSlot] = 0;
-   maxArr[lastSlot] = 0;
+   minArr[lastSlot]      = 0;
+   maxArr[lastSlot]      = 0;
    *(int*)((char*)teamPtr + 0x48) = lastSlot;
 
+   // Return the ODF name when called by name; nil when called by index
+   // (classDef+0x18 is only a hash — the name string offset is unconfirmed).
+   if (unitClass) {
+      g_lua.pushlstring(L, unitClass, strlen(unitClass));
+      return 1;
+   }
+   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Async HTTP infrastructure — fire-and-forget background threads
+//
+// Each Async variant copies the URL/body onto the heap, spawns a thread,
+// and returns immediately. The thread does the request, discards the response,
+// frees the work struct, and exits. The game thread is never blocked.
+// ---------------------------------------------------------------------------
+
+struct HttpAsyncWork {
+   char*  url;
+   char*  body;       // null = no body
+   size_t bodyLen;
+   char   method[8];  // "GET", "PUT", "POST", …
+   char*  headers;    // null = no extra headers
+};
+
+static void http_async_free(HttpAsyncWork* w)
+{
+   free(w->url);
+   free(w->body);
+   free(w->headers);
+   free(w);
+}
+
+static DWORD WINAPI http_async_worker(LPVOID param)
+{
+   HttpAsyncWork* w = (HttpAsyncWork*)param;
+
+   if (strcmp(w->method, "GET") == 0) {
+      // High-level path: InternetOpenUrlA is fine for GET.
+      HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+      if (hNet) {
+         HINTERNET hUrl = InternetOpenUrlA(hNet, w->url, nullptr, 0,
+                                           INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE |
+                                           INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+                                           INTERNET_FLAG_IGNORE_CERT_DATE_INVALID, 0);
+         if (hUrl) {
+            char chunk[4096]; DWORD br = 0;
+            while (InternetReadFile(hUrl, chunk, sizeof(chunk), &br) && br > 0) {}
+            InternetCloseHandle(hUrl);
+         }
+         InternetCloseHandle(hNet);
+      }
+   } else {
+      // Low-level path: InternetConnect + HttpOpenRequest (required to set method / headers).
+      URL_COMPONENTSA uc = {};
+      uc.dwStructSize = sizeof(uc);
+      char hostBuf[256] = {}, pathBuf[2048] = {};
+      uc.lpszHostName     = hostBuf; uc.dwHostNameLength = sizeof(hostBuf);
+      uc.lpszUrlPath      = pathBuf; uc.dwUrlPathLength  = sizeof(pathBuf);
+
+      if (InternetCrackUrlA(w->url, 0, 0, &uc)) {
+         const BOOL  isHttps = (uc.nScheme == INTERNET_SCHEME_HTTPS);
+         const DWORD flags   = INTERNET_FLAG_RELOAD |
+                               (isHttps ? INTERNET_FLAG_SECURE |
+                                          INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+                                          INTERNET_FLAG_IGNORE_CERT_DATE_INVALID : 0);
+         const INTERNET_PORT port = uc.nPort ? uc.nPort
+                                  : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
+                                             : INTERNET_DEFAULT_HTTP_PORT);
+
+         HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+         if (hNet) {
+            HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
+                                               nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+            if (hConn) {
+               const char* path = pathBuf[0] ? pathBuf : "/";
+               HINTERNET hReq = HttpOpenRequestA(hConn, w->method, path,
+                                                 nullptr, nullptr, nullptr, flags, 0);
+               if (hReq) {
+                  DWORD hdrLen = w->headers ? (DWORD)strlen(w->headers) : 0;
+                  if (HttpSendRequestA(hReq, w->headers, hdrLen,
+                                       (LPVOID)w->body, w->body ? (DWORD)w->bodyLen : 0)) {
+                     char chunk[4096]; DWORD br = 0;
+                     while (InternetReadFile(hReq, chunk, sizeof(chunk), &br) && br > 0) {}
+                  }
+                  InternetCloseHandle(hReq);
+               }
+               InternetCloseHandle(hConn);
+            }
+            InternetCloseHandle(hNet);
+         }
+      }
+   }
+
+   http_async_free(w);
+   return 0;
+}
+
+// Allocates a work item, copies all strings, spawns the thread, and detaches it.
+// Returns true if the thread was created successfully.
+static bool http_fire_and_forget(const char* method, const char* url,
+                                 const char* body, size_t bodyLen,
+                                 const char* headers)
+{
+   HttpAsyncWork* w = (HttpAsyncWork*)malloc(sizeof(HttpAsyncWork));
+   if (!w) return false;
+   memset(w, 0, sizeof(*w));
+
+   w->url = _strdup(url);
+   if (!w->url) { http_async_free(w); return false; }
+
+   if (body && bodyLen > 0) {
+      w->body = (char*)malloc(bodyLen);
+      if (!w->body) { http_async_free(w); return false; }
+      memcpy(w->body, body, bodyLen);
+      w->bodyLen = bodyLen;
+   }
+
+   if (headers) {
+      w->headers = _strdup(headers);
+      if (!w->headers) { http_async_free(w); return false; }
+   }
+
+   strncpy_s(w->method, sizeof(w->method), method, _TRUNCATE);
+
+   HANDLE hThread = CreateThread(nullptr, 0, http_async_worker, w, 0, nullptr);
+   if (!hThread) { http_async_free(w); return false; }
+   CloseHandle(hThread);  // detach — thread frees w on exit
+   return true;
+}
+
+// HttpGetAsync(url) - fire-and-forget HTTP GET. Returns immediately.
+static int lua_HttpGetAsync(lua_State* L)
+{
+   const char* url = g_lua.tolstring(L, 1, nullptr);
+   if (url) http_fire_and_forget("GET", url, nullptr, 0, nullptr);
+   return 0;
+}
+
+// HttpPutAsync(url, body) - fire-and-forget HTTP PUT. Returns immediately.
+static int lua_HttpPutAsync(lua_State* L)
+{
+   const char* url = g_lua.tolstring(L, 1, nullptr);
+   if (!url) return 0;
+   size_t bodyLen = 0;
+   const char* body = g_lua.tolstring(L, 2, &bodyLen);
+   http_fire_and_forget("PUT", url, body, bodyLen, nullptr);
+   return 0;
+}
+
+// HttpPostAsync(url, body) - fire-and-forget HTTP POST with Content-Type: application/json.
+// Returns immediately. Ideal for Discord webhooks and other event notifications.
+static int lua_HttpPostAsync(lua_State* L)
+{
+   const char* url = g_lua.tolstring(L, 1, nullptr);
+   if (!url) return 0;
+   size_t bodyLen = 0;
+   const char* body = g_lua.tolstring(L, 2, &bodyLen);
+   http_fire_and_forget("POST", url, body, bodyLen, "Content-Type: application/json\r\n");
    return 0;
 }
 
@@ -251,6 +583,11 @@ static const lua_func_entry custom_functions[] = {
    { "GetSystemTickCount",    lua_GetSystemTickCount },
    { "ReadTextFile",          lua_ReadTextFile },
    { "HttpGet",               lua_HttpGet },
+   { "HttpPut",               lua_HttpPut },
+   { "HttpPost",              lua_HttpPost },
+   { "HttpGetAsync",          lua_HttpGetAsync },
+   { "HttpPutAsync",          lua_HttpPutAsync },
+   { "HttpPostAsync",         lua_HttpPostAsync },
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
    { "RemoveUnitClass",       lua_RemoveUnitClass },
    { nullptr, nullptr }

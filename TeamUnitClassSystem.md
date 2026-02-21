@@ -175,24 +175,53 @@ Enforces max 12 classes (vanilla; BF2GameExt patches this to 20).
 
 ## `RemoveUnitClass` — BF2GameExt addition
 
-Inverse of `AddUnitClass`. Algorithm:
+**Algorithm (tombstone, not shift):**
 
 1. **Resolve team pointer** — double-dereference `g_ppTeams` as shown above.
 2. **Hash the class name** — call `HashString` to get the integer hash.
 3. **Walk `g_ClassDefList`** — find the `ClassDef*` whose `nameHash` matches.
 4. **Search team's `classDefArr`** — find the slot index by pointer comparison.
-5. **Left-shift removal** — for each slot `i` from `foundSlot` to `classCount-2`:
+5. **Tombstone the slot** — in place, no shifting:
    ```
-   classDefArr[i] = classDefArr[i+1]
-   SetUnitClassMinMax(team, i, minArr[i+1], maxArr[i+1])
+   classDefArr[foundSlot] = nullptr
+   minArr[foundSlot]      = 0
+   maxArr[foundSlot]      = 0
+   classCount unchanged
    ```
-   `SetUnitClassMinMax` must be called (not a raw write) so `OnUnitClassChanged` fires.
-6. **Clear last slot** — zero `classDefArr[lastSlot]`, `minArr[lastSlot]`, `maxArr[lastSlot]`.
-7. **Decrement count** — `*(int*)(teamPtr + 0x48) = classCount - 1`.
 
-**Why left-shift, not swap-and-pop?**
-Swap-and-pop moves the last element into the removed slot, changing the visible order of
-unit classes in the spawn menu. Left-shift preserves order exactly as the player sees it.
+**Why tombstone, not left-shift?**
+
+`thunk_FUN_00643500` (`Character::SetClass(slotIndex)`) is called by the spawner
+(FUN_006470f0) just before `FUN_006457a0` (Spawn). It reads `classDefArr[slotIndex]`
+and stores the result in `[character + 0x140]`. The spawner pre-caches these slot
+indices — they are computed before `RemoveUnitClass` runs and are not updated when
+the array changes. If we left-shift the array, the class that was at `lastSlot`
+moves to `lastSlot - 1`, but any character still holding the old index `lastSlot`
+calls `SetClass(lastSlot)` → `classDefArr[lastSlot] = null` →
+`[character + 0x140] = null` → **"Trying to spawn a character with no class"**.
+
+Tombstoning avoids this entirely — all other slot indices are unchanged. The spawner
+checks `alive < max` before queuing a spawn; with `max = 0` it never queues the
+tombstoned slot, so no new characters of that class will be created. Existing
+characters of that class keep their valid classDef pointer and are unaffected.
+
+**Trade-off:** the slot is not freed (`classCount` stays the same). A removed slot
+is permanently wasted until the team is re-initialized. This is acceptable because
+scripted maps remove a fixed set of classes at init time and do not cycle them.
+
+**Pre-spawn limitation:** The spawner calls `Character::SetClass(slotIndex)`
+(`thunk_FUN_00643500`) to assign a class to each character object **before**
+`ScriptPostLoad` runs. Those characters already have a direct classDef pointer stored
+at `[character + 0x140]` (pointing into the global registry, which `RemoveUnitClass`
+never touches). They will spawn once regardless of the team array. After they die they
+will not respawn, because the spawner then reads from the (now-modified) team array and
+the class is gone. **Practical effect**: calling `RemoveUnitClass` at `ScriptPostLoad`
+prevents player selection of the class and prevents AI respawns, but does not suppress
+the initial pre-spawned wave of that class.
+
+**`classDef + 0x20` is the name string** (confirmed from spawn function):
+`FUN_007e3d50("Memory pool for \"%s\" full...", *(classDef + 0x20))`. This can be
+used to recover the ODF name from an index-based removal in the future.
 
 ---
 
