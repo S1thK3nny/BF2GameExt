@@ -132,6 +132,115 @@ static int lua_GetCharacterWeapon(lua_State* L)
    return 1;
 }
 
+// ---------------------------------------------------------------------------
+// RemoveUnitClass(teamIndex, unitClass) - removes a unit class from a team.
+//
+// Reverse of AddUnitClass. Finds the class in the global class def list,
+// locates it in the team's parallel arrays, then left-shifts remaining entries
+// to preserve order and keep the arrays compact.
+//
+// @param #int    teamIndex   Index of team (0-based)
+// @param #string unitClass   ODF class name (e.g. "imp_inf_trooper")
+// ---------------------------------------------------------------------------
+
+// Team::SetUnitClassMinMax — __thiscall on team object.
+// Writes min/max into their respective parallel arrays and fires the change
+// notification (thunk_FUN_00661e00).
+typedef void (__thiscall* SetUnitClassMinMax_t)(void* team, int slot, int min, int max);
+
+// Game's printf-style debug logger — same one vanilla scripts call for error output.
+// FUN_007e3d50, __cdecl, (const char* fmt, ...)
+typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
+
+static int lua_RemoveUnitClass(lua_State* L)
+{
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t addr) -> uintptr_t { return addr - 0x400000u + base; };
+   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+
+   if (!g_lua.isnumber(L, 1)) return 0;
+   const char* unitClass = g_lua.tolstring(L, 2, nullptr);
+   if (!unitClass) return 0;
+
+   const int teamIndex = g_lua.tointeger(L, 1);
+   if (teamIndex < 0 || teamIndex >= 8) {
+      fn_GameLog("RemoveUnitClass(): teamIndex %d out of range (0-7)\n", teamIndex);
+      return 0;
+   }
+
+   // Get team pointer from g_ppTeams[teamIndex].
+   // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
+   const uintptr_t teamArrayBase = *(uintptr_t*)res(0xAD5D64);
+   void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
+   if (!teamPtr) {
+      fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
+      return 0;
+   }
+
+   // Step 1: Walk g_ClassDefList to find the classDef pointer for unitClass.
+   // The head node pointer is stored at res(0xACD2C8).
+   // Node layout: +0x04 = next node ptr, +0x0c = classDef ptr (null = end of list).
+   // classDef layout: +0x18 = integer name hash (NOT a char* — do not dereference as string).
+   //
+   // Compute the target hash using the game's own HashString (FUN_007e1bd0).
+   // HashString is __thiscall: ECX = 8-byte stack buffer, stack arg = class name string.
+   // Returns EAX = ECX (the buffer); first dword of the buffer is the hash.
+   typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
+   const auto fn_HashString = (HashString_t)res(0x7E1BD0);
+   alignas(4) int hashBuf[2] = {};
+   fn_HashString(hashBuf, unitClass);
+   const int targetHash = hashBuf[0];
+
+   uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+   void* classDef = nullptr;
+   for (int guard = 0; guard < 1024; ++guard) {
+      void* element = *(void**)(node + 0x0c);
+      if (!element) break;
+      if (*(int*)((char*)element + 0x18) == targetHash) {
+         classDef = element;
+         break;
+      }
+      node = *(uintptr_t*)(node + 0x04);
+   }
+   if (!classDef) {
+      fn_GameLog("RemoveUnitClass(): class \"%s\" not found in global registry (check the side's .req file)\n", unitClass);
+      return 0;
+   }
+
+   // Step 2: Find classDef in team->classDefArray (parallel array at team+0x50).
+   const int classCount = *(int*)((char*)teamPtr + 0x48);
+   void** classDefArr = *(void***)((char*)teamPtr + 0x50);
+   int foundSlot = -1;
+   for (int i = 0; i < classCount; ++i) {
+      if (classDefArr[i] == classDef) { foundSlot = i; break; }
+   }
+   if (foundSlot < 0) {
+      fn_GameLog("RemoveUnitClass(): class \"%s\" is not assigned to team %d\n", unitClass, teamIndex);
+      return 0;
+   }
+
+   // Step 3: Left-shift removal.
+   // Slide every entry after foundSlot one position to the left, preserving
+   // order. The list is capped at classCapacity entries so this is always cheap.
+   int* minArr = *(int**)((char*)teamPtr + 0x54);
+   int* maxArr = *(int**)((char*)teamPtr + 0x58);
+   const int lastSlot = classCount - 1;
+   const auto fn_SetMinMax = (SetUnitClassMinMax_t)res(0x662C20);
+
+   for (int i = foundSlot; i < lastSlot; ++i) {
+      classDefArr[i] = classDefArr[i + 1];
+      fn_SetMinMax(teamPtr, i, minArr[i + 1], maxArr[i + 1]);
+   }
+
+   // Clear the vacated last slot and decrement count.
+   classDefArr[lastSlot] = nullptr;
+   minArr[lastSlot] = 0;
+   maxArr[lastSlot] = 0;
+   *(int*)((char*)teamPtr + 0x48) = lastSlot;
+
+   return 0;
+}
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -143,6 +252,7 @@ static const lua_func_entry custom_functions[] = {
    { "ReadTextFile",          lua_ReadTextFile },
    { "HttpGet",               lua_HttpGet },
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
+   { "RemoveUnitClass",       lua_RemoveUnitClass },
    { nullptr, nullptr }
 };
 

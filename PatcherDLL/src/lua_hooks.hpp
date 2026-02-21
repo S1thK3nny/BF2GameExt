@@ -53,6 +53,10 @@ using fn_lua_toboolean = int(__cdecl*)(lua_State* L, int idx);
 // lua_touserdata(L, idx) - get light userdata pointer from Lua stack
 using fn_lua_touserdata = void*(__cdecl*)(lua_State* L, int idx);
 
+// lua_isnumber(L, idx) - returns 1 if the value at idx is a number or a string
+// convertible to a number, 0 otherwise.
+using fn_lua_isnumber = int(__cdecl*)(lua_State* L, int idx);
+
 namespace lua_addrs {
    // --------------------------------------------------------------------------
    // FOR BF2_modtools exe - fill in from Ghidra
@@ -110,6 +114,11 @@ namespace lua_addrs {
       // lua_touserdata(L, idx) - returns light userdata pointer or NULL
       // Confirmed: 0x7B8440
       constexpr uintptr_t lua_touserdata = 0x7B8440;
+
+      // lua_isnumber(L, idx)
+      // Confirmed: FUN_007b8070 — checks slot type tag == 3 (LUA_TNUMBER),
+      // falls back to lua_str2num for string coercion.
+      constexpr uintptr_t lua_isnumber = 0x7B8070;
    }
 
    namespace steam {
@@ -152,6 +161,9 @@ namespace lua_addrs {
 
       // lua_touserdata(L, idx)
       constexpr uintptr_t lua_touserdata = 0xDEAD000C;     // TODO: REPLACE
+
+      // lua_isnumber(L, idx)
+      constexpr uintptr_t lua_isnumber = 0xDEAD000D;       // TODO: REPLACE
    }
 }
 
@@ -170,6 +182,9 @@ struct lua_api {
    fn_lua_pushboolean  pushboolean  = nullptr;
    fn_lua_toboolean    toboolean    = nullptr;
    fn_lua_touserdata   touserdata   = nullptr;
+   fn_lua_isnumber     isnumber     = nullptr;
+
+   int tointeger(lua_State* L, int idx) const { return static_cast<int>(tonumber(L, idx)); }
 };
 
 // Global API instance - populated by lua_hooks_install()

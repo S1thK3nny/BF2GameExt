@@ -55,6 +55,7 @@ void lua_hooks_install(uintptr_t exe_base)
    g_lua.pushboolean  = (fn_lua_pushboolean) resolve(exe_base, lua_pushboolean);
    g_lua.toboolean    = (fn_lua_toboolean)   resolve(exe_base, lua_toboolean);
    g_lua.touserdata   = (fn_lua_touserdata)  resolve(exe_base, lua_touserdata);
+   g_lua.isnumber     = (fn_lua_isnumber)    resolve(exe_base, lua_isnumber);
 
    original_init_state = (fn_init_state)resolve(exe_base, init_state);
 
