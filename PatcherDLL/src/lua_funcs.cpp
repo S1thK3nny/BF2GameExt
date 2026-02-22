@@ -257,30 +257,29 @@ static int lua_HttpPost(lua_State* L)
 }
 
 // ---------------------------------------------------------------------------
-// GetCharacterWeapon(charIndex [, slotIndex]) - returns the ODF name of a
-// weapon held by a character.
+// GetCharacterWeapon(charIndex [, channel]) - returns the ODF name of the
+// currently selected weapon in a given weapon channel.
 //
 // @param #int  charIndex   Integer character unit index (0-based)
-// @param #int  slotIndex   Optional weapon slot (0-based). Omit to use slot 0.
-//                          Slot 0 is typically the primary weapon.
-//                          Slot 1 is typically the secondary/alternate weapon.
+// @param #int  channel     Weapon channel (default 0).
+//                          0 = primary weapon channel (key 1)
+//                          1 = secondary weapon channel (key 2)
 // @return #string          ODF name (e.g. "rep_weap_dc-15s_blaster_carbine"), or nil.
 //
-// TODO: "active/in-hand" weapon tracking — the field in Controllable that stores
-// the currently equipped weapon index (changes on weapon switch) has not yet been
-// identified. Use explicit slotIndex for now.
-//
-// Resolution chain (all offsets confirmed via runtime scanning):
-//
+// Resolution chain:
 //   mCharacterStructArray + charIndex * 0x1B0  → charSlot
 //   *(charSlot + 0x148)                        → intermediate
-//   intermediate + 0x18                        → Controllable* (vtable 0x00A403A0)
-//   *(Controllable + 0x4D8 + slotIndex*4)      → Weapon*  (weapon slot array)
-//   *(Weapon + 0x060)                          → WeaponClass*  (vtable 0x00A525F4)
-//   WeaponClass + 0x30                         → char[]  ODF name (inline, null-terminated)
+//   intermediate + 0x18                        → Controllable*
+//   *(Controllable + 0x4D8 + slotIdx*4)        → Weapon* (slot array, up to 8)
+//   *(Weapon + 0x060)                          → WeaponClass*
+//   WeaponClass + 0x30                         → char[] ODF name
 //
-// NOTE: Controllable is also reachable as Entity + 0x258, where Entity is the
-// pointer returned by GetCharacterUnit (vtable 0x00A40500).
+// Weapon index tracking (confirmed via runtime testing):
+//   ctrl+0x4F8 is an array of bytes, one per weapon channel.
+//   Each byte is a direct index into the weapon slot array at ctrl+0x4D8.
+//     ctrl+0x4F8 byte[0] = selected slot index for channel 0 (primary)
+//     ctrl+0x4F9 byte[1] = selected slot index for channel 1 (secondary)
+//   General: *(uint8_t*)(ctrl + 0x4F8 + channel) = slot index for that channel.
 // ---------------------------------------------------------------------------
 static int lua_GetCharacterWeapon(lua_State* L)
 {
@@ -296,27 +295,45 @@ static int lua_GetCharacterWeapon(lua_State* L)
    const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
-   // Optional second arg: weapon slot index (default 0 = primary weapon).
-   const int slotIndex = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
-                         ? g_lua.tointeger(L, 2) : 0;
-   if (slotIndex < 0 || slotIndex > 7) { g_lua.pushnil(L); return 1; }
+   const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
+                       ? g_lua.tointeger(L, 2) : 0;
+   if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
 
-   char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-   char* intermediate = *(char**)(charSlot + 0x148);
-   if (!intermediate) { g_lua.pushnil(L); return 1; }
+   __try {
+      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
+      char* intermediate = *(char**)(charSlot + 0x148);
+      if (!intermediate) { g_lua.pushnil(L); return 1; }
 
-   char* ctrl   = intermediate + 0x18;                          // Controllable*
-   char* weapon = *(char**)(ctrl + 0x4D8 + slotIndex * 4);     // Weapon slot array
-   if (!weapon) { g_lua.pushnil(L); return 1; }
+      char* ctrl = intermediate + 0x18;  // Controllable*
 
-   char* wepClass = *(char**)(weapon + 0x060);                  // WeaponClass*
-   if (!wepClass) { g_lua.pushnil(L); return 1; }
+      // Read the slot index for the requested channel
+      uint8_t slotIdx = 0;
+      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
 
-   const char* odfName = wepClass + 0x30;                       // inline char[] ODF name
-   if (!odfName[0]) { g_lua.pushnil(L); return 1; }
+      if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
 
-   g_lua.pushlstring(L, odfName, strlen(odfName));
-   return 1;
+      // Read weapon pointer from slot array
+      uintptr_t wpn = 0;
+      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+
+      // Read WeaponClass pointer
+      uintptr_t wc = 0;
+      __try { wc = *(uintptr_t*)(wpn + 0x060); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (!wc) { g_lua.pushnil(L); return 1; }
+
+      // Read ODF name from WeaponClass
+      const char* odfName = (const char*)(wc + 0x30);
+      g_lua.pushlstring(L, odfName, strlen(odfName));
+      return 1;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      g_lua.pushnil(L);
+      return 1;
+   }
 }
 
 // ---------------------------------------------------------------------------
