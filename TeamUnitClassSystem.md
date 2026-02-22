@@ -251,16 +251,6 @@ and either patch their sizes or intercept `malloc`/`new` at startup to enlarge t
 
 ---
 
-## `GetCharacterWeapon` — ⚠️ NOT CURRENTLY WORKING
-
-> **Status: broken / not maintained.** `lua_GetCharacterWeapon` in `lua_funcs.cpp` reads
-> `weapon + 0x18` as a `util::BaseArray<char>` whose first field is a `char*` ODF name.
-> The offset and/or the Weapon layout assumption have not been confirmed against a live
-> game session. The function compiles and registers fine, but returns garbage or nil in
-> practice. Do not rely on it until the Weapon struct layout is verified in Ghidra.
-
----
-
 ## Debugging Notes
 
 - **Access violation in `strcmp`/`stricmp`**: You read `classDef + 0x18` as a `char*`.

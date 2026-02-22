@@ -4,6 +4,9 @@
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
+// Game's printf-style debug logger — FUN_007e3d50, __cdecl, (const char* fmt, ...)
+typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
+
 // PrintToLog(msg) - writes a string to Bfront2.log
 static int lua_PrintToLog(lua_State* L)
 {
@@ -254,37 +257,65 @@ static int lua_HttpPost(lua_State* L)
 }
 
 // ---------------------------------------------------------------------------
-// GetCharacterWeapon(unit) - returns the ODF class name of the active weapon
-// held by a character unit.
-// Pass the return value of GetCharacterUnit() directly as the argument.
-// GetCharacterUnit() returns a light userdata (Controllable*); we read that
-// pointer, call Controllable::GetCurWpn, then read the ODF name string.
-// Returns nil if the unit is invalid or has no active weapon.
-// Example:
-//   local unit = GetCharacterUnit("myHero")
-//   local wpn  = GetCharacterWeapon(unit)
+// GetCharacterWeapon(charIndex [, slotIndex]) - returns the ODF name of a
+// weapon held by a character.
+//
+// @param #int  charIndex   Integer character unit index (0-based)
+// @param #int  slotIndex   Optional weapon slot (0-based). Omit to use slot 0.
+//                          Slot 0 is typically the primary weapon.
+//                          Slot 1 is typically the secondary/alternate weapon.
+// @return #string          ODF name (e.g. "rep_weap_dc-15s_blaster_carbine"), or nil.
+//
+// TODO: "active/in-hand" weapon tracking — the field in Controllable that stores
+// the currently equipped weapon index (changes on weapon switch) has not yet been
+// identified. Use explicit slotIndex for now.
+//
+// Resolution chain (all offsets confirmed via runtime scanning):
+//
+//   mCharacterStructArray + charIndex * 0x1B0  → charSlot
+//   *(charSlot + 0x148)                        → intermediate
+//   intermediate + 0x18                        → Controllable* (vtable 0x00A403A0)
+//   *(Controllable + 0x4D8 + slotIndex*4)      → Weapon*  (weapon slot array)
+//   *(Weapon + 0x060)                          → WeaponClass*  (vtable 0x00A525F4)
+//   WeaponClass + 0x30                         → char[]  ODF name (inline, null-terminated)
+//
+// NOTE: Controllable is also reachable as Entity + 0x258, where Entity is the
+// pointer returned by GetCharacterUnit (vtable 0x00A40500).
 // ---------------------------------------------------------------------------
-
-// Controllable::GetCurWpn — __thiscall, ECX = Controllable*, returns Weapon*
-typedef void* (__thiscall* GetCurWpn_t)(void* controllable);
-static const GetCurWpn_t fn_GetCurWpn = (GetCurWpn_t)0x005e70a0;
-
 static int lua_GetCharacterWeapon(lua_State* L)
 {
-   // GetCharacterUnit() pushes a light userdata (Controllable*) onto the Lua
-   // stack. lua_touserdata returns the raw pointer directly — no float cast.
-   void* controllable = g_lua.touserdata(L, 1);
-   if (!controllable) { g_lua.pushnil(L); return 1; }
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
 
-   // Call Controllable::GetCurWpn(__thiscall, ECX = controllable ptr)
-   void* weapon = fn_GetCurWpn(controllable);
+   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
+
+   const int charIndex = g_lua.tointeger(L, 1);
+   const int maxChars  = *(int*)res(0xB939F4);
+   if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   if (!arrayBase) { g_lua.pushnil(L); return 1; }
+
+   // Optional second arg: weapon slot index (default 0 = primary weapon).
+   const int slotIndex = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
+                         ? g_lua.tointeger(L, 2) : 0;
+   if (slotIndex < 0 || slotIndex > 7) { g_lua.pushnil(L); return 1; }
+
+   char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
+   char* intermediate = *(char**)(charSlot + 0x148);
+   if (!intermediate) { g_lua.pushnil(L); return 1; }
+
+   char* ctrl   = intermediate + 0x18;                          // Controllable*
+   char* weapon = *(char**)(ctrl + 0x4D8 + slotIndex * 4);     // Weapon slot array
    if (!weapon) { g_lua.pushnil(L); return 1; }
 
-   // weapon + 0x18 = util::BaseArray<char>; first field (+0x00) is char* data
-   const char* odf = *(const char**)((char*)weapon + 0x18);
-   if (!odf || odf[0] == '\0') { g_lua.pushnil(L); return 1; }
+   char* wepClass = *(char**)(weapon + 0x060);                  // WeaponClass*
+   if (!wepClass) { g_lua.pushnil(L); return 1; }
 
-   g_lua.pushlstring(L, odf, strlen(odf));
+   const char* odfName = wepClass + 0x30;                       // inline char[] ODF name
+   if (!odfName[0]) { g_lua.pushnil(L); return 1; }
+
+   g_lua.pushlstring(L, odfName, strlen(odfName));
    return 1;
 }
 
@@ -305,8 +336,6 @@ static int lua_GetCharacterWeapon(lua_State* L)
 typedef void (__thiscall* SetUnitClassMinMax_t)(void* team, int slot, int min, int max);
 
 // Game's printf-style debug logger — same one vanilla scripts call for error output.
-// FUN_007e3d50, __cdecl, (const char* fmt, ...)
-typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
 
 static int lua_RemoveUnitClass(lua_State* L)
 {
@@ -585,11 +614,11 @@ static const lua_func_entry custom_functions[] = {
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
+   { "GetCharacterWeapon",    lua_GetCharacterWeapon },
    { "HttpGetAsync",          lua_HttpGetAsync },
    { "HttpPutAsync",          lua_HttpPutAsync },
    { "HttpPostAsync",         lua_HttpPostAsync },
-   { "GetCharacterWeapon",    lua_GetCharacterWeapon },
-   { "RemoveUnitClass",       lua_RemoveUnitClass },
+{ "RemoveUnitClass",       lua_RemoveUnitClass },
    { nullptr, nullptr }
 };
 
