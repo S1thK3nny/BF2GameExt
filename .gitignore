@@ -359,3 +359,8 @@ MigrationBackup/
 .ionide/
 shaders.bin
 pipeline library.bin
+/scripts
+/docs
+/.claude
+/.mcp.json
+/PLAN.md

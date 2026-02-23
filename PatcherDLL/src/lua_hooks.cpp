@@ -118,25 +118,155 @@ void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
    // Lua 5.0: push name + closure, then settable into LUA_GLOBALSINDEX
    g_lua.pushlstring(L, name, strlen(name));
    g_lua.pushcclosure(L, fn, 0);
-   g_lua.settable(L, -10001);
+   g_lua.settable(L, LUA_GLOBALSINDEX);
 }
 
 void lua_hooks_install(uintptr_t exe_base)
 {
    using namespace lua_addrs::modtools;
 
-   g_lua.pushcclosure = (fn_lua_pushcclosure)resolve(exe_base, lua_pushcclosure);
-   g_lua.pushlstring  = (fn_lua_pushlstring) resolve(exe_base, lua_pushlstring);
-   g_lua.settable     = (fn_lua_settable)    resolve(exe_base, lua_settable);
-   g_lua.tolstring    = (fn_lua_tolstring)   resolve(exe_base, lua_tolstring);
-   g_lua.pushnumber   = (fn_lua_pushnumber)  resolve(exe_base, lua_pushnumber);
-   g_lua.tonumber     = (fn_lua_tonumber)    resolve(exe_base, lua_tonumber);
-   g_lua.gettop       = (fn_lua_gettop)      resolve(exe_base, lua_gettop);
-   g_lua.pushnil      = (fn_lua_pushnil)     resolve(exe_base, lua_pushnil);
-   g_lua.pushboolean  = (fn_lua_pushboolean) resolve(exe_base, lua_pushboolean);
-   g_lua.toboolean    = (fn_lua_toboolean)   resolve(exe_base, lua_toboolean);
-   g_lua.touserdata   = (fn_lua_touserdata)  resolve(exe_base, lua_touserdata);
-   g_lua.isnumber     = (fn_lua_isnumber)    resolve(exe_base, lua_isnumber);
+   // -- lua_ State --
+   g_lua.open              = (fn_lua_open)             resolve(exe_base, lua_open);
+   g_lua.close             = (fn_lua_close)            resolve(exe_base, lua_close);
+   g_lua.newthread         = (fn_lua_newthread)        resolve(exe_base, lua_newthread);
+   g_lua.atpanic           = (fn_lua_atpanic)          resolve(exe_base, lua_atpanic);
+
+   // -- lua_ Stack --
+   g_lua.gettop            = (fn_lua_gettop)           resolve(exe_base, lua_gettop);
+   g_lua.settop            = (fn_lua_settop)           resolve(exe_base, lua_settop);
+   g_lua.pushvalue         = (fn_lua_pushvalue)        resolve(exe_base, lua_pushvalue);
+   g_lua.remove            = (fn_lua_remove)           resolve(exe_base, lua_remove);
+   g_lua.insert            = (fn_lua_insert)           resolve(exe_base, lua_insert);
+   g_lua.replace           = (fn_lua_replace)          resolve(exe_base, lua_replace);
+   g_lua.checkstack        = (fn_lua_checkstack)       resolve(exe_base, lua_checkstack);
+   g_lua.xmove             = (fn_lua_xmove)            resolve(exe_base, lua_xmove);
+
+   // -- lua_ Type checking --
+   g_lua.type              = (fn_lua_type)             resolve(exe_base, lua_type);
+   g_lua.type_name         = (fn_lua_typename)         resolve(exe_base, lua_typename);
+   g_lua.isnumber          = (fn_lua_isnumber)         resolve(exe_base, lua_isnumber);
+   g_lua.isstring          = (fn_lua_isstring)         resolve(exe_base, lua_isstring);
+   g_lua.iscfunction       = (fn_lua_iscfunction)      resolve(exe_base, lua_iscfunction);
+   g_lua.isuserdata        = (fn_lua_isuserdata)       resolve(exe_base, lua_isuserdata);
+   g_lua.equal             = (fn_lua_equal)            resolve(exe_base, lua_equal);
+   g_lua.rawequal          = (fn_lua_rawequal)         resolve(exe_base, lua_rawequal);
+   g_lua.lessthan          = (fn_lua_lessthan)         resolve(exe_base, lua_lessthan);
+
+   // -- lua_ Conversion --
+   g_lua.tonumber          = (fn_lua_tonumber)         resolve(exe_base, lua_tonumber);
+   g_lua.toboolean         = (fn_lua_toboolean)        resolve(exe_base, lua_toboolean);
+   g_lua.tostring          = (fn_lua_tostring)         resolve(exe_base, lua_tostring);
+   g_lua.tolstring         = (fn_luaL_checklstring)    resolve(exe_base, luaL_checklstring);
+   g_lua.str_len           = (fn_lua_strlen)           resolve(exe_base, lua_strlen);
+   g_lua.tocfunction       = (fn_lua_tocfunction)      resolve(exe_base, lua_tocfunction);
+   g_lua.touserdata        = (fn_lua_touserdata)       resolve(exe_base, lua_touserdata);
+   g_lua.tothread          = (fn_lua_tothread)         resolve(exe_base, lua_tothread);
+   g_lua.topointer         = (fn_lua_topointer)        resolve(exe_base, lua_topointer);
+
+   // -- lua_ Push --
+   g_lua.pushnil           = (fn_lua_pushnil)          resolve(exe_base, lua_pushnil);
+   g_lua.pushnumber        = (fn_lua_pushnumber)       resolve(exe_base, lua_pushnumber);
+   g_lua.pushlstring       = (fn_lua_pushlstring)      resolve(exe_base, lua_pushlstring);
+   g_lua.pushstring        = (fn_lua_pushstring)       resolve(exe_base, lua_pushstring);
+   g_lua.pushvfstring      = (fn_lua_pushvfstring)     resolve(exe_base, lua_pushvfstring);
+   g_lua.pushfstring       = (fn_lua_pushfstring)      resolve(exe_base, lua_pushfstring);
+   g_lua.pushcclosure      = (fn_lua_pushcclosure)     resolve(exe_base, lua_pushcclosure);
+   g_lua.pushboolean       = (fn_lua_pushboolean)      resolve(exe_base, lua_pushboolean);
+   g_lua.pushlightuserdata = (fn_lua_pushlightuserdata)resolve(exe_base, lua_pushlightuserdata);
+
+   // -- lua_ Get --
+   g_lua.gettable          = (fn_lua_gettable)         resolve(exe_base, lua_gettable);
+   g_lua.rawget            = (fn_lua_rawget)           resolve(exe_base, lua_rawget);
+   g_lua.rawgeti           = (fn_lua_rawgeti)          resolve(exe_base, lua_rawgeti);
+   g_lua.newtable          = (fn_lua_newtable)         resolve(exe_base, lua_newtable);
+   g_lua.getmetatable      = (fn_lua_getmetatable)     resolve(exe_base, lua_getmetatable);
+   g_lua.getfenv           = (fn_lua_getfenv)          resolve(exe_base, lua_getfenv);
+
+   // -- lua_ Set --
+   g_lua.settable          = (fn_lua_settable)         resolve(exe_base, lua_settable);
+   g_lua.rawset            = (fn_lua_rawset)           resolve(exe_base, lua_rawset);
+   g_lua.rawseti           = (fn_lua_rawseti)          resolve(exe_base, lua_rawseti);
+   g_lua.setmetatable      = (fn_lua_setmetatable)     resolve(exe_base, lua_setmetatable);
+   g_lua.setfenv           = (fn_lua_setfenv)          resolve(exe_base, lua_setfenv);
+
+   // -- lua_ Call --
+   g_lua.call              = (fn_lua_call)             resolve(exe_base, lua_call);
+   g_lua.pcall             = (fn_lua_pcall)            resolve(exe_base, lua_pcall);
+   g_lua.cpcall            = (fn_lua_cpcall)           resolve(exe_base, lua_cpcall);
+   g_lua.load              = (fn_lua_load)             resolve(exe_base, lua_load);
+   g_lua.dump              = (fn_lua_dump)             resolve(exe_base, lua_dump);
+
+   // -- lua_ Misc --
+   g_lua.error             = (fn_lua_error)            resolve(exe_base, lua_error);
+   g_lua.next              = (fn_lua_next)             resolve(exe_base, lua_next);
+   g_lua.concat            = (fn_lua_concat)           resolve(exe_base, lua_concat);
+   g_lua.newuserdata       = (fn_lua_newuserdata)      resolve(exe_base, lua_newuserdata);
+
+   // -- lua_ GC --
+   g_lua.getgcthreshold    = (fn_lua_getgcthreshold)   resolve(exe_base, lua_getgcthreshold);
+   g_lua.getgccount        = (fn_lua_getgccount)       resolve(exe_base, lua_getgccount);
+   g_lua.setgcthreshold    = (fn_lua_setgcthreshold)   resolve(exe_base, lua_setgcthreshold);
+
+   // -- lua_ Debug --
+   g_lua.getupvalue        = (fn_lua_getupvalue)       resolve(exe_base, lua_getupvalue);
+   g_lua.setupvalue        = (fn_lua_setupvalue)       resolve(exe_base, lua_setupvalue);
+   g_lua.getinfo           = (fn_lua_getinfo)          resolve(exe_base, lua_getinfo);
+   g_lua.pushupvalues      = (fn_lua_pushupvalues)     resolve(exe_base, lua_pushupvalues);
+   g_lua.sethook           = (fn_lua_sethook)          resolve(exe_base, lua_sethook);
+   g_lua.gethook           = (fn_lua_gethook)          resolve(exe_base, lua_gethook);
+   g_lua.gethookmask       = (fn_lua_gethookmask)      resolve(exe_base, lua_gethookmask);
+   g_lua.gethookcount      = (fn_lua_gethookcount)     resolve(exe_base, lua_gethookcount);
+   g_lua.getstack          = (fn_lua_getstack)         resolve(exe_base, lua_getstack);
+   g_lua.getlocal          = (fn_lua_getlocal)         resolve(exe_base, lua_getlocal);
+   g_lua.setlocal          = (fn_lua_setlocal)         resolve(exe_base, lua_setlocal);
+
+   // -- lua_ Compat --
+   g_lua.version           = (fn_lua_version)          resolve(exe_base, lua_version);
+   g_lua.dofile            = (fn_lua_dofile)           resolve(exe_base, lua_dofile);
+   g_lua.dobuffer          = (fn_lua_dobuffer)         resolve(exe_base, lua_dobuffer);
+   g_lua.dostring          = (fn_lua_dostring)         resolve(exe_base, lua_dostring);
+
+   // -- luaL_ Auxiliary --
+   g_lua.L_openlib         = (fn_luaL_openlib)         resolve(exe_base, luaL_openlib);
+   g_lua.L_callmeta        = (fn_luaL_callmeta)        resolve(exe_base, luaL_callmeta);
+   g_lua.L_typerror        = (fn_luaL_typerror)        resolve(exe_base, luaL_typerror);
+   g_lua.L_argerror        = (fn_luaL_argerror)        resolve(exe_base, luaL_argerror);
+   g_lua.L_checklstring    = (fn_luaL_checklstring)    resolve(exe_base, luaL_checklstring);
+   g_lua.L_optlstring      = (fn_luaL_optlstring)      resolve(exe_base, luaL_optlstring);
+   g_lua.L_checknumber     = (fn_luaL_checknumber)     resolve(exe_base, luaL_checknumber);
+   g_lua.L_optnumber       = (fn_luaL_optnumber)       resolve(exe_base, luaL_optnumber);
+   g_lua.L_checktype       = (fn_luaL_checktype)       resolve(exe_base, luaL_checktype);
+   g_lua.L_checkany        = (fn_luaL_checkany)        resolve(exe_base, luaL_checkany);
+   g_lua.L_newmetatable    = (fn_luaL_newmetatable)    resolve(exe_base, luaL_newmetatable);
+   g_lua.L_getmetatable    = (fn_luaL_getmetatable)    resolve(exe_base, luaL_getmetatable);
+   g_lua.L_checkudata      = (fn_luaL_checkudata)      resolve(exe_base, luaL_checkudata);
+   g_lua.L_where           = (fn_luaL_where)           resolve(exe_base, luaL_where);
+   g_lua.L_error           = (fn_luaL_error)           resolve(exe_base, luaL_error);
+   g_lua.L_findstring      = (fn_luaL_findstring)      resolve(exe_base, luaL_findstring);
+   g_lua.L_ref             = (fn_luaL_ref)             resolve(exe_base, luaL_ref);
+   g_lua.L_unref           = (fn_luaL_unref)           resolve(exe_base, luaL_unref);
+   g_lua.L_getn            = (fn_luaL_getn)            resolve(exe_base, luaL_getn);
+   g_lua.L_setn            = (fn_luaL_setn)            resolve(exe_base, luaL_setn);
+   g_lua.L_loadfile        = (fn_luaL_loadfile)        resolve(exe_base, luaL_loadfile);
+   g_lua.L_loadbuffer      = (fn_luaL_loadbuffer)      resolve(exe_base, luaL_loadbuffer);
+   g_lua.L_checkstack      = (fn_luaL_checkstack)      resolve(exe_base, luaL_checkstack);
+   g_lua.L_getmetafield    = (fn_luaL_getmetafield)    resolve(exe_base, luaL_getmetafield);
+
+   // -- luaL_ Buffer --
+   g_lua.L_buffinit        = (fn_luaL_buffinit)        resolve(exe_base, luaL_buffinit);
+   g_lua.L_prepbuffer      = (fn_luaL_prepbuffer)      resolve(exe_base, luaL_prepbuffer);
+   g_lua.L_addlstring      = (fn_luaL_addlstring)      resolve(exe_base, luaL_addlstring);
+   g_lua.L_addstring       = (fn_luaL_addstring)       resolve(exe_base, luaL_addstring);
+   g_lua.L_addvalue        = (fn_luaL_addvalue)        resolve(exe_base, luaL_addvalue);
+   g_lua.L_pushresult      = (fn_luaL_pushresult)      resolve(exe_base, luaL_pushresult);
+
+   // -- luaopen_ Library openers --
+   g_lua.open_base         = (fn_luaopen)              resolve(exe_base, luaopen_base);
+   g_lua.open_table        = (fn_luaopen)              resolve(exe_base, luaopen_table);
+   g_lua.open_io           = (fn_luaopen)              resolve(exe_base, luaopen_io);
+   g_lua.open_string       = (fn_luaopen)              resolve(exe_base, luaopen_string);
+   g_lua.open_math         = (fn_luaopen)              resolve(exe_base, luaopen_math);
+   g_lua.open_debug        = (fn_luaopen)              resolve(exe_base, luaopen_debug);
 
    original_init_state = (fn_init_state)resolve(exe_base, init_state);
 
