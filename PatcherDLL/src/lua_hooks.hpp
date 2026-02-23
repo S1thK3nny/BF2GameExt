@@ -119,6 +119,21 @@ namespace lua_addrs {
       // Confirmed: FUN_007b8070 — checks slot type tag == 3 (LUA_TNUMBER),
       // falls back to lua_str2num for string coercion.
       constexpr uintptr_t lua_isnumber = 0x7B8070;
+
+      // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
+      // Sets mFirePos, mRootPos, mDirection, and bDirect on the Aimer.
+      constexpr uintptr_t aimer_set_soldier_info = 0x5EE9D0;
+
+      // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70).
+      // Patched at startup to point to our hooked function.
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
+
+      // Weapon::OverrideAimer implementation and thunk (for vtable validation).
+      constexpr uintptr_t weapon_override_aimer_impl = 0x61CEE0;
+      constexpr uintptr_t weapon_override_aimer_thunk = 0x4068DE;
+
+      // Weapon::ZoomFirstPerson() — returns true if weapon is in first-person zoom.
+      constexpr uintptr_t weapon_zoom_first_person = 0x61B640;
    }
 
    namespace steam {
@@ -164,6 +179,11 @@ namespace lua_addrs {
 
       // lua_isnumber(L, idx)
       constexpr uintptr_t lua_isnumber = 0xDEAD000D;       // TODO: REPLACE
+
+      constexpr uintptr_t aimer_set_soldier_info = 0xDEAD000E;                // TODO: REPLACE
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD000F;  // TODO: REPLACE
+      constexpr uintptr_t weapon_override_aimer_impl = 0xDEAD0010;            // TODO: REPLACE
+      constexpr uintptr_t weapon_override_aimer_thunk = 0xDEAD0011;           // TODO: REPLACE
    }
 }
 
@@ -192,6 +212,10 @@ extern lua_api g_lua;
 
 // The captured lua_State pointer (set when hook fires)
 extern lua_State* g_L;
+
+// Barrel fire origin toggle — when true, WeaponCannon fires from barrel
+// hardpoint (mBarrelPoseMatrix) instead of the default aimer position.
+extern bool g_useBarrelFireOrigin;
 
 // =============================================================================
 // Public interface
