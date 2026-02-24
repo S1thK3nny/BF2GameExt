@@ -992,6 +992,134 @@ static int lua_ReleaseCEV(lua_State* L)
    return 0;
 }
 
+// SetBarrelFireOrigin(enable) - toggle barrel-origin fire position.
+// When true, projectiles originate from the weapon's barrel hardpoint
+// (mFirePointMatrix) instead of the default aimer position.
+// Swaps the WeaponCannon vtable entry between our hook and vanilla.
+// Accepts both number (0/1) and boolean (true/false) — in Lua 5.0
+// the number 0 is truthy, so we check isnumber first.
+extern void** g_cannonOverrideAimerSlot;
+extern void*  g_cannonOverrideAimerOrig;
+extern void*  g_cannonOverrideAimerHook;
+
+static int lua_SetBarrelFireOrigin(lua_State* L)
+{
+   if (g_lua.isnumber(L, 1))
+      g_useBarrelFireOrigin = g_lua.tonumber(L, 1) != 0.0f;
+   else
+      g_useBarrelFireOrigin = g_lua.toboolean(L, 1) != 0;
+
+   if (g_cannonOverrideAimerSlot) {
+      DWORD oldProt;
+      if (VirtualProtect(g_cannonOverrideAimerSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
+         *g_cannonOverrideAimerSlot = g_useBarrelFireOrigin
+            ? g_cannonOverrideAimerHook
+            : g_cannonOverrideAimerOrig;
+         VirtualProtect(g_cannonOverrideAimerSlot, sizeof(void*), oldProt, &oldProt);
+      }
+   }
+   return 0;
+}
+
+// DumpAimerInfo(charIndex [, channel]) - diagnostic: logs aimer positions to Bfront2.log.
+// Dumps mFirePos, mMountPos, mBarrelPoseMatrix[0..3] trans, and mCurrentBarrel.
+static int lua_DumpAimerInfo(lua_State* L)
+{
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+
+   if (!g_lua.isnumber(L, 1)) return 0;
+
+   const int charIndex = g_lua.tointeger(L, 1);
+   const int maxChars  = *(int*)res(0xB939F4);
+   if (charIndex < 0 || charIndex >= maxChars) return 0;
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   if (!arrayBase) return 0;
+
+   const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
+                       ? g_lua.tointeger(L, 2) : 0;
+
+   __try {
+      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
+      char* intermediate = *(char**)(charSlot + 0x148);
+      if (!intermediate) return 0;
+      char* ctrl = intermediate + 0x18;
+
+      // Get weapon from channel
+      uint8_t slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel);
+      if (slotIdx >= 8) return 0;
+      uintptr_t wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4);
+      if (!wpn) return 0;
+
+      // Weapon::mAimer at weapon+0x70
+      void* aimer = *(void**)(wpn + 0x70);
+      if (!aimer) return 0;
+
+      FILE* f = nullptr;
+      if (fopen_s(&f, "Bfront2.log", "a") != 0 || !f) return 0;
+
+      float* firePos  = (float*)((char*)aimer + 0x88);
+      float* mountPos = (float*)((char*)aimer + 0x54);
+      float* rootPos  = (float*)((char*)aimer + 0x70);
+      int barrel      = *(int*)((char*)aimer + 0x204);
+
+      // Weapon::mFirePointMatrix at weapon+0x20 (PblMatrix)
+      float* fpm = (float*)(wpn + 0x20);
+      // Weapon::mFirePos at weapon+0x7C (PblVector3)
+      float* wpnFirePos = (float*)(wpn + 0x7C);
+
+      float wpnZoom = *(float*)(wpn + 0xBC);
+
+      // Dump bytes around where mIsAiming might be on the Controllable
+      uintptr_t owner = *(uintptr_t*)(wpn + 0x6C);
+
+      fprintf(f, "=== Aimer Dump (char %d, ch %d) ===\n", charIndex, channel);
+      fprintf(f, "  Weapon::mZoom (+0xBC): %.6f\n", wpnZoom);
+      if (owner) {
+         // Dump wider range to find mIsAiming by comparing zoomed vs unzoomed
+         for (int row = 0x100; row < 0x300; row += 0x20) {
+            fprintf(f, "  owner+0x%03X: ", row);
+            for (int i = 0; i < 0x20; ++i)
+               fprintf(f, "%02X ", *(unsigned char*)(owner + row + i));
+            fprintf(f, "\n");
+         }
+      }
+      fprintf(f, "  Weapon::mFirePointMatrix trans: %.3f, %.3f, %.3f\n",
+              fpm[12], fpm[13], fpm[14]);
+      fprintf(f, "  Weapon::mFirePos: %.3f, %.3f, %.3f\n",
+              wpnFirePos[0], wpnFirePos[1], wpnFirePos[2]);
+      fprintf(f, "  mFirePos:    %.3f, %.3f, %.3f\n", firePos[0], firePos[1], firePos[2]);
+      fprintf(f, "  mMountPos:   %.3f, %.3f, %.3f\n", mountPos[0], mountPos[1], mountPos[2]);
+      fprintf(f, "  mRootPos:    %.3f, %.3f, %.3f\n", rootPos[0], rootPos[1], rootPos[2]);
+      fprintf(f, "  mCurrentBarrel: %d\n", barrel);
+
+      for (int b = 0; b < 4; ++b) {
+         float* mat = (float*)((char*)aimer + 0xF0 + b * 0x40);
+         fprintf(f, "  mBarrelPoseMatrix[%d]:\n", b);
+         fprintf(f, "    right:   %.3f, %.3f, %.3f, %.3f\n", mat[0], mat[1], mat[2], mat[3]);
+         fprintf(f, "    up:      %.3f, %.3f, %.3f, %.3f\n", mat[4], mat[5], mat[6], mat[7]);
+         fprintf(f, "    forward: %.3f, %.3f, %.3f, %.3f\n", mat[8], mat[9], mat[10], mat[11]);
+         fprintf(f, "    trans:   %.3f, %.3f, %.3f, %.3f\n", mat[12], mat[13], mat[14], mat[15]);
+      }
+
+      // Also dump mMountPoseMatrix (aimer+0xB0)
+      float* mpm = (float*)((char*)aimer + 0xB0);
+      fprintf(f, "  mMountPoseMatrix:\n");
+      fprintf(f, "    right:   %.3f, %.3f, %.3f, %.3f\n", mpm[0], mpm[1], mpm[2], mpm[3]);
+      fprintf(f, "    up:      %.3f, %.3f, %.3f, %.3f\n", mpm[4], mpm[5], mpm[6], mpm[7]);
+      fprintf(f, "    forward: %.3f, %.3f, %.3f, %.3f\n", mpm[8], mpm[9], mpm[10], mpm[11]);
+      fprintf(f, "    trans:   %.3f, %.3f, %.3f, %.3f\n", mpm[12], mpm[13], mpm[14], mpm[15]);
+
+      fprintf(f, "===\n");
+      fclose(f);
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      return 0;
+   }
+   return 0;
+}
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -1016,6 +1144,8 @@ static const lua_func_entry custom_functions[] = {
    { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },
    { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
    { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
+   { "SetBarrelFireOrigin",   lua_SetBarrelFireOrigin },
+   { "DumpAimerInfo",         lua_DumpAimerInfo },
    { nullptr, nullptr }
 };
 

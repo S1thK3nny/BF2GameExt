@@ -176,6 +176,21 @@ namespace lua_addrs {
       // lua_insert(L, idx) - moves top element to position idx, shifting others up.
       // Confirmed: FUN_007b7f20, used in thunk_FUN_004869d0 as (mState, -2).
       constexpr uintptr_t lua_insert = 0x7B7F20;
+
+      // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
+      // Sets mFirePos, mRootPos, mDirection, and bDirect on the Aimer.
+      constexpr uintptr_t aimer_set_soldier_info = 0x5EE9D0;
+
+      // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70).
+      // Patched at startup to point to our hooked function.
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
+
+      // Weapon::OverrideAimer implementation and thunk (for vtable validation).
+      constexpr uintptr_t weapon_override_aimer_impl = 0x61CEE0;
+      constexpr uintptr_t weapon_override_aimer_thunk = 0x4068DE;
+
+      // Weapon::ZoomFirstPerson() — returns true if weapon is in first-person zoom.
+      constexpr uintptr_t weapon_zoom_first_person = 0x61B640;
    }
 
    namespace steam {
@@ -239,6 +254,11 @@ namespace lua_addrs {
 
       // lua_insert(L, idx)
       constexpr uintptr_t lua_insert = 0xDEAD0012;         // TODO: REPLACE
+
+      constexpr uintptr_t aimer_set_soldier_info = 0xDEAD0014;                // TODO: REPLACE
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD0015;  // TODO: REPLACE
+      constexpr uintptr_t weapon_override_aimer_impl = 0xDEAD0016;            // TODO: REPLACE
+      constexpr uintptr_t weapon_override_aimer_thunk = 0xDEAD0017;           // TODO: REPLACE
    }
 }
 
@@ -273,6 +293,10 @@ extern lua_api g_lua;
 
 // The captured lua_State pointer (set when hook fires)
 extern lua_State* g_L;
+
+// Barrel fire origin toggle — when true, WeaponCannon fires from barrel
+// hardpoint (mBarrelPoseMatrix) instead of the default aimer position.
+extern bool g_useBarrelFireOrigin;
 
 // =============================================================================
 // OnCharacterExitVehicle — custom callback storage
