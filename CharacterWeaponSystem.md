@@ -292,6 +292,43 @@ or finding cross-references in Ghidra, but cannot be found via vtable scanning.
 
 ---
 
+## Per-Frame Tick Broadcaster
+
+Originally suspected to be a weapon-switch event system — **it is not**. It is a generic
+per-frame tick broadcaster. `g_deltaTime` (a float, ~0.0125s) is passed as `param_1` to all
+subscribers, not a weapon/entity pointer.
+
+```
+GameLoop (0x007363e4)
+  → TickBroadcaster_Dispatch([g_deltaTime], 0, 0)       // 0x0048fda0
+    → TickBroadcaster_BroadcastList(primaryList, dt)    // 0x0048fcd0
+      → TickBroadcaster_NotifyChain(node, dt)           // 0x0048fc70
+        → node->vtable[1](dt)                           // virtual Update(float dt)
+          if returns false → node->vtable[0](1)         // fallback/reset
+```
+
+### Subscriber lists
+| Global | Address | Used when |
+|--------|---------|-----------|
+| `g_tickSubscribers_primary` | `0xb6a704` | Always (param2=0 path) |
+| `g_tickSubscribers_secondary` | `0xb6a774` | param3=1 AND multiple game-state flags pass |
+| `g_tickSubscribers_alt` | `0xb6a728` | param2=1 path |
+
+### `TickBroadcaster_Dispatch` — parameter semantics
+| Param | Type | Effect |
+|-------|------|--------|
+| `param_1` | `float` | Delta time — forwarded to every subscriber's vtable[1] |
+| `param_2` | `byte` | If non-zero: use alt list instead of primary |
+| `param_3` | `byte` | If non-zero AND flags pass: also notify secondary list |
+
+### Animation subscriber
+`AnimSubscriber_Update` at `0x0055f080` is registered in `g_tickSubscribers_primary`. It is
+called every frame with the current delta time. This is what drives the per-character animation
+state. **This is the key function to decompile** — it determines what data it reads to select
+the animation stance, which will tell us what SetCharacterWeapon needs to write.
+
+---
+
 ## What Has NOT Worked (Dead Ends)
 
 These approaches were tested and confirmed to fail. Documented here to save future effort.
@@ -332,6 +369,10 @@ These approaches were tested and confirmed to fail. Documented here to save futu
 |------------|------------------------------|----------|------------------------------------------|
 | `0xB93A08` | `g_mCharacterStructArray`    | `void**` | Pointer to character slot array base     |
 | `0xB939F4` | `g_MaxCharacterCount`        | `int`    | Max valid charIndex (exclusive)          |
+| `0xb6a704` | `g_tickSubscribers_primary`  | list head | Primary per-frame tick subscriber list  |
+| `0xb6a774` | `g_tickSubscribers_secondary`| list head | Secondary tick subscribers (conditional)|
+| `0xb6a728` | `g_tickSubscribers_alt`      | list head | Alternate list (used when param2 != 0)  |
+| `0xc6a9b0` | `g_deltaTime`                | `float`  | Current frame delta time (~0.0125s). Passed as param to all tick subscribers. NOT an entity pointer. |
 
 ### Functions
 | Address      | Label                                  | Signature / Notes                                |
@@ -344,6 +385,11 @@ These approaches were tested and confirmed to fail. Documented here to save futu
 | `0x005E7070` | `Controllable::GetCurAimer`            | Initializes intrusive list head sub-struct       |
 | `0x005E6FA0` | `Controllable::SetCharacter`           | Links Controllable ↔ Character                   |
 | `0x005E6FE0` | `Controllable::Update`                 | Per-frame update, takes float dt                 |
+| `0x0048fda0` | `TickBroadcaster_Dispatch`             | Selects subscriber list(s) and broadcasts delta-time to each |
+| `0x0048fcd0` | `TickBroadcaster_BroadcastList`        | Iterates doubly-linked subscriber list, calls `_NotifyChain` on each |
+| `0x0048fc70` | `TickBroadcaster_NotifyChain`          | Per-node: calls `vtable[1](param)`, on false calls `vtable[0](1)` |
+| `0x00449d10` | `TickBroadcaster_Lock`                 | Critical-section lock/unlock around each broadcast |
+| `0x0055f080` | `AnimSubscriber_Update`                | Subscriber vtable[1] — per-frame animation update, receives delta time |
 
 ### Struct Field Labels (for Ghidra struct definitions)
 

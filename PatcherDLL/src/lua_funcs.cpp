@@ -337,6 +337,194 @@ static int lua_GetCharacterWeapon(lua_State* L)
 }
 
 // ---------------------------------------------------------------------------
+// SetCharacterWeapon(charIndex, odfName [, channel]) - replaces the currently
+// active weapon in a channel with a different already-loaded weapon ODF.
+//
+// @param #int    charIndex   Integer character unit index (0-based)
+// @param #string odfName     ODF name to switch to (must be loaded by the level)
+// @param #int    channel     Weapon channel (default 0): 0=primary, 1=secondary
+// @return #bool              true on success, nil on failure.
+//
+// Mechanism:
+//   1. Resolve charIndex → ctrl (same chain as GetCharacterWeapon)
+//   2. Get the active weapon slot for the given channel
+//   3. Walk the global WeaponClass linked list (WeaponClass+0x008 = next)
+//      starting from the current weapon's WeaponClass, looking for odfName
+//   4. Swap weapon+0x060, +0x064, +0x068 to point at the found WeaponClass
+//   5. Call Controllable::SetWeaponIndex (0x005E6F70) with the same slot index to
+//      re-trigger the game's own PlayAnimation path for the newly-swapped WeaponClass.
+//
+// Limitations:
+//   - Only works with ODFs already loaded in memory (ReadDataFile'd at level load)
+//   - Does NOT call Weapon::Init — ammo count and heat are NOT reset to the new
+//     weapon's defaults. The engine reads damage/projectile/model from WeaponClass
+//     at fire time, so behavior changes immediately even without Init.
+static int lua_SetCharacterWeapon(lua_State* L)
+{
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+
+   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
+
+   const int   charIndex = g_lua.tointeger(L, 1);
+   const char* targetOdf = g_lua.tolstring(L, 2, nullptr);
+   if (!targetOdf || targetOdf[0] == '\0') { g_lua.pushnil(L); return 1; }
+
+   const int channel = (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3))
+                       ? g_lua.tointeger(L, 3) : 0;
+   if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
+
+   const int maxChars = *(int*)res(0xB939F4);
+   if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   if (!arrayBase) { g_lua.pushnil(L); return 1; }
+
+   __try {
+      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
+      char* intermediate = *(char**)(charSlot + 0x148);
+      if (!intermediate) { g_lua.pushnil(L); return 1; }
+
+      char* ctrl = intermediate + 0x18;  // Controllable*
+
+      // Get active weapon slot for this channel.
+      uint8_t slotIdx = 0;
+      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
+
+      uintptr_t wpn = 0;
+      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+
+      uintptr_t startWc = 0;
+      __try { startWc = *(uintptr_t*)(wpn + 0x060); }
+      __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (!startWc || startWc == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+
+      // Walk the WeaponClass global linked list.
+      // Flink/Blink (WC+0x008/0x00C) store adjacentWC+0x004; subtract 4 when following.
+      // Name matching: accept exact OR suffix so callers can omit faction prefixes.
+      auto wcNameMatches = [](const char* wcName, const char* target) -> bool {
+         if (_stricmp(wcName, target) == 0) return true;
+         size_t wl = strlen(wcName), tl = strlen(target);
+         return (wl > tl && _stricmp(wcName + wl - tl, target) == 0);
+      };
+
+      uintptr_t foundWc  = 0;
+      uintptr_t searchWc = startWc;
+      for (int guard = 0; guard < 512; guard++) {
+         __try {
+            const char* name = (const char*)(searchWc + 0x30);
+            if (wcNameMatches(name, targetOdf)) { foundWc = searchWc; break; }
+            uintptr_t linkRaw = *(uintptr_t*)(searchWc + 0x008);
+            if (!linkRaw || linkRaw == 0xCDCDCDCDu || linkRaw < 0x01000000u) break;
+            uintptr_t nextWc = linkRaw - 0x004;
+            if (nextWc == startWc) break;
+            searchWc = nextWc;
+         }
+         __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+      }
+
+      if (!foundWc) {
+         // Walk backwards in case the target is behind the start node.
+         searchWc = startWc;
+         for (int guard = 0; guard < 512; guard++) {
+            __try {
+               uintptr_t linkRaw = *(uintptr_t*)(searchWc + 0x00C);
+               if (!linkRaw || linkRaw == 0xCDCDCDCDu || linkRaw < 0x01000000u) break;
+               uintptr_t prevWc = linkRaw - 0x004;
+               if (prevWc == startWc) break;
+               const char* name = (const char*)(prevWc + 0x30);
+               if (wcNameMatches(name, targetOdf)) { foundWc = prevWc; break; }
+               searchWc = prevWc;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+         }
+      }
+
+      if (!foundWc) {
+         fn_GameLog("SetCharacterWeapon: '%s' not found in loaded WeaponClass list.\n", targetOdf);
+         g_lua.pushnil(L);
+         return 1;
+      }
+
+      // Scan for a live weapon of the target type to borrow its OrdnanceClass* and vtable.
+      uintptr_t sourceWpn = 0;
+      int scanMax = 0;
+      __try { scanMax = *(int*)res(0xB939F4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      const int scanLimit = (scanMax < 512) ? 512 : scanMax;
+      __try {
+         for (int ci = 0; ci < scanLimit && !sourceWpn; ci++) {
+            if (ci == charIndex) continue;
+            __try {
+               char* cs2 = (char*)arrayBase + ci * 0x1B0;
+               char* im2 = *(char**)(cs2 + 0x148);
+               if (!im2 || im2 == (char*)0xCDCDCDCDu) continue;
+               char* ct2 = im2 + 0x18;
+               for (int si = 0; si < 8 && !sourceWpn; si++) {
+                  __try {
+                     uintptr_t w = *(uintptr_t*)((uintptr_t)ct2 + 0x4D8 + si * 4);
+                     if (!w || w == 0xCDCDCDCDu) continue;
+                     uintptr_t wc = *(uintptr_t*)(w + 0x060);
+                     if (!wc || wc == 0xCDCDCDCDu) continue;
+                     const char* wcName = (const char*)(wc + 0x30);
+                     __try {
+                        size_t wl = strlen(wcName), tl = strlen(targetOdf);
+                        if ((_stricmp(wcName, targetOdf) == 0) ||
+                            (wl > tl && _stricmp(wcName + wl - tl, targetOdf) == 0))
+                           sourceWpn = w;
+                     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                  } __except(EXCEPTION_EXECUTE_HANDLER) {}
+               }
+            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // Patch factory+0x18 (OrdnanceClass*) and factory+0x1c from the source weapon.
+      if (sourceWpn) {
+         uintptr_t srcFactory = 0, playerFactory = 0;
+         __try { srcFactory    = *(uintptr_t*)(sourceWpn + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         __try { playerFactory = *(uintptr_t*)(wpn        + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         if (srcFactory && playerFactory) {
+            uintptr_t ord18 = 0; uint32_t val1c = 0;
+            __try { ord18 = *(uintptr_t*)(srcFactory + 0x018); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            __try { val1c = *(uint32_t* )(srcFactory + 0x01c); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            __try { *(uintptr_t*)(playerFactory + 0x018) = ord18; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            __try { *(uint32_t* )(playerFactory + 0x01c) = val1c; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         }
+
+         // Swap vtable so virtual dispatch matches the target weapon type.
+         uintptr_t srcVtable = 0;
+         __try { srcVtable = *(uintptr_t*)(sourceWpn); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         if (srcVtable && srcVtable != 0xCDCDCDCDu)
+            __try { *(uintptr_t*)(wpn) = srcVtable; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      }
+
+      // Write all three WC pointers in the Weapon instance.
+      __try { *(uintptr_t*)(wpn + 0x060) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { *(uintptr_t*)(wpn + 0x064) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { *(uintptr_t*)(wpn + 0x068) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // TODO: trigger per-character animation bank update here.
+
+      fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' (newWc=0x%08x src=%s)\n",
+                 charIndex, channel, slotIdx, targetOdf,
+                 (unsigned)foundWc, sourceWpn ? "found" : "none");
+
+      g_lua.pushnumber(L, 1);
+      return 1;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      g_lua.pushnil(L);
+      return 1;
+   }
+}
+
+
+// ---------------------------------------------------------------------------
 // RemoveUnitClass(teamIndex, unitClass) - removes a unit class from a team.
 //
 // Reverse of AddUnitClass. Finds the class in the global class def list,
@@ -619,6 +807,191 @@ static int lua_HttpPostAsync(lua_State* L)
    return 0;
 }
 
+
+// ---------------------------------------------------------------------------
+// ReapplyAnimations() - calls SoldierAnimatorClass::AssignAnimations (0x00581AF0).
+// Re-wires all weapon animation banks for every soldier in the level.
+// Call this after SetCharacterWeapon if animations haven't updated visually.
+// ---------------------------------------------------------------------------
+static int lua_ReapplyAnimations(lua_State* L)
+{
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+
+   typedef void (__fastcall* AssignAnimations_t)(void*);
+   const auto fn_assign = (AssignAnimations_t)res(0x581AF0);
+   void* animInst = *(void**)res(0xB8D3C4);
+   if (!animInst) { g_lua.pushnil(L); return 1; }
+
+   __try { fn_assign(animInst); } __except(EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+
+   g_lua.pushnumber(L, 1);
+   return 1;
+}
+
+
+// ---------------------------------------------------------------------------
+// OnCharacterExitVehicle / Name / Team / Class / Release
+//
+// Custom Lua C functions that store callbacks in the Lua registry and track
+// filter metadata in g_cevCallbacks[].  The C++ hook in lua_hooks.cpp scans
+// the character array, resolves name/team/class, and fires matching callbacks.
+//
+// Returns a lightuserdata handle (pointer to the g_cevCallbacks slot).
+// ReleaseCharacterExitVehicle(handle) clears the slot and nils the registry entry.
+// ---------------------------------------------------------------------------
+
+// Helper: store the value at Lua stack top into globals[key].
+// Pops the value.  Returns the key.
+// Uses LUA_GLOBALSINDEX (-10001) with negative integer keys to avoid
+// conflicts with luaL_ref positive keys in LUA_REGISTRYINDEX (-10000).
+static int cev_store_ref(lua_State* L)
+{
+   int key = g_cevNextKey--;
+   // Stack: [..., value]
+   g_lua.pushnumber(L, (float)key);
+   g_lua.insert(L, -2);
+   // Stack: [..., key, value]
+   g_lua.settable(L, -10001);   // _G[key] = value
+   return key;
+}
+
+// Helper: remove a globals reference.
+static void cev_remove_ref(lua_State* L, int key)
+{
+   g_lua.pushnumber(L, (float)key);
+   g_lua.pushnil(L);
+   g_lua.settable(L, -10001);   // _G[key] = nil
+}
+
+// OnCharacterExitVehicle(callback) -> handle
+static int lua_OnCEV(lua_State* L)
+{
+   for (int i = 0; i < CEV_MAX_CBS; i++) {
+      if (g_cevCallbacks[i].regKey == 0) {
+         int key = cev_store_ref(L);
+         g_cevCallbacks[i].regKey     = key;
+         g_cevCallbacks[i].filterType = CEV_PLAIN;
+         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
+         return 1;
+      }
+   }
+   g_lua.pushnil(L);
+   return 1;
+}
+
+// OnCharacterExitVehicleName(callback, nameStr) -> handle
+static int lua_OnCEVName(lua_State* L)
+{
+   const char* name = g_lua.tolstring(L, 2, nullptr);
+   if (!name) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
+   const auto fn_Hash = (HashString_t)res(0x7E1BD0);
+   alignas(4) int hashBuf[2] = {};
+   fn_Hash(hashBuf, name);
+   const uint32_t nameHash = (uint32_t)hashBuf[0];
+
+   for (int i = 0; i < CEV_MAX_CBS; i++) {
+      if (g_cevCallbacks[i].regKey == 0) {
+         g_cevCallbacks[i].nameHash   = nameHash;
+         g_lua.settop(L, 1);
+         int key = cev_store_ref(L);
+         g_cevCallbacks[i].regKey     = key;
+         g_cevCallbacks[i].filterType = CEV_NAME;
+         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
+         return 1;
+      }
+   }
+   g_lua.pushnil(L);
+   return 1;
+}
+
+// OnCharacterExitVehicleTeam(callback, teamIndex) -> handle
+static int lua_OnCEVTeam(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 2)) { g_lua.pushnil(L); return 1; }
+   int team = g_lua.tointeger(L, 2);
+
+   for (int i = 0; i < CEV_MAX_CBS; i++) {
+      if (g_cevCallbacks[i].regKey == 0) {
+         g_cevCallbacks[i].teamFilter = team;
+         g_lua.settop(L, 1);
+         int key = cev_store_ref(L);
+         g_cevCallbacks[i].regKey     = key;
+         g_cevCallbacks[i].filterType = CEV_TEAM;
+         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
+         return 1;
+      }
+   }
+   g_lua.pushnil(L);
+   return 1;
+}
+
+// OnCharacterExitVehicleClass(callback, classStr) -> handle
+static int lua_OnCEVClass(lua_State* L)
+{
+   const char* cls = g_lua.tolstring(L, 2, nullptr);
+   if (!cls) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
+   const auto fn_Hash = (HashString_t)res(0x7E1BD0);
+   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+
+   // Hash the class name and walk the EntityClass global registry to resolve it
+   // to a live EntityClass pointer. Registration fails if the class isn't loaded.
+   alignas(4) int hashBuf[2] = {};
+   fn_Hash(hashBuf, cls);
+   const uint32_t targetHash = (uint32_t)hashBuf[0];
+
+   void* classPtr = nullptr;
+   uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+   for (int guard = 0; guard < 4096; ++guard) {
+      void* ec = *(void**)(node + 0x0C);
+      if (!ec) break;
+      if (*(uint32_t*)((char*)ec + 0x18) == targetHash) { classPtr = ec; break; }
+      node = *(uintptr_t*)(node + 0x04);
+   }
+
+   if (!classPtr) {
+      fn_GameLog("OnCharacterExitVehicleClass: class '%s' not found in EntityClass registry\n", cls);
+      g_lua.pushnil(L);
+      return 1;
+   }
+
+   for (int i = 0; i < CEV_MAX_CBS; i++) {
+      if (g_cevCallbacks[i].regKey == 0) {
+         g_cevCallbacks[i].classPtr   = classPtr;
+         g_lua.settop(L, 1);
+         int key = cev_store_ref(L);
+         g_cevCallbacks[i].regKey     = key;
+         g_cevCallbacks[i].filterType = CEV_CLASS;
+         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
+         return 1;
+      }
+   }
+   g_lua.pushnil(L);
+   return 1;
+}
+
+// ReleaseCharacterExitVehicle(handle)
+static int lua_ReleaseCEV(lua_State* L)
+{
+   void* handle = g_lua.touserdata(L, 1);
+   if (!handle) return 0;
+
+   CEVCallback* cb = (CEVCallback*)handle;
+   if (cb >= g_cevCallbacks && cb < g_cevCallbacks + CEV_MAX_CBS && cb->regKey != 0) {
+      cev_remove_ref(L, cb->regKey);
+      memset(cb, 0, sizeof(*cb));
+   }
+   return 0;
+}
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -632,10 +1005,17 @@ static const lua_func_entry custom_functions[] = {
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
+   { "SetCharacterWeapon",    lua_SetCharacterWeapon },
    { "HttpGetAsync",          lua_HttpGetAsync },
    { "HttpPutAsync",          lua_HttpPutAsync },
    { "HttpPostAsync",         lua_HttpPostAsync },
-{ "RemoveUnitClass",       lua_RemoveUnitClass },
+   { "RemoveUnitClass",       lua_RemoveUnitClass },
+   { "ReapplyAnimations",     lua_ReapplyAnimations },
+   { "OnCharacterExitVehicle",       lua_OnCEV },
+   { "OnCharacterExitVehicleName",   lua_OnCEVName },
+   { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },
+   { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
+   { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
    { nullptr, nullptr }
 };
 

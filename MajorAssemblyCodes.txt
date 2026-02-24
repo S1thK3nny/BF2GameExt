@@ -1,0 +1,195 @@
+```EntitySoldier Memory Layout
+
+  EntitySoldier (+0x000)
+  ├── EntityEx (+0x000)
+  │   ├── Entity vtable (+0x000)
+  │   ├── mId              (+0x004)  uint     — entity name hash
+  │   └── mEntityClass     (+0x008)  void*    — EntityClass pointer
+  │       └── name hash    (+0x18)   uint     — class name hash
+  ├── EntityGeometry (+0x000)
+  │   ├── CollisionObject  (+0x00C)
+  │   └── RedSceneObject   (+0x094)
+  ├── GameObject (+0x000)
+  │   ├── Damageable       (+0x140)
+  │   ├── mClassUnion      (+0x218)
+  │   ├── mTeam            (+0x234)  int:4    — team index (bitfield)
+  │   └── mOwningTeam      (+0x234)  int:4    — owning team (upper nibble)
+  ├── Controllable (+0x240)
+  │   ├── Thread           (+0x000)
+  │   ├── Trackable        (+0x018)
+  │   ├── mControlFire     (+0x038)  Trigger[2]
+  │   ├── mWpnChannel      (+0x094)  int
+  │   ├── mCtrl            (+0x0C8)  Controller*
+  │   ├── mCharacter       (+0x0CC)  Character*
+  │   ├── mPilot           (+0x0D0)  Controllable*
+  │   ├── mPlayerId        (+0x0D4)  int
+  │   ├── mPilotType       (+0x144)  PilotType enum
+  │   └── ...              (total 396 bytes)
+  ├── mClass               (+0x458)  EntitySoldierClass*
+  ├── mAimer               (+0x510)  Aimer (544 bytes)
+  ├── mWeapon[8]           (+0x730)  Weapon* array
+  ├── mWeaponIndex[2]      (+0x750)  char — selected slot per channel
+  └── ...                  (total 4080 bytes)
+
+  Character Array
+
+  Base pointer:    *(0xB93A08)
+  Max characters:  *(0xB939F4)
+  Stride:          0x1B0 per slot
+
+  charSlot = arrayBase + charIndex * 0x1B0
+
+  charSlot + 0x134  →  int    team index
+  charSlot + 0x13C  →  int    class index (numeric, within team)
+  charSlot + 0x148  →  void*  Controllable* (= EntitySoldier + 0x240)
+
+  Verified Access Chains
+
+  From charSlot to Controllable:
+    intermediate = *(void**)(charSlot + 0x148)
+    // intermediate IS the Controllable (at EntitySoldier + 0x240)
+
+  From Controllable to EntitySoldier:
+    entitySoldier = (char*)intermediate - 0x240
+
+  From Controllable to weapons:
+    ctrl = intermediate + 0x18
+    slotIdx = *(uint8_t*)(ctrl + 0x4F8 + channel)
+    weapon  = *(void**)(ctrl + 0x4D8 + slotIdx * 4)
+
+  From Weapon to owner/ODF:
+    owner       = *(void**)(weapon + 0x6C)   // Controllable*
+    weaponClass = *(void**)(weapon + 0x60)   // WeaponClass*
+    odfName     = (char*)(weaponClass + 0x30) // ODF string
+
+  Vehicle pilot hop (from vehicle Controllable):
+    pilotType = *(int*)(owner + 0x144)
+    pilot     = *(void**)(owner + 0xD0)
+    // PILOT_NONE=0, PILOT_SELF=1, PILOT_VEHICLE=2, PILOT_REMOTE=3, PILOT_VEHICLESELF=4
+    // If pilotType != PILOT_SELF and not (PILOT_VEHICLESELF && pilot == owner):
+    //   shooter = pilot  (follow the hop)
+
+  Entity name from charSlot:
+    intermediate  = *(void**)(charSlot + 0x148)
+    entitySoldier = (char*)intermediate - 0x240
+    nameHash      = *(uint*)(entitySoldier + 4)
+    name          = StringDB_Find(nameHash)     // FUN_0048db10
+
+  Entity class name from charSlot:
+    entityClass   = *(void**)(entitySoldier + 8)
+    classHash     = *(uint*)((char*)entityClass + 0x18)
+    className     = StringDB_Find(classHash)    // FUN_0048db10
+
+  Team array (for AddUnitClass/RemoveUnitClass):
+    teamArrayBase = *(*(0xAD5D64))
+    teamPtr       = *(void**)(teamArrayBase + teamIndex * 4)
+    classCount    = *(int*)((char*)teamPtr + 0x48)
+    classDefArr   = *(void***)((char*)teamPtr + 0x50)
+    minArr        = *(int**)((char*)teamPtr + 0x54)
+    maxArr        = *(int**)((char*)teamPtr + 0x58)
+
+  Key Functions
+
+  StringDB::Find     0x48DB10  — const char* __cdecl (uint hash)
+  HashString         0x7E1BD0  — void* __thiscall (void* buf8, const char* name)
+  Weapon::SignalFire 0x61C870  — void __thiscall (Weapon* this)
+  GameLog            0x7E3D50  — void __cdecl (const char* fmt, ...)
+
+  All offsets are unrelocated (imagebase 0x400000), modtools build.  EntitySoldier Memory Layout
+
+  EntitySoldier (+0x000)
+  ├── EntityEx (+0x000)
+  │   ├── Entity vtable (+0x000)
+  │   ├── mId              (+0x004)  uint     — entity name hash
+  │   └── mEntityClass     (+0x008)  void*    — EntityClass pointer
+  │       └── name hash    (+0x18)   uint     — class name hash
+  ├── EntityGeometry (+0x000)
+  │   ├── CollisionObject  (+0x00C)
+  │   └── RedSceneObject   (+0x094)
+  ├── GameObject (+0x000)
+  │   ├── Damageable       (+0x140)
+  │   ├── mClassUnion      (+0x218)
+  │   ├── mTeam            (+0x234)  int:4    — team index (bitfield)
+  │   └── mOwningTeam      (+0x234)  int:4    — owning team (upper nibble)
+  ├── Controllable (+0x240)
+  │   ├── Thread           (+0x000)
+  │   ├── Trackable        (+0x018)
+  │   ├── mControlFire     (+0x038)  Trigger[2]
+  │   ├── mWpnChannel      (+0x094)  int
+  │   ├── mCtrl            (+0x0C8)  Controller*
+  │   ├── mCharacter       (+0x0CC)  Character*
+  │   ├── mPilot           (+0x0D0)  Controllable*
+  │   ├── mPlayerId        (+0x0D4)  int
+  │   ├── mPilotType       (+0x144)  PilotType enum
+  │   └── ...              (total 396 bytes)
+  ├── mClass               (+0x458)  EntitySoldierClass*
+  ├── mAimer               (+0x510)  Aimer (544 bytes)
+  ├── mWeapon[8]           (+0x730)  Weapon* array
+  ├── mWeaponIndex[2]      (+0x750)  char — selected slot per channel
+  └── ...                  (total 4080 bytes)
+
+  Character Array
+
+  Base pointer:    *(0xB93A08)
+  Max characters:  *(0xB939F4)
+  Stride:          0x1B0 per slot
+
+  charSlot = arrayBase + charIndex * 0x1B0
+
+  charSlot + 0x134  →  int    team index
+  charSlot + 0x13C  →  int    class index (numeric, within team)
+  charSlot + 0x148  →  void*  Controllable* (= EntitySoldier + 0x240)
+
+  Verified Access Chains
+
+  From charSlot to Controllable:
+    intermediate = *(void**)(charSlot + 0x148)
+    // intermediate IS the Controllable (at EntitySoldier + 0x240)
+
+  From Controllable to EntitySoldier:
+    entitySoldier = (char*)intermediate - 0x240
+
+  From Controllable to weapons:
+    ctrl = intermediate + 0x18
+    slotIdx = *(uint8_t*)(ctrl + 0x4F8 + channel)
+    weapon  = *(void**)(ctrl + 0x4D8 + slotIdx * 4)
+
+  From Weapon to owner/ODF:
+    owner       = *(void**)(weapon + 0x6C)   // Controllable*
+    weaponClass = *(void**)(weapon + 0x60)   // WeaponClass*
+    odfName     = (char*)(weaponClass + 0x30) // ODF string
+
+  Vehicle pilot hop (from vehicle Controllable):
+    pilotType = *(int*)(owner + 0x144)
+    pilot     = *(void**)(owner + 0xD0)
+    // PILOT_NONE=0, PILOT_SELF=1, PILOT_VEHICLE=2, PILOT_REMOTE=3, PILOT_VEHICLESELF=4
+    // If pilotType != PILOT_SELF and not (PILOT_VEHICLESELF && pilot == owner):
+    //   shooter = pilot  (follow the hop)
+
+  Entity name from charSlot:
+    intermediate  = *(void**)(charSlot + 0x148)
+    entitySoldier = (char*)intermediate - 0x240
+    nameHash      = *(uint*)(entitySoldier + 4)
+    name          = StringDB_Find(nameHash)     // FUN_0048db10
+
+  Entity class name from charSlot:
+    entityClass   = *(void**)(entitySoldier + 8)
+    classHash     = *(uint*)((char*)entityClass + 0x18)
+    className     = StringDB_Find(classHash)    // FUN_0048db10
+
+  Team array (for AddUnitClass/RemoveUnitClass):
+    teamArrayBase = *(*(0xAD5D64))
+    teamPtr       = *(void**)(teamArrayBase + teamIndex * 4)
+    classCount    = *(int*)((char*)teamPtr + 0x48)
+    classDefArr   = *(void***)((char*)teamPtr + 0x50)
+    minArr        = *(int**)((char*)teamPtr + 0x54)
+    maxArr        = *(int**)((char*)teamPtr + 0x58)
+
+  Key Functions
+
+  StringDB::Find     0x48DB10  — const char* __cdecl (uint hash)
+  HashString         0x7E1BD0  — void* __thiscall (void* buf8, const char* name)
+  Weapon::SignalFire 0x61C870  — void __thiscall (Weapon* this)
+  GameLog            0x7E3D50  — void __cdecl (const char* fmt, ...)
+
+  All offsets are unrelocated (imagebase 0x400000), modtools build```
