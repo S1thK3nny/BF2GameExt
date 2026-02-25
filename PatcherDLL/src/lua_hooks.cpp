@@ -7,6 +7,7 @@
 lua_api g_lua = {};
 lua_State* g_L = nullptr;
 bool g_useBarrelFireOrigin = false;
+char g_loadDisplayPath[260] = "Load\\load";
 
 // ---------------------------------------------------------------------------
 // Barrel fire origin — WeaponCannon OverrideAimer vtable hook
@@ -198,17 +199,34 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
    original_char_exit_vehicle(thisPtr, nullptr, arg1, arg2);
 }
 
+// ---------------------------------------------------------------------------
+// LoadDisplay::EnterState hook
+//
+// The original function has a hardcoded PUSH imm32 pointing at "Load\\load"
+// in .rdata (VA 0x00A5AF5C). During install we patch the 4-byte operand of
+// that PUSH instruction to point to g_loadDisplayPath instead.  Modders call
+// SetLoadDisplayLevel() from ScriptPreInit to override the path before the
+// load screen fires.
+// ---------------------------------------------------------------------------
+
+// VA 0x0067e388 — the 4-byte imm32 operand of the PUSH instruction at 0x0067e387
+static constexpr uintptr_t enter_state_path_op = 0x0067e388;
+
+// Saved so we can restore on uninstall.
+static uint32_t* g_enter_state_path_op_ptr  = nullptr;
+static uint32_t  g_enter_state_path_op_orig = 0;
+
 using fn_init_state = void(__cdecl*)();
 static fn_init_state original_init_state = nullptr;
 
 static void __cdecl hooked_init_state()
 {
-   auto fn_log = get_gamelog();
-   fn_log("[CEV] hooked_init_state: calling original...\n");
    original_init_state();
 
+   // RESET the path to vanilla every time a new mission/state starts
+   strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), "Load\\load", _TRUNCATE);
+
    g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), lua_addrs::modtools::g_lua_state_ptr);
-   fn_log("[CEV] g_L = 0x%08x\n", (unsigned)(uintptr_t)g_L);
 
    // Reset callback storage for the new Lua state.
    memset(g_cevCallbacks, 0, sizeof(g_cevCallbacks));
@@ -261,7 +279,16 @@ void lua_hooks_install(uintptr_t exe_base)
    LONG rc = DetourTransactionCommit();
 
    auto fn_log = get_gamelog();
-   fn_log("[CEV] DetourAttach init_state=%ld  exit_vehicle=%ld  commit=%ld\n", r1, r2, rc);
+   fn_log("DetourAttach init_state=%ld  exit_vehicle=%ld  commit=%ld\n", r1, r2, rc);
+
+   // Patch the PUSH imm32 operand inside LoadDisplay::EnterState so the
+   // hardcoded "Load\\load" pointer is replaced by &g_loadDisplayPath.
+   // dllmain.cpp has already made all sections PAGE_READWRITE at this point.
+   g_enter_state_path_op_ptr  = (uint32_t*)resolve(exe_base, enter_state_path_op);
+   g_enter_state_path_op_orig = *g_enter_state_path_op_ptr;
+   *g_enter_state_path_op_ptr = (uint32_t)(uintptr_t)g_loadDisplayPath;
+   fn_log("[LoadDisplay] patched path operand 0x%08x -> 0x%08x (\"%s\")\n",
+          g_enter_state_path_op_orig, *g_enter_state_path_op_ptr, g_loadDisplayPath);
 
    // Resolve Weapon::ZoomFirstPerson for the barrel fire origin hook
    fn_ZoomFirstPerson = (ZoomFirstPerson_t)resolve(exe_base, weapon_zoom_first_person);
@@ -288,6 +315,15 @@ void lua_hooks_uninstall()
    if (original_init_state)          DetourDetach(&(PVOID&)original_init_state, hooked_init_state);
    if (original_char_exit_vehicle)   DetourDetach(&(PVOID&)original_char_exit_vehicle, hooked_char_exit_vehicle);
    DetourTransactionCommit();
+
+   // Restore the PUSH operand in LoadDisplay::EnterState
+   if (g_enter_state_path_op_ptr && g_enter_state_path_op_orig) {
+      DWORD oldProt;
+      if (VirtualProtect(g_enter_state_path_op_ptr, sizeof(uint32_t), PAGE_EXECUTE_READWRITE, &oldProt)) {
+         *g_enter_state_path_op_ptr = g_enter_state_path_op_orig;
+         VirtualProtect(g_enter_state_path_op_ptr, sizeof(uint32_t), oldProt, &oldProt);
+      }
+   }
 
    // Restore WeaponCannon vtable entry
    if (g_cannonOverrideAimerSlot && g_cannonOverrideAimerOrig) {

@@ -1120,6 +1120,19 @@ static int lua_DumpAimerInfo(lua_State* L)
    return 0;
 }
 
+// SetLoadDisplayLevel(path) - overrides the level loaded by LoadDisplay::EnterState.
+// The default is "Load\\load" (vanilla load screen level).
+// Call from Script root or ScriptPreInit
+// Example: SetLoadDisplayLevel("relative path to custom load.lvl")
+// E.g. SetLoadDisplayLevel("..\\..\\addon\\995\\data\\_LVL_PC\\Load")
+static int lua_SetLoadDisplayLevel(lua_State* L)
+{
+   const char* path = g_lua.tolstring(L, 1, nullptr);
+   if (path)
+      strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), path, _TRUNCATE);
+   return 0;
+}
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -1146,6 +1159,7 @@ static const lua_func_entry custom_functions[] = {
    { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
    { "SetBarrelFireOrigin",   lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",         lua_DumpAimerInfo },
+   { "SetLoadDisplayLevel",   lua_SetLoadDisplayLevel },
    { nullptr, nullptr }
 };
 
