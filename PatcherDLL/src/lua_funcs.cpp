@@ -920,6 +920,89 @@ static int lua_DebugCharacterInfo(lua_State* L)
    }
 }
 
+// ---------------------------------------------------------------------------
+// print() override for retail (Steam/GOG).
+// Mimics standard Lua print(): converts each arg to string, joins with tabs,
+// writes the line to BF2GameExt.log. On modtools the built-in print() is
+// left alone (it writes to the debug console).
+// ---------------------------------------------------------------------------
+static int lua_Print(lua_State* L)
+{
+   // Compute log path once (same directory as the exe)
+   static char logPath[MAX_PATH] = {};
+   if (!logPath[0]) {
+      char exePath[MAX_PATH];
+      GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+      char* slash = strrchr(exePath, '\\');
+      if (slash) *(slash + 1) = '\0';
+      snprintf(logPath, MAX_PATH, "%sBF2GameExt.log", exePath);
+   }
+
+   FILE* f = nullptr;
+   fopen_s(&f, logPath, "a");
+   if (!f) return 0;
+
+   int n = g_lua.gettop(L);
+   for (int i = 1; i <= n; ++i) {
+      if (i > 1) fputc('\t', f);
+      const char* s = g_lua.tostring(L, i);
+      fputs(s ? s : "(null)", f);
+   }
+   fputc('\n', f);
+   fclose(f);
+
+   return 0;
+}
+
+// SetCharacterSpeedFactor(charIndex, factor [, duration [, lerpSpeed]])
+// Sets a per-character movement speed cap (always active).
+//   charIndex: integer character index
+//   factor:    0.0–1.0 speed multiplier (e.g. 0.4 = 40% of max speed)
+//   duration:  seconds the effect lasts (0 or omitted = permanent)
+//   lerpSpeed: transition rate per frame (default 0.02, ~0.8s for 1→0.5 at 60fps)
+static int lua_SetCharacterSpeedFactor(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) return 0;
+   int charIndex  = g_lua.tointeger(L, 1);
+   float factor   = g_lua.tonumber(L, 2);
+   float duration = 0.0f;
+   float lerp     = 0.0f;
+   if (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3))
+      duration = g_lua.tonumber(L, 3);
+   if (g_lua.gettop(L) >= 4 && g_lua.isnumber(L, 4))
+      lerp = g_lua.tonumber(L, 4);
+   set_character_speed_factor(charIndex, factor, duration, lerp);
+   return 0;
+}
+
+// SetCharacterAimSpeedFactor(charIndex, factor [, lerpSpeed])
+// Sets a per-character movement speed cap that only applies while aiming.
+// Permanent until cleared. Intended for the human player's zoom slow.
+//   charIndex: integer character index
+//   factor:    0.0–1.0 speed multiplier
+//   lerpSpeed: transition rate per frame (default 0.02)
+static int lua_SetCharacterAimSpeedFactor(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) return 0;
+   int charIndex = g_lua.tointeger(L, 1);
+   float factor  = g_lua.tonumber(L, 2);
+   float lerp    = 0.0f;
+   if (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3))
+      lerp = g_lua.tonumber(L, 3);
+   set_character_aim_speed_factor(charIndex, factor, lerp);
+   return 0;
+}
+
+// ClearCharacterSpeedFactor(charIndex)
+// Removes all speed overrides (both aim and general) for a character.
+static int lua_ClearCharacterSpeedFactor(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1)) return 0;
+   int charIndex = g_lua.tointeger(L, 1);
+   clear_character_speed_factor(charIndex);
+   return 0;
+}
+
 // ===========================================================================
 
 struct lua_func_entry {
@@ -944,14 +1027,21 @@ static const lua_func_entry custom_functions[] = {
    { "GetCharacterClassName",  lua_GetCharacterClassName },
    { "DebugCharacterInfo",    lua_DebugCharacterInfo },
    { "EnableFlyerLandingFire", lua_EnableFlyerLandingFire },
+   { "SetCharacterSpeedFactor",      lua_SetCharacterSpeedFactor },
+   { "SetCharacterAimSpeedFactor",   lua_SetCharacterAimSpeedFactor },
+   { "ClearCharacterSpeedFactor",    lua_ClearCharacterSpeedFactor },
    { nullptr, nullptr }
 };
 
 void register_lua_functions(lua_State* L)
 {
-
    for (const lua_func_entry* entry = custom_functions; entry->name; ++entry)
       lua_register_func(L, entry->name, entry->func);
+
+   // On retail (Steam/GOG), override print() to write to BF2GameExt.log.
+   // On modtools, leave the built-in print() alone (writes to debug console).
+   if (g_exeType != ExeType::MODTOOLS)
+      lua_register_func(L, "print", lua_Print);
 
    // Register event callbacks (closures with upvalues)
    g_evtCharacterFireWeapon.registerLua(L);

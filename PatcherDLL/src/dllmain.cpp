@@ -44,13 +44,34 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
    case DLL_PROCESS_ATTACH: {
       DisableThreadLibraryCalls(hModule);
 
-      // Load the real dinput8.dll from the system directory
-      char sysDir[MAX_PATH];
-      GetSystemDirectoryA(sysDir, MAX_PATH);
-      char realPath[MAX_PATH];
-      wsprintfA(realPath, "%s\\dinput8.dll", sysDir);
+      // Chain: scan for dinput8_*.dll in our directory (e.g. dinput8_reshade.dll).
+      // If found, load it and forward DirectInput8Create through it.
+      // Otherwise fall back to the real system dinput8.dll.
+      char myDir[MAX_PATH];
+      GetModuleFileNameA(hModule, myDir, MAX_PATH);
+      char* lastSlash = strrchr(myDir, '\\');
+      if (lastSlash) *(lastSlash + 1) = '\0';
 
-      g_realDInput8 = LoadLibraryA(realPath);
+      char searchPath[MAX_PATH];
+      wsprintfA(searchPath, "%sdinput8_*.dll", myDir);
+
+      WIN32_FIND_DATAA fd;
+      HANDLE hFind = FindFirstFileA(searchPath, &fd);
+      if (hFind != INVALID_HANDLE_VALUE) {
+         char chainPath[MAX_PATH];
+         wsprintfA(chainPath, "%s%s", myDir, fd.cFileName);
+         g_realDInput8 = LoadLibraryA(chainPath);
+         FindClose(hFind);
+      }
+
+      if (!g_realDInput8) {
+         char sysDir[MAX_PATH];
+         GetSystemDirectoryA(sysDir, MAX_PATH);
+         char realPath[MAX_PATH];
+         wsprintfA(realPath, "%s\\dinput8.dll", sysDir);
+         g_realDInput8 = LoadLibraryA(realPath);
+      }
+
       if (g_realDInput8) {
          g_realDI8Create = (PFN_DirectInput8Create)
             GetProcAddress(g_realDInput8, "DirectInput8Create");

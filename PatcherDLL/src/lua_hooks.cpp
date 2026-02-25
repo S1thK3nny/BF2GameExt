@@ -68,7 +68,7 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    //   2. Player is already in first-person and zooms any weapon
    void* owner = *(void**)((char*)weapon + 0x6C);
    if (owner) {
-      bool isZoomed = *(bool*)((char*)owner + 0x160);
+      bool isZoomed = *(bool*)((char*)owner + g_game.controllable_mIsAiming_offset);
       if (isZoomed) {
          // Case 1: weapon class forces first-person on zoom
          if (fn_ZoomFirstPerson && fn_ZoomFirstPerson(weapon))
@@ -127,67 +127,311 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 // OnCharacterFireWeapon — Weapon::SignalFire Detours hook
 // ---------------------------------------------------------------------------
 
+// Weapon::OverrideSoldierVelocity — __thiscall, 4 float* stack params, RET 0x10
+using fn_override_soldier_velocity = bool(__thiscall*)(void*, float*, float*, float*, float*);
+static fn_override_soldier_velocity original_override_soldier_velocity = nullptr;
+
+// Player tracking (only the human player aims/zooms)
+static void* s_playerOwner = nullptr;
+static int   s_localPlayerCharIdx = -1;
+
+// ---------------------------------------------------------------------------
+// Resolve character index from a Controllable pointer using the same
+// pointer-arithmetic method the vanilla Lua callbacks use:
+//   charIndex = (Controllable.mCharacter - Character::sCharacters) / sizeof(Character)
+// Returns -1 if not found.
+// ---------------------------------------------------------------------------
+static int resolve_char_index_from_controllable(void* controllable)
+{
+   if (!controllable) return -1;
+   if (!g_game.char_array_base_ptr || !g_game.char_array_max_count) return -1;
+   if (!g_game.controllable_mCharacter_offset) return -1;
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
+   if (!arrayBase) return -1;
+   const int maxChars = *(int*)res(g_game.char_array_max_count);
+
+   // Read Controllable.mCharacter — back-pointer to the Character array slot
+   uintptr_t chrPtr = *(uintptr_t*)((char*)controllable + g_game.controllable_mCharacter_offset);
+   if (!chrPtr || chrPtr < arrayBase) return -1;
+
+   int idx = (int)((chrPtr - arrayBase) / 0x1B0);
+   if (idx < 0 || idx >= maxChars) return -1;
+   return idx;
+}
+
+// ---------------------------------------------------------------------------
+// Per-character speed factor system
+//
+// Two override types per character:
+//   aimOnly=false  "general" — always applies (e.g. AI fire slow, debuffs)
+//   aimOnly=true   "aim"     — only applies while the character is aiming
+// Both can coexist; effective factor = min(aim, general).
+// ---------------------------------------------------------------------------
+
+struct CharacterSpeedOverride {
+   int    charIndex;       // -1 = empty slot
+   float  targetFactor;    // desired factor (0–1, from Lua)
+   float  currentFactor;   // lerped value for smooth transitions
+   DWORD  expireTick;      // GetTickCount() expiry; 0 = permanent
+   float  lerpSpeed;       // per-frame lerp rate
+   bool   aimOnly;         // true = only apply while aiming
+};
+
+static constexpr float DEFAULT_LERP_SPEED = 0.02f;
+static constexpr int MAX_CHAR_OVERRIDES = 64;
+static CharacterSpeedOverride s_charOverrides[MAX_CHAR_OVERRIDES];
+
+void clear_all_character_speed_factors()
+{
+   for (int i = 0; i < MAX_CHAR_OVERRIDES; ++i)
+      s_charOverrides[i].charIndex = -1;
+}
+
+// Find an existing entry matching charIndex + aimOnly, or allocate a new slot.
+static CharacterSpeedOverride* find_or_alloc(int charIndex, bool aimOnly)
+{
+   // Exact match first
+   for (int i = 0; i < MAX_CHAR_OVERRIDES; ++i) {
+      if (s_charOverrides[i].charIndex == charIndex && s_charOverrides[i].aimOnly == aimOnly)
+         return &s_charOverrides[i];
+   }
+
+   // Find empty or oldest expired slot
+   int best = -1;
+   DWORD oldest = MAXDWORD;
+   DWORD now = GetTickCount();
+   for (int i = 0; i < MAX_CHAR_OVERRIDES; ++i) {
+      if (s_charOverrides[i].charIndex < 0) { best = i; break; }
+      if (s_charOverrides[i].expireTick &&
+          (int)(now - s_charOverrides[i].expireTick) >= 0) { best = i; break; }
+      if (s_charOverrides[i].expireTick && s_charOverrides[i].expireTick < oldest) {
+         oldest = s_charOverrides[i].expireTick; best = i;
+      }
+   }
+   if (best < 0) best = 0;
+
+   s_charOverrides[best].charIndex = -1;  // mark as fresh
+   return &s_charOverrides[best];
+}
+
+void set_character_speed_factor(int charIndex, float factor, float durationSec, float lerpSpeed)
+{
+   if (factor < 0.0f) factor = 0.0f;
+   if (factor > 1.0f) factor = 1.0f;
+   if (lerpSpeed <= 0.0f) lerpSpeed = DEFAULT_LERP_SPEED;
+
+   DWORD expire = 0;
+   if (durationSec > 0.0f)
+      expire = GetTickCount() + (DWORD)(durationSec * 1000.0f);
+
+   CharacterSpeedOverride* ovr = find_or_alloc(charIndex, false);
+   bool isNew = (ovr->charIndex != charIndex);
+   ovr->charIndex     = charIndex;
+   ovr->targetFactor  = factor;
+   ovr->expireTick    = expire;
+   ovr->lerpSpeed     = lerpSpeed;
+   ovr->aimOnly       = false;
+   if (isNew) ovr->currentFactor = 1.0f;
+}
+
+void set_character_aim_speed_factor(int charIndex, float factor, float lerpSpeed)
+{
+   if (factor < 0.0f) factor = 0.0f;
+   if (factor > 1.0f) factor = 1.0f;
+   if (lerpSpeed <= 0.0f) lerpSpeed = DEFAULT_LERP_SPEED;
+
+   CharacterSpeedOverride* ovr = find_or_alloc(charIndex, true);
+   bool isNew = (ovr->charIndex != charIndex);
+   ovr->charIndex     = charIndex;
+   ovr->targetFactor  = factor;
+   ovr->expireTick    = 0;  // aim overrides are always permanent
+   ovr->lerpSpeed     = lerpSpeed;
+   ovr->aimOnly       = true;
+   if (isNew) ovr->currentFactor = 1.0f;
+}
+
+void clear_character_speed_factor(int charIndex)
+{
+   for (int i = 0; i < MAX_CHAR_OVERRIDES; ++i) {
+      if (s_charOverrides[i].charIndex == charIndex)
+         s_charOverrides[i].charIndex = -1;
+   }
+}
+
+// Apply per-character velocity cap. Called from the velocity hook for each owner.
+static void apply_character_speed(void* owner, int charIdx, bool isPlayer, bool isAiming)
+{
+   int soldierState = *(int*)((char*)owner + 0x514);
+   bool stateAllowed = (soldierState == 0 || soldierState == 1);
+
+   float effectiveFactor = 1.0f;
+
+   for (int i = 0; i < MAX_CHAR_OVERRIDES; ++i) {
+      CharacterSpeedOverride* ovr = &s_charOverrides[i];
+      if (ovr->charIndex != charIdx) continue;
+
+      // Handle expiry for timed entries
+      bool expired = false;
+      if (ovr->expireTick) {
+         DWORD now = GetTickCount();
+         if ((int)(now - ovr->expireTick) >= 0)
+            expired = true;
+      }
+
+      if (expired) {
+         // Fade out toward 1.0, then clear
+         ovr->currentFactor += (1.0f - ovr->currentFactor) * 0.05f;
+         if (ovr->currentFactor > 0.995f) {
+            ovr->charIndex = -1;
+            continue;
+         }
+      } else {
+         // Determine if this entry is active right now
+         bool active = true;
+         if (ovr->aimOnly)
+            active = isAiming;
+
+         // Snap to 1.0 for non-allowed states (roll, jump, sprint, etc.)
+         if (!stateAllowed && ovr->currentFactor < 1.0f) {
+            ovr->currentFactor = 1.0f;
+            continue;
+         }
+
+         float target = (active && stateAllowed && ovr->targetFactor < 1.0f)
+                        ? ovr->targetFactor : 1.0f;
+
+         // Linear lerp
+         float diff = target - ovr->currentFactor;
+         if (fabsf(diff) <= ovr->lerpSpeed)
+            ovr->currentFactor = target;
+         else
+            ovr->currentFactor += (diff > 0.0f) ? ovr->lerpSpeed : -ovr->lerpSpeed;
+      }
+
+      if (ovr->currentFactor < effectiveFactor)
+         effectiveFactor = ovr->currentFactor;
+   }
+
+   // Cap velocity to maxSpeed * effectiveFactor (only clamps — no jitter)
+   if (effectiveFactor < 1.0f) {
+      void* soldierClass = *(void**)((char*)owner + 0x218);
+      if (soldierClass) {
+         float maxSpeed  = *(float*)((char*)soldierClass + 0x890);
+         float maxStrafe = *(float*)((char*)soldierClass + 0x894);
+         float capSpeed  = maxSpeed  * effectiveFactor;
+         float capStrafe = maxStrafe * effectiveFactor;
+         float cap = (capSpeed > capStrafe) ? capSpeed : capStrafe;
+
+         float* vel = (float*)((char*)owner + 0x2AC);
+         float hSpeedSq = vel[0] * vel[0] + vel[2] * vel[2];
+         if (hSpeedSq > cap * cap) {
+            float scale = cap / sqrtf(hSpeedSq);
+            vel[0] *= scale;
+            vel[2] *= scale;
+         }
+      }
+   }
+}
+
+static bool __fastcall hooked_override_soldier_velocity(void* thisPtr, void* /*edx*/,
+                                                         float* p1, float* p2, float* p3, float* p4)
+{
+   bool result = original_override_soldier_velocity(thisPtr, p1, p2, p3, p4);
+
+   void* owner = *(void**)((char*)thisPtr + 0x6C);
+   if (!owner) return result;
+
+   int charIdx = resolve_char_index_from_controllable(owner);
+   if (charIdx < 0) return result;
+
+   bool isAiming = *(bool*)((char*)owner + g_game.controllable_mIsAiming_offset);
+   bool isPlayer = false;
+
+   // Track the player (only humans aim/zoom)
+   if (isAiming) {
+      s_playerOwner = owner;
+      s_localPlayerCharIdx = charIdx;
+      isPlayer = true;
+   } else if (owner == s_playerOwner || charIdx == s_localPlayerCharIdx) {
+      isPlayer = true;
+   }
+
+   apply_character_speed(owner, charIdx, isPlayer, isAiming);
+   return result;
+}
+
 using fn_signal_fire = void(__thiscall*)(void*);
 static fn_signal_fire original_signal_fire = nullptr;
 
+static int g_signalFireCount = 0;
+
 static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
 {
+   if (g_signalFireCount < 3)
+      dbg_log("[signal_fire] ENTERED weapon=%p g_L=%p\n", weapon, (void*)g_L);
+
    // Debounce: SignalFire can be called multiple times per trigger pull (salvo).
    // Read mLastFireTime (weapon+0x11C) before the original call. If it already
    // equals the current mission time after the call, this is a duplicate — skip.
    float prevFireTime = 0.0f;
-   __try { prevFireTime = *(float*)((char*)weapon + 0x11C); }
-   __except (EXCEPTION_EXECUTE_HANDLER) {}
+   __try { prevFireTime = *(float*)((char*)weapon + g_game.weapon_mLastFireTime_offset); }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (g_signalFireCount < 3) dbg_log("[signal_fire] EXCEPTION reading prevFireTime\n");
+   }
 
    original_signal_fire(weapon);
 
    if (!g_L) return;
 
    __try {
-      float newFireTime = *(float*)((char*)weapon + 0x11C);
-      if (prevFireTime == newFireTime) return;
-   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      float newFireTime = *(float*)((char*)weapon + g_game.weapon_mLastFireTime_offset);
+      if (prevFireTime == newFireTime) {
+         if (g_signalFireCount < 3) dbg_log("[signal_fire] debounce skip\n");
+         return;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (g_signalFireCount < 3) dbg_log("[signal_fire] EXCEPTION reading newFireTime\n");
+   }
 
    __try {
-      // Weapon ODF name: weapon+0x60 → WeaponClass*, +0x30 → char[]
-      void* weaponClass = *(void**)((char*)weapon + 0x60);
-      if (!weaponClass) return;
+      // Weapon ODF name: weapon+mClass → WeaponClass*, +0x30 → char[]
+      void* weaponClass = *(void**)((char*)weapon + g_game.weapon_mClass_offset);
+      if (!weaponClass) { if (g_signalFireCount < 3) dbg_log("[signal_fire] weaponClass=NULL\n"); ++g_signalFireCount; return; }
       const char* odfName = (const char*)((char*)weaponClass + 0x30);
-      if (!odfName || !odfName[0]) return;
+      if (!odfName || !odfName[0]) { if (g_signalFireCount < 3) dbg_log("[signal_fire] odfName empty\n"); ++g_signalFireCount; return; }
 
       // Owner Controllable
       void* owner = *(void**)((char*)weapon + 0x6C);
-      if (!owner) return;
+      if (!owner) { if (g_signalFireCount < 3) dbg_log("[signal_fire] owner=NULL\n"); ++g_signalFireCount; return; }
+
+      if (g_signalFireCount < 3)
+         dbg_log("[signal_fire] odf=%s owner=%p\n", odfName, owner);
 
       // Vehicle hop: follow mPilot if owner is a vehicle
       void* shooter = owner;
-      int pilotType = *(int*)((char*)owner + 0x144);  // PilotType enum
-      void* pilot   = *(void**)((char*)owner + 0xD0); // Controllable::mPilot
+      int pilotType = *(int*)((char*)owner + g_game.controllable_mPilotType_offset);  // PilotType enum
+      void* pilot   = *(void**)((char*)owner + g_game.controllable_mPilot_offset); // Controllable::mPilot
       // PILOT_NONE=0, PILOT_SELF=1, PILOT_VEHICLE=2, PILOT_REMOTE=3, PILOT_VEHICLESELF=4
+      // Default pilotType is defined per-class in the ODF (typically PILOT_VEHICLE).
+      // PILOT_VEHICLESELF acts as SELF when unoccupied, VEHICLE when entered.
       if (pilotType != 1 && !(pilotType == 4 && pilot == owner)) {
          if (pilot) shooter = pilot;
       }
 
-      // Walk character array to find charIndex
-      const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-      auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+      // Resolve charIndex by scanning the Character array for a matching
+      // mUnit/mVehicle/mRemote — the same approach vanilla callbacks use.
+      int charIndex = resolve_char_index_from_controllable(shooter);
 
-      if (!g_game.char_array_base_ptr || !g_game.char_array_max_count) return;
-      const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
-      if (!arrayBase) return;
-      const int maxChars = *(int*)res(g_game.char_array_max_count);
+      if (charIndex < 0) { if (g_signalFireCount < 3) dbg_log("[signal_fire] charIndex not found, shooter=%p\n", shooter); ++g_signalFireCount; return; }
 
-      int charIndex = -1;
-      for (int i = 0; i < maxChars; ++i) {
-         char* charSlot = (char*)arrayBase + i * 0x1B0;
-         void* intermediate = *(void**)(charSlot + 0x148);
-         if (intermediate == shooter) {
-            charIndex = i;
-            break;
-         }
-      }
+      if (g_signalFireCount < 3)
+         dbg_log("[signal_fire] DISPATCH charIndex=%d odf=%s\n", charIndex, odfName);
 
-      if (charIndex < 0) return;  // automated turret or unknown — skip
+      ++g_signalFireCount;
 
       // Push event args and dispatch through the generic event system
       g_lua.pushnumber(g_L, (float)charIndex);
@@ -213,6 +457,11 @@ static fn_init_state original_init_state = nullptr;
 static void __cdecl hooked_init_state()
 {
    original_init_state();
+
+   // Reset per-character speed overrides on map change
+   clear_all_character_speed_factors();
+   s_playerOwner = nullptr;
+   s_localPlayerCharIdx = -1;
 
    // Read gLuaState_Pointer now that InitState has returned
    lua_State** p_lua_state = (lua_State**)((g_game.g_lua_state_ptr - 0x400000) +
@@ -305,6 +554,14 @@ static ExeType detect_exe(uintptr_t exe_base)
    g_game.entity_class_registry              = NS::entity_class_registry;    \
    g_game.team_array_ptr                     = NS::team_array_ptr;           \
    g_game.game_log                           = NS::game_log;                 \
+   g_game.weapon_mLastFireTime_offset        = NS::weapon_mLastFireTime_offset; \
+   g_game.weapon_mClass_offset               = NS::weapon_mClass_offset;        \
+   g_game.controllable_mCharacter_offset     = NS::controllable_mCharacter_offset;  \
+   g_game.controllable_mPilot_offset         = NS::controllable_mPilot_offset;  \
+   g_game.controllable_mPilotType_offset     = NS::controllable_mPilotType_offset; \
+   g_game.controllable_mPlayerId_offset      = NS::controllable_mPlayerId_offset;  \
+   g_game.controllable_mIsAiming_offset      = NS::controllable_mIsAiming_offset;  \
+   g_game.weapon_override_soldier_velocity   = NS::weapon_override_soldier_velocity; \
 } while(0)
 
 // ---------------------------------------------------------------------------
@@ -420,6 +677,7 @@ static ExeType detect_exe(uintptr_t exe_base)
 void lua_hooks_install(uintptr_t exe_base)
 {
    init_log_path();
+   clear_all_character_speed_factors();
 
    // --- Detect which exe we're running in ---
    g_exeType = detect_exe(exe_base);
@@ -463,12 +721,15 @@ void lua_hooks_install(uintptr_t exe_base)
    original_init_state  = (fn_init_state) resolve(exe_base, g_game.init_state);
    original_close_state = (fn_close_state)resolve(exe_base, g_game.close_state);
    original_signal_fire = (fn_signal_fire)resolve(exe_base, g_game.weapon_signal_fire);
+   original_override_soldier_velocity = (fn_override_soldier_velocity)resolve(exe_base, g_game.weapon_override_soldier_velocity);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_init_state, hooked_init_state);
    DetourAttach(&(PVOID&)original_close_state, hooked_close_state);
    DetourAttach(&(PVOID&)original_signal_fire, hooked_signal_fire);
+   if (original_override_soldier_velocity)
+      DetourAttach(&(PVOID&)original_override_soldier_velocity, hooked_override_soldier_velocity);
    LONG detourResult = DetourTransactionCommit();
    dbg_log("[lua_hooks] Detours commit result=%ld\n", detourResult);
 
@@ -526,6 +787,8 @@ void lua_hooks_uninstall()
          DetourDetach(&(PVOID&)original_close_state, hooked_close_state);
       if (original_signal_fire)
          DetourDetach(&(PVOID&)original_signal_fire, hooked_signal_fire);
+      if (original_override_soldier_velocity)
+         DetourDetach(&(PVOID&)original_override_soldier_velocity, hooked_override_soldier_velocity);
       DetourTransactionCommit();
    }
 

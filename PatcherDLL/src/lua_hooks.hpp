@@ -385,6 +385,18 @@ namespace lua_addrs {
       // EntityFlyer::Update — JNP that skips fire suppression when mInLandingRegionFactor == 0.
       // Patching 0x7B (JNP) → 0xEB (JMP) allows firing in landing regions while flying.
       constexpr uintptr_t flyer_landing_fire_jnp             = 0x5004D3;
+
+      // Weapon struct member offsets
+      constexpr unsigned weapon_mLastFireTime_offset          = 0x11C;
+      constexpr unsigned weapon_mClass_offset                 = 0x64;
+
+      // Controllable struct member offsets
+      constexpr unsigned controllable_mCharacter_offset       = 0xCC;
+      constexpr unsigned controllable_mPilot_offset           = 0xD0;
+      constexpr unsigned controllable_mPilotType_offset       = 0x144;
+      constexpr unsigned controllable_mPlayerId_offset        = 0xD4;
+      constexpr unsigned controllable_mIsAiming_offset         = 0x160;
+      constexpr uintptr_t weapon_override_soldier_velocity     = 0x0061CEC0;
    }
 
    namespace steam {
@@ -552,6 +564,19 @@ namespace lua_addrs {
       constexpr uintptr_t weapon_override_aimer_thunk         = 0;        // no thunk in retail
       constexpr uintptr_t weapon_zoom_first_person            = 0x677D40;
       constexpr uintptr_t flyer_landing_fire_jnp             = 0x4B019E;
+
+      // Weapon struct member offsets (retail differs from modtools)
+      constexpr unsigned weapon_mLastFireTime_offset          = 0xF8;
+      constexpr unsigned weapon_mClass_offset                 = 0x64;
+
+      // Controllable struct member offsets (retail is 4 bytes smaller than modtools)
+      constexpr unsigned controllable_mCharacter_offset       = 0xC8;
+      constexpr unsigned controllable_mPilot_offset           = 0xCC;
+      constexpr unsigned controllable_mPilotType_offset       = 0x140;
+      constexpr unsigned controllable_mPlayerId_offset        = 0xD0;
+      constexpr unsigned controllable_mIsAiming_offset         = 0x15C;
+      constexpr uintptr_t weapon_override_soldier_velocity     = 0x00677760;
+
       constexpr uintptr_t pbl_hash_ctor                      = 0x726D20;
       constexpr uintptr_t hash_to_name                       = 0x652030;
       constexpr uintptr_t entity_class_registry              = 0x7EC560;
@@ -722,6 +747,19 @@ namespace lua_addrs {
       constexpr uintptr_t weapon_override_aimer_thunk         = 0;        // no thunk in retail
       constexpr uintptr_t weapon_zoom_first_person            = 0x678DE0;
       constexpr uintptr_t flyer_landing_fire_jnp             = 0x4B0198;
+
+      // Weapon struct member offsets (retail differs from modtools)
+      constexpr unsigned weapon_mLastFireTime_offset          = 0xF8;
+      constexpr unsigned weapon_mClass_offset                 = 0x64;
+
+      // Controllable struct member offsets (retail is 4 bytes smaller than modtools)
+      constexpr unsigned controllable_mCharacter_offset       = 0xC8;
+      constexpr unsigned controllable_mPilot_offset           = 0xCC;
+      constexpr unsigned controllable_mPilotType_offset       = 0x140;
+      constexpr unsigned controllable_mPlayerId_offset        = 0xD0;
+      constexpr unsigned controllable_mIsAiming_offset         = 0x15C;
+      constexpr uintptr_t weapon_override_soldier_velocity     = 0;  // TODO
+
       constexpr uintptr_t pbl_hash_ctor                      = 0x727DF0;
       constexpr uintptr_t hash_to_name                       = 0x6530D0;
       constexpr uintptr_t entity_class_registry              = 0x7ED4F0;
@@ -759,6 +797,18 @@ struct game_addrs {
    uintptr_t entity_class_registry              = 0;
    uintptr_t team_array_ptr                     = 0;
    uintptr_t game_log                           = 0;
+
+   // Weapon struct member offsets (differ between modtools and retail)
+   unsigned weapon_mLastFireTime_offset          = 0;
+   unsigned weapon_mClass_offset                 = 0;
+
+   // Controllable struct member offsets (retail is 4 bytes smaller than modtools)
+   unsigned controllable_mCharacter_offset       = 0;
+   unsigned controllable_mPilot_offset           = 0;
+   unsigned controllable_mPilotType_offset       = 0;
+   unsigned controllable_mPlayerId_offset        = 0;
+   unsigned controllable_mIsAiming_offset        = 0;
+   uintptr_t weapon_override_soldier_velocity    = 0;
 };
 
 extern game_addrs g_game;
@@ -917,6 +967,11 @@ extern lua_State* g_L;
 // Barrel fire origin toggle — when true, WeaponCannon fires from barrel
 // hardpoint (mBarrelPoseMatrix) instead of the default aimer position.
 extern bool g_useBarrelFireOrigin;
+// Per-character speed factor API — called from lua_funcs.cpp
+void set_character_speed_factor(int charIndex, float factor, float durationSec, float lerpSpeed);
+void set_character_aim_speed_factor(int charIndex, float factor, float lerpSpeed);
+void clear_character_speed_factor(int charIndex);
+void clear_all_character_speed_factors();
 
 // =============================================================================
 // Public interface
