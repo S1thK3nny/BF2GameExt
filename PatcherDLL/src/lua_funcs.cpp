@@ -935,7 +935,7 @@ static int lua_Print(lua_State* L)
       GetModuleFileNameA(nullptr, exePath, MAX_PATH);
       char* slash = strrchr(exePath, '\\');
       if (slash) *(slash + 1) = '\0';
-      snprintf(logPath, MAX_PATH, "%sBF2GameExt.log", exePath);
+      snprintf(logPath, MAX_PATH, "%sBFront2.log", exePath);
    }
 
    FILE* f = nullptr;

@@ -21,7 +21,7 @@ static void init_log_path()
    // Strip exe filename, keep directory
    char* lastSlash = strrchr(exePath, '\\');
    if (lastSlash) *(lastSlash + 1) = '\0';
-   snprintf(g_logPath, MAX_PATH, "%sBF2GameExt.log", exePath);
+   snprintf(g_logPath, MAX_PATH, "%sBFront2.log", exePath);
 }
 
 static void dbg_log(const char* fmt, ...)
