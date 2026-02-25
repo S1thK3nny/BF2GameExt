@@ -327,3 +327,4 @@ void GameEvent::registerLua(lua_State* L)
 // ===========================================================================
 
 GameEvent g_evtCharacterFireWeapon = { "CharacterFireWeapon", FILTER_ALL };
+GameEvent g_evtCharacterExitVehicle = { "CharacterExitVehicle", FILTER_ALL };

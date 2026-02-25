@@ -397,6 +397,7 @@ namespace lua_addrs {
       constexpr unsigned controllable_mPlayerId_offset        = 0xD4;
       constexpr unsigned controllable_mIsAiming_offset         = 0x160;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x0061CEC0;
+      constexpr uintptr_t char_exit_vehicle                    = 0x0052FC70;
    }
 
    namespace steam {
@@ -584,6 +585,7 @@ namespace lua_addrs {
       constexpr uintptr_t char_array_max_count               = 0x1E30320;
       constexpr uintptr_t team_array_ptr                     = 0;         // TODO
       constexpr uintptr_t game_log                           = 0;         // TODO
+      constexpr uintptr_t char_exit_vehicle                  = 0x004F1380;
    }
 
    namespace gog {
@@ -758,7 +760,7 @@ namespace lua_addrs {
       constexpr unsigned controllable_mPilotType_offset       = 0x140;
       constexpr unsigned controllable_mPlayerId_offset        = 0xD0;
       constexpr unsigned controllable_mIsAiming_offset         = 0x15C;
-      constexpr uintptr_t weapon_override_soldier_velocity     = 0;  // TODO
+      constexpr uintptr_t weapon_override_soldier_velocity     = 0x00678800;
 
       constexpr uintptr_t pbl_hash_ctor                      = 0x727DF0;
       constexpr uintptr_t hash_to_name                       = 0x6530D0;
@@ -767,6 +769,7 @@ namespace lua_addrs {
       constexpr uintptr_t char_array_max_count               = 0x1E317C0;
       constexpr uintptr_t team_array_ptr                     = 0;         // TODO
       constexpr uintptr_t game_log                           = 0;         // TODO
+      constexpr uintptr_t char_exit_vehicle                  = 0x004F1380;
    }
 }
 
@@ -809,6 +812,7 @@ struct game_addrs {
    unsigned controllable_mPlayerId_offset        = 0;
    unsigned controllable_mIsAiming_offset        = 0;
    uintptr_t weapon_override_soldier_velocity    = 0;
+   uintptr_t char_exit_vehicle                  = 0;
 };
 
 extern game_addrs g_game;

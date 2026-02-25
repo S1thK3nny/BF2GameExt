@@ -443,6 +443,64 @@ static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
    }
 }
 
+// ---------------------------------------------------------------------------
+// OnCharacterExitVehicle — Detours hook on the exit-vehicle function
+// ---------------------------------------------------------------------------
+
+// EntitySoldier::ExitVehicle — __thiscall, this=EntitySoldier*, 2 bool stack params, RET 0x8
+using fn_char_exit_vehicle = bool(__thiscall*)(void*, bool, bool);
+static fn_char_exit_vehicle original_char_exit_vehicle = nullptr;
+
+static bool __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, bool param_1, bool param_2)
+{
+   // thisPtr = EntitySoldier* (NOT Controllable*).
+   // Disasm shows both modtools and steam read this+0xCC to get the Character
+   // array slot pointer. This is a field in the GameObject region — the same
+   // offset in both builds (unlike Controllable.mCharacter which shifts).
+   // Cannot use resolve_char_index_from_controllable here.
+   int charIndex = -1;
+   void* vehicleEntity = nullptr;
+
+   __try {
+      if (g_game.char_array_base_ptr && g_game.char_array_max_count) {
+         const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+         auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+         const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
+         const int maxChars = *(int*)res(g_game.char_array_max_count);
+
+         if (arrayBase) {
+            // Read Character slot pointer from EntitySoldier+0xCC (same offset both builds)
+            uintptr_t chrPtr = *(uintptr_t*)((char*)thisPtr + 0xCC);
+            if (chrPtr >= arrayBase) {
+               int idx = (int)((chrPtr - arrayBase) / 0x1B0);
+               if (idx >= 0 && idx < maxChars) {
+                  charIndex = idx;
+                  // Character.mVehicle (+0x14C) is a Controllable*, but Lua
+                  // expects an EntityEx*/GameObject* (what GetEntityClass uses).
+                  // Controllable is at +0x240 in all entity types, so
+                  // GameObject* = Controllable* - 0x240.
+                  void* vehCtrl = *(void**)((char*)chrPtr + 0x14C);
+                  if (vehCtrl)
+                     vehicleEntity = (char*)vehCtrl - 0x240;
+               }
+            }
+         }
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   bool result = original_char_exit_vehicle(thisPtr, param_1, param_2);
+
+   if (!g_L || charIndex < 0) return result;
+
+   __try {
+      g_lua.pushnumber(g_L, (float)charIndex);
+      g_lua.pushlightuserdata(g_L, vehicleEntity);
+      g_evtCharacterExitVehicle.dispatch(charIndex, 2);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   return result;
+}
+
 static const uintptr_t unrelocated_base = 0x400000;
 
 static void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
@@ -562,6 +620,7 @@ static ExeType detect_exe(uintptr_t exe_base)
    g_game.controllable_mPlayerId_offset      = NS::controllable_mPlayerId_offset;  \
    g_game.controllable_mIsAiming_offset      = NS::controllable_mIsAiming_offset;  \
    g_game.weapon_override_soldier_velocity   = NS::weapon_override_soldier_velocity; \
+   g_game.char_exit_vehicle                  = NS::char_exit_vehicle;               \
 } while(0)
 
 // ---------------------------------------------------------------------------
@@ -722,6 +781,7 @@ void lua_hooks_install(uintptr_t exe_base)
    original_close_state = (fn_close_state)resolve(exe_base, g_game.close_state);
    original_signal_fire = (fn_signal_fire)resolve(exe_base, g_game.weapon_signal_fire);
    original_override_soldier_velocity = (fn_override_soldier_velocity)resolve(exe_base, g_game.weapon_override_soldier_velocity);
+   original_char_exit_vehicle = (fn_char_exit_vehicle)resolve(exe_base, g_game.char_exit_vehicle);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -730,6 +790,8 @@ void lua_hooks_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_signal_fire, hooked_signal_fire);
    if (original_override_soldier_velocity)
       DetourAttach(&(PVOID&)original_override_soldier_velocity, hooked_override_soldier_velocity);
+   if (original_char_exit_vehicle)
+      DetourAttach(&(PVOID&)original_char_exit_vehicle, hooked_char_exit_vehicle);
    LONG detourResult = DetourTransactionCommit();
    dbg_log("[lua_hooks] Detours commit result=%ld\n", detourResult);
 
@@ -789,6 +851,8 @@ void lua_hooks_uninstall()
          DetourDetach(&(PVOID&)original_signal_fire, hooked_signal_fire);
       if (original_override_soldier_velocity)
          DetourDetach(&(PVOID&)original_override_soldier_velocity, hooked_override_soldier_velocity);
+      if (original_char_exit_vehicle)
+         DetourDetach(&(PVOID&)original_char_exit_vehicle, hooked_char_exit_vehicle);
       DetourTransactionCommit();
    }
 

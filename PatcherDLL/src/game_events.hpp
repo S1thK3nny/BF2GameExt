@@ -49,3 +49,4 @@ struct GameEvent {
 
 // Event instances
 extern GameEvent g_evtCharacterFireWeapon;
+extern GameEvent g_evtCharacterExitVehicle;
