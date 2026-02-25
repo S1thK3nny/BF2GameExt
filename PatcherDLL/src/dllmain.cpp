@@ -1,4 +1,11 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
+//
+// This DLL serves double duty:
+//   1. dinput8.dll proxy — the game imports DirectInput8Create from dinput8.dll.
+//      Placing this DLL (named dinput8.dll) in the game directory causes it to
+//      load instead of the system DLL. We forward the real call transparently.
+//   2. BF2GameExt — all patching/hooking runs in DllMain after Steam DRM
+//      has unpacked the real game code.
 #include "pch.h"
 
 #include "apply_patches.hpp"
@@ -7,10 +14,48 @@
 
 void install_patches();
 
-BOOL __declspec(dllexport) APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+// ---------------------------------------------------------------------------
+// Real dinput8.dll forwarding
+// ---------------------------------------------------------------------------
+
+static HMODULE g_realDInput8 = nullptr;
+
+using PFN_DirectInput8Create = HRESULT(WINAPI*)(
+   HINSTANCE hinst, DWORD dwVersion, REFIID riidltf,
+   void** ppvOut, void* punkOuter);
+
+static PFN_DirectInput8Create g_realDI8Create = nullptr;
+
+extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(
+   HINSTANCE hinst, DWORD dwVersion, REFIID riidltf,
+   void** ppvOut, void* punkOuter)
+{
+   if (!g_realDI8Create) return E_FAIL;
+   return g_realDI8Create(hinst, dwVersion, riidltf, ppvOut, punkOuter);
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpReserved*/)
 {
    switch (ul_reason_for_call) {
    case DLL_PROCESS_ATTACH: {
+      DisableThreadLibraryCalls(hModule);
+
+      // Load the real dinput8.dll from the system directory
+      char sysDir[MAX_PATH];
+      GetSystemDirectoryA(sysDir, MAX_PATH);
+      char realPath[MAX_PATH];
+      wsprintfA(realPath, "%s\\dinput8.dll", sysDir);
+
+      g_realDInput8 = LoadLibraryA(realPath);
+      if (g_realDInput8) {
+         g_realDI8Create = (PFN_DirectInput8Create)
+            GetProcAddress(g_realDInput8, "DirectInput8Create");
+      }
+
       install_patches();
    } break;
    case DLL_THREAD_ATTACH:
@@ -18,12 +63,14 @@ BOOL __declspec(dllexport) APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for
       break;
    case DLL_PROCESS_DETACH:
       lua_hooks_uninstall();
+      if (g_realDInput8) {
+         FreeLibrary(g_realDInput8);
+         g_realDInput8 = nullptr;
+      }
       break;
    }
    return TRUE;
 }
-
-void __declspec(dllexport) ExportFunction() {}
 
 void install_patches()
 {
@@ -80,4 +127,7 @@ void install_patches()
          FatalAppExitA(0, "Failed to restore normal executable sections virtual protect!");
       }
    }
+
+   // Re-verify and re-patch IAT after protections are restored
+   lua_hooks_post_install();
 }

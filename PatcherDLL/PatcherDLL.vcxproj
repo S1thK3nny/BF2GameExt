@@ -44,12 +44,12 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <TargetName>BF2GameExt</TargetName>
+    <TargetName>dinput8</TargetName>
     <IntDir>build\$(Configuration)\</IntDir>
     <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <TargetName>BF2GameExt</TargetName>
+    <TargetName>dinput8</TargetName>
     <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
     <IntDir>build\$(Configuration)\</IntDir>
   </PropertyGroup>
@@ -73,6 +73,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <ModuleDefinitionFile>dinput8.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -100,6 +101,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <ModuleDefinitionFile>dinput8.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -108,6 +110,7 @@
     <ClInclude Include="src\cfile.hpp" />
     <ClInclude Include="src\lua_hooks.hpp" />
     <ClInclude Include="src\lua_funcs.hpp" />
+    <ClInclude Include="src\game_events.hpp" />
     <ClInclude Include="src\framework.h" />
     <ClInclude Include="src\patch_table.hpp" />
     <ClInclude Include="src\pch.h" />
@@ -120,6 +123,7 @@
     <ClCompile Include="src\patch_table.cpp" />
     <ClCompile Include="src\lua_hooks.cpp" />
     <ClCompile Include="src\lua_funcs.cpp" />
+    <ClCompile Include="src\game_events.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
@@ -127,6 +131,9 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="dinput8.def" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(SolutionDir)Detours\Detours.vcxproj">

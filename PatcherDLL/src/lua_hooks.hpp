@@ -226,9 +226,9 @@ namespace lua_addrs {
 
       // -- lua_ State --
       constexpr uintptr_t lua_open                = 0x7BDF50;
-      constexpr uintptr_t lua_close               = 0x7BDFE0;
+      // constexpr uintptr_t lua_close             = 0x7BDFE0;  // orphaned, stripped from retail
       constexpr uintptr_t lua_newthread           = 0x7B7E20;
-      constexpr uintptr_t lua_atpanic             = 0x7B7E00;
+      // constexpr uintptr_t lua_atpanic           = 0x7B7E00;  // orphaned, stripped from retail
 
       // -- lua_ Stack --
       constexpr uintptr_t lua_gettop              = 0x7B7E60;
@@ -256,7 +256,7 @@ namespace lua_addrs {
       constexpr uintptr_t lua_toboolean           = 0x7B82F0;
       constexpr uintptr_t lua_tostring            = 0x7B8330;
       constexpr uintptr_t lua_strlen              = 0x7B83A0;
-      constexpr uintptr_t lua_tocfunction         = 0x7B8400;
+      // constexpr uintptr_t lua_tocfunction       = 0x7B8400;  // orphaned, stripped from retail
       constexpr uintptr_t lua_touserdata          = 0x7B8440;
       constexpr uintptr_t lua_tothread            = 0x7B8490;
       constexpr uintptr_t lua_topointer           = 0x7B84D0;
@@ -290,7 +290,7 @@ namespace lua_addrs {
       // -- lua_ Call --
       constexpr uintptr_t lua_call                = 0x7B8B10;
       constexpr uintptr_t lua_pcall               = 0x7B8B60;
-      constexpr uintptr_t lua_cpcall              = 0x7B8C60;
+      // constexpr uintptr_t lua_cpcall            = 0x7B8C60;  // orphaned, stripped from retail
       constexpr uintptr_t lua_load                = 0x7B8CA0;
       constexpr uintptr_t lua_dump                = 0x7B8CF0;
 
@@ -309,7 +309,7 @@ namespace lua_addrs {
       constexpr uintptr_t lua_getupvalue          = 0x7B8FB0;
       constexpr uintptr_t lua_setupvalue          = 0x7B9030;
       constexpr uintptr_t lua_getinfo             = 0x7BED30;
-      constexpr uintptr_t lua_pushupvalues        = 0x7B8EE0;
+      // constexpr uintptr_t lua_pushupvalues      = 0x7B8EE0;  // orphaned, stripped from retail
       constexpr uintptr_t lua_sethook             = 0x7BE0F0;
       constexpr uintptr_t lua_gethook             = 0x7BE130;
       constexpr uintptr_t lua_gethookmask         = 0x7BE140;
@@ -319,8 +319,8 @@ namespace lua_addrs {
       constexpr uintptr_t lua_setlocal            = 0x7BE280;
 
       // -- lua_ Compat --
-      constexpr uintptr_t lua_version             = 0x7B8DA0;
-      constexpr uintptr_t lua_dofile              = 0x7B7870;
+      // constexpr uintptr_t lua_version           = 0x7B8DA0;  // orphaned, stripped from retail
+      // constexpr uintptr_t lua_dofile            = 0x7B7870;  // orphaned, stripped from retail
       constexpr uintptr_t lua_dobuffer            = 0x7B78B0;
       constexpr uintptr_t lua_dostring            = 0x7B7910;
 
@@ -337,10 +337,10 @@ namespace lua_addrs {
       constexpr uintptr_t luaL_checkany           = 0x7B7AD0;
       constexpr uintptr_t luaL_newmetatable       = 0x7B6B90;
       constexpr uintptr_t luaL_getmetatable       = 0x7B6C10;
-      constexpr uintptr_t luaL_checkudata         = 0x7B6C30;
+      // constexpr uintptr_t luaL_checkudata       = 0x7B6C30;  // orphaned, stripped from retail
       constexpr uintptr_t luaL_where              = 0x7B6A70;
       constexpr uintptr_t luaL_error              = 0x7B6B00;
-      constexpr uintptr_t luaL_findstring         = 0x7B6B30;
+      // constexpr uintptr_t luaL_findstring       = 0x7B6B30;  // orphaned, stripped from retail
       constexpr uintptr_t luaL_ref                = 0x7B73E0;
       constexpr uintptr_t luaL_unref              = 0x7B74B0;
       constexpr uintptr_t luaL_getn               = 0x7B7030;
@@ -354,7 +354,7 @@ namespace lua_addrs {
       constexpr uintptr_t luaL_buffinit           = 0x7B73C0;
       constexpr uintptr_t luaL_prepbuffer         = 0x7B7200;
       constexpr uintptr_t luaL_addlstring         = 0x7B7240;
-      constexpr uintptr_t luaL_addstring          = 0x7B72A0;
+      // constexpr uintptr_t luaL_addstring        = 0x7B72A0;  // orphaned, stripped from retail
       constexpr uintptr_t luaL_addvalue           = 0x7B7320;
       constexpr uintptr_t luaL_pushresult         = 0x7B72D0;
 
@@ -367,36 +367,402 @@ namespace lua_addrs {
       constexpr uintptr_t luaopen_debug           = 0x7B9BD0;
 
       // -- Game-specific --
+      constexpr uintptr_t close_state                         = 0x4866E0;
+      constexpr uintptr_t weapon_signal_fire                  = 0x61C870;
+      constexpr uintptr_t hash_to_name                        = 0x48DB10;
+      constexpr uintptr_t pbl_hash_ctor                       = 0x7E1BD0;
+      constexpr uintptr_t entity_class_registry               = 0xACD2C8;
       constexpr uintptr_t aimer_set_soldier_info              = 0x5EE9D0;
       constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
       constexpr uintptr_t weapon_override_aimer_impl          = 0x61CEE0;
       constexpr uintptr_t weapon_override_aimer_thunk         = 0x4068DE;
       constexpr uintptr_t weapon_zoom_first_person            = 0x61B640;
+      constexpr uintptr_t char_array_base_ptr                 = 0xB93A08;
+      constexpr uintptr_t char_array_max_count                = 0xB939F4;
+      constexpr uintptr_t team_array_ptr                      = 0xAD5D64;
+      constexpr uintptr_t game_log                            = 0x7E3D50;
+
+      // EntityFlyer::Update — JNP that skips fire suppression when mInLandingRegionFactor == 0.
+      // Patching 0x7B (JNP) → 0xEB (JMP) allows firing in landing regions while flying.
+      constexpr uintptr_t flyer_landing_fire_jnp             = 0x5004D3;
    }
 
    namespace steam {
-      // TODO: Fill in all addresses for the Steam exe.
-      // Use the same constant names as the modtools namespace.
-      constexpr uintptr_t init_state              = 0xDEAD0000;   // TODO
-      constexpr uintptr_t g_lua_state_ptr         = 0xDEAD0000;   // TODO
-      constexpr uintptr_t lua_pushcclosure        = 0xDEAD0002;   // TODO
-      constexpr uintptr_t lua_pushlstring         = 0xDEAD0005;   // TODO
-      constexpr uintptr_t lua_settable            = 0xDEAD0003;   // TODO
-      constexpr uintptr_t luaL_checklstring       = 0xDEAD0004;   // TODO
-      constexpr uintptr_t lua_pushnumber          = 0xDEAD0006;   // TODO
-      constexpr uintptr_t lua_tonumber            = 0xDEAD0007;   // TODO
-      constexpr uintptr_t lua_gettop              = 0xDEAD0008;   // TODO
-      constexpr uintptr_t lua_pushnil             = 0xDEAD0009;   // TODO
-      constexpr uintptr_t lua_pushboolean         = 0xDEAD000A;   // TODO
-      constexpr uintptr_t lua_toboolean           = 0xDEAD000B;   // TODO
-      constexpr uintptr_t lua_touserdata          = 0xDEAD000C;   // TODO
-      constexpr uintptr_t lua_isnumber            = 0xDEAD000D;   // TODO
-      constexpr uintptr_t aimer_set_soldier_info              = 0xDEAD000E;   // TODO
-      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD000F;  // TODO
-      constexpr uintptr_t weapon_override_aimer_impl          = 0xDEAD0010;   // TODO
-      constexpr uintptr_t weapon_override_aimer_thunk         = 0xDEAD0011;   // TODO
+      // The following Lua 5.0.2 API functions are orphaned in the modtools exe
+      // and were likely stripped by the retail compiler/linker:
+      //   lua_close, lua_atpanic, lua_tocfunction, lua_cpcall, lua_pushupvalues,
+      //   lua_version, lua_dofile, luaL_checkudata, luaL_findstring, luaL_addstring
+      // If any are needed at runtime, check modtools addresses for reference:
+      //   lua_close=0x7BDFE0  lua_atpanic=0x7B7E00  lua_tocfunction=0x7B8400
+      //   lua_cpcall=0x7B8C60  lua_pushupvalues=0x7B8EE0  lua_version=0x7B8DA0
+      //   lua_dofile=0x7B7870  luaL_checkudata=0x7B6C30  luaL_findstring=0x7B6B30
+      //   luaL_addstring=0x7B72A0
+
+      // -- Engine hooks --
+      constexpr uintptr_t init_state              = 0x5A0CE0;
+      constexpr uintptr_t g_lua_state_ptr         = 0x1E579A0;
+
+      // -- lua_ State --
+      constexpr uintptr_t lua_open                = 0x69F8E0;
+      constexpr uintptr_t lua_close               = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_newthread           = 0x69BDF0;
+      constexpr uintptr_t lua_atpanic             = 0;   // likely stripped from retail
+
+      // -- lua_ Stack --
+      constexpr uintptr_t lua_gettop              = 0x69BBA0;
+      constexpr uintptr_t lua_settop              = 0x69C400;
+      constexpr uintptr_t lua_pushvalue           = 0x69C0C0;
+      constexpr uintptr_t lua_remove              = 0x69C260;
+      constexpr uintptr_t lua_insert              = 0x69BC00;
+      constexpr uintptr_t lua_replace             = 0x69C2A0;
+      constexpr uintptr_t lua_checkstack          = 0x69B8E0;
+      constexpr uintptr_t lua_xmove              = 0x69C6C0;
+
+      // -- lua_ Type checking --
+      constexpr uintptr_t lua_type                = 0x69C680;
+      constexpr uintptr_t lua_typename            = 0x69C6A0;
+      constexpr uintptr_t lua_isnumber            = 0x69BC80;
+      constexpr uintptr_t lua_isstring            = 0x69BCC0;
+      constexpr uintptr_t lua_iscfunction         = 0x69BC50;
+      constexpr uintptr_t lua_isuserdata          = 0x69BCF0;
+      constexpr uintptr_t lua_equal               = 0x69C120;
+      constexpr uintptr_t lua_rawequal            = 0x69BD20;
+      constexpr uintptr_t lua_lessthan            = 0x69BA00;
+
+      // -- lua_ Conversion --
+      constexpr uintptr_t lua_tonumber            = 0x69C510;
+      constexpr uintptr_t lua_toboolean           = 0x69C4D0;
+      constexpr uintptr_t lua_tostring            = 0x69C5B0;
+      constexpr uintptr_t lua_strlen              = 0x69C490;
+      constexpr uintptr_t lua_tocfunction         = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_touserdata          = 0x69C640;
+      constexpr uintptr_t lua_tothread            = 0x69C610;
+      constexpr uintptr_t lua_topointer           = 0x69C550;
+
+      // -- lua_ Push --
+      constexpr uintptr_t lua_pushnil             = 0x69C040;
+      constexpr uintptr_t lua_pushnumber          = 0x69C060;
+      constexpr uintptr_t lua_pushlstring         = 0x69C000;
+      constexpr uintptr_t lua_pushstring          = 0x69C080;
+      constexpr uintptr_t lua_pushvfstring        = 0x69C0F0;
+      constexpr uintptr_t lua_pushfstring         = 0x69BFB0;
+      constexpr uintptr_t lua_pushcclosure        = 0x69BF30;
+      constexpr uintptr_t lua_pushboolean         = 0x69BF10;
+      constexpr uintptr_t lua_pushlightuserdata   = 0x69BFE0;
+
+      // -- lua_ Get --
+      constexpr uintptr_t lua_gettable            = 0x69BB60;
+      constexpr uintptr_t lua_rawget              = 0x69C160;
+      constexpr uintptr_t lua_rawgeti             = 0x69C1A0;
+      constexpr uintptr_t lua_newtable            = 0x69BDB0;
+      constexpr uintptr_t lua_getmetatable        = 0x69BB00;
+      constexpr uintptr_t lua_getfenv             = 0x69BA70;
+
+      // -- lua_ Set --
+      constexpr uintptr_t lua_settable            = 0x69C3D0;
+      constexpr uintptr_t lua_rawset              = 0x69C1E0;
+      constexpr uintptr_t lua_rawseti             = 0x69C220;
+      constexpr uintptr_t lua_setmetatable        = 0x69C360;
+      constexpr uintptr_t lua_setfenv             = 0x69C2D0;
+
+      // -- lua_ Call --
+      constexpr uintptr_t lua_call                = 0x69B8B0;
+      constexpr uintptr_t lua_pcall               = 0x69BEB0;
+      constexpr uintptr_t lua_cpcall              = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_load                = 0x69BD60;
+      constexpr uintptr_t lua_dump                = 0x69B9C0;
+
+      // -- lua_ Misc --
+      constexpr uintptr_t lua_error               = 0x69BA50;
+      constexpr uintptr_t lua_next                = 0x69BE70;
+      constexpr uintptr_t lua_concat              = 0x69B940;
+      constexpr uintptr_t lua_newuserdata         = 0x69BE30;
+
+      // -- lua_ GC --
+      constexpr uintptr_t lua_getgcthreshold      = 0x69BAE0;
+      constexpr uintptr_t lua_getgccount          = 0x69BAC0;
+      constexpr uintptr_t lua_setgcthreshold      = 0x69C320;
+
+      // -- lua_ Debug --
+      constexpr uintptr_t lua_getupvalue          = 0x69BBC0;
+      constexpr uintptr_t lua_setupvalue          = 0x69C450;
+      constexpr uintptr_t lua_getinfo             = 0x6A21A0;
+      constexpr uintptr_t lua_pushupvalues        = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_sethook             = 0x6A2340;
+      constexpr uintptr_t lua_gethook             = 0x6A2170;
+      constexpr uintptr_t lua_gethookmask         = 0x6A2190;
+      constexpr uintptr_t lua_gethookcount        = 0x6A2180;
+      constexpr uintptr_t lua_getstack            = 0x6A22C0;
+      constexpr uintptr_t lua_getlocal            = 0x6A2250;
+      constexpr uintptr_t lua_setlocal            = 0x6A2380;
+
+      // -- lua_ Compat --
+      constexpr uintptr_t lua_version             = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_dofile              = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_dobuffer            = 0x69B700;
+      constexpr uintptr_t lua_dostring            = 0x69B730;
+
+      // -- luaL_ Auxiliary --
+      constexpr uintptr_t luaL_openlib            = 0x69B260;
+      constexpr uintptr_t luaL_callmeta           = 0x69AD30;
+      constexpr uintptr_t luaL_typerror           = 0x69B5C0;
+      constexpr uintptr_t luaL_argerror           = 0x69AC40;
+      constexpr uintptr_t luaL_checklstring       = 0x69ADC0;
+      constexpr uintptr_t luaL_optlstring         = 0x69B340;
+      constexpr uintptr_t luaL_checknumber        = 0x69AE10;
+      constexpr uintptr_t luaL_optnumber          = 0x69B3A0;
+      constexpr uintptr_t luaL_checktype          = 0x69AE90;
+      constexpr uintptr_t luaL_checkany           = 0x69AD90;
+      constexpr uintptr_t luaL_newmetatable       = 0x69B1E0;
+      constexpr uintptr_t luaL_getmetatable       = 0x69AF50;
+      constexpr uintptr_t luaL_checkudata         = 0;   // likely stripped from retail
+      constexpr uintptr_t luaL_where              = 0x69B670;
+      constexpr uintptr_t luaL_error              = 0x69AEC0;
+      constexpr uintptr_t luaL_findstring         = 0;   // likely stripped from retail
+      constexpr uintptr_t luaL_ref                = 0x69B430;
+      constexpr uintptr_t luaL_unref              = 0x69B600;
+      constexpr uintptr_t luaL_getn               = 0x69AF70;
+      constexpr uintptr_t luaL_setn               = 0x69B500;
+      constexpr uintptr_t luaL_loadfile           = 0x69B060;
+      constexpr uintptr_t luaL_loadbuffer         = 0x69B030;
+      constexpr uintptr_t luaL_checkstack         = 0x69AE60;
+      constexpr uintptr_t luaL_getmetafield       = 0x69AEF0;
+
+      // -- luaL_ Buffer --
+      constexpr uintptr_t luaL_buffinit           = 0x69AD10;
+      constexpr uintptr_t luaL_prepbuffer         = 0x69B3D0;
+      constexpr uintptr_t luaL_addlstring         = 0x69AB70;
+      constexpr uintptr_t luaL_addstring          = 0;   // likely stripped/inlined from retail
+      constexpr uintptr_t luaL_addvalue           = 0x69ABC0;
+      constexpr uintptr_t luaL_pushresult         = 0x69B400;
+
+      // -- luaopen_ Library openers --
+      constexpr uintptr_t luaopen_base            = 0x6A0C00;
+      constexpr uintptr_t luaopen_table           = 0x6A15B0;
+      constexpr uintptr_t luaopen_io              = 0x6A0D90;
+      constexpr uintptr_t luaopen_string          = 0x69ECD0;
+      constexpr uintptr_t luaopen_math            = 0x69DA80;
+      constexpr uintptr_t luaopen_debug           = 0x69D090;
+
+      // -- Game-specific --
+      constexpr uintptr_t close_state                         = 0x5A0D40;
+      constexpr uintptr_t weapon_signal_fire                  = 0x679610;
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x7B05EC;
+      constexpr uintptr_t weapon_override_aimer_impl          = 0x677780;
+      constexpr uintptr_t weapon_override_aimer_thunk         = 0;        // no thunk in retail
+      constexpr uintptr_t weapon_zoom_first_person            = 0x677D40;
+      constexpr uintptr_t flyer_landing_fire_jnp             = 0x4B019E;
+      constexpr uintptr_t pbl_hash_ctor                      = 0x726D20;
+      constexpr uintptr_t hash_to_name                       = 0x652030;
+      constexpr uintptr_t entity_class_registry              = 0x7EC560;
+      constexpr uintptr_t char_array_base_ptr                = 0x1E30334;
+      constexpr uintptr_t char_array_max_count               = 0x1E30320;
+      constexpr uintptr_t team_array_ptr                     = 0;         // TODO
+      constexpr uintptr_t game_log                           = 0;         // TODO
+   }
+
+   namespace gog {
+      // GOG exe: BattlefrontII_MemExt.exe
+      // Lua library addresses are steam + 0x1090.
+      // Game-specific addresses have variable offsets — filled in separately.
+      //
+      // Same stripped functions as steam (see steam namespace comment).
+
+      // -- Engine hooks --
+      constexpr uintptr_t init_state              = 0x5A1C90;
+      constexpr uintptr_t g_lua_state_ptr         = 0x1E58E50;
+
+      // -- lua_ State --
+      constexpr uintptr_t lua_open                = 0x6A0970;
+      constexpr uintptr_t lua_close               = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_newthread           = 0x69CE80;
+      constexpr uintptr_t lua_atpanic             = 0;   // likely stripped from retail
+
+      // -- lua_ Stack --
+      constexpr uintptr_t lua_gettop              = 0x69CC30;
+      constexpr uintptr_t lua_settop              = 0x69D490;
+      constexpr uintptr_t lua_pushvalue           = 0x69D150;
+      constexpr uintptr_t lua_remove              = 0x69D2F0;
+      constexpr uintptr_t lua_insert              = 0x69CC90;
+      constexpr uintptr_t lua_replace             = 0x69D330;
+      constexpr uintptr_t lua_checkstack          = 0x69C970;
+      constexpr uintptr_t lua_xmove              = 0x69D750;
+
+      // -- lua_ Type checking --
+      constexpr uintptr_t lua_type                = 0x69D710;
+      constexpr uintptr_t lua_typename            = 0x69D730;
+      constexpr uintptr_t lua_isnumber            = 0x69CD10;
+      constexpr uintptr_t lua_isstring            = 0x69CD50;
+      constexpr uintptr_t lua_iscfunction         = 0x69CCE0;
+      constexpr uintptr_t lua_isuserdata          = 0x69CD80;
+      constexpr uintptr_t lua_equal               = 0x69D1B0;
+      constexpr uintptr_t lua_rawequal            = 0x69CDB0;
+      constexpr uintptr_t lua_lessthan            = 0x69CA90;
+
+      // -- lua_ Conversion --
+      constexpr uintptr_t lua_tonumber            = 0x69D5A0;
+      constexpr uintptr_t lua_toboolean           = 0x69D560;
+      constexpr uintptr_t lua_tostring            = 0x69D640;
+      constexpr uintptr_t lua_strlen              = 0x69D520;
+      constexpr uintptr_t lua_tocfunction         = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_touserdata          = 0x69D6D0;
+      constexpr uintptr_t lua_tothread            = 0x69D6A0;
+      constexpr uintptr_t lua_topointer           = 0x69D5E0;
+
+      // -- lua_ Push --
+      constexpr uintptr_t lua_pushnil             = 0x69D0D0;
+      constexpr uintptr_t lua_pushnumber          = 0x69D0F0;
+      constexpr uintptr_t lua_pushlstring         = 0x69D090;
+      constexpr uintptr_t lua_pushstring          = 0x69D110;
+      constexpr uintptr_t lua_pushvfstring        = 0x69D180;
+      constexpr uintptr_t lua_pushfstring         = 0x69D040;
+      constexpr uintptr_t lua_pushcclosure        = 0x69CFC0;
+      constexpr uintptr_t lua_pushboolean         = 0x69CFA0;
+      constexpr uintptr_t lua_pushlightuserdata   = 0x69D070;
+
+      // -- lua_ Get --
+      constexpr uintptr_t lua_gettable            = 0x69CBF0;
+      constexpr uintptr_t lua_rawget              = 0x69D1F0;
+      constexpr uintptr_t lua_rawgeti             = 0x69D230;
+      constexpr uintptr_t lua_newtable            = 0x69CE40;
+      constexpr uintptr_t lua_getmetatable        = 0x69CB90;
+      constexpr uintptr_t lua_getfenv             = 0x69CB00;
+
+      // -- lua_ Set --
+      constexpr uintptr_t lua_settable            = 0x69D460;
+      constexpr uintptr_t lua_rawset              = 0x69D270;
+      constexpr uintptr_t lua_rawseti             = 0x69D2B0;
+      constexpr uintptr_t lua_setmetatable        = 0x69D3F0;
+      constexpr uintptr_t lua_setfenv             = 0x69D360;
+
+      // -- lua_ Call --
+      constexpr uintptr_t lua_call                = 0x69C940;
+      constexpr uintptr_t lua_pcall               = 0x69CF40;
+      constexpr uintptr_t lua_cpcall              = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_load                = 0x69CDF0;
+      constexpr uintptr_t lua_dump                = 0x69CA50;
+
+      // -- lua_ Misc --
+      constexpr uintptr_t lua_error               = 0x69CAE0;
+      constexpr uintptr_t lua_next                = 0x69CF00;
+      constexpr uintptr_t lua_concat              = 0x69C9D0;
+      constexpr uintptr_t lua_newuserdata         = 0x69CEC0;
+
+      // -- lua_ GC --
+      constexpr uintptr_t lua_getgcthreshold      = 0x69CB70;
+      constexpr uintptr_t lua_getgccount          = 0x69CB50;
+      constexpr uintptr_t lua_setgcthreshold      = 0x69D3B0;
+
+      // -- lua_ Debug --
+      constexpr uintptr_t lua_getupvalue          = 0x69CC50;
+      constexpr uintptr_t lua_setupvalue          = 0x69D4E0;
+      constexpr uintptr_t lua_getinfo             = 0x6A3230;
+      constexpr uintptr_t lua_pushupvalues        = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_sethook             = 0x6A33D0;
+      constexpr uintptr_t lua_gethook             = 0x6A3200;
+      constexpr uintptr_t lua_gethookmask         = 0x6A3220;
+      constexpr uintptr_t lua_gethookcount        = 0x6A3210;
+      constexpr uintptr_t lua_getstack            = 0x6A3350;
+      constexpr uintptr_t lua_getlocal            = 0x6A32E0;
+      constexpr uintptr_t lua_setlocal            = 0x6A3410;
+
+      // -- lua_ Compat --
+      constexpr uintptr_t lua_version             = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_dofile              = 0;   // likely stripped from retail
+      constexpr uintptr_t lua_dobuffer            = 0x69C790;
+      constexpr uintptr_t lua_dostring            = 0x69C7C0;
+
+      // -- luaL_ Auxiliary --
+      constexpr uintptr_t luaL_openlib            = 0x69C2F0;
+      constexpr uintptr_t luaL_callmeta           = 0x69BDC0;
+      constexpr uintptr_t luaL_typerror           = 0x69C650;
+      constexpr uintptr_t luaL_argerror           = 0x69BCD0;
+      constexpr uintptr_t luaL_checklstring       = 0x69BE50;
+      constexpr uintptr_t luaL_optlstring         = 0x69C3D0;
+      constexpr uintptr_t luaL_checknumber        = 0x69BEA0;
+      constexpr uintptr_t luaL_optnumber          = 0x69C430;
+      constexpr uintptr_t luaL_checktype          = 0x69BF20;
+      constexpr uintptr_t luaL_checkany           = 0x69BE20;
+      constexpr uintptr_t luaL_newmetatable       = 0x69C270;
+      constexpr uintptr_t luaL_getmetatable       = 0x69BFE0;
+      constexpr uintptr_t luaL_checkudata         = 0;   // likely stripped from retail
+      constexpr uintptr_t luaL_where              = 0x69C700;
+      constexpr uintptr_t luaL_error              = 0x69BF50;
+      constexpr uintptr_t luaL_findstring         = 0;   // likely stripped from retail
+      constexpr uintptr_t luaL_ref                = 0x69C4C0;
+      constexpr uintptr_t luaL_unref              = 0x69C690;
+      constexpr uintptr_t luaL_getn               = 0x69C000;
+      constexpr uintptr_t luaL_setn               = 0x69C590;
+      constexpr uintptr_t luaL_loadfile           = 0x69C0F0;
+      constexpr uintptr_t luaL_loadbuffer         = 0x69C0C0;
+      constexpr uintptr_t luaL_checkstack         = 0x69BEF0;
+      constexpr uintptr_t luaL_getmetafield       = 0x69BF80;
+
+      // -- luaL_ Buffer --
+      constexpr uintptr_t luaL_buffinit           = 0x69BDA0;
+      constexpr uintptr_t luaL_prepbuffer         = 0x69C460;
+      constexpr uintptr_t luaL_addlstring         = 0x69BC00;
+      constexpr uintptr_t luaL_addstring          = 0;   // likely stripped/inlined from retail
+      constexpr uintptr_t luaL_addvalue           = 0x69BC50;
+      constexpr uintptr_t luaL_pushresult         = 0x69C490;
+
+      // -- luaopen_ Library openers --
+      constexpr uintptr_t luaopen_base            = 0x6A1C90;
+      constexpr uintptr_t luaopen_table           = 0x6A2640;
+      constexpr uintptr_t luaopen_io              = 0x6A1E20;
+      constexpr uintptr_t luaopen_string          = 0x69FD60;
+      constexpr uintptr_t luaopen_math            = 0x69EB10;
+      constexpr uintptr_t luaopen_debug           = 0x69E120;
+
+      // -- Game-specific --
+      constexpr uintptr_t close_state                         = 0x5A1CF0;
+      constexpr uintptr_t weapon_signal_fire                  = 0x67A6B0;
+      constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x7B1564;
+      constexpr uintptr_t weapon_override_aimer_impl          = 0x678820;
+      constexpr uintptr_t weapon_override_aimer_thunk         = 0;        // no thunk in retail
+      constexpr uintptr_t weapon_zoom_first_person            = 0x678DE0;
+      constexpr uintptr_t flyer_landing_fire_jnp             = 0x4B0198;
+      constexpr uintptr_t pbl_hash_ctor                      = 0x727DF0;
+      constexpr uintptr_t hash_to_name                       = 0x6530D0;
+      constexpr uintptr_t entity_class_registry              = 0x7ED4F0;
+      constexpr uintptr_t char_array_base_ptr                = 0x1E317D4;
+      constexpr uintptr_t char_array_max_count               = 0x1E317C0;
+      constexpr uintptr_t team_array_ptr                     = 0;         // TODO
+      constexpr uintptr_t game_log                           = 0;         // TODO
    }
 }
+
+// =============================================================================
+// Exe detection — identifies which build we're injected into
+// =============================================================================
+
+enum class ExeType { UNKNOWN, MODTOOLS, STEAM, GOG };
+
+// =============================================================================
+// Game-specific addresses — filled at startup from the correct namespace
+// =============================================================================
+
+struct game_addrs {
+   uintptr_t init_state                         = 0;
+   uintptr_t close_state                        = 0;
+   uintptr_t g_lua_state_ptr                    = 0;
+   uintptr_t weapon_signal_fire                 = 0;
+   uintptr_t weapon_cannon_vftable_override_aimer = 0;
+   uintptr_t weapon_override_aimer_impl         = 0;
+   uintptr_t weapon_override_aimer_thunk        = 0;
+   uintptr_t weapon_zoom_first_person           = 0;
+   uintptr_t flyer_landing_fire_jnp             = 0;
+   uintptr_t char_array_base_ptr                = 0;
+   uintptr_t char_array_max_count               = 0;
+   uintptr_t pbl_hash_ctor                      = 0;
+   uintptr_t hash_to_name                       = 0;
+   uintptr_t entity_class_registry              = 0;
+   uintptr_t team_array_ptr                     = 0;
+   uintptr_t game_log                           = 0;
+};
+
+extern game_addrs g_game;
+extern ExeType    g_exeType;
 
 // =============================================================================
 // Lua API struct — resolved at runtime from exe base + addresses above
@@ -407,9 +773,7 @@ struct lua_api {
 
    // State
    fn_lua_open              open              = nullptr;
-   fn_lua_close             close             = nullptr;
    fn_lua_newthread         newthread         = nullptr;
-   fn_lua_atpanic           atpanic           = nullptr;
 
    // Stack
    fn_lua_gettop            gettop            = nullptr;
@@ -438,7 +802,6 @@ struct lua_api {
    fn_lua_tostring          tostring          = nullptr;
    fn_luaL_checklstring     tolstring         = nullptr;  // compat: actually luaL_checklstring
    fn_lua_strlen            str_len           = nullptr;
-   fn_lua_tocfunction       tocfunction       = nullptr;
    fn_lua_touserdata        touserdata        = nullptr;
    fn_lua_tothread          tothread          = nullptr;
    fn_lua_topointer         topointer         = nullptr;
@@ -472,7 +835,6 @@ struct lua_api {
    // Call
    fn_lua_call              call              = nullptr;
    fn_lua_pcall             pcall             = nullptr;
-   fn_lua_cpcall            cpcall            = nullptr;
    fn_lua_load              load              = nullptr;
    fn_lua_dump              dump              = nullptr;
 
@@ -491,7 +853,6 @@ struct lua_api {
    fn_lua_getupvalue        getupvalue        = nullptr;
    fn_lua_setupvalue        setupvalue        = nullptr;
    fn_lua_getinfo           getinfo           = nullptr;
-   fn_lua_pushupvalues      pushupvalues      = nullptr;
    fn_lua_sethook           sethook           = nullptr;
    fn_lua_gethook           gethook           = nullptr;
    fn_lua_gethookmask       gethookmask       = nullptr;
@@ -501,8 +862,6 @@ struct lua_api {
    fn_lua_setlocal          setlocal          = nullptr;
 
    // Compat
-   fn_lua_version           version           = nullptr;
-   fn_lua_dofile            dofile            = nullptr;
    fn_lua_dobuffer          dobuffer          = nullptr;
    fn_lua_dostring          dostring          = nullptr;
 
@@ -519,10 +878,8 @@ struct lua_api {
    fn_luaL_checkany         L_checkany        = nullptr;
    fn_luaL_newmetatable     L_newmetatable    = nullptr;
    fn_luaL_getmetatable     L_getmetatable    = nullptr;
-   fn_luaL_checkudata       L_checkudata      = nullptr;
    fn_luaL_where            L_where           = nullptr;
    fn_luaL_error            L_error           = nullptr;
-   fn_luaL_findstring       L_findstring      = nullptr;
    fn_luaL_ref              L_ref             = nullptr;
    fn_luaL_unref            L_unref           = nullptr;
    fn_luaL_getn             L_getn            = nullptr;
@@ -536,7 +893,6 @@ struct lua_api {
    fn_luaL_buffinit         L_buffinit        = nullptr;
    fn_luaL_prepbuffer       L_prepbuffer      = nullptr;
    fn_luaL_addlstring       L_addlstring      = nullptr;
-   fn_luaL_addstring        L_addstring       = nullptr;
    fn_luaL_addvalue         L_addvalue        = nullptr;
    fn_luaL_pushresult       L_pushresult      = nullptr;
 
@@ -568,6 +924,7 @@ extern bool g_useBarrelFireOrigin;
 
 // Call from install_patches() in dllmain.cpp.
 void lua_hooks_install(uintptr_t exe_base);
+void lua_hooks_post_install();
 
 // Cleanup (optional, called on DLL_PROCESS_DETACH if desired)
 void lua_hooks_uninstall();

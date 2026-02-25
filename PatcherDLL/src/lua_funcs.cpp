@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
+#include "game_events.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -289,10 +290,11 @@ static int lua_GetCharacterWeapon(lua_State* L)
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(0xB939F4);
+   if (!g_game.char_array_max_count || !g_game.char_array_base_ptr) { g_lua.pushnil(L); return 1; }
+   const int maxChars  = *(int*)res(g_game.char_array_max_count);
    if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
@@ -358,7 +360,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t addr) -> uintptr_t { return addr - 0x400000u + base; };
-   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+   const auto fn_GameLog = g_game.game_log ? (GameLog_t)res(g_game.game_log) : nullptr;
 
    if (!g_lua.isnumber(L, 1)) return 0;
 
@@ -369,16 +371,16 @@ static int lua_RemoveUnitClass(lua_State* L)
 
    const int teamIndex = g_lua.tointeger(L, 1);
    if (teamIndex < 0 || teamIndex >= 8) {
-      fn_GameLog("RemoveUnitClass(): teamIndex %d out of range (0-7)\n", teamIndex);
+      if (fn_GameLog) fn_GameLog("RemoveUnitClass(): teamIndex %d out of range (0-7)\n", teamIndex);
       return 0;
    }
 
    // Get team pointer from g_ppTeams[teamIndex].
-   // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
-   const uintptr_t teamArrayBase = *(uintptr_t*)res(0xAD5D64);
+   if (!g_game.team_array_ptr) return 0;
+   const uintptr_t teamArrayBase = *(uintptr_t*)res(g_game.team_array_ptr);
    void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
    if (!teamPtr) {
-      fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
+      if (fn_GameLog) fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
       return 0;
    }
 
@@ -391,7 +393,7 @@ static int lua_RemoveUnitClass(lua_State* L)
       // Direct slot index — no global registry lookup needed.
       const int classIndex = g_lua.tointeger(L, 2);
       if (classIndex < 0 || classIndex >= classCount) {
-         fn_GameLog("RemoveUnitClass(): class index %d out of range (team %d has %d classes)\n",
+         if (fn_GameLog) fn_GameLog("RemoveUnitClass(): class index %d out of range (team %d has %d classes)\n",
                     classIndex, teamIndex, classCount);
          return 0;
       }
@@ -404,12 +406,13 @@ static int lua_RemoveUnitClass(lua_State* L)
       // HashString: __thiscall, ECX = 8-byte stack buffer, stack arg = name string.
       // buf[0] is the resulting integer hash.
       typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
-      const auto fn_HashString = (HashString_t)res(0x7E1BD0);
+      if (!g_game.pbl_hash_ctor || !g_game.entity_class_registry) return 0;
+      const auto fn_HashString = (HashString_t)res(g_game.pbl_hash_ctor);
       alignas(4) int hashBuf[2] = {};
       fn_HashString(hashBuf, unitClass);
       const int targetHash = hashBuf[0];
 
-      uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+      uintptr_t node = *(uintptr_t*)res(g_game.entity_class_registry);
       void* classDef = nullptr;
       for (int guard = 0; guard < 1024; ++guard) {
          void* element = *(void**)(node + 0x0c);
@@ -418,7 +421,7 @@ static int lua_RemoveUnitClass(lua_State* L)
          node = *(uintptr_t*)(node + 0x04);
       }
       if (!classDef) {
-         fn_GameLog("RemoveUnitClass(): class \"%s\" not found in global registry (check the side's .req file)\n", unitClass);
+         if (fn_GameLog) fn_GameLog("RemoveUnitClass(): class \"%s\" not found in global registry (check the side's .req file)\n", unitClass);
          return 0;
       }
 
@@ -426,7 +429,7 @@ static int lua_RemoveUnitClass(lua_State* L)
          if (classDefArr[i] == classDef) { foundSlot = i; break; }
       }
       if (foundSlot < 0) {
-         fn_GameLog("RemoveUnitClass(): class \"%s\" is not assigned to team %d\n", unitClass, teamIndex);
+         if (fn_GameLog) fn_GameLog("RemoveUnitClass(): class \"%s\" is not assigned to team %d\n", unitClass, teamIndex);
          return 0;
       }
    }
@@ -619,6 +622,30 @@ static int lua_HttpPostAsync(lua_State* L)
    return 0;
 }
 
+// EnableFlyerLandingFire(enable) — allow flyers to fire weapons while in landing regions.
+// Patches a conditional jump in EntityFlyer::Update so the fire trigger suppression
+// is skipped when mState == FLYING, regardless of mInLandingRegionFactor.
+extern unsigned char* g_flyerLandingFirePatch;
+extern unsigned char  g_flyerLandingFireOrig;
+
+static int lua_EnableFlyerLandingFire(lua_State* L)
+{
+   if (!g_flyerLandingFirePatch || g_flyerLandingFireOrig != 0x7B) return 0;
+
+   bool enable;
+   if (g_lua.isnumber(L, 1))
+      enable = g_lua.tonumber(L, 1) != 0.0f;
+   else
+      enable = g_lua.toboolean(L, 1) != 0;
+
+   DWORD oldProt;
+   if (VirtualProtect(g_flyerLandingFirePatch, 1, PAGE_READWRITE, &oldProt)) {
+      *g_flyerLandingFirePatch = enable ? (unsigned char)0xEB : (unsigned char)0x7B;
+      VirtualProtect(g_flyerLandingFirePatch, 1, oldProt, &oldProt);
+   }
+   return 0;
+}
+
 // SetBarrelFireOrigin(enable) - toggle barrel-origin fire position.
 // When true, projectiles originate from the weapon's barrel hardpoint
 // (mFirePointMatrix) instead of the default aimer position.
@@ -658,10 +685,11 @@ static int lua_DumpAimerInfo(lua_State* L)
    if (!g_lua.isnumber(L, 1)) return 0;
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(0xB939F4);
+   if (!g_game.char_array_max_count || !g_game.char_array_base_ptr) return 0;
+   const int maxChars  = *(int*)res(g_game.char_array_max_count);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
    if (!arrayBase) return 0;
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
@@ -747,6 +775,153 @@ static int lua_DumpAimerInfo(lua_State* L)
    return 0;
 }
 
+// ---------------------------------------------------------------------------
+// GetCharacterClassName(charIndex) - returns the ODF class name for a character.
+// Reads EntityEx.mEntityClass directly from the character array, then returns
+// EntityClass.mFilename (char[32] at EntityClass+0x20).
+// Works reliably in callbacks where the game's GetEntityClassName returns nil.
+// ---------------------------------------------------------------------------
+static int lua_GetCharacterClassName(lua_State* L)
+{
+   int argType = g_lua.type(L, 1);
+
+   // Lightuserdata: entity pointer from GetCharacterUnit()
+   if (argType == LUA_TLIGHTUSERDATA) {
+      void* entity = g_lua.touserdata(L, 1);
+      if (!entity) { g_lua.pushnil(L); return 1; }
+
+      __try {
+         void* entClass = *(void**)((char*)entity + 8);
+         if (!entClass) { g_lua.pushnil(L); return 1; }
+
+         const char* name = (const char*)((char*)entClass + 0x20);
+         if (name && name[0]) {
+            g_lua.pushstring(L, name);
+            return 1;
+         }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+      g_lua.pushnil(L);
+      return 1;
+   }
+
+   // Number: charIndex
+   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
+
+   const int charIndex = g_lua.tointeger(L, 1);
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+
+   if (!g_game.char_array_max_count || !g_game.char_array_base_ptr) { g_lua.pushnil(L); return 1; }
+   const int maxChars = *(int*)res(g_game.char_array_max_count);
+   if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
+   if (!arrayBase) { g_lua.pushnil(L); return 1; }
+
+   __try {
+      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+      char* intermediate = *(char**)(charSlot + 0x148);
+      if (!intermediate) { g_lua.pushnil(L); return 1; }
+
+      char* entitySoldier = intermediate - 0x240;
+      void* entClass = *(void**)(entitySoldier + 8);
+      if (!entClass) { g_lua.pushnil(L); return 1; }
+
+      const char* name = (const char*)((char*)entClass + 0x20);
+      if (name && name[0]) {
+         g_lua.pushstring(L, name);
+         return 1;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   g_lua.pushnil(L);
+   return 1;
+}
+
+// ---------------------------------------------------------------------------
+// DebugCharacterInfo(charIndex) - diagnostic: prints the full resolution chain
+// for a character's entity name and class name. Call from Lua to see exactly
+// what the class filter sees.
+// ---------------------------------------------------------------------------
+static int lua_DebugCharacterInfo(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
+
+   const int charIndex = g_lua.tointeger(L, 1);
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+
+   if (!g_game.char_array_base_ptr) {
+      g_lua.pushstring(L, "char_array_base_ptr not available for this exe");
+      return 1;
+   }
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
+   if (!arrayBase) {
+      g_lua.pushstring(L, "arrayBase is null");
+      return 1;
+   }
+
+   char buf[512];
+   char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+
+   __try {
+      int team = *(int*)(charSlot + 0x134);
+      char* intermediate = *(char**)(charSlot + 0x148);
+
+      if (!intermediate) {
+         snprintf(buf, sizeof(buf), "char %d: team=%d, intermediate=NULL", charIndex, team);
+         g_lua.pushstring(L, buf);
+         return 1;
+      }
+
+      char* entitySoldier = intermediate - 0x240;
+      void* vtable   = *(void**)entitySoldier;
+      unsigned int nameHash = *(unsigned int*)(entitySoldier + 4);
+      void* entClass = *(void**)(entitySoldier + 8);
+
+      auto hashFn = g_game.hash_to_name
+         ? (const char*(__cdecl*)(unsigned int))(g_game.hash_to_name - 0x400000u + base)
+         : nullptr;
+
+      const char* entityName = hashFn ? hashFn(nameHash) : nullptr;
+
+      if (!entClass) {
+         snprintf(buf, sizeof(buf),
+            "char %d: team=%d, intermediate=%p, entitySoldier=%p, vtable=%p, "
+            "nameHash=0x%08X (\"%s\"), entClass=NULL",
+            charIndex, team, intermediate, entitySoldier, vtable,
+            nameHash, entityName ? entityName : "<null>");
+         g_lua.pushstring(L, buf);
+         return 1;
+      }
+
+      unsigned int classHash = *(unsigned int*)((char*)entClass + 0x18);
+      const char* className = hashFn ? hashFn(classHash) : nullptr;
+
+      // Also read mFilename at EntityClass+0x20 (char[32]) for comparison
+      const char* mFilename = (const char*)((char*)entClass + 0x20);
+
+      snprintf(buf, sizeof(buf),
+         "char %d: team=%d, entityName=\"%s\", "
+         "entClass=%p, classHash=0x%08X, className=\"%s\", mFilename=\"%.32s\"",
+         charIndex, team,
+         entityName ? entityName : "<null>",
+         entClass, classHash,
+         className ? className : "<null>",
+         mFilename);
+
+      g_lua.pushstring(L, buf);
+      return 1;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      g_lua.pushstring(L, "ACCESS VIOLATION during resolution");
+      return 1;
+   }
+}
+
+// ===========================================================================
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -766,11 +941,18 @@ static const lua_func_entry custom_functions[] = {
 { "RemoveUnitClass",       lua_RemoveUnitClass },
    { "SetBarrelFireOrigin",   lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",         lua_DumpAimerInfo },
+   { "GetCharacterClassName",  lua_GetCharacterClassName },
+   { "DebugCharacterInfo",    lua_DebugCharacterInfo },
+   { "EnableFlyerLandingFire", lua_EnableFlyerLandingFire },
    { nullptr, nullptr }
 };
 
 void register_lua_functions(lua_State* L)
 {
+
    for (const lua_func_entry* entry = custom_functions; entry->name; ++entry)
       lua_register_func(L, entry->name, entry->func);
+
+   // Register event callbacks (closures with upvalues)
+   g_evtCharacterFireWeapon.registerLua(L);
 }
