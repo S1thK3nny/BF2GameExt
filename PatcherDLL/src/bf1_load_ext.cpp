@@ -98,6 +98,7 @@ static fn_prt_t            g_prt             = nullptr;
 static void*               g_color_ptr       = nullptr;
 static fn_set_current_heap_t g_set_current_heap = nullptr;
 static int*                  g_runtime_heap_idx  = nullptr; // &RunTimeHeap (game global, value=2)
+static int*                  g_s_load_heap_ptr   = nullptr; // &s_loadHeap (game global at 0x00ba111c)
 
 static fn_pbl_find_t       g_pbl_find            = nullptr;
 static void*               g_tex_table           = nullptr;
@@ -431,8 +432,35 @@ static void __fastcall hooked_load_update(void* ecx, void* edx)
         return;
     }
 
+    // BF1 mode: redirect s_loadHeap → RunTimeHeap for the entire Update call.
+    //
+    // Root cause of 007E2D77 / 008024A6 crashes:
+    //   LoadDisplay::Update calls _RedSetCurrentHeap(s_loadHeap = TempLoadHeap) BEFORE
+    //   any rendering.  The loading-text vtable draw and ProgressIndicator::Update then
+    //   push items to the SortHeap with __RedCurrHeap = TempLoadHeap.  If the SortHeap
+    //   backing array is at capacity, FUN_00806920 reallocates it from TempLoadHeap.
+    //   After ReleaseTempHeap the array pointer is dangling → next SortHeap write
+    //   corrupts RunTimeHeap's free list → crash at 007E2D77 in _RedGetHeapFree.
+    //   Similarly, any MemoryPool created during loading-screen rendering with
+    //   __RedCurrHeap = TempLoadHeap has its slab in TempLoadHeap → crash at 008024A6.
+    //
+    // Fix: substitute RunTimeHeap (persistent) for s_loadHeap so that
+    //   _RedSetCurrentHeap(s_loadHeap) inside Update switches to RunTimeHeap instead.
+    //   ALL SortHeap array growth (loading text, progress bar, BF1 overlay) then
+    //   allocates from RunTimeHeap.  s_loadHeap is restored after Update returns.
+    //   The existing per-g_prt heap switch in hooked_render_screen is kept as
+    //   defence-in-depth for code paths that bypass hooked_load_update.
+    int saved_load_heap = -1;
+    if (g_bf1Ext.bf1Enabled && g_s_load_heap_ptr && g_runtime_heap_idx) {
+        saved_load_heap      = *g_s_load_heap_ptr;
+        *g_s_load_heap_ptr   = *g_runtime_heap_idx;
+    }
+
     const DWORD qpc_before = g_qpc_stamp ? *g_qpc_stamp : 0;
     g_orig_load_update(ecx, edx);
+
+    if (saved_load_heap >= 0 && g_s_load_heap_ptr)
+        *g_s_load_heap_ptr = saved_load_heap;
 
     if (!g_bf1Ext.bf1Enabled || !g_orig_load_render) return;
 
@@ -520,7 +548,19 @@ static void __fastcall hooked_load_end(void* ecx, void* edx)
                     // Track whether Update() renders internally (QPC stamp changes)
                     // so the 33 ms render gate doesn't fire again in the same slot.
                     const DWORD qpc_before = g_qpc_stamp ? *g_qpc_stamp : 0;
+                    // Same s_loadHeap redirect as in hooked_load_update: ensure any
+                    // SortHeap growth triggered by Update's loading-text draws goes to
+                    // RunTimeHeap.  We call g_orig_load_update (the trampoline to the
+                    // original) directly here, bypassing hooked_load_update, so the
+                    // redirect must be applied manually.
+                    int saved_load_heap_end = -1;
+                    if (g_s_load_heap_ptr && g_runtime_heap_idx) {
+                        saved_load_heap_end    = *g_s_load_heap_ptr;
+                        *g_s_load_heap_ptr     = *g_runtime_heap_idx;
+                    }
                     g_orig_load_update(ecx, nullptr); // advance blink timer + bar state
+                    if (saved_load_heap_end >= 0 && g_s_load_heap_ptr)
+                        *g_s_load_heap_ptr = saved_load_heap_end;
                     if (g_qpc_stamp && *g_qpc_stamp != qpc_before)
                         g_lastRenderMs = GetTickCount(); // Update() rendered — reset gate
                 }
@@ -1054,6 +1094,7 @@ void bf1_load_ext_install(uintptr_t exe_base)
     g_color_ptr      = resolve_va(exe_base, color_ptr_global);
     g_set_current_heap = (fn_set_current_heap_t) resolve_va(exe_base, red_set_current_heap);
     g_runtime_heap_idx = (int*)                  resolve_va(exe_base, runtime_heap_global);
+    g_s_load_heap_ptr  = (int*)                  resolve_va(exe_base, s_loadheap_global);
 
     g_hash_string = (fn_hash_string_t)resolve_va(exe_base, hash_string);
     g_pbl_find    = (fn_pbl_find_t)   resolve_va(exe_base, pbl_hash_table_find);

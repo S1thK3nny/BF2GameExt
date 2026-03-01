@@ -284,6 +284,17 @@ namespace lua_addrs {
       // Stored at this address by the MOV [0x00b30220],EAX after _RedCreateHeap("Runtime").
       // We read it at runtime so we pass the correct index to _RedSetCurrentHeap.
       constexpr uintptr_t runtime_heap_global       = 0x00b30220;
+
+      // Global int: s_loadHeap — the heap index passed to _RedSetCurrentHeap by
+      // LoadDisplay::Update before it starts rendering.  Normally = TempLoadHeap (3).
+      // Confirmed: address of MOV EAX,[0x00ba111c] / PUSH EAX / CALL _RedSetCurrentHeap
+      // inside LoadDisplay::Update at 0067c1d0 (see Ghidra decompile, uVar4 line).
+      // We temporarily set this to *runtime_heap_global (= RunTimeHeap = 2) before
+      // calling the original Update so every SortHeap allocation during loading-screen
+      // rendering (loading text, progress bar, BF1 overlay) goes to RunTimeHeap.
+      // After ReleaseTempHeap this keeps the SortHeap backing array valid, preventing
+      // the 007E2D77 (_RedGetHeapFree) and 008024A6 (MemoryPool::Allocate) crashes.
+      constexpr uintptr_t s_loadheap_global         = 0x00ba111c;
    }
 
    namespace steam {
