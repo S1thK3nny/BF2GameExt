@@ -359,3 +359,5 @@ MigrationBackup/
 .ionide/
 shaders.bin
 pipeline library.bin
+
+settings.local.json
