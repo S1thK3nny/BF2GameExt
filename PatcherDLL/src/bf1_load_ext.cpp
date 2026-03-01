@@ -472,8 +472,24 @@ static void __fastcall hooked_load_update(void* ecx, void* edx)
         // Inject render only if LoadDisplay is still active (*ecx != 0).
         // End() zeroes the active byte (offset 0) after freeing textures; calling
         // Render() on a torn-down LoadDisplay accesses freed D3D resources → crash.
+        //
+        // Heap fix: after g_orig_load_update returns, __RedCurrHeap = TempLoadHeap
+        // (Update's internal _RedSetCurrentHeap(s_loadHeap) saved/restored it, and
+        // the game's loading loop runs in TempLoadHeap context).  PlatformRender()
+        // allocates MemoryPool slabs and other internal buffers from __RedCurrHeap
+        // BEFORE calling our hooked_render_screen callback.  Those allocations would
+        // land in TempLoadHeap and become dangling after ReleaseTempHeap → crash at
+        // 007E2D77 (_RedGetHeapFree) or 008024A6 (MemoryPool::Allocate).
+        // Redirect __RedCurrHeap to RunTimeHeap for the entire PlatformRender() call.
         g_lastRenderMs = GetTickCount();
-        g_orig_load_render(ecx, nullptr);
+        {
+            int prevRenderHeap = -1;
+            if (g_set_current_heap && g_runtime_heap_idx)
+                prevRenderHeap = g_set_current_heap(*g_runtime_heap_idx);
+            g_orig_load_render(ecx, nullptr);
+            if (prevRenderHeap >= 0 && g_set_current_heap)
+                g_set_current_heap(prevRenderHeap);
+        }
     }
 }
 
@@ -566,7 +582,16 @@ static void __fastcall hooked_load_end(void* ecx, void* edx)
                 }
                 if (g_orig_load_render && GetTickCount() - g_lastRenderMs >= 33u) {
                     g_lastRenderMs = GetTickCount();
+                    // Same heap fix as in hooked_load_update: __RedCurrHeap = TempLoadHeap
+                    // here (game loading loop context).  Guard the entire PlatformRender()
+                    // call so its pre-callback allocations go to RunTimeHeap, not the
+                    // soon-to-be-released TempLoadHeap.
+                    int prevRenderHeap = -1;
+                    if (g_set_current_heap && g_runtime_heap_idx)
+                        prevRenderHeap = g_set_current_heap(*g_runtime_heap_idx);
                     g_orig_load_render(ecx, nullptr); // ~30 fps rendering
+                    if (prevRenderHeap >= 0 && g_set_current_heap)
+                        g_set_current_heap(prevRenderHeap);
                 }
                 Sleep(1);                             // yield CPU between frames
             }
