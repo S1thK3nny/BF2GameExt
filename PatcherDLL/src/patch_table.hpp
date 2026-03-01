@@ -4,7 +4,7 @@
 
 #include "slim_vector.hpp"
 
-#define PATCH_COUNT 3
+#define PATCH_COUNT 4
 #define EXE_COUNT 3
 
 struct patch_flags {
@@ -39,3 +39,7 @@ struct exe_patch_list {
 };
 
 extern const exe_patch_list patch_lists[EXE_COUNT];
+
+// Renderer cache storage — redirected from s_caches[15] by binary patches.
+// Used by particle_renderer_patch.cpp to set the overflow hook's array pointer.
+extern char g_sCaches_storage[];

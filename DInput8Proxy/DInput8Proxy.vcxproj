@@ -13,8 +13,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{b256165e-afad-4bdf-936d-faf7cb0bfdf0}</ProjectGuid>
-    <RootNamespace>PatcherDLL</RootNamespace>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <RootNamespace>DInput8Proxy</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -44,12 +44,12 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <TargetName>BF2GameExt</TargetName>
+    <TargetName>dinput8</TargetName>
     <IntDir>build\$(Configuration)\</IntDir>
     <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <TargetName>BF2GameExt</TargetName>
+    <TargetName>dinput8</TargetName>
     <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
     <IntDir>build\$(Configuration)\</IntDir>
   </PropertyGroup>
@@ -60,23 +60,22 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;PATCHERDLL_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <ExceptionHandling>false</ExceptionHandling>
-      <AdditionalIncludeDirectories>$(SolutionDir)Detours\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <ModuleDefinitionFile>BF2GameExt.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>dinput8.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(TargetDir)BF2GameExt.dll" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"</Command>
+      <Command>copy "$(TargetDir)dinput8.dll" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"
+copy "$(SolutionDir)dist\BF2GameExt.ini" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -85,10 +84,9 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;PATCHERDLL_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <Optimization>MinSpace</Optimization>
       <ExceptionHandling>false</ExceptionHandling>
@@ -96,7 +94,6 @@
       <ControlFlowGuard>Guard</ControlFlowGuard>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
-      <AdditionalIncludeDirectories>$(SolutionDir)Detours\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -104,52 +101,18 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <ModuleDefinitionFile>BF2GameExt.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>dinput8.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(TargetDir)BF2GameExt.dll" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"</Command>
+      <Command>copy "$(TargetDir)dinput8.dll" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"
+copy "$(SolutionDir)dist\BF2GameExt.ini" "C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="resource.h" />
-    <ClInclude Include="src\apply_patches.hpp" />
-    <ClInclude Include="src\ini_config.hpp" />
-    <ClInclude Include="src\cfile.hpp" />
-    <ClInclude Include="src\lua_hooks.hpp" />
-    <ClInclude Include="src\lua_funcs.hpp" />
-    <ClInclude Include="src\game_events.hpp" />
-    <ClInclude Include="src\framework.h" />
-    <ClInclude Include="src\patch_table.hpp" />
-    <ClInclude Include="src\pch.h" />
-    <ClInclude Include="src\slim_vector.hpp" />
-    <ClInclude Include="src\particle_renderer_patch.hpp" />
-    <ClInclude Include="src\tentacle_patch.hpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="src\apply_patches.cpp" />
-    <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
-    <ClCompile Include="src\patch_table.cpp" />
-    <ClCompile Include="src\lua_hooks.cpp" />
-    <ClCompile Include="src\lua_funcs.cpp" />
-    <ClCompile Include="src\game_events.cpp" />
-    <ClCompile Include="src\particle_renderer_patch.cpp" />
-    <ClCompile Include="src\tentacle_patch.cpp" />
-    <ClCompile Include="src\pch.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="Resource.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="BF2GameExt.def" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="$(SolutionDir)Detours\Detours.vcxproj">
-      <Project>{e140ad5e-f779-4799-8d8d-f3913091f84a}</Project>
-    </ProjectReference>
+    <None Include="dinput8.def" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

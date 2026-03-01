@@ -130,6 +130,7 @@ int GameEvent::addHandler(lua_State* L, unsigned filterType, int team, const cha
    h.luaRef = ref;
    handlers.push_back(h);
 
+   dbg_log_verbose("[%s] handler added id=%d filter=%u\n", name, h.id, filterType);
    return h.id;
 }
 
@@ -139,6 +140,7 @@ void GameEvent::removeHandler(int id)
       if (it->id == id) {
          g_lua.L_unref(g_L, LUA_REGISTRYINDEX, it->luaRef);
          handlers.erase(it);
+         dbg_log_verbose("[%s] handler removed id=%d\n", name, id);
          return;
       }
    }
@@ -146,6 +148,13 @@ void GameEvent::removeHandler(int id)
 
 void GameEvent::dispatch(int charIndex, int nargs)
 {
+   // MP clients don't fire event callbacks — matches vanilla game behavior
+   if (isMultiplayerClient()) {
+      dbg_log_verbose("[%s] dispatch blocked — MP client\n", name);
+      if (g_L && nargs > 0) g_lua.settop(g_L, -(nargs + 1));
+      return;
+   }
+
    if (!g_L || handlers.empty()) {
       // Still need to pop the args the caller pushed
       if (g_L && nargs > 0) g_lua.settop(g_L, -(nargs + 1));
@@ -320,6 +329,8 @@ void GameEvent::registerLua(lua_State* L)
       register_closure(L, this, lua_OnEventName,  "On%sName");
    if (filters & FILTER_CLASS)
       register_closure(L, this, lua_OnEventClass, "On%sClass");
+
+   dbg_log_verbose("[%s] registered Lua closures (filters=0x%x)\n", name, filters);
 }
 
 // ===========================================================================

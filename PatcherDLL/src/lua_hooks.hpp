@@ -396,8 +396,28 @@ namespace lua_addrs {
       constexpr unsigned controllable_mPilotType_offset       = 0x144;
       constexpr unsigned controllable_mPlayerId_offset        = 0xD4;
       constexpr unsigned controllable_mIsAiming_offset         = 0x160;
+      // Offsets from Controllable* into EntitySoldier derived fields
+      constexpr unsigned controllable_to_soldierState_offset  = 0x514;
+      constexpr unsigned controllable_to_soldierClass_offset  = 0x218;
+      constexpr unsigned controllable_to_velocity_offset      = 0x2AC;
+      // Offsets within EntitySoldierClass
+      constexpr unsigned soldierClass_maxSpeed_offset         = 0x890;
+      constexpr unsigned soldierClass_maxStrafe_offset        = 0x894;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x0061CEC0;
       constexpr uintptr_t char_exit_vehicle                    = 0x0052FC70;
+      constexpr uintptr_t load_display_path_push_op            = 0x0067e388;
+      constexpr uintptr_t load_display_dlc_flag_byte           = 0x0067e2ca;
+      constexpr uintptr_t load_random_dlc_flag_byte            = 0x0067e05b;
+
+      // ReadDataFile stricmp("ingame.lvl") — CALL __stricmp (direct E8, 5 bytes)
+      constexpr uintptr_t ingame_stricmp_call                  = 0x0046a8f6;
+      constexpr unsigned  ingame_stricmp_call_size             = 5;
+
+      // Networking state globals (for MP guards — direct byte reads)
+      constexpr uintptr_t net_in_shell       = 0x00ADABC2;
+      constexpr uintptr_t net_enabled        = 0x00BE14F0;
+      constexpr uintptr_t net_enabled_next   = 0x00BE14F1;
+      constexpr uintptr_t net_on_client      = 0x00BE14FD;
    }
 
    namespace steam {
@@ -570,22 +590,42 @@ namespace lua_addrs {
       constexpr unsigned weapon_mLastFireTime_offset          = 0xF8;
       constexpr unsigned weapon_mClass_offset                 = 0x64;
 
-      // Controllable struct member offsets (retail is 4 bytes smaller than modtools)
-      constexpr unsigned controllable_mCharacter_offset       = 0xC8;
-      constexpr unsigned controllable_mPilot_offset           = 0xCC;
-      constexpr unsigned controllable_mPilotType_offset       = 0x140;
-      constexpr unsigned controllable_mPlayerId_offset        = 0xD0;
-      constexpr unsigned controllable_mIsAiming_offset         = 0x15C;
+      // Controllable struct member offsets (same as modtools — no 4-byte shift)
+      constexpr unsigned controllable_mCharacter_offset       = 0xCC;
+      constexpr unsigned controllable_mPilot_offset           = 0xD0;
+      constexpr unsigned controllable_mPilotType_offset       = 0x144;
+      constexpr unsigned controllable_mPlayerId_offset        = 0xD4;
+      constexpr unsigned controllable_mIsAiming_offset         = 0x160;
+      // Offsets from Controllable* into EntitySoldier derived fields
+      constexpr unsigned controllable_to_soldierState_offset  = 0x504;
+      constexpr unsigned controllable_to_soldierClass_offset  = 0x200;
+      constexpr unsigned controllable_to_velocity_offset      = 0x29C;
+      // Offsets within EntitySoldierClass
+      constexpr unsigned soldierClass_maxSpeed_offset         = 0x69C;
+      constexpr unsigned soldierClass_maxStrafe_offset        = 0x6A0;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x00677760;
 
       constexpr uintptr_t pbl_hash_ctor                      = 0x726D20;
       constexpr uintptr_t hash_to_name                       = 0x652030;
       constexpr uintptr_t entity_class_registry              = 0x7EC560;
       constexpr uintptr_t char_array_base_ptr                = 0x1E30334;
-      constexpr uintptr_t char_array_max_count               = 0x1E30320;
+      constexpr uintptr_t char_array_max_count               = 0x1E30330;
       constexpr uintptr_t team_array_ptr                     = 0;         // TODO
-      constexpr uintptr_t game_log                           = 0;         // TODO
+      constexpr uintptr_t game_log                           = 0x6F6FF0;         // TODO
       constexpr uintptr_t char_exit_vehicle                  = 0x004F1380;
+      constexpr uintptr_t load_display_path_push_op          = 0x00577661;
+      constexpr uintptr_t load_display_dlc_flag_byte         = 0x0057764a;
+      constexpr uintptr_t load_random_dlc_flag_byte          = 0x0057743c;
+
+      // ReadDataFile stricmp("ingame.lvl") — CALL [IAT] (indirect FF15, 6 bytes)
+      constexpr uintptr_t ingame_stricmp_call                = 0x0058adc4;
+      constexpr unsigned  ingame_stricmp_call_size           = 6;
+
+      // Networking state globals (for MP guards — direct byte reads)
+      constexpr uintptr_t net_in_shell       = 0x007E8007;
+      constexpr uintptr_t net_enabled        = 0x01E62EA9;
+      constexpr uintptr_t net_enabled_next   = 0x01E62EA8;
+      constexpr uintptr_t net_on_client      = 0x01E62EAB;
    }
 
    namespace gog {
@@ -754,22 +794,42 @@ namespace lua_addrs {
       constexpr unsigned weapon_mLastFireTime_offset          = 0xF8;
       constexpr unsigned weapon_mClass_offset                 = 0x64;
 
-      // Controllable struct member offsets (retail is 4 bytes smaller than modtools)
-      constexpr unsigned controllable_mCharacter_offset       = 0xC8;
-      constexpr unsigned controllable_mPilot_offset           = 0xCC;
-      constexpr unsigned controllable_mPilotType_offset       = 0x140;
-      constexpr unsigned controllable_mPlayerId_offset        = 0xD0;
-      constexpr unsigned controllable_mIsAiming_offset         = 0x15C;
+      // Controllable struct member offsets (same as modtools — no 4-byte shift)
+      constexpr unsigned controllable_mCharacter_offset       = 0xCC;
+      constexpr unsigned controllable_mPilot_offset           = 0xD0;
+      constexpr unsigned controllable_mPilotType_offset       = 0x144;
+      constexpr unsigned controllable_mPlayerId_offset        = 0xD4;
+      constexpr unsigned controllable_mIsAiming_offset         = 0x160;
+      // Offsets from Controllable* into EntitySoldier derived fields
+      constexpr unsigned controllable_to_soldierState_offset  = 0x504;
+      constexpr unsigned controllable_to_soldierClass_offset  = 0x200;
+      constexpr unsigned controllable_to_velocity_offset      = 0x29C;
+      // Offsets within EntitySoldierClass
+      constexpr unsigned soldierClass_maxSpeed_offset         = 0x69C;
+      constexpr unsigned soldierClass_maxStrafe_offset        = 0x6A0;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x00678800;
 
       constexpr uintptr_t pbl_hash_ctor                      = 0x727DF0;
       constexpr uintptr_t hash_to_name                       = 0x6530D0;
       constexpr uintptr_t entity_class_registry              = 0x7ED4F0;
       constexpr uintptr_t char_array_base_ptr                = 0x1E317D4;
-      constexpr uintptr_t char_array_max_count               = 0x1E317C0;
+      constexpr uintptr_t char_array_max_count               = 0x1E317C0; // TODO: verify — likely 0x1E317D0 (Steam had same wrong-gap bug)
       constexpr uintptr_t team_array_ptr                     = 0;         // TODO
       constexpr uintptr_t game_log                           = 0;         // TODO
       constexpr uintptr_t char_exit_vehicle                  = 0x004F1380;
+      constexpr uintptr_t load_display_path_push_op          = 0x005783e1;
+      constexpr uintptr_t load_display_dlc_flag_byte         = 0x005783ca;
+      constexpr uintptr_t load_random_dlc_flag_byte          = 0x005781bc;
+
+      // ReadDataFile stricmp("ingame.lvl") — CALL [IAT] (indirect FF15, 6 bytes)
+      constexpr uintptr_t ingame_stricmp_call                = 0x0058bd74;
+      constexpr unsigned  ingame_stricmp_call_size           = 6;
+
+      // Networking state globals (for MP guards — direct byte reads)
+      constexpr uintptr_t net_in_shell       = 0x007E9007;
+      constexpr uintptr_t net_enabled        = 0x01E64359;
+      constexpr uintptr_t net_enabled_next   = 0x01E64358;
+      constexpr uintptr_t net_on_client      = 0x01E6435B;
    }
 }
 
@@ -811,12 +871,62 @@ struct game_addrs {
    unsigned controllable_mPilotType_offset       = 0;
    unsigned controllable_mPlayerId_offset        = 0;
    unsigned controllable_mIsAiming_offset        = 0;
+   // Offsets from Controllable* into EntitySoldier derived fields
+   unsigned controllable_to_soldierState_offset  = 0;
+   unsigned controllable_to_soldierClass_offset  = 0;
+   unsigned controllable_to_velocity_offset      = 0;
+   // Offsets within EntitySoldierClass
+   unsigned soldierClass_maxSpeed_offset         = 0;
+   unsigned soldierClass_maxStrafe_offset        = 0;
    uintptr_t weapon_override_soldier_velocity    = 0;
    uintptr_t char_exit_vehicle                  = 0;
+   uintptr_t load_display_path_push_op           = 0;
+   uintptr_t load_display_dlc_flag_byte          = 0;
+   uintptr_t load_random_dlc_flag_byte           = 0;
+   uintptr_t ingame_stricmp_call                 = 0;
+   unsigned  ingame_stricmp_call_size             = 0;
+
+   // Networking state (for MP guards — direct byte reads at resolved address)
+   uintptr_t net_in_shell     = 0;
+   uintptr_t net_enabled      = 0;
+   uintptr_t net_enabled_next = 0;
+   uintptr_t net_on_client    = 0;
 };
 
 extern game_addrs g_game;
 extern ExeType    g_exeType;
+extern int        g_debugLogLevel;  // 0=off, 1=normal, 2=verbose
+
+// Logging — defined in lua_hooks.cpp, usable from any TU
+void dbg_log(const char* fmt, ...);
+void dbg_log_verbose(const char* fmt, ...);
+
+// =============================================================================
+// Multiplayer state helpers
+// =============================================================================
+// Replicate the vanilla game's callback guard pattern using the same globals.
+// Returns false (allow execution) if addresses aren't resolved yet.
+
+inline bool isMultiplayer()
+{
+   if (!g_game.net_in_shell || !g_game.net_enabled || !g_game.net_enabled_next)
+      return false;
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   char net = *(char*)res(g_game.net_in_shell)
+            ? *(char*)res(g_game.net_enabled_next)
+            : *(char*)res(g_game.net_enabled);
+   return (net && *(char*)res(g_game.net_enabled));
+}
+
+inline bool isMultiplayerClient()
+{
+   if (!isMultiplayer()) return false;
+   if (!g_game.net_on_client) return false;
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   return *(char*)res(g_game.net_on_client) != 0;
+}
 
 // =============================================================================
 // Lua API struct — resolved at runtime from exe base + addresses above
@@ -971,11 +1081,22 @@ extern lua_State* g_L;
 // Barrel fire origin toggle — when true, WeaponCannon fires from barrel
 // hardpoint (mBarrelPoseMatrix) instead of the default aimer position.
 extern bool g_useBarrelFireOrigin;
+
+extern char g_loadDisplayPath[260];
+extern bool g_ingameInitArmed;
+extern uint8_t* g_loadDisplay_dlc_flag_ptr;
+extern uint8_t* g_loadRandom_dlc_flag_ptr;
+
 // Per-character speed factor API — called from lua_funcs.cpp
 void set_character_speed_factor(int charIndex, float factor, float durationSec, float lerpSpeed);
 void set_character_aim_speed_factor(int charIndex, float factor, float lerpSpeed);
+void set_character_fire_speed_factor(int charIndex, float factor, float cooldownSec, float chance, float lerpSpeed);
 void clear_character_speed_factor(int charIndex);
+void clear_fire_speed_factor(int charIndex);
 void clear_all_character_speed_factors();
+void clear_all_fire_speed_factors();
+
+float get_entity_movement_speed(void* entity);
 
 // =============================================================================
 // Public interface

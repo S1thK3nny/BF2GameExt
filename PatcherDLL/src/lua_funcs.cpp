@@ -8,6 +8,21 @@
 // Game's printf-style debug logger — FUN_007e3d50, __cdecl, (const char* fmt, ...)
 typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
 
+// Resolve a name hash through StringDB::Find (hash_to_name).
+// Calling convention differs: modtools=__cdecl (stack), retail=ECX register.
+static const char* call_hash_to_name(unsigned int hash)
+{
+   if (!g_game.hash_to_name) return nullptr;
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   uintptr_t fn = g_game.hash_to_name - 0x400000u + base;
+   if (g_exeType == ExeType::MODTOOLS) {
+      return ((const char*(__cdecl*)(unsigned int))fn)(hash);
+   } else {
+      // Steam/GOG: arg passed in ECX — use __fastcall
+      return ((const char*(__fastcall*)(unsigned int, void*))fn)(hash, nullptr);
+   }
+}
+
 // PrintToLog(msg) - writes a string to Bfront2.log
 static int lua_PrintToLog(lua_State* L)
 {
@@ -358,6 +373,7 @@ typedef void (__thiscall* SetUnitClassMinMax_t)(void* team, int slot, int min, i
 
 static int lua_RemoveUnitClass(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[RemoveUnitClass] blocked — multiplayer\n"); return 0; }
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t addr) -> uintptr_t { return addr - 0x400000u + base; };
    const auto fn_GameLog = g_game.game_log ? (GameLog_t)res(g_game.game_log) : nullptr;
@@ -630,6 +646,7 @@ extern unsigned char  g_flyerLandingFireOrig;
 
 static int lua_EnableFlyerLandingFire(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[EnableFlyerLandingFire] blocked — multiplayer\n"); return 0; }
    if (!g_flyerLandingFirePatch || g_flyerLandingFireOrig != 0x7B) return 0;
 
    bool enable;
@@ -658,6 +675,7 @@ extern void*  g_cannonOverrideAimerHook;
 
 static int lua_SetBarrelFireOrigin(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[SetBarrelFireOrigin] blocked — multiplayer\n"); return 0; }
    if (g_lua.isnumber(L, 1))
       g_useBarrelFireOrigin = g_lua.tonumber(L, 1) != 0.0f;
    else
@@ -775,69 +793,6 @@ static int lua_DumpAimerInfo(lua_State* L)
    return 0;
 }
 
-// ---------------------------------------------------------------------------
-// GetCharacterClassName(charIndex) - returns the ODF class name for a character.
-// Reads EntityEx.mEntityClass directly from the character array, then returns
-// EntityClass.mFilename (char[32] at EntityClass+0x20).
-// Works reliably in callbacks where the game's GetEntityClassName returns nil.
-// ---------------------------------------------------------------------------
-static int lua_GetCharacterClassName(lua_State* L)
-{
-   int argType = g_lua.type(L, 1);
-
-   // Lightuserdata: entity pointer from GetCharacterUnit()
-   if (argType == LUA_TLIGHTUSERDATA) {
-      void* entity = g_lua.touserdata(L, 1);
-      if (!entity) { g_lua.pushnil(L); return 1; }
-
-      __try {
-         void* entClass = *(void**)((char*)entity + 8);
-         if (!entClass) { g_lua.pushnil(L); return 1; }
-
-         const char* name = (const char*)((char*)entClass + 0x20);
-         if (name && name[0]) {
-            g_lua.pushstring(L, name);
-            return 1;
-         }
-      } __except (EXCEPTION_EXECUTE_HANDLER) {}
-
-      g_lua.pushnil(L);
-      return 1;
-   }
-
-   // Number: charIndex
-   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
-
-   const int charIndex = g_lua.tointeger(L, 1);
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
-
-   if (!g_game.char_array_max_count || !g_game.char_array_base_ptr) { g_lua.pushnil(L); return 1; }
-   const int maxChars = *(int*)res(g_game.char_array_max_count);
-   if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
-
-   const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
-   if (!arrayBase) { g_lua.pushnil(L); return 1; }
-
-   __try {
-      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) { g_lua.pushnil(L); return 1; }
-
-      char* entitySoldier = intermediate - 0x240;
-      void* entClass = *(void**)(entitySoldier + 8);
-      if (!entClass) { g_lua.pushnil(L); return 1; }
-
-      const char* name = (const char*)((char*)entClass + 0x20);
-      if (name && name[0]) {
-         g_lua.pushstring(L, name);
-         return 1;
-      }
-   } __except (EXCEPTION_EXECUTE_HANDLER) {}
-
-   g_lua.pushnil(L);
-   return 1;
-}
 
 // ---------------------------------------------------------------------------
 // DebugCharacterInfo(charIndex) - diagnostic: prints the full resolution chain
@@ -880,11 +835,7 @@ static int lua_DebugCharacterInfo(lua_State* L)
       unsigned int nameHash = *(unsigned int*)(entitySoldier + 4);
       void* entClass = *(void**)(entitySoldier + 8);
 
-      auto hashFn = g_game.hash_to_name
-         ? (const char*(__cdecl*)(unsigned int))(g_game.hash_to_name - 0x400000u + base)
-         : nullptr;
-
-      const char* entityName = hashFn ? hashFn(nameHash) : nullptr;
+      const char* entityName = call_hash_to_name(nameHash);
 
       if (!entClass) {
          snprintf(buf, sizeof(buf),
@@ -897,7 +848,7 @@ static int lua_DebugCharacterInfo(lua_State* L)
       }
 
       unsigned int classHash = *(unsigned int*)((char*)entClass + 0x18);
-      const char* className = hashFn ? hashFn(classHash) : nullptr;
+      const char* className = call_hash_to_name(classHash);
 
       // Also read mFilename at EntityClass+0x20 (char[32]) for comparison
       const char* mFilename = (const char*)((char*)entClass + 0x20);
@@ -935,7 +886,7 @@ static int lua_Print(lua_State* L)
       GetModuleFileNameA(nullptr, exePath, MAX_PATH);
       char* slash = strrchr(exePath, '\\');
       if (slash) *(slash + 1) = '\0';
-      snprintf(logPath, MAX_PATH, "%sBFront2.log", exePath);
+      snprintf(logPath, MAX_PATH, "%sBF2GameExt.log", exePath);
    }
 
    FILE* f = nullptr;
@@ -962,6 +913,7 @@ static int lua_Print(lua_State* L)
 //   lerpSpeed: transition rate per frame (default 0.02, ~0.8s for 1→0.5 at 60fps)
 static int lua_SetCharacterSpeedFactor(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[SetCharacterSpeedFactor] blocked — multiplayer\n"); return 0; }
    if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) return 0;
    int charIndex  = g_lua.tointeger(L, 1);
    float factor   = g_lua.tonumber(L, 2);
@@ -983,7 +935,12 @@ static int lua_SetCharacterSpeedFactor(lua_State* L)
 //   lerpSpeed: transition rate per frame (default 0.02)
 static int lua_SetCharacterAimSpeedFactor(lua_State* L)
 {
-   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) return 0;
+   if (isMultiplayer()) { dbg_log("[SetCharacterAimSpeedFactor] blocked — multiplayer\n"); return 0; }
+   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) {
+      dbg_log("[SetCharacterAimSpeedFactor] bad args: arg1_isnum=%d arg2_isnum=%d\n",
+              g_lua.isnumber(L, 1), g_lua.isnumber(L, 2));
+      return 0;
+   }
    int charIndex = g_lua.tointeger(L, 1);
    float factor  = g_lua.tonumber(L, 2);
    float lerp    = 0.0f;
@@ -997,10 +954,59 @@ static int lua_SetCharacterAimSpeedFactor(lua_State* L)
 // Removes all speed overrides (both aim and general) for a character.
 static int lua_ClearCharacterSpeedFactor(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[ClearCharacterSpeedFactor] blocked — multiplayer\n"); return 0; }
    if (!g_lua.isnumber(L, 1)) return 0;
    int charIndex = g_lua.tointeger(L, 1);
    clear_character_speed_factor(charIndex);
    return 0;
+}
+
+// SetCharacterFireSpeedFactor(charIndex, factor [, cooldown [, chance [, lerpSpeed]]])
+// Sets a per-character speed cap that only applies while firing (mControlFire[0] held).
+// After fire stops, the slow persists for `cooldown` seconds.
+// `chance` (0–1) controls per-burst probability (default 1.0 = always applies).
+static int lua_SetCharacterFireSpeedFactor(lua_State* L)
+{
+   if (isMultiplayer()) { dbg_log("[SetCharacterFireSpeedFactor] blocked — multiplayer\n"); return 0; }
+   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) {
+      dbg_log("[SetCharacterFireSpeedFactor] bad args\n");
+      return 0;
+   }
+   int charIndex    = g_lua.tointeger(L, 1);
+   float factor     = g_lua.tonumber(L, 2);
+   float cooldown   = 0.0f;
+   float chance     = 1.0f;
+   float lerp       = 0.0f;
+   if (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3))
+      cooldown = g_lua.tonumber(L, 3);
+   if (g_lua.gettop(L) >= 4 && g_lua.isnumber(L, 4))
+      chance = g_lua.tonumber(L, 4);
+   if (g_lua.gettop(L) >= 5 && g_lua.isnumber(L, 5))
+      lerp = g_lua.tonumber(L, 5);
+   set_character_fire_speed_factor(charIndex, factor, cooldown, chance, lerp);
+   return 0;
+}
+
+// ClearCharacterFireSpeedFactor(charIndex)
+// Removes the fire-speed override for a character (general + aim overrides remain).
+static int lua_ClearCharacterFireSpeedFactor(lua_State* L)
+{
+   if (isMultiplayer()) { dbg_log_verbose("[ClearCharacterFireSpeedFactor] blocked — multiplayer\n"); return 0; }
+   if (!g_lua.isnumber(L, 1)) return 0;
+   int charIndex = g_lua.tointeger(L, 1);
+   clear_fire_speed_factor(charIndex);
+   return 0;
+}
+
+// GetEntityMovementSpeed(entity) -> float
+// Returns the horizontal movement speed of any EntityControllable (soldier, vehicle, etc.).
+// Entity is lightuserdata from GetCharacterUnit(), GetCharacterVehicle(), etc.
+static int lua_GetEntityMovementSpeed(lua_State* L)
+{
+   if (g_lua.type(L, 1) != LUA_TLIGHTUSERDATA) { g_lua.pushnumber(L, 0.0); return 1; }
+   void* entity = g_lua.touserdata(L, 1);
+   g_lua.pushnumber(L, (double)get_entity_movement_speed(entity));
+   return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,6 +1032,7 @@ static int lua_ClearCharacterSpeedFactor(lua_State* L)
 // ---------------------------------------------------------------------------
 static int lua_SetCharacterWeapon(lua_State* L)
 {
+   if (isMultiplayer()) { dbg_log_verbose("[SetCharacterWeapon] blocked — multiplayer\n"); return 0; }
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
    const auto fn_GameLog = g_game.game_log ? (GameLog_t)res(g_game.game_log) : nullptr;
@@ -1209,6 +1216,67 @@ static int lua_ReapplyAnimations(lua_State* L)
    return 1;
 }
 
+// ---------------------------------------------------------------------------
+// SetDLCLoadDisplay([arg])
+//   No args / true / 1:  enable DLC resolution, vanilla path ("Load\\load")
+//   string:              enable DLC resolution, custom path
+//   false / 0:           disable DLC resolution, reset to vanilla
+// Resets each map change. Call from ScriptPreInit.
+//
+// Examples:
+//   SetDLCLoadDisplay()                   -- addon's Load\load.lvl
+//   SetDLCLoadDisplay(1)                  -- same
+//   SetDLCLoadDisplay("Custom\\load")     -- addon's Custom\load.lvl
+//   SetDLCLoadDisplay(0)                  -- disable, back to base game
+// ---------------------------------------------------------------------------
+static int lua_SetDLCLoadDisplay(lua_State* L)
+{
+   if (isMultiplayer()) { dbg_log_verbose("[SetDLCLoadDisplay] blocked — multiplayer\n"); return 0; }
+   bool enable = true;
+
+   if (g_lua.gettop(L) >= 1) {
+      if (g_lua.isstring(L, 1)) {
+         // String arg: custom path, enable DLC
+         const char* path = g_lua.tolstring(L, 1, nullptr);
+         if (path)
+            strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), path, _TRUNCATE);
+      } else {
+         // Bool/number arg: toggle DLC on/off
+         enable = g_lua.toboolean(L, 1) != 0;
+         if (!enable)
+            strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), "Load\\load", _TRUNCATE);
+      }
+   }
+
+   if (g_loadDisplay_dlc_flag_ptr) {
+      uint8_t val = enable ? 0x01 : 0x00;
+      DWORD oldProt;
+      if (VirtualProtect(g_loadDisplay_dlc_flag_ptr, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+         *g_loadDisplay_dlc_flag_ptr = val;
+         VirtualProtect(g_loadDisplay_dlc_flag_ptr, 1, oldProt, &oldProt);
+      }
+      if (g_loadRandom_dlc_flag_ptr) {
+         if (VirtualProtect(g_loadRandom_dlc_flag_ptr, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+            *g_loadRandom_dlc_flag_ptr = val;
+            VirtualProtect(g_loadRandom_dlc_flag_ptr, 1, oldProt, &oldProt);
+         }
+      }
+   }
+
+   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// ArmIngameInit()
+//   DISABLED — ingame.lvl stricmp shim is disabled until remaster script
+//   dependency is resolved. Function remains registered as a no-op so existing
+//   Lua scripts that call it don't error.
+// ---------------------------------------------------------------------------
+static int lua_ArmIngameInit(lua_State* /*L*/)
+{
+   return 0;
+}
+
 // ===========================================================================
 
 struct lua_func_entry {
@@ -1230,14 +1298,18 @@ static const lua_func_entry custom_functions[] = {
 { "RemoveUnitClass",       lua_RemoveUnitClass },
    { "SetBarrelFireOrigin",   lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",         lua_DumpAimerInfo },
-   { "GetCharacterClassName",  lua_GetCharacterClassName },
    { "DebugCharacterInfo",    lua_DebugCharacterInfo },
    { "EnableFlyerLandingFire", lua_EnableFlyerLandingFire },
    { "SetCharacterSpeedFactor",      lua_SetCharacterSpeedFactor },
    { "SetCharacterAimSpeedFactor",   lua_SetCharacterAimSpeedFactor },
    { "ClearCharacterSpeedFactor",    lua_ClearCharacterSpeedFactor },
+   { "SetCharacterFireSpeedFactor",    lua_SetCharacterFireSpeedFactor },
+   { "ClearCharacterFireSpeedFactor",  lua_ClearCharacterFireSpeedFactor },
+   { "GetEntityMovementSpeed",         lua_GetEntityMovementSpeed },
    { "SetCharacterWeapon",           lua_SetCharacterWeapon },
    { "ReapplyAnimations",            lua_ReapplyAnimations },
+   { "SetDLCLoadDisplay",             lua_SetDLCLoadDisplay },
+   { "ArmIngameInit",                  lua_ArmIngameInit },
    { nullptr, nullptr }
 };
 
@@ -1250,6 +1322,11 @@ void register_lua_functions(lua_State* L)
    // On modtools, leave the built-in print() alone (writes to debug console).
    if (g_exeType != ExeType::MODTOOLS)
       lua_register_func(L, "print", lua_Print);
+
+   // Set g_BF2GameExt = true so Lua scripts can detect the mod
+   g_lua.pushlstring(L, "g_BF2GameExt", 12);
+   g_lua.pushboolean(L, 1);
+   g_lua.settable(L, LUA_GLOBALSINDEX);
 
    // Register event callbacks (closures with upvalues)
    g_evtCharacterFireWeapon.registerLua(L);

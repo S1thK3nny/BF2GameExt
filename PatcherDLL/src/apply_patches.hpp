@@ -11,4 +11,5 @@ struct section_info {
    uint32_t file_end = 0;
 };
 
-bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<section_info>& sections);
+bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<section_info>& sections,
+                   const char* ini_path = nullptr);
