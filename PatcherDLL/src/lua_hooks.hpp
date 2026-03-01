@@ -191,6 +191,110 @@ namespace lua_addrs {
 
       // Weapon::ZoomFirstPerson() — returns true if weapon is in first-person zoom.
       constexpr uintptr_t weapon_zoom_first_person = 0x61B640;
+
+      // -----------------------------------------------------------------------
+      // BF1 LoadDisplay extension
+      // -----------------------------------------------------------------------
+
+      // LoadDisplay::LoadDataFile(lvlPath) — MakeFullName→PblFile→ChunkProcessor pipeline.
+      // Hooked to inject a second lvl load ("Load\load_bf1ext") for BF1 custom textures.
+      constexpr uintptr_t load_data_file_real       = 0x0067e2b0;
+
+      // LoadDisplay::LoadConfig real implementation (thunk 0x004102df → here)
+      constexpr uintptr_t load_config_real          = 0x0067c650;
+
+      // LoadDisplay::RenderScreen real implementation (thunk 0x00413dc7 → here)
+      constexpr uintptr_t render_screen_real        = 0x0067a1b0;
+
+      // LoadDisplay::End() body — jumped to from the thunk at 0x0041451f which
+      // ScriptCB_ShowLoadDisplay(false) calls.  Hooking the body intercepts the
+      // call via the thunk's unconditional JMP.
+      constexpr uintptr_t load_end_real             = 0x0067de10;
+
+      // LoadDisplay::ProgressIndicator::SetAllOn() — instantly fills every bar
+      // segment to 100%.  ECX = LoadDisplay* + 0xd30 (the ProgressIndicator).
+      // Called once in hooked_load_end before the spin-loop so the bar shows 100%
+      // while we hold End() until the BF1 animation finishes.
+      constexpr uintptr_t progress_set_all_on       = 0x0040786f;
+
+      // LoadDisplay::Update() — QPC-timed: advances the "Loading..." blink timer
+      // (at ecx+0x14cc) and ProgressIndicator, then calls Render() internally.
+      // Called from hooked_load_end every ~200 ms to keep blink text animated.
+      constexpr uintptr_t load_update_real          = 0x0067c1d0;
+
+      // LoadDisplay::Render() — camera/lighting setup → PlatformRender() → restore.
+      // NOT QPC-throttled; runs at vsync rate.  Called at most every 33 ms to
+      // target ~30 fps in both the end spin-loop and the asset-loading phase.
+      constexpr uintptr_t load_render_real          = 0x00402b71;
+
+      // DAT_00ba2f60 — QPC low-word timestamp written by LoadDisplay::Update()
+      // only when the 50 ms throttle passes and Render() is actually called.
+      // hooked_load_update reads this before/after to detect whether Update()
+      // rendered so we can avoid double-renders and correctly track g_lastRenderMs.
+      constexpr uintptr_t load_update_qpc_stamp     = 0x00ba2f60;
+
+      // PlatformRenderTexture thunk (→ 0x006d0650)
+      // __stdcall(hash, x0,y0,x1,y1, color_ptr, alpha_blend, u0,v0,u1,v1, r,g,b,a)
+      constexpr uintptr_t platform_render_texture   = 0x004165fe;
+
+      // PblConfig::PblConfig(fh)            — ctor, RETN 4
+      constexpr uintptr_t pbl_config_ctor           = 0x00821000;
+
+      // PblConfig::PblConfig(parent, share) — copy ctor, RETN 8
+      constexpr uintptr_t pbl_config_copy_ctor      = 0x00821080;
+
+      // PblConfig::ReadNextData(data_buf)   — writes hash/argc/args, RETN 4
+      constexpr uintptr_t pbl_read_next_data        = 0x008210f0;
+
+      // PblConfig::ReadNextScope(temp_buf)  — enters scope, returns temp_buf, RETN 4
+      constexpr uintptr_t pbl_read_next_scope       = 0x00821140;
+
+      // HashString raw (pure hash computation, __cdecl(const char*) → uint32_t).
+      // 0x007e1b70 = inner function called by the __thiscall wrapper at 0x007e1bd0.
+      // The wrapper stores the result via ECX ptr; the inner function simply returns
+      // the hash in EAX with one stack arg — correct for our fn_hash_string_t typedef.
+      constexpr uintptr_t hash_string               = 0x007e1b70;
+
+      // Snd::Sound::Properties::FindByHashID(hash) — returns Properties* or null
+      constexpr uintptr_t snd_find_by_hash_id       = 0x0088c500;
+
+      // Snd::Sound::Play(entity, props, p3, p4, p5)
+      constexpr uintptr_t snd_sound_play            = 0x0088cc10;
+
+      // PblHashTableCode::_Find(table_ptr, table_size, hash) — looks up texture by hash.
+      // Used inside PlatformRenderTexture (confirmed via disasm at 006d07ea).
+      // Global texture table: 0xd4f994, size=0x2000. Returns NULL if not found.
+      constexpr uintptr_t pbl_hash_table_find       = 0x007e1a40;
+
+      // Global texture hash table pointer (passed to pbl_hash_table_find)
+      constexpr uintptr_t tex_hash_table            = 0x00d4f994;
+
+      // Global color/render-state pointer passed as arg 6 to PlatformRenderTexture
+      constexpr uintptr_t color_ptr_global          = 0xae2150;
+
+      // _RedSetCurrentHeap(int heap) — __cdecl; switches the active allocator heap,
+      // returns the previous heap index.  Used to redirect our g_prt calls' SortHeap
+      // array growth to RunTimeHeap (persistent) instead of TempLoadHeap (destroyed at
+      // end-of-load, which leaves the SortHeap array pointer dangling and corrupts
+      // RunTimeHeap's free list → crash in _RedGetHeapFree).
+      // Confirmed: FUN_007e2c70, decompiled as int __cdecl _RedSetCurrentHeap(int heap).
+      constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
+
+      // Global int: RunTimeHeap handle/index (value = 2 after GameMemory::BuildHeaps).
+      // Stored at this address by the MOV [0x00b30220],EAX after _RedCreateHeap("Runtime").
+      // We read it at runtime so we pass the correct index to _RedSetCurrentHeap.
+      constexpr uintptr_t runtime_heap_global       = 0x00b30220;
+
+      // Global int: s_loadHeap — the heap index passed to _RedSetCurrentHeap by
+      // LoadDisplay::Update before it starts rendering.  Normally = TempLoadHeap (3).
+      // Confirmed: address of MOV EAX,[0x00ba111c] / PUSH EAX / CALL _RedSetCurrentHeap
+      // inside LoadDisplay::Update at 0067c1d0 (see Ghidra decompile, uVar4 line).
+      // We temporarily set this to *runtime_heap_global (= RunTimeHeap = 2) before
+      // calling the original Update so every SortHeap allocation during loading-screen
+      // rendering (loading text, progress bar, BF1 overlay) goes to RunTimeHeap.
+      // After ReleaseTempHeap this keeps the SortHeap backing array valid, preventing
+      // the 007E2D77 (_RedGetHeapFree) and 008024A6 (MemoryPool::Allocate) crashes.
+      constexpr uintptr_t s_loadheap_global         = 0x00ba111c;
    }
 
    namespace steam {
