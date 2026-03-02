@@ -26,8 +26,27 @@ typedef void* (__fastcall* fn_pbl_read_scope_t)(void* ecx, void* edx, void* temp
 // Snd::Sound::Properties::FindByHashID(hash) — static lookup by hash
 typedef void* (__cdecl* fn_find_by_hash_t)(uint32_t hash);
 
-// Snd::Sound::Play(entity, props, p3, p4, p5)
-typedef void  (__cdecl* fn_snd_play_t)(int entity, void* props, int p3, int p4, int p5);
+// Snd::Sound::Play(src3D, props, cb, userdata, param5) — fire-and-forget variant.
+// Called with cb=NULL/userdata=NULL/param5=0 for one-shot sounds (bf1_play_sound).
+typedef void  (__cdecl* fn_snd_play_t)(int src3D, void* props, int cb, int userdata, int param5);
+
+// Snd::Sound::Play — same address, typed to capture the VoiceVirtual* return value.
+// Returns VoiceVirtual* only when cb != NULL (due to mask: -(uint)(cb!=0) & voice).
+// Used by tracking_sound_start to record the handle for later stopping.
+typedef void* (__cdecl* fn_snd_play_ex_t)(void* src3D, void* props, void* cb, void* userdata, int param5);
+
+// FUN_0088b5d0 — VoiceVirtual* → mVoiceVirtualHandle index.
+// Returns: (VoiceVirtual* − smVoiceVirtuals) / 200 + 1
+typedef uint32_t (__cdecl* fn_voice_to_handle_t)(void* voice);
+
+// Snd::Sound::VoiceVirtualRelease(this) — stops the sound held in mVoiceVirtualHandle.
+// __thiscall; zeroes the handle after releasing the voice.
+typedef void (__fastcall* fn_vvrelease_t)(void* ecx, void* edx);
+
+// FUN_008827b0 — Snd::EngineBase::Update(float deltaTime, char doFullUpdate)
+// Advances smTimeElapsed and drives audio mixing/hardware output.  Called manually
+// from hooked_load_update to keep voices audible during the loading screen.
+typedef void (__cdecl* fn_snd_eng_update_t)(float dt, char full);
 
 // PlatformRenderTexture — __stdcall, 15 args
 typedef void (__stdcall* fn_prt_t)(
@@ -93,7 +112,12 @@ static fn_pbl_copy_ctor_t  g_pbl_copy_ctor   = nullptr;
 static fn_pbl_read_data_t  g_pbl_read_data   = nullptr;
 static fn_pbl_read_scope_t g_pbl_read_scope  = nullptr;
 static fn_find_by_hash_t   g_find_by_hash    = nullptr;
-static fn_snd_play_t       g_snd_play        = nullptr;
+static fn_snd_play_t        g_snd_play        = nullptr;
+static fn_snd_play_ex_t     g_snd_play_ex     = nullptr;  // same address, returns VoiceVirtual*
+static fn_voice_to_handle_t g_voice_to_handle = nullptr;  // VoiceVirtual* → handle index
+static fn_vvrelease_t       g_vvrelease       = nullptr;
+static fn_snd_eng_update_t  g_snd_update      = nullptr;  // Snd::EngineBase::Update
+static DWORD                g_lastSndUpdateMs = 0;        // for deltaTime computation in hooked_load_update
 static fn_prt_t            g_prt             = nullptr;
 static void*               g_color_ptr       = nullptr;
 static fn_set_current_heap_t g_set_current_heap = nullptr;
@@ -117,6 +141,30 @@ static bool                g_inRealEnd           = false;   // set while g_orig_
 static bool                g_endProcessed        = false;   // set after our hooked_load_end has called g_orig_load_end once; prevents double-End() crash
 
 // =============================================================================
+// Sound helper types
+// =============================================================================
+
+// Minimal GameSound layout (20 bytes) for stack-allocated initialization.
+// We set mProps (offset 12) from FindByHashID and mType (offset 16, =1 = regular Sound).
+// All other fields are zeroed; GameSound::CanPlay checks mType and mProps only.
+struct GameSoundLocal {
+    const char* mSoundDescription; // +0
+    void*       mNodeNext;         // +4
+    void*       mNodePrev;         // +8
+    void*       mProps;            // +12  ← Properties* from FindByHashID
+    uint8_t     mType;             // +16  ← 1 = GameSound, 2 = Parameterized, 3 = Stream
+    uint8_t     _pad[3];
+};
+
+// GameSoundControllable layout (4 bytes) — persists the voice handle so the playing
+// sound can be stopped via VoiceVirtualRelease.
+struct GameSoundControllable {
+    uint16_t mVoiceVirtualHandle; // +0  ← filled by Play(); passed to VoiceVirtualRelease
+    uint8_t  mFlags;              // +2
+    uint8_t  _pad;                // +3
+};
+
+// =============================================================================
 // Global BF1 extension data
 // =============================================================================
 
@@ -130,6 +178,31 @@ static DWORD g_animStartMs = 0;
 // One-shot probe log: fires on the first BF1-enabled render frame per loading
 // screen. Declared at file scope so hooked_load_config can re-arm it each load.
 static bool s_probed = false;
+
+// Tracking sound state — XTrackingSound / YTrackingSound need to be stoppable
+// mid-play (they're defined as looping in the sound LVL).
+// g_trackCtrl persists the voice handle from the most recent Play() call.
+static GameSoundControllable g_trackCtrl   = {};
+static bool                  g_trackActive = false;
+// Raw VoiceVirtual* returned by g_snd_play_ex — stored independently of
+// g_trackCtrl.mVoiceVirtualHandle because the inactive callback at 0x0040360c
+// (FUN_0074d4c0 → FUN_0074d470 → VoiceVirtualRelease) zeroes the handle after
+// the first DirectSound buffer-end event while restarting playback.  The
+// VoiceVirtual struct itself is never freed during playback, so this raw pointer
+// remains valid until we explicitly stop the voice.
+static void*                 g_trackVoice  = nullptr;
+
+// Animation phase tracking: fire sounds exactly once on phase/cycle transitions.
+// Values: 0=PhaseA, 1=PhaseAh, 2=PhaseB, 3=PhaseBh, 4=PhaseC, -1=unset, -2=done.
+static int  s_lastAnimPhase = -1;
+static int  s_lastAnimCycle = -1;
+
+// BarSound timing: next time (ms) to replay the BarSound in non-planet mode.
+static DWORD s_nextBarSoundMs = 0;
+
+// Set false by hooked_load_config; set true once the sound LVL has been loaded
+// so it is loaded at most once per loading screen.
+static bool  s_sndLvlLoaded = false;
 
 // Per-transition cycle duration (ms): must exactly match the phase constants
 // used in hooked_render_screen so hooked_load_end can share the same value.
@@ -175,8 +248,9 @@ static constexpr uint32_t kHash_TeamModelRotationSpeed = 0x26455a06;
 static constexpr uint32_t kHash_ProgressBarTotalTime   = 0x31a6bc76;
 
 // Extension-only parameters (not in vanilla BF1 load.cfg).
-// Hash computed at runtime in bf1_load_ext_install() via hash_name().
+// Hashes computed at runtime in bf1_load_ext_install() via hash_name().
 static uint32_t kHash_ZoomSelectorTileSize = 0; // ZoomSelectorTileSize(half_w[, half_h])
+static uint32_t kHash_LoadSoundLVL        = 0; // LoadSoundLVL("path/to/sound.lvl")
 
 // =============================================================================
 // PblConfig helpers
@@ -226,8 +300,135 @@ static uint32_t hash_name(const char* name) {
     return g_hash_string ? g_hash_string(name) : 0u;
 }
 
-// Forward declaration — defined after the hooks
+// Forward declarations — defined after the hooks
 void bf1_play_sound(uint32_t sound_hash);
+
+// Stop the current tracking sound (if any is playing).
+// Safe to call when nothing is playing.
+//
+// Architecture (from VoiceVirtual hex dump analysis):
+//   VoiceVirtual+0xa0 = Voice* (the real audio processing object, stride 0x540).
+//   Voice::Update checks field_0x80 bit 1: if set, resets the SourceResampler
+//   (SW mode stop) and sets SourceTransport state to 4 (inactive).
+//   VoiceVirtual+0xc0/+0xc4 = user callback from Snd::Sound::Play (loop restart).
+//   VoiceVirtual+0xac/+0xb0 = mInactiveCallback (already FireForget by default).
+//
+// Stop sequence:
+//   1. VoiceVirtualRelease — clears +0xc0/+0xc4 (prevents loop restart)
+//   2. Set Voice->field_0x80 |= 2 — triggers SW resampler stop on next Update
+//   3. Tick audio engine — Voice::Update processes the stop
+static void tracking_sound_stop()
+{
+    if (!g_trackActive) return;
+
+    auto fn_log = get_gamelog();
+
+    if (g_trackVoice && g_vvrelease && g_voice_to_handle) {
+        uint8_t* pVV = (uint8_t*)g_trackVoice;
+
+        // 1. Recompute handle and call VoiceVirtualRelease to clear the
+        //    loop-restart callback at +0xc0/+0xc4.
+        uint16_t handle = (uint16_t)g_voice_to_handle(g_trackVoice);
+        g_trackCtrl.mVoiceVirtualHandle = handle;
+        g_vvrelease(&g_trackCtrl, nullptr);
+
+        // 2. Dereference VV+0xa0 to get Voice* and set field_0x80 bit 1.
+        //    This triggers Voice::Update's stop path which resets the
+        //    SourceResampler (silencing SW mode 4) and sets play state
+        //    to inactive.
+        void* pVoice = *(void**)(pVV + 0xa0);
+        fn_log("[BF1Ext] tracking_sound_stop: VV=%p handle=%d Voice=%p\n",
+               g_trackVoice, (int)handle, pVoice);
+
+        if (pVoice) {
+            uint8_t* v = (uint8_t*)pVoice;
+            fn_log("[BF1Ext]   Voice+0x68=%08x +0x6c=%04x +0x80=%02x\n",
+                   *(uint32_t*)(v + 0x68),
+                   (unsigned)*(uint16_t*)(v + 0x6c),
+                   (unsigned)v[0x80]);
+
+            // Set the stop-request bit that Voice::Update checks.
+            v[0x80] |= 0x02;
+        }
+
+        // 3. Tick the audio engine so Voice::Update processes the stop.
+        if (g_snd_update) {
+            g_snd_update(0.016f, 1);
+            g_snd_update(0.016f, 1);
+        }
+
+        if (pVoice) {
+            uint8_t* v = (uint8_t*)pVoice;
+            fn_log("[BF1Ext]   AFTER: Voice+0x68=%08x +0x6c=%04x +0x80=%02x\n",
+                   *(uint32_t*)(v + 0x68),
+                   (unsigned)*(uint16_t*)(v + 0x6c),
+                   (unsigned)v[0x80]);
+        }
+
+        g_trackVoice = nullptr;
+    }
+
+    memset(&g_trackCtrl, 0, sizeof(g_trackCtrl));
+    g_trackActive = false;
+}
+
+// Start a looping/controllable tracking sound (Y-tracking, X-tracking, or bar).
+// Stops any currently playing tracking sound first to avoid orphaned voice handles.
+// Calls Snd::Sound::Play directly, bypassing GameSound::CanPlay entirely (which would
+// block all sounds during the loading screen in multiplayer due to game-state checks).
+static void tracking_sound_start(uint32_t hash)
+{
+    auto fn_log = get_gamelog();
+    tracking_sound_stop();
+    if (!g_snd_play_ex || !g_find_by_hash || !hash) {
+        fn_log("[BF1Ext] tracking_sound_start(hash=%08x): SKIP (no ptr or zero hash)\n", hash);
+        return;
+    }
+    void* props = g_find_by_hash(hash);
+    fn_log("[BF1Ext] tracking_sound_start(hash=%08x): props=%p\n", hash, props);
+    if (!props) return;
+
+    memset(&g_trackCtrl, 0, sizeof(g_trackCtrl));
+
+    // Set mFlags from the Properties looping bit (same formula as GameSoundControllable::Play).
+    // field_0x1c & 0x10 = looping flag; result: 3 if looping, 1 if not.
+    // The inactive callback (LAB_0040360c → FUN_0074d4c0) reads this to decide
+    // whether to restart or release when a sample ends.
+    const uint8_t loopBit      = (*(const uint8_t*)((const uint8_t*)props + 0x1c)) & 0x10;
+    g_trackCtrl.mFlags         = (uint8_t)((loopBit | 8u) >> 3);
+
+    // Reset nextAllowedTime (Properties+0x68) so FUN_008a4b50's cooldown check always
+    // passes.  smTimeElapsed (0x02331080) stays at 0.0f during loading because the
+    // audio engine update loop isn't called.  After the first Play sets
+    //   field_0x68 = smTimeElapsed + minInterval = 0.0 + minInterval > 0.0
+    // every subsequent call sees  field_0x68 > smTimeElapsed (0.0 > 0.0 is false, but
+    // minInterval > 0.0 is true) → blocked.  Zeroing it makes the check 0.0 > 0.0
+    // (false) so Play always proceeds.
+    *(float*)((uint8_t*)props + 0x68) = 0.0f;
+
+    // Call Snd::Sound::Play with:
+    //   src3D    = NULL  (2D sound, no positional data)
+    //   cb       = LAB_0040360c (non-null → Play returns VoiceVirtual*; handles loop/release)
+    //   userdata = &g_trackCtrl (GameSoundControllable* for the callback)
+    //   param5   = 0 (play even if inaudible; don't suppress the return pointer)
+    void* voice = g_snd_play_ex(nullptr, props, (void*)0x0040360c, &g_trackCtrl, 0);
+    fn_log("[BF1Ext] tracking_sound_start: voice=%p flags=%d handle=%d\n",
+           voice, (int)g_trackCtrl.mFlags,
+           (voice && g_voice_to_handle) ? (int)g_voice_to_handle(voice) : -1);
+
+    if (voice && g_voice_to_handle)
+        g_trackCtrl.mVoiceVirtualHandle = (uint16_t)g_voice_to_handle(voice);
+
+    // Store the raw VoiceVirtual* for hardware stop in tracking_sound_stop().
+    // This pointer is valid for the lifetime of the voice (VoiceVirtual structs
+    // live in the smVoiceVirtuals pool; they are never freed while playing).
+    // mVoiceVirtualHandle is zeroed by the restart callback after the first
+    // buffer-end — g_trackVoice survives that and lets tracking_sound_stop()
+    // set the hardware stop bit regardless of how many loops have occurred.
+    g_trackVoice = voice;
+
+    g_trackActive = true;
+}
 
 // Parse one DATA entry as a known BF1 param and update g_bf1Ext.
 // Called from both the LoadDisplay and Map loops so BF1 params work in either scope.
@@ -327,6 +528,18 @@ static void parse_bf1_entry(const uint32_t* data_buf, GameLog_t fn_log)
         g_bf1Ext.barSoundInterval = pbl_get_int(data_buf, 0);
     }
     // ── BF1Ext-only extension params ──────────────────────────────────────────
+    // LoadSoundLVL("path"): relative lvl path containing the snd_ chunks for the
+    // XTrackingSound / YTrackingSound / ZoomSound / TransitionSound / BarSound.
+    // Loaded once (via LoadDataFile) on the first hooked_load_data_file call so
+    // all Properties are in the game's sound hash table before the first render.
+    else if (kHash_LoadSoundLVL && hash == kHash_LoadSoundLVL && argc >= 1) {
+        const char* s = pbl_get_str(data_buf, 0);
+        fn_log("[BF1Ext]        LoadSoundLVL = '%s'\n", s ? s : "(null)");
+        if (s) {
+            strncpy_s(g_bf1Ext.loadSoundLvl, sizeof(g_bf1Ext.loadSoundLvl), s,
+                      sizeof(g_bf1Ext.loadSoundLvl) - 1);
+        }
+    }
     // ZoomSelectorTileSize(half_w[, half_h]):
     // Half-dimensions of each tiling strip tile in normalized 0-1 screen space.
     // Drives the BF1-accurate 16-quad crosshair frame around the planet rect.
@@ -411,6 +624,25 @@ static void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* l
     const int texAfter = ecx ? *(const int*)((const uint8_t*)ecx + 0x15f8) : -1;
     fn_log("[BF1Ext] LoadDataFile('%s') texCount after=%d (+%d loaded)\n",
            lvlPath ? lvlPath : "(null)", texAfter, texAfter - texBefore);
+
+    // Load the BF1-ext sound LVL once per loading screen so that snd_ chunk
+    // Properties are in the game's sound hash table before the first render fires sounds.
+    // We call g_orig_load_data_file (the trampoline to the original LoadDataFile) which
+    // handles MakeFullName path resolution and all chunk processing including snd_.
+    // Sound Properties use FreeList allocators (not Red heap) so no heap guard needed.
+    if (g_bf1Ext.bf1Enabled && g_bf1Ext.loadSoundLvl[0] && !s_sndLvlLoaded) {
+        s_sndLvlLoaded = true;
+        fn_log("[BF1Ext] LoadSoundLVL: loading '%s'\n", g_bf1Ext.loadSoundLvl);
+        g_orig_load_data_file(ecx, edx, g_bf1Ext.loadSoundLvl);
+        const int texAfterSnd = ecx ? *(const int*)((const uint8_t*)ecx + 0x15f8) : -1;
+        fn_log("[BF1Ext] LoadSoundLVL: done (texCount now=%d)\n", texAfterSnd);
+        // Reset phase tracking so the current animation phase re-fires its sound
+        // triggers now that the sound LVL is in the hash table.  Without this,
+        // if hooked_render_screen ran before this call (race condition), the phase
+        // was already recorded in s_lastAnimPhase and the sounds would never trigger.
+        s_lastAnimPhase = -1;
+        s_lastAnimCycle = -1;
+    }
 }
 
 // =============================================================================
@@ -461,6 +693,19 @@ static void __fastcall hooked_load_update(void* ecx, void* edx)
 
     if (saved_load_heap >= 0 && g_s_load_heap_ptr)
         *g_s_load_heap_ptr = saved_load_heap;
+
+    // Tick the audio engine once per Update() call so queued voices are mixed to hardware.
+    // During loading the game's main loop is blocked and never calls Snd::EngineBase::Update
+    // (FUN_008827b0).  Without this tick the audio device receives nothing and all sounds
+    // are silent until the match starts and the main loop resumes.
+    if (g_bf1Ext.bf1Enabled && g_snd_update) {
+        const DWORD now = GetTickCount();
+        const DWORD ms  = now - g_lastSndUpdateMs;
+        if (ms > 0 && ms < 1000u) {    // clamp: skip if first call or after a long stall
+            g_snd_update((float)ms * 0.001f, 1);
+        }
+        g_lastSndUpdateMs = now;
+    }
 
     if (!g_bf1Ext.bf1Enabled || !g_orig_load_render) return;
 
@@ -579,6 +824,18 @@ static void __fastcall hooked_load_end(void* ecx, void* edx)
                         *g_s_load_heap_ptr = saved_load_heap_end;
                     if (g_qpc_stamp && *g_qpc_stamp != qpc_before)
                         g_lastRenderMs = GetTickCount(); // Update() rendered — reset gate
+
+                    // Tick the audio engine so queued voices are mixed to hardware.
+                    // Mirrors the same tick in hooked_load_update; without this the
+                    // SW audio buffer drains after one cycle and tracking sounds go
+                    // silent for the remainder of the spin-loop.
+                    if (g_snd_update) {
+                        const DWORD sndNow = GetTickCount();
+                        const DWORD sndMs  = sndNow - g_lastSndUpdateMs;
+                        if (sndMs > 0 && sndMs < 1000u)
+                            g_snd_update((float)sndMs * 0.001f, 1);
+                        g_lastSndUpdateMs = sndNow;
+                    }
                 }
                 if (g_orig_load_render && GetTickCount() - g_lastRenderMs >= 33u) {
                     g_lastRenderMs = GetTickCount();
@@ -604,6 +861,10 @@ static void __fastcall hooked_load_end(void* ecx, void* edx)
     // g_inRealEnd causes hooked_load_update to return early (no Update(), no Render())
     // while End() is tearing down state.  Calling the original Update() here would
     // be unsafe: its internal 50 ms QPC render path fires against freed textures.
+    // Stop any looping tracking sound before End() frees D3D and sound resources.
+    // Leaving a voice handle active while the loading screen tears down could
+    // reference freed sound state.
+    tracking_sound_stop();
     g_endProcessed = true;  // block any subsequent End() call from re-entering
     g_inRealEnd = true;
     g_orig_load_end(ecx, edx);
@@ -639,10 +900,16 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     memcpy(fh, fh_saved, sizeof(fh_saved));
 
     g_bf1Ext.reset();
-    g_animStartMs   = GetTickCount(); // restart animation from PlanetLevel 0 on each new match
-    g_lastRenderMs  = 0;              // reset so first injected render fires immediately
-    g_endProcessed  = false;          // re-arm End() hook for new loading screen
-    s_probed        = false;          // re-arm per-loading-screen probe log
+    g_animStartMs    = GetTickCount(); // restart animation from PlanetLevel 0 on each new match
+    g_lastRenderMs   = 0;              // reset so first injected render fires immediately
+    g_lastSndUpdateMs = GetTickCount(); // reset audio-tick timer so first deltaTime is ~0
+    g_endProcessed   = false;          // re-arm End() hook for new loading screen
+    s_probed         = false;          // re-arm per-loading-screen probe log
+    s_sndLvlLoaded   = false;          // re-arm sound LVL loading for new loading screen
+    s_lastAnimPhase  = -1;             // reset phase tracking for sound triggers
+    s_lastAnimCycle  = -1;
+    s_nextBarSoundMs = 0;
+    tracking_sound_stop();             // stop any stale tracking sound from previous load
 
     // Current level hashes stored in the LoadDisplay object (ecx+4 = world hash, ecx+8 = map hash).
     // These are matched against Map() scope level name hashes to locate EnableBF1.
@@ -977,6 +1244,11 @@ static void __fastcall hooked_render_screen(void* ecx, void* edx)
                 animDone = true;
                 bgLevel  = (nTrans < nLev) ? nTrans : nTrans - 1;
                 // zx0,zy0,zx1,zy1 keep (0,0,1,1) defaults — full screen.
+                // Stop any looping tracking sound — animation is over.
+                if (s_lastAnimPhase != -2) {
+                    tracking_sound_stop();
+                    s_lastAnimPhase = -2; // sentinel: animation done
+                }
             } else {
                 const DWORD elapsed = rawElapsed % totalMs;
                 const int   ti      = (int)(elapsed / kCyMs);    // which transition [0, nTrans)
@@ -1018,6 +1290,58 @@ static void __fastcall hooked_render_screen(void* ecx, void* edx)
                     zx1 = tx1 + (1.0f - tx1) * a;     zy1 = ty1 + (1.0f - ty1) * a;
                     fgLevel = nxt; // draw next planet inside the expanding rect
                 }
+
+                // ── Sound triggers ──────────────────────────────────────────────
+                // Determine the current phase index (0=A, 1=Ah, 2=B, 3=Bh, 4=C).
+                const int curPhase = (ph < kOffAh) ? 0
+                                   : (ph < kOffB)  ? 1
+                                   : (ph < kOffBh) ? 2
+                                   : (ph < kOffC)  ? 3
+                                                   : 4;
+
+                if (ti != s_lastAnimCycle || curPhase != s_lastAnimPhase) {
+                    const bool newCycle = (ti != s_lastAnimCycle);
+
+                    // C → A transition: play the transition sound once at the
+                    // start of each new cycle (when the last cycle ended in C).
+                    if (newCycle && s_lastAnimPhase == 4)
+                        bf1_play_sound(g_bf1Ext.transitionSoundHash);
+
+                    switch (curPhase) {
+                    case 0: // Phase A — Y bands converging
+                        tracking_sound_start(g_bf1Ext.yTrackSoundHash);
+                        break;
+                    case 1: // Phase Ah — bands at target Y, held
+                        tracking_sound_stop();
+                        break;
+                    case 2: // Phase B — X bands converging
+                        tracking_sound_start(g_bf1Ext.xTrackSoundHash);
+                        break;
+                    case 3: // Phase Bh — all bands at target rect, held
+                        tracking_sound_stop();
+                        break;
+                    case 4: // Phase C — zoom-in
+                        tracking_sound_stop(); // stop any stray tracking sound
+                        bf1_play_sound(g_bf1Ext.zoomSoundHash);
+                        break;
+                    }
+
+                    s_lastAnimPhase = curPhase;
+                    s_lastAnimCycle = ti;
+                }
+            }
+        }
+
+        // Non-planet mode: play BarSound periodically while loading screen is active.
+        // Only fires when no planet transitions are configured (nTrans == 0).
+        if (nTrans == 0 && g_bf1Ext.barSoundHash) {
+            const DWORD now = GetTickCount();
+            if (s_nextBarSoundMs == 0 || now >= s_nextBarSoundMs) {
+                const DWORD intervalMs = (g_bf1Ext.barSoundInterval > 0)
+                                       ? (DWORD)g_bf1Ext.barSoundInterval * 1000u
+                                       : 5000u; // default 5 s if not configured
+                s_nextBarSoundMs = now + intervalMs;
+                bf1_play_sound(g_bf1Ext.barSoundHash);
             }
         }
 
@@ -1089,10 +1413,14 @@ static void __fastcall hooked_render_screen(void* ecx, void* edx)
 // =============================================================================
 void bf1_play_sound(uint32_t sound_hash)
 {
+    auto fn_log = get_gamelog();
     if (!g_find_by_hash || !g_snd_play || !sound_hash) return;
     void* props = g_find_by_hash(sound_hash);
-    if (props)
-        g_snd_play(0, props, 0, 0, 0);
+    fn_log("[BF1Ext] bf1_play_sound(hash=%08x): props=%p\n", sound_hash, props);
+    if (!props) return;
+    // Reset nextAllowedTime cooldown — same reasoning as tracking_sound_start.
+    *(float*)((uint8_t*)props + 0x68) = 0.0f;
+    g_snd_play(0, props, 0, 0, 0);
 }
 
 // =============================================================================
@@ -1114,7 +1442,12 @@ void bf1_load_ext_install(uintptr_t exe_base)
     g_pbl_read_data  = (fn_pbl_read_data_t) resolve_va(exe_base, pbl_read_next_data);
     g_pbl_read_scope = (fn_pbl_read_scope_t)resolve_va(exe_base, pbl_read_next_scope);
     g_find_by_hash   = (fn_find_by_hash_t)  resolve_va(exe_base, snd_find_by_hash_id);
-    g_snd_play       = (fn_snd_play_t)      resolve_va(exe_base, snd_sound_play);
+    g_snd_play        = (fn_snd_play_t)        resolve_va(exe_base, snd_sound_play);
+    g_snd_play_ex     = (fn_snd_play_ex_t)     resolve_va(exe_base, snd_sound_play);  // same addr, captures return
+    g_voice_to_handle = (fn_voice_to_handle_t) resolve_va(exe_base, voice_to_handle);
+    g_vvrelease       = (fn_vvrelease_t)       resolve_va(exe_base, voice_virtual_release);
+    g_snd_update      = (fn_snd_eng_update_t)  resolve_va(exe_base, snd_engine_update);
+    g_lastSndUpdateMs = GetTickCount();
     g_prt            = (fn_prt_t)           resolve_va(exe_base, platform_render_texture);
     g_color_ptr      = resolve_va(exe_base, color_ptr_global);
     g_set_current_heap = (fn_set_current_heap_t) resolve_va(exe_base, red_set_current_heap);
@@ -1129,6 +1462,7 @@ void bf1_load_ext_install(uintptr_t exe_base)
     // (these don't exist in vanilla BF1, so there are no compile-time constants).
     if (g_hash_string) {
         kHash_ZoomSelectorTileSize = g_hash_string("ZoomSelectorTileSize");
+        kHash_LoadSoundLVL         = g_hash_string("LoadSoundLVL");
     }
 
     g_orig_load_data_file = (fn_load_data_file_t)resolve_va(exe_base, load_data_file_real);

@@ -49,7 +49,12 @@ struct Bf1LoadExt {
     uint32_t zoomSoundHash;
     uint32_t transitionSoundHash;
     uint32_t barSoundHash;
-    int      barSoundInterval;   // ms between BarSound plays
+    int      barSoundInterval;   // seconds between BarSound replays (0 = play once)
+
+    // LoadSoundLVL: relative lvl path containing the snd_ chunks for the above sounds.
+    // Loaded once via LoadDataFile on the first hooked_load_data_file call so that
+    // Properties are in the game's sound hash table before the first render fires sounds.
+    char     loadSoundLvl[260];
 
     // PlanetLevel: per-level planet texture with a direct 0-1 screen rect.
     // Syntax: PlanetLevel(levelIndex, texName, x, y, w, h)

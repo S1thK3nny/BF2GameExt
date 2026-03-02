@@ -261,6 +261,33 @@ namespace lua_addrs {
       // Snd::Sound::Play(entity, props, p3, p4, p5)
       constexpr uintptr_t snd_sound_play            = 0x0088cc10;
 
+      // GameSoundControllable::Play(this, gameSound*, pos3D*, vel3D*, char flags)
+      // __thiscall; plays a sound and stores its voice handle in this->mVoiceVirtualHandle.
+      // Use with a manually constructed GameSound (mProps=FindByHashID, mType=1).
+      // Confirmed from BF2 binary: function at 0x0074dd30.
+      constexpr uintptr_t gamesound_controllable_play = 0x0074dd30;
+
+      // Snd::Sound::VoiceVirtualRelease(this) — stops the sound held by mVoiceVirtualHandle.
+      // Calls VoiceVirtualHandleToVoiceVirtual, then zeroes the handle.
+      // Confirmed from BF2 binary: function at 0x0074d440.
+      constexpr uintptr_t voice_virtual_release       = 0x0074d440;
+
+      // FUN_0088b5d0 — converts VoiceVirtual* to the compact handle stored in
+      // GameSoundControllable::mVoiceVirtualHandle.
+      // Formula: handle = (VoiceVirtual* − smVoiceVirtuals) / 200 + 1
+      // Used by tracking_sound_start after calling Snd::Sound::Play directly
+      // (bypassing GameSound::CanPlay which blocks sounds during the loading screen).
+      constexpr uintptr_t voice_to_handle              = 0x0088b5d0;
+
+      // FUN_008827b0 — Snd::EngineBase::Update(float deltaTime, char doFullUpdate)
+      // Advances smTimeElapsed (0x02331080) and drives audio mixing/hardware output.
+      // The game's main loop calls this via FUN_00885070 every frame, but the main
+      // loop is blocked during loading — we call it manually from hooked_load_update
+      // so sounds queued during the loading screen actually reach the audio device.
+      // doFullUpdate=1 → also processes VoiceVirtuals and stream sources (safe during
+      // loading since the sound system is already initialised by the time BF1 sounds play).
+      constexpr uintptr_t snd_engine_update            = 0x008827b0;
+
       // PblHashTableCode::_Find(table_ptr, table_size, hash) — looks up texture by hash.
       // Used inside PlatformRenderTexture (confirmed via disasm at 006d07ea).
       // Global texture table: 0xd4f994, size=0x2000. Returns NULL if not found.
