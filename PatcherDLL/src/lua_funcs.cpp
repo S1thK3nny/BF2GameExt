@@ -508,11 +508,46 @@ static int lua_SetCharacterWeapon(lua_State* L)
       __try { *(uintptr_t*)(wpn + 0x064) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
       __try { *(uintptr_t*)(wpn + 0x068) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      // TODO: trigger per-character animation bank update here.
+      // Trigger per-character animation update.
+      // EntitySoldier::UpdateIndirect (0x0053b920) reads wpn+0xC8 (cached animation MAP)
+      // every frame and calls SoldierAnimator::SetWeaponAnimationMap with it.
+      // SetCharacterWeapon used to leave wpn+0xC8 stale (old weapon's MAP), so the
+      // animation stance never changed visually even though gameplay used the new WC.
+      //
+      // Fix: copy the correct MAP from sourceWpn (a live weapon of the target type),
+      // write it to wpn+0xC8 so future frames stay correct, then call
+      // SetWeaponAnimationMap directly for an immediate this-frame visual update.
+      //
+      // Offsets confirmed from disasm of EntitySoldier::UpdateIndirect (0x0053be5c):
+      //   ctrl+0x290 -> EntitySoldier*  (back-pointer, already documented)
+      //   entity+0x520 -> SoldierAnimator*  (MOV ECX,[ESI+0x520])
+      //   weapon+0xC8  -> int MAP           (MOV EAX,[EAX+0xC8]; CMP EAX,-1)
+      if (sourceWpn) {
+         int32_t newMap = -1;
+         __try { newMap = *(int32_t*)(sourceWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         if (newMap != -1) {
+            // Update cached MAP on the player's weapon so future frames read the right value.
+            __try { *(int32_t*)(wpn + 0x0C8) = newMap; } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' (newWc=0x%08x src=%s)\n",
+            // Call SetWeaponAnimationMap (0x004170d5) for an immediate visual switch.
+            uintptr_t entity = 0;
+            __try { entity = *(uintptr_t*)((uintptr_t)ctrl + 0x290); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            if (entity) {
+               uintptr_t soldierAnimator = 0;
+               __try { soldierAnimator = *(uintptr_t*)(entity + 0x520); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+               if (soldierAnimator) {
+                  typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
+                  auto fn_SetWAM = (SetWeaponAnimMap_t)res(0x4170D5);
+                  __try { fn_SetWAM((void*)soldierAnimator, newMap); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+               }
+            }
+         }
+      }
+
+      fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' (newWc=0x%08x src=%s map=%d)\n",
                  charIndex, channel, slotIdx, targetOdf,
-                 (unsigned)foundWc, sourceWpn ? "found" : "none");
+                 (unsigned)foundWc, sourceWpn ? "found" : "none",
+                 sourceWpn ? *(int32_t*)(sourceWpn + 0x0C8) : -1);
 
       g_lua.pushnumber(L, 1);
       return 1;

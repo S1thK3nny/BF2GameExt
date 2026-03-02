@@ -173,15 +173,47 @@ The count of entries is at `*(wcList + 0x040)` (capped at 64 in code).
 
 ---
 
-## Animation Change — Open Questions
+## Animation Change — RESOLVED ✅
 
-1. **`blendNode+0x044`** (`0x08834228` on observed session) — per-character heap ptr, never dumped. Likely the actual per-character animation state object. If its contents differ between an E-5 droid and RPS-6 droid, **this is the write target**.
+The fix was found by decompiling `EntitySoldier::UpdateIndirect` (0x0053b920) and reading the
+disassembly around `0x0053be5c`. The full per-frame animation update path, confirmed from disasm:
 
-2. **`WC+0x050`** — odd-addressed ptr (e.g. `08ab044e`, `089ebaca`). Likely an AnimBank name string. Following it may reveal the field that maps a WeaponClass to an animation bank by name, which could be the correct write to change animation stance.
+```
+0053be5c: MOV ECX, [ESI+0x520]        ; SoldierAnimator* from EntitySoldier
+0053be66: MOV AL,  [ESI+0x512]        ; active weapon slot index (byte)
+0053be79: MOV EAX, [ESI+EDX*4+0x4F0] ; Weapon* from entity's weapon array
+0053be84: MOV EAX, [EAX+0xC8]        ; int MAP  ← the missing cached field
+0053be8a: CMP EAX, -1                 ; -1 = INVALID_MAP, skip if so
+0053be90: CALL 0x004170d5             ; SoldierAnimator::SetWeaponAnimationMap(ECX, MAP)
+```
 
-3. **ctrl vtable[3] / vtable[4]** (`0x00409935`, `0x00410901`) — not yet called. One of these is likely `ApplyStance()` or equivalent. Calling it after all the data writes may force the animation graph to re-evaluate.
+**Root cause:** `wpn+0xC8` is the cached animation MAP integer for a weapon instance.
+`SetCharacterWeapon` only wrote `wpn+0x060/064/068` (WeaponClass*) and `wpn+0x088` (factory),
+so `UpdateIndirect` kept re-applying the old weapon's MAP every frame.
 
-4. **`animMap+0x03c`** — ❌ Hardware write breakpoint confirmed it is NOT written during a real weapon switch. It is read-only during normal gameplay (written only at setup time). Dead end for animation triggering.
+**Fix implemented in `lua_funcs.cpp`:**
+- Copy `newMap = *(sourceWpn + 0xC8)` from the source weapon (same type on another character)
+- Write `*(wpn + 0xC8) = newMap` — keeps all future frames correct
+- Get `entity = *(ctrl + 0x290)`, `soldierAnimator = *(entity + 0x520)`
+- Call `SetWeaponAnimationMap(soldierAnimator, newMap)` at `0x004170D5` for immediate visual switch
+
+### Additional confirmed EntitySoldier fields (ESI = ctrl+0x290, NOT the charSlot)
+| Offset | Field |
+|--------|-------|
+| +0x4F0 | Weapon*[8] array (rendering-side weapon slots) |
+| +0x512 | uint8 active slot index (channel 0) |
+| +0x520 | SoldierAnimator* |
+
+### Additional confirmed Weapon instance field
+| Offset | Field |
+|--------|-------|
+| +0xC8  | int MAP (animation map ID, -1 = INVALID) |
+
+### Remaining open question
+When `sourceWpn` is not found (no other character has the target weapon), the MAP cannot
+be copied. `FUN_00570760(BANK, WEAPON_type)` can look it up from the global registration
+table at `0xacf558/0xacf55c`, but the WEAPON type field within WeaponClass is not yet
+confirmed (possibly `WeaponClass+0x020` based on `FUN_006740d0` decompile).
 
 ---
 
