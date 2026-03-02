@@ -175,10 +175,6 @@ Bf1LoadExt g_bf1Ext = {};
 // every match starts fresh regardless of when GetTickCount() happens to be.
 static DWORD g_animStartMs = 0;
 
-// One-shot probe log: fires on the first BF1-enabled render frame per loading
-// screen. Declared at file scope so hooked_load_config can re-arm it each load.
-static bool s_probed = false;
-
 // Tracking sound state — XTrackingSound / YTrackingSound need to be stoppable
 // mid-play (they're defined as looping in the sound LVL).
 // g_trackCtrl persists the voice handle from the most recent Play() call.
@@ -321,8 +317,6 @@ static void tracking_sound_stop()
 {
     if (!g_trackActive) return;
 
-    auto fn_log = get_gamelog();
-
     if (g_trackVoice && g_vvrelease && g_voice_to_handle) {
         uint8_t* pVV = (uint8_t*)g_trackVoice;
 
@@ -337,17 +331,8 @@ static void tracking_sound_stop()
         //    SourceResampler (silencing SW mode 4) and sets play state
         //    to inactive.
         void* pVoice = *(void**)(pVV + 0xa0);
-        fn_log("[BF1Ext] tracking_sound_stop: VV=%p handle=%d Voice=%p\n",
-               g_trackVoice, (int)handle, pVoice);
-
         if (pVoice) {
             uint8_t* v = (uint8_t*)pVoice;
-            fn_log("[BF1Ext]   Voice+0x68=%08x +0x6c=%04x +0x80=%02x\n",
-                   *(uint32_t*)(v + 0x68),
-                   (unsigned)*(uint16_t*)(v + 0x6c),
-                   (unsigned)v[0x80]);
-
-            // Set the stop-request bit that Voice::Update checks.
             v[0x80] |= 0x02;
         }
 
@@ -355,14 +340,6 @@ static void tracking_sound_stop()
         if (g_snd_update) {
             g_snd_update(0.016f, 1);
             g_snd_update(0.016f, 1);
-        }
-
-        if (pVoice) {
-            uint8_t* v = (uint8_t*)pVoice;
-            fn_log("[BF1Ext]   AFTER: Voice+0x68=%08x +0x6c=%04x +0x80=%02x\n",
-                   *(uint32_t*)(v + 0x68),
-                   (unsigned)*(uint16_t*)(v + 0x6c),
-                   (unsigned)v[0x80]);
         }
 
         g_trackVoice = nullptr;
@@ -378,15 +355,14 @@ static void tracking_sound_stop()
 // block all sounds during the loading screen in multiplayer due to game-state checks).
 static void tracking_sound_start(uint32_t hash)
 {
-    auto fn_log = get_gamelog();
     tracking_sound_stop();
-    if (!g_snd_play_ex || !g_find_by_hash || !hash) {
-        fn_log("[BF1Ext] tracking_sound_start(hash=%08x): SKIP (no ptr or zero hash)\n", hash);
+    if (!g_snd_play_ex || !g_find_by_hash || !hash) return;
+    void* props = g_find_by_hash(hash);
+    if (!props) {
+        auto fn_log = get_gamelog();
+        fn_log("[BF1Ext] ERROR: tracking_sound_start — sound hash %08x not found\n", hash);
         return;
     }
-    void* props = g_find_by_hash(hash);
-    fn_log("[BF1Ext] tracking_sound_start(hash=%08x): props=%p\n", hash, props);
-    if (!props) return;
 
     memset(&g_trackCtrl, 0, sizeof(g_trackCtrl));
 
@@ -412,10 +388,6 @@ static void tracking_sound_start(uint32_t hash)
     //   userdata = &g_trackCtrl (GameSoundControllable* for the callback)
     //   param5   = 0 (play even if inaudible; don't suppress the return pointer)
     void* voice = g_snd_play_ex(nullptr, props, (void*)0x0040360c, &g_trackCtrl, 0);
-    fn_log("[BF1Ext] tracking_sound_start: voice=%p flags=%d handle=%d\n",
-           voice, (int)g_trackCtrl.mFlags,
-           (voice && g_voice_to_handle) ? (int)g_voice_to_handle(voice) : -1);
-
     if (voice && g_voice_to_handle)
         g_trackCtrl.mVoiceVirtualHandle = (uint16_t)g_voice_to_handle(voice);
 
@@ -434,31 +406,35 @@ static void tracking_sound_start(uint32_t hash)
 // Called from both the LoadDisplay and Map loops so BF1 params work in either scope.
 // PlanetLevel is NOT handled here — it has position args and is Map-only; the Map loop
 // handles it directly.
-static void parse_bf1_entry(const uint32_t* data_buf, GameLog_t fn_log)
+static void parse_bf1_entry(const uint32_t* data_buf)
 {
     const uint32_t hash = data_buf[0];
     const uint32_t argc = data_buf[1];
 
     if (hash == kHash_EnableBF1 && argc >= 1) {
         g_bf1Ext.bf1Enabled = (pbl_get_int(data_buf, 0) != 0);
-        fn_log("[BF1Ext]        EnableBF1 = %d\n", (int)g_bf1Ext.bf1Enabled);
     }
     else if (hash == kHash_ScanLineTexture && argc >= 1) {
         const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        ScanLineTexture = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.scanLineTexHash     = hash_name(s);
+        g_bf1Ext.scanLineTexHash = hash_name(s);
+        if (!g_bf1Ext.scanLineTexHash) {
+            auto fn_log = get_gamelog();
+            fn_log("[BF1Ext] ERROR: ScanLineTexture name '%s' could not be hashed\n", s ? s : "(null)");
+        }
         if (argc >= 2) g_bf1Ext.scanLineParams[0] = pbl_get_float(data_buf, 1);
         if (argc >= 3) g_bf1Ext.scanLineParams[1] = pbl_get_float(data_buf, 2);
         if (argc >= 4) g_bf1Ext.scanLineParams[2] = pbl_get_float(data_buf, 3);
     }
     else if (hash == kHash_ZoomSelectorTextures && argc >= 1) {
-        fn_log("[BF1Ext]        ZoomSelectorTextures argc=%u\n", argc);
         const int n = (int)argc < Bf1LoadExt::kMaxZoomSel
                     ? (int)argc : Bf1LoadExt::kMaxZoomSel;
         for (int i = 0; i < n; ++i) {
             const char* s = pbl_get_str(data_buf, i);
-            fn_log("[BF1Ext]          [%d] = '%s'\n", i, s ? s : "(null)");
             g_bf1Ext.zoomSelHashes[i] = hash_name(s);
+            if (!g_bf1Ext.zoomSelHashes[i]) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] ERROR: ZoomSelectorTextures[%d] name '%s' could not be hashed\n", i, s ? s : "(null)");
+            }
         }
         g_bf1Ext.zoomSelCount = n;
     }
@@ -466,14 +442,10 @@ static void parse_bf1_entry(const uint32_t* data_buf, GameLog_t fn_log)
         const char* base = pbl_get_str(data_buf, 0);
         int         cnt  = pbl_get_int(data_buf, 1);
         const float fps  = (argc >= 3) ? pbl_get_float(data_buf, 2) : 10.0f;
-        // Optional rect args (3-6): x, y, w, h in normalized 0-1 screen space.
-        // w==0 (absent) → falls back to full screen in the renderer.
         const float ax = (argc >= 4) ? pbl_get_float(data_buf, 3) : 0.0f;
         const float ay = (argc >= 5) ? pbl_get_float(data_buf, 4) : 0.0f;
         const float aw = (argc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
         const float ah = (argc >= 7) ? pbl_get_float(data_buf, 6) : 0.0f;
-        fn_log("[BF1Ext]        AnimatedTextures base='%s' cnt=%d fps=%.2f rect=(%.3f,%.3f,%.3f,%.3f)\n",
-               base ? base : "(null)", cnt, fps, ax, ay, aw, ah);
         if (base && cnt > 0) {
             if (cnt > Bf1LoadExt::kMaxAnimFrames) cnt = Bf1LoadExt::kMaxAnimFrames;
             for (int i = 0; i < cnt; ++i) {
@@ -485,107 +457,59 @@ static void parse_bf1_entry(const uint32_t* data_buf, GameLog_t fn_log)
             g_bf1Ext.animFPS   = fps;
             g_bf1Ext.animX = ax; g_bf1Ext.animY = ay;
             g_bf1Ext.animW = aw; g_bf1Ext.animH = ah;
+        } else if (!base) {
+            auto fn_log = get_gamelog();
+            fn_log("[BF1Ext] ERROR: AnimatedTextures base name is null\n");
         }
     }
     else if (hash == kHash_PlanetBackdrops && argc >= 1) {
-        fn_log("[BF1Ext]        PlanetBackdrops argc=%u\n", argc);
         const int n = (int)argc < Bf1LoadExt::kMaxBackdrops
                     ? (int)argc : Bf1LoadExt::kMaxBackdrops;
         for (int i = 0; i < n; ++i) {
             const char* s = pbl_get_str(data_buf, i);
-            fn_log("[BF1Ext]          [%d] = '%s'\n", i, s ? s : "(null)");
             g_bf1Ext.backdropHashes[i] = hash_name(s);
+            if (!g_bf1Ext.backdropHashes[i]) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] ERROR: PlanetBackdrops[%d] name '%s' could not be hashed\n", i, s ? s : "(null)");
+            }
         }
         g_bf1Ext.backdropCount = n;
     }
     else if (hash == kHash_XTrackingSound && argc >= 1) {
-        const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        XTrackingSound = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.xTrackSoundHash = hash_name(s);
+        g_bf1Ext.xTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_YTrackingSound && argc >= 1) {
-        const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        YTrackingSound = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.yTrackSoundHash = hash_name(s);
+        g_bf1Ext.yTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_ZoomSound && argc >= 1) {
-        const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        ZoomSound = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.zoomSoundHash = hash_name(s);
+        g_bf1Ext.zoomSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_TransitionSound && argc >= 1) {
-        const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        TransitionSound = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.transitionSoundHash = hash_name(s);
+        g_bf1Ext.transitionSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_BarSound && argc >= 1) {
-        const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        BarSound = '%s'\n", s ? s : "(null)");
-        g_bf1Ext.barSoundHash = hash_name(s);
+        g_bf1Ext.barSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_BarSoundInterval && argc >= 1) {
-        fn_log("[BF1Ext]        BarSoundInterval = %d\n", pbl_get_int(data_buf, 0));
         g_bf1Ext.barSoundInterval = pbl_get_int(data_buf, 0);
     }
-    // ── BF1Ext-only extension params ──────────────────────────────────────────
-    // LoadSoundLVL("path"): relative lvl path containing the snd_ chunks for the
-    // XTrackingSound / YTrackingSound / ZoomSound / TransitionSound / BarSound.
-    // Loaded once (via LoadDataFile) on the first hooked_load_data_file call so
-    // all Properties are in the game's sound hash table before the first render.
     else if (kHash_LoadSoundLVL && hash == kHash_LoadSoundLVL && argc >= 1) {
         const char* s = pbl_get_str(data_buf, 0);
-        fn_log("[BF1Ext]        LoadSoundLVL = '%s'\n", s ? s : "(null)");
         if (s) {
             strncpy_s(g_bf1Ext.loadSoundLvl, sizeof(g_bf1Ext.loadSoundLvl), s,
                       sizeof(g_bf1Ext.loadSoundLvl) - 1);
         }
     }
-    // ZoomSelectorTileSize(half_w[, half_h]):
-    // Half-dimensions of each tiling strip tile in normalized 0-1 screen space.
-    // Drives the BF1-accurate 16-quad crosshair frame around the planet rect.
-    // If omitted, defaults to 0.02 (≈2% of screen width per strip).
     else if (kHash_ZoomSelectorTileSize && hash == kHash_ZoomSelectorTileSize && argc >= 1) {
         g_bf1Ext.zoomTileHalfW = pbl_get_float(data_buf, 0);
         g_bf1Ext.zoomTileHalfH = (argc >= 2) ? pbl_get_float(data_buf, 1)
                                               : g_bf1Ext.zoomTileHalfW;
-        fn_log("[BF1Ext]        ZoomSelectorTileSize hw=%.4f hh=%.4f\n",
-               g_bf1Ext.zoomTileHalfW, g_bf1Ext.zoomTileHalfH);
     }
-    // ── Known-but-unimplemented / BF2-native params ───────────────────────────
-    // Recognised by hash so they don't fall through to the noisy "unrecognised"
-    // log.  No runtime action is taken for any of these.
-    else if (hash == kHash_TeamModel) {
-        // BF1-only: a 3D team model rotated during the loading screen.
-        // BF2's loading screen has no 3D model pipeline, so we skip this.
-        const char* s = (argc >= 1) ? pbl_get_str(data_buf, 0) : nullptr;
-        fn_log("[BF1Ext]        TeamModel = '%s' (BF1-only, not implemented)\n",
-               s ? s : "(null)");
-    }
-    else if (hash == kHash_TeamModelRotationSpeed) {
-        // BF1-only: rotation speed (deg/s) for the TeamModel above.
-        fn_log("[BF1Ext]        TeamModelRotationSpeed = %.3f (BF1-only, not implemented)\n",
-               (argc >= 1) ? pbl_get_float(data_buf, 0) : 0.0f);
-    }
-    else if (hash == kHash_ProgressBarTotalTime) {
-        // BF2 native: total animation time for the loading progress bar.
-        // Already consumed by BF2's own LoadConfig; we see it on our second
-        // parse pass but have no need to act on it.
-        fn_log("[BF1Ext]        ProgressBarTotalTime = %.3f (BF2 native, no action)\n",
-               (argc >= 1) ? pbl_get_float(data_buf, 0) : 0.0f);
-    }
-    else {
-        if (argc == 0 || argc > 8) {
-            fn_log("[BF1Ext]        (unrecognised hash=%08x argc=%u)\n", hash, argc);
-        } else {
-            // Log args as floats for diagnostic purposes (texture-name args will show
-            // garbage float values, but numeric params like GalaxyMapRect are readable).
-            char ab[192]; int pos = 0;
-            for (uint32_t i = 0; i < argc; ++i)
-                pos += snprintf(ab + pos, (int)sizeof(ab) - pos,
-                                " %.3f", pbl_get_float(data_buf, i));
-            fn_log("[BF1Ext]        (unrecognised hash=%08x argc=%u args:%s)\n",
-                   hash, argc, ab);
-        }
+    // Known-but-unimplemented / BF2-native params — silently ignored.
+    else if (hash == kHash_TeamModel
+          || hash == kHash_TeamModelRotationSpeed
+          || hash == kHash_ProgressBarTotalTime) {
+        // no action
     }
 }
 
@@ -606,40 +530,20 @@ static void pbl_skip_next_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
 }
 
 // =============================================================================
-// LoadDataFile hook — diagnostic: log tex count before/after to confirm
-//                     whether tex_ chunks in the lvl are actually being read.
-// LoadDisplay + 0x15f8 = running texture count incremented by ChunkProcessor
-//                        each time RedTexture::Read succeeds.
+// LoadDataFile hook
 // =============================================================================
 
 static void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
 {
-    auto fn_log = get_gamelog();
-    const int texBefore = ecx ? *(const int*)((const uint8_t*)ecx + 0x15f8) : -1;
-    fn_log("[BF1Ext] LoadDataFile('%s') texCount before=%d\n",
-           lvlPath ? lvlPath : "(null)", texBefore);
-
     g_orig_load_data_file(ecx, edx, lvlPath);
-
-    const int texAfter = ecx ? *(const int*)((const uint8_t*)ecx + 0x15f8) : -1;
-    fn_log("[BF1Ext] LoadDataFile('%s') texCount after=%d (+%d loaded)\n",
-           lvlPath ? lvlPath : "(null)", texAfter, texAfter - texBefore);
 
     // Load the BF1-ext sound LVL once per loading screen so that snd_ chunk
     // Properties are in the game's sound hash table before the first render fires sounds.
-    // We call g_orig_load_data_file (the trampoline to the original LoadDataFile) which
-    // handles MakeFullName path resolution and all chunk processing including snd_.
-    // Sound Properties use FreeList allocators (not Red heap) so no heap guard needed.
     if (g_bf1Ext.bf1Enabled && g_bf1Ext.loadSoundLvl[0] && !s_sndLvlLoaded) {
         s_sndLvlLoaded = true;
-        fn_log("[BF1Ext] LoadSoundLVL: loading '%s'\n", g_bf1Ext.loadSoundLvl);
         g_orig_load_data_file(ecx, edx, g_bf1Ext.loadSoundLvl);
-        const int texAfterSnd = ecx ? *(const int*)((const uint8_t*)ecx + 0x15f8) : -1;
-        fn_log("[BF1Ext] LoadSoundLVL: done (texCount now=%d)\n", texAfterSnd);
         // Reset phase tracking so the current animation phase re-fires its sound
-        // triggers now that the sound LVL is in the hash table.  Without this,
-        // if hooked_render_screen ran before this call (race condition), the phase
-        // was already recorded in s_lastAnimPhase and the sounds would never trigger.
+        // triggers now that the sound LVL is in the hash table.
         s_lastAnimPhase = -1;
         s_lastAnimCycle = -1;
     }
@@ -887,10 +791,9 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
 
     g_orig_load_config(ecx, edx, fh);
 
-    auto fn_log = get_gamelog();
-
     if (!g_pbl_ctor || !g_pbl_read_data || !g_pbl_read_scope || !g_pbl_copy_ctor || !fh) {
-        fn_log("[BF1Ext] LoadConfig: skipping — missing fn ptrs (ctor=%p rd=%p rs=%p cc=%p fh=%p)\n",
+        auto fn_log = get_gamelog();
+        fn_log("[BF1Ext] ERROR: LoadConfig — missing fn ptrs (ctor=%p rd=%p rs=%p cc=%p fh=%p)\n",
                (void*)g_pbl_ctor, (void*)g_pbl_read_data,
                (void*)g_pbl_read_scope, (void*)g_pbl_copy_ctor, (void*)fh);
         return;
@@ -904,7 +807,6 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     g_lastRenderMs   = 0;              // reset so first injected render fires immediately
     g_lastSndUpdateMs = GetTickCount(); // reset audio-tick timer so first deltaTime is ~0
     g_endProcessed   = false;          // re-arm End() hook for new loading screen
-    s_probed         = false;          // re-arm per-loading-screen probe log
     s_sndLvlLoaded   = false;          // re-arm sound LVL loading for new loading screen
     s_lastAnimPhase  = -1;             // reset phase tracking for sound triggers
     s_lastAnimCycle  = -1;
@@ -915,9 +817,6 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     // These are matched against Map() scope level name hashes to locate EnableBF1.
     const uint32_t lvlHash1 = *(const uint32_t*)((const uint8_t*)ecx + 4);
     const uint32_t lvlHash2 = *(const uint32_t*)((const uint8_t*)ecx + 8);
-
-    fn_log("[BF1Ext] LoadConfig: ecx=%p lvlHash1=%08x lvlHash2=%08x fh[0..3]=%08x %08x %08x %08x\n",
-           ecx, lvlHash1, lvlHash2, fh_saved[0], fh_saved[1], fh_saved[2], fh_saved[3]);
 
     // PblConfig stack buffers — 0x300 bytes each, matches the game's auStack_768 allocation.
     uint8_t  outer_buf[0x300]; // root-level PblConfig
@@ -935,9 +834,6 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     // reader at the first root-level scope header.
     g_pbl_ctor(outer_buf, nullptr, fh);
 
-    fn_log("[BF1Ext]   outer_buf[2]=%08x [3]=%08x [5]=%p\n",
-           ((uint32_t*)outer_buf)[2], ((uint32_t*)outer_buf)[3], (void*)((uint32_t*)outer_buf)[5]);
-
     // ── Outer loop ───────────────────────────────────────────────────────────
     // The config file has multiple sibling scopes at the root level:
     //   LoadDisplay { … }
@@ -945,7 +841,6 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     //   World("levelName") { … }
     // ReadNextData reads the scope-header DATA chunk (hash = scope type, args = scope args).
     // ReadNextScope then enters the scope body.
-    int outerCount = 0;
     while (pbl_has_more(outer_buf)) {
         memset(root_data, 0, sizeof(root_data));
         g_pbl_read_data(outer_buf, nullptr, root_data);
@@ -953,38 +848,27 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
         const uint32_t root_hash = root_data[0];
         const uint32_t root_argc = root_data[1];
 
-        fn_log("[BF1Ext]   outer[%d] hash=%08x argc=%u\n", outerCount++, root_hash, root_argc);
-
         // ── LoadDisplay scope — BF1 texture / sound params ───────────────────
         if (root_hash == kHash_LoadDisplay) {
-            fn_log("[BF1Ext]   -> LoadDisplay: entering scope\n");
             memset(temp_buf, 0, sizeof(temp_buf));
             void* sr = g_pbl_read_scope(outer_buf, nullptr, temp_buf);
-            fn_log("[BF1Ext]      ReadNextScope returned %p\n", sr);
             g_pbl_copy_ctor(scope_buf, nullptr, sr, 1);
-            fn_log("[BF1Ext]      scope_buf[2]=%08x [3]=%08x [5]=%p\n",
-                   ((uint32_t*)scope_buf)[2], ((uint32_t*)scope_buf)[3], (void*)((uint32_t*)scope_buf)[5]);
 
-            int dispCount = 0;
             while (pbl_has_more(scope_buf)) {
                 memset(data_buf, 0, sizeof(data_buf));
                 g_pbl_read_data(scope_buf, nullptr, data_buf);
 
                 const uint32_t hash = data_buf[0];
 
-                fn_log("[BF1Ext]      disp[%d] hash=%08x argc=%u\n", dispCount++, hash, data_buf[1]);
-
                 // LoadingTextColorPallete is a sub-scope: skip its body so the reader
                 // stays in sync. All other entries go through parse_bf1_entry.
                 if (hash == kHash_LoadingTextColorPallete) {
-                    fn_log("[BF1Ext]        -> LoadingTextColorPallete: skipping scope\n");
                     pbl_skip_next_scope(scope_buf, temp_buf, data_buf);
                     continue;
                 }
 
-                parse_bf1_entry(data_buf, fn_log);
+                parse_bf1_entry(data_buf);
             }
-            fn_log("[BF1Ext]   <- LoadDisplay done (%d entries)\n", dispCount);
         }
 
         // ── Map / World scope — per-map master switch ─────────────────────────
@@ -995,20 +879,12 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
             const uint32_t mHash   = lvlName ? hash_name(lvlName) : 0;
             const bool     match   = mHash && (mHash == lvlHash1 || mHash == lvlHash2);
 
-            fn_log("[BF1Ext]   -> %s scope: lvlName='%s' lvlHash=%08x match=%d\n",
-                   (root_hash == kHash_Map) ? "Map" : "World",
-                   lvlName ? lvlName : "(null)", mHash, (int)match);
-
             memset(temp_buf, 0, sizeof(temp_buf));
             void* mr = g_pbl_read_scope(outer_buf, nullptr, temp_buf);
-            fn_log("[BF1Ext]      ReadNextScope returned %p\n", mr);
             g_pbl_copy_ctor(map_buf, nullptr, mr, 1);
-            fn_log("[BF1Ext]      map_buf[2]=%08x [3]=%08x [5]=%p\n",
-                   ((uint32_t*)map_buf)[2], ((uint32_t*)map_buf)[3], (void*)((uint32_t*)map_buf)[5]);
 
             // Always drain the scope to advance the file position correctly.
             // Only act on the data when the level name matches the current map.
-            int mapCount = 0;
             while (pbl_has_more(map_buf)) {
                 memset(data_buf, 0, sizeof(data_buf));
                 g_pbl_read_data(map_buf, nullptr, data_buf);
@@ -1016,45 +892,49 @@ static void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
                 const uint32_t mhash = data_buf[0];
                 const uint32_t mArgc = data_buf[1];
 
-                fn_log("[BF1Ext]      map[%d] hash=%08x argc=%u\n", mapCount++, mhash, mArgc);
-
                 if (!match) continue; // drain but don't act on non-matching maps
 
                 // PlanetLevel: flat entry directly in Map (no sub-scope).
-                // args: levelIndex(int), texName(str), x(float), y(float), w(float), h(float)
                 if (mhash == kHash_PlanetLevel && mArgc >= 2
                     && g_bf1Ext.planetCount < Bf1LoadExt::kMaxPlanets) {
                     Bf1LoadExt::PlanetEntry& e = g_bf1Ext.planets[g_bf1Ext.planetCount++];
                     e.levelIndex = pbl_get_int(data_buf, 0);
                     const char* s = pbl_get_str(data_buf, 1);
                     e.texHash = hash_name(s);
+                    if (!e.texHash) {
+                        auto fn_log = get_gamelog();
+                        fn_log("[BF1Ext] ERROR: PlanetLevel[%d] texture name '%s' could not be hashed\n",
+                               e.levelIndex, s ? s : "(null)");
+                    }
                     e.x = (mArgc >= 3) ? pbl_get_float(data_buf, 2) : 0.0f;
                     e.y = (mArgc >= 4) ? pbl_get_float(data_buf, 3) : 0.0f;
                     e.w = (mArgc >= 5) ? pbl_get_float(data_buf, 4) : 0.0f;
                     e.h = (mArgc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
-                    fn_log("[BF1Ext]        PlanetLevel idx=%d tex='%s' x=%.1f y=%.1f w=%.1f h=%.1f\n",
-                           e.levelIndex, s ? s : "(null)", e.x, e.y, e.w, e.h);
                 }
                 else {
-                    // All other BF1 params (EnableBF1, ScanLineTexture, ZoomSelectorTextures,
-                    // AnimatedTextures, PlanetBackdrops, sounds, etc.)
-                    parse_bf1_entry(data_buf, fn_log);
+                    parse_bf1_entry(data_buf);
                 }
             }
-            fn_log("[BF1Ext]   <- %s done (%d entries)\n",
-                   (root_hash == kHash_Map) ? "Map" : "World", mapCount);
         }
         else {
-            fn_log("[BF1Ext]   (unrecognised root hash=%08x — no scope consumed)\n", root_hash);
+            // Unknown root-level scope — no scope consumed.
         }
     }
 
-    fn_log("[BF1Ext] LoadConfig result: bf1Enabled=%d scanLine=%08x "
-           "zoomSel=%d backdrop=%d anim=%d planet=%d\n",
-           (int)g_bf1Ext.bf1Enabled,
-           g_bf1Ext.scanLineTexHash,
-           g_bf1Ext.zoomSelCount, g_bf1Ext.backdropCount,
-           g_bf1Ext.animCount, g_bf1Ext.planetCount);
+    // ── Post-parse gate ─────────────────────────────────────────────────────
+    // The following BF1-only parameters are silently cleared when EnableBF1 is
+    // not set, so they have no effect on standard BF2 loading screens even if
+    // a modder accidentally leaves them in the config.
+    if (!g_bf1Ext.bf1Enabled) {
+        g_bf1Ext.xTrackSoundHash     = 0;
+        g_bf1Ext.yTrackSoundHash     = 0;
+        g_bf1Ext.zoomSoundHash       = 0;
+        g_bf1Ext.transitionSoundHash = 0;
+        g_bf1Ext.barSoundHash        = 0;
+        g_bf1Ext.barSoundInterval    = 0;
+        g_bf1Ext.zoomSelCount        = 0;
+        g_bf1Ext.planetCount         = 0;
+    }
 }
 
 // =============================================================================
@@ -1080,50 +960,28 @@ static void __fastcall hooked_render_screen(void* ecx, void* edx)
     if (g_bf1Ext.bf1Enabled && ecx)
         *(uint32_t*)((uint8_t*)ecx + 0x14c0) = savedBackdropHash;
 
-    // One-shot general diagnostic (first RenderScreen call ever, BF1 or not).
-    static bool s_logged = false;
-    if (!s_logged) {
-        s_logged = true;
-        auto fn_log = get_gamelog();
-        fn_log("[BF1Ext] RenderScreen first call: bf1Enabled=%d g_prt=%p g_color_ptr=%p\n",
-               (int)g_bf1Ext.bf1Enabled, (void*)g_prt, g_color_ptr);
-    }
-
     if (!g_bf1Ext.bf1Enabled || !g_prt || !g_color_ptr)
         return;
 
-
-    // One-shot probe: fires on the first BF1-enabled frame per loading screen.
-    // s_probed is file-scope so hooked_load_config can re-arm it on each new load.
-    if (!s_probed) {
-        s_probed = true;
+    // One-shot texture probe: log errors for any BF1 textures that aren't in
+    // the global texture hash table (missing from the LVL, wrong name, etc.).
+    static bool s_texProbed = false;
+    if (!s_texProbed && g_pbl_find && g_tex_table) {
+        s_texProbed = true;
         auto fn_log = get_gamelog();
-        fn_log("[BF1Ext] RenderScreen BF1 probe: scanLine=%08x "
-               "zoomSel=%d(hw=%.3f,hh=%.3f) backdrop=%d anim=%d planet=%d\n",
-               g_bf1Ext.scanLineTexHash,
-               g_bf1Ext.zoomSelCount, g_bf1Ext.zoomTileHalfW, g_bf1Ext.zoomTileHalfH,
-               g_bf1Ext.backdropCount, g_bf1Ext.animCount, g_bf1Ext.planetCount);
-        for (int pi = 0; pi < g_bf1Ext.planetCount; ++pi) {
-            const Bf1LoadExt::PlanetEntry& pe = g_bf1Ext.planets[pi];
-            fn_log("[BF1Ext]   planet[%d] idx=%d tex=%08x x=%.1f y=%.1f w=%.1f h=%.1f\n",
-                   pi, pe.levelIndex, pe.texHash, pe.x, pe.y, pe.w, pe.h);
-        }
-        if (g_pbl_find && g_tex_table) {
-            auto probe = [&](const char* label, uint32_t hash) {
-                void* entry = g_pbl_find(g_tex_table, 0x2000, hash);
-                fn_log("[BF1Ext]   tex_probe %-32s hash=%08x -> %s\n",
-                       label, hash, entry ? "FOUND" : "MISSING");
-            };
-            for (int i = 0; i < g_bf1Ext.backdropCount; ++i)
-                probe("backdrop", g_bf1Ext.backdropHashes[i]);
-            probe("scanLine", g_bf1Ext.scanLineTexHash);
-            for (int i = 0; i < g_bf1Ext.zoomSelCount; ++i)
-                probe("zoomSel", g_bf1Ext.zoomSelHashes[i]);
-            for (int i = 0; i < g_bf1Ext.animCount; ++i)
-                probe("anim", g_bf1Ext.animHashes[i]);
-            for (int pi = 0; pi < g_bf1Ext.planetCount; ++pi)
-                probe("planet", g_bf1Ext.planets[pi].texHash);
-        }
+        auto check = [&](const char* label, uint32_t hash) {
+            if (hash && !g_pbl_find(g_tex_table, 0x2000, hash))
+                fn_log("[BF1Ext] ERROR: %s texture hash %08x not found in texture table\n", label, hash);
+        };
+        for (int i = 0; i < g_bf1Ext.backdropCount; ++i)
+            check("PlanetBackdrops", g_bf1Ext.backdropHashes[i]);
+        check("ScanLineTexture", g_bf1Ext.scanLineTexHash);
+        for (int i = 0; i < g_bf1Ext.zoomSelCount; ++i)
+            check("ZoomSelectorTextures", g_bf1Ext.zoomSelHashes[i]);
+        for (int i = 0; i < g_bf1Ext.animCount; ++i)
+            check("AnimatedTextures", g_bf1Ext.animHashes[i]);
+        for (int pi = 0; pi < g_bf1Ext.planetCount; ++pi)
+            check("PlanetLevel", g_bf1Ext.planets[pi].texHash);
     }
 
     // PlatformRenderTexture uses NORMALIZED 0.0–1.0 screen coordinates.
@@ -1413,11 +1271,13 @@ static void __fastcall hooked_render_screen(void* ecx, void* edx)
 // =============================================================================
 void bf1_play_sound(uint32_t sound_hash)
 {
-    auto fn_log = get_gamelog();
     if (!g_find_by_hash || !g_snd_play || !sound_hash) return;
     void* props = g_find_by_hash(sound_hash);
-    fn_log("[BF1Ext] bf1_play_sound(hash=%08x): props=%p\n", sound_hash, props);
-    if (!props) return;
+    if (!props) {
+        auto fn_log = get_gamelog();
+        fn_log("[BF1Ext] ERROR: bf1_play_sound — sound hash %08x not found\n", sound_hash);
+        return;
+    }
     // Reset nextAllowedTime cooldown — same reasoning as tracking_sound_start.
     *(float*)((uint8_t*)props + 0x68) = 0.0f;
     g_snd_play(0, props, 0, 0, 0);
@@ -1474,17 +1334,6 @@ void bf1_load_ext_install(uintptr_t exe_base)
     g_orig_load_render    = (fn_load_render_t)   resolve_va(exe_base, load_render_real);    // not Detour-hooked
     g_qpc_stamp           = (DWORD*)             resolve_va(exe_base, load_update_qpc_stamp);
 
-    auto fn_log = get_gamelog();
-    fn_log("[BF1Ext] install: exe_base=%08x\n", (unsigned)exe_base);
-    fn_log("[BF1Ext]   kHash_LoadingTextColorPallete=%08x kHash_PlanetLevel=%08x\n",
-           kHash_LoadingTextColorPallete, kHash_PlanetLevel);
-    fn_log("[BF1Ext]   pbl_ctor=%p  copy_ctor=%p  read_data=%p  read_scope=%p\n",
-           (void*)g_pbl_ctor, (void*)g_pbl_copy_ctor,
-           (void*)g_pbl_read_data, (void*)g_pbl_read_scope);
-    fn_log("[BF1Ext]   prt=%p  color_ptr=%p\n", (void*)g_prt, g_color_ptr);
-    fn_log("[BF1Ext]   load_data_file=%p  load_config=%p  render_screen=%p\n",
-           (void*)g_orig_load_data_file, (void*)g_orig_load_config, (void*)g_orig_render_screen);
-
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
     DetourAttach(&(PVOID&)g_orig_load_data_file, hooked_load_data_file);
@@ -1492,8 +1341,7 @@ void bf1_load_ext_install(uintptr_t exe_base)
     DetourAttach(&(PVOID&)g_orig_render_screen,  hooked_render_screen);
     DetourAttach(&(PVOID&)g_orig_load_end,       hooked_load_end);
     DetourAttach(&(PVOID&)g_orig_load_update,    hooked_load_update);
-    LONG rc = DetourTransactionCommit();
-    fn_log("[BF1Ext]   DetourTransactionCommit = %ld\n", rc);
+    DetourTransactionCommit();
 }
 
 void bf1_load_ext_uninstall()
