@@ -124,6 +124,11 @@
     <ClInclude Include="src\slim_vector.hpp" />
     <ClInclude Include="src\particle_renderer_patch.hpp" />
     <ClInclude Include="src\tentacle_patch.hpp" />
+    <ClInclude Include="src\controller_support.hpp" />
+    <ClInclude Include="src\controller_rumble.hpp" />
+    <ClInclude Include="src\anim_textures.hpp" />
+    <ClInclude Include="src\bone_transform.hpp" />
+    <ClInclude Include="src\lod_limit_patch.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\apply_patches.cpp" />
@@ -135,6 +140,11 @@
     <ClCompile Include="src\game_events.cpp" />
     <ClCompile Include="src\particle_renderer_patch.cpp" />
     <ClCompile Include="src\tentacle_patch.cpp" />
+    <ClCompile Include="src\controller_support.cpp" />
+    <ClCompile Include="src\controller_rumble.cpp" />
+    <ClCompile Include="src\anim_textures.cpp" />
+    <ClCompile Include="src\bone_transform.cpp" />
+    <ClCompile Include="src\lod_limit_patch.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>

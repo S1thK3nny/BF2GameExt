@@ -2,6 +2,7 @@
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "game_events.hpp"
+#include "controller_support.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -1278,6 +1279,134 @@ static int lua_ArmIngameInit(lua_State* /*L*/)
 }
 
 // ===========================================================================
+// Controller / Gamepad Lua API
+// ===========================================================================
+
+// SetGamepadBinding(rawInput, action [, mode])
+//   rawInput: "A","B","X","Y","LB","RB","Back","Start","L3","R3",
+//             "DPadUp","DPadRight","DPadDown","DPadLeft",
+//             "LX+","LX-","LY+","LY-","ZPos","ZNeg",
+//             "RX+","RX-","RY+","RY-","RZPos","RZNeg"
+//   action:   "PrimaryFire","SecondaryFire","Sprint","Jump","Crouch","Zoom","View",
+//             "Reload","Use","SquadCommand","AcceptHero","DeclineHero","LockTarget",
+//             "PrimaryNext","PrimaryPrev","SecondaryNext","SecondaryPrev","PlayerList",
+//             "StrafeAxis","MoveAxis","TurnAxis","PitchAxis","None"
+//   mode:     0-4 (optional — if omitted, sets for all modes)
+static int lua_SetGamepadBinding(lua_State* L)
+{
+   if (!g_controllerEnabled) return 0;
+
+   const char* rawName = g_lua.tolstring(L, 1, nullptr);
+   const char* actName = g_lua.tolstring(L, 2, nullptr);
+   if (!rawName || !actName) return 0;
+
+   int rawInput = controller_raw_input_from_name(rawName);
+   int action   = controller_action_from_name(actName);
+   if (rawInput == -2 || action == -2) return 0;
+   if (rawInput < 0 || rawInput >= eCONTROLLERINPUT_MAX) return 0;
+
+   // Resolve binding table addresses
+   uintptr_t ctrlBaseAddr = g_game.controller_base_global;
+   if (!ctrlBaseAddr) return 0;
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   uintptr_t ctrlBase = (ctrlBaseAddr - 0x400000u + base) + 0x428;
+   uintptr_t luaTable = ctrlBase + 0x1ACC;
+   uintptr_t rtTable  = ctrlBase + 0x20BC;
+
+   auto writeBinding = [&](int mode) {
+      // Lua API table (raw → action)
+      if (rawInput >= 0 && rawInput < eCONTROLLERINPUT_MAX) {
+         uintptr_t entry = luaTable + (mode * 0x4C + rawInput) * 4;
+         *(int*)entry = action;
+      }
+      // Runtime table (action → encoded scancode, 6 bytes/entry, 43 entries/mode)
+      // Entry: [sc0_lo][sc0_hi][sc1_lo][sc1_hi][dev0][dev1]
+      // Joystick scancodes encoded as (raw_index + 1) << 8
+      if (action >= 0 && action < 0x2B) {
+         unsigned short encoded = (unsigned short)((rawInput + 1) << 8);
+         uintptr_t entry = rtTable + (mode * 0x2B + action) * 6;
+         // Write to slot 1 (preserve keyboard in slot 0)
+         *(unsigned short*)(entry + 2) = encoded;
+         *(unsigned char*)(entry + 5) = 0;
+      }
+   };
+
+   int nargs = g_lua.gettop(L);
+   if (nargs >= 3) {
+      int mode = (int)g_lua.tonumber(L, 3);
+      if (mode >= 0 && mode < CONTROL_MODE_COUNT)
+         writeBinding(mode);
+   } else {
+      for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++)
+         writeBinding(mode);
+   }
+   return 0;
+}
+
+// GetGamepadBinding(rawInput [, mode]) → action name string or "None"
+static int lua_GetGamepadBinding(lua_State* L)
+{
+   const char* rawName = g_lua.tolstring(L, 1, nullptr);
+   if (!rawName) { g_lua.pushlstring(L, "None", 4); return 1; }
+
+   int rawInput = controller_raw_input_from_name(rawName);
+   if (rawInput < 0 || rawInput >= eCONTROLLERINPUT_MAX) {
+      g_lua.pushlstring(L, "None", 4); return 1;
+   }
+
+   uintptr_t ctrlBaseAddr = g_game.controller_base_global;
+   if (!ctrlBaseAddr) { g_lua.pushlstring(L, "None", 4); return 1; }
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   uintptr_t ctrlBase = (ctrlBaseAddr - 0x400000u + base) + 0x428;
+   uintptr_t table = ctrlBase + 0x1ACC;
+
+   int nargs = g_lua.gettop(L);
+   int mode = 0;
+   if (nargs >= 2) mode = (int)g_lua.tonumber(L, 2);
+   if (mode < 0 || mode >= CONTROL_MODE_COUNT) mode = 0;
+
+   uintptr_t entry = table + (mode * 0x4C + rawInput) * 4;
+   int action = *(int*)entry;
+   const char* name = controller_action_to_name(action);
+   g_lua.pushlstring(L, name, strlen(name));
+   return 1;
+}
+
+// SetGamepadAnalog(stickIdx, analogFunc [, mode])
+//   DEPRECATED: The game's SetFunctionIdForAnalog is a NOP in the PC build.
+//   Use SetGamepadBinding with axis actions instead:
+//     SetGamepadBinding("LX+", "StrafeAxis")  -- left stick X → strafe
+//     SetGamepadBinding("LY-", "MoveAxis")    -- left stick Y → move (inverted)
+//     SetGamepadBinding("RX+", "TurnAxis")    -- right stick X → turn
+//     SetGamepadBinding("RY-", "PitchAxis")   -- right stick Y → pitch (inverted)
+static int lua_SetGamepadAnalog(lua_State* /*L*/)
+{
+   dbg_log("[Controller] SetGamepadAnalog is a no-op — use SetGamepadBinding with axis actions\n");
+   return 0;
+}
+
+// SetupDefaultGamepadBindings() — re-apply all default Xbox bindings
+static int lua_SetupDefaultGamepadBindings(lua_State* /*L*/)
+{
+   controller_setup_bindings();
+   return 0;
+}
+
+// IsGamepadEnabled() → boolean
+static int lua_IsGamepadEnabled(lua_State* L)
+{
+   if (!g_controllerEnabled) { g_lua.pushboolean(L, 0); return 1; }
+
+   uintptr_t numJoysticksAddr = g_game.num_joysticks_global;
+   if (!numJoysticksAddr) { g_lua.pushboolean(L, 0); return 1; }
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   int numJoysticks = *(int*)(numJoysticksAddr - 0x400000u + base);
+   g_lua.pushboolean(L, numJoysticks > 0 ? 1 : 0);
+   return 1;
+}
+
+// ===========================================================================
 
 struct lua_func_entry {
    const char* name;
@@ -1310,6 +1439,11 @@ static const lua_func_entry custom_functions[] = {
    { "ReapplyAnimations",            lua_ReapplyAnimations },
    { "SetDLCLoadDisplay",             lua_SetDLCLoadDisplay },
    { "ArmIngameInit",                  lua_ArmIngameInit },
+   { "SetGamepadBinding",              lua_SetGamepadBinding },
+   { "GetGamepadBinding",              lua_GetGamepadBinding },
+   { "SetGamepadAnalog",               lua_SetGamepadAnalog },
+   { "SetupDefaultGamepadBindings",    lua_SetupDefaultGamepadBindings },
+   { "IsGamepadEnabled",               lua_IsGamepadEnabled },
    { nullptr, nullptr }
 };
 

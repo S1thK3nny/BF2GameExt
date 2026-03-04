@@ -57,29 +57,29 @@ static const renderer_addrs MODTOOLS = {
 };
 
 static const renderer_addrs STEAM = {
-   .id_file_offset     = 0x39e234,
+   .id_file_offset     = 0x39f834,   // RVA of "Application" string (not a raw file offset)
    .id_expected        = 0x746163696c707041,
 
-   .fn_SubmitParticle  = 0,  // TODO
-   .fn_AddParticle     = 0,
-   .g_currentCache     = 0,
-   .g_s_cacheIndex     = 0,
-   .g_s_caches         = 0,
+   .fn_SubmitParticle  = 0x2d33a0,
+   .fn_AddParticle     = 0x2d0c60,
+   .g_currentCache     = 0x5661b4,
+   .g_s_cacheIndex     = 0x5661b8,
+   .g_s_caches         = 0x5661e0,
 
-   .limit_byte_file_offset = 0,  // TODO
+   .limit_byte_file_offset = 0x2d32ea,  // RVA (offset from exe_base), not a raw file offset
 };
 
 static const renderer_addrs GOG = {
-   .id_file_offset     = 0x39f298,
+   .id_file_offset     = 0x3a0698,   // RVA of "Application" string (not a raw file offset)
    .id_expected        = 0x746163696c707041,
 
-   .fn_SubmitParticle  = 0,  // TODO
-   .fn_AddParticle     = 0,
-   .g_currentCache     = 0,
-   .g_s_cacheIndex     = 0,
-   .g_s_caches         = 0,
+   .fn_SubmitParticle  = 0x2d4440,
+   .fn_AddParticle     = 0x2d1d00,
+   .g_currentCache     = 0x567654,
+   .g_s_cacheIndex     = 0x567658,
+   .g_s_caches         = 0x567680,
 
-   .limit_byte_file_offset = 0,  // TODO
+   .limit_byte_file_offset = 0x2d438a,  // RVA (offset from exe_base), not a raw file offset
 };
 // clang-format on
 
@@ -225,8 +225,7 @@ static bool install_hooks(uintptr_t exe_base, const renderer_addrs& addrs, cfile
    // Patch the renderer cache entry limit (CMP EDX, imm8 in SetCurrentCache).
    // Sections are writable when this runs — no VirtualProtect needed.
    if (addrs.limit_byte_file_offset) {
-      // resolve_file_address isn't available here, but the exe is loaded at exe_base
-      // and the .text section's file_offset == virtual_offset for this exe.
+      // Used as RVA (offset from exe_base), not an actual file offset.
       uint8_t* limit_ptr = (uint8_t*)(addrs.limit_byte_file_offset + exe_base);
       if (*limit_ptr == 0x0F) {  // verify old value (15)
          *limit_ptr = (uint8_t)MAX_CACHES;

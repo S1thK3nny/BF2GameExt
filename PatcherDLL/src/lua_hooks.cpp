@@ -2,6 +2,8 @@
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
 #include "game_events.hpp"
+#include "controller_support.hpp"
+#include "controller_rumble.hpp"
 
 #include <detours.h>
 
@@ -61,6 +63,7 @@ void dbg_log_verbose(const char* fmt, ...)
 // Landing region fire patch — byte pointer into EntityFlyer::Update
 unsigned char* g_flyerLandingFirePatch = nullptr;
 unsigned char  g_flyerLandingFireOrig  = 0;
+
 
 // ---------------------------------------------------------------------------
 // Barrel fire origin — WeaponCannon OverrideAimer vtable hook
@@ -533,6 +536,7 @@ static bool __fastcall hooked_override_soldier_velocity(void* thisPtr, void* /*e
    }
 
    apply_character_speed(owner, charIdx, isPlayer, isAiming);
+
    return result;
 }
 
@@ -558,6 +562,10 @@ static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
       float newFireTime = *(float*)((char*)weapon + g_game.weapon_mLastFireTime_offset);
       if (prevFireTime == newFireTime) return;
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   // Per-shot recoil rumble (Xbox-faithful, before Lua dispatch)
+   if (g_rumbleEnabled)
+      rumble_on_signal_fire(weapon);
 
    __try {
       // Weapon ODF name: weapon+mClass -> WeaponClass*, +0x30 -> char[]
@@ -753,6 +761,10 @@ static void __cdecl hooked_init_state()
 
    if (g_L)
       register_lua_functions(g_L);
+
+   // Set up default gamepad bindings (writes to binding table memory).
+   // Must run after input system is initialized — init_state fires after that.
+   controller_setup_bindings();
 }
 
 // ---------------------------------------------------------------------------
@@ -848,6 +860,7 @@ static ExeType detect_exe(uintptr_t exe_base)
    g_game.soldierClass_maxSpeed_offset       = NS::soldierClass_maxSpeed_offset;     \
    g_game.soldierClass_maxStrafe_offset      = NS::soldierClass_maxStrafe_offset;    \
    g_game.weapon_override_soldier_velocity   = NS::weapon_override_soldier_velocity; \
+   g_game.weapon_update                      = NS::weapon_update;                   \
    g_game.char_exit_vehicle                  = NS::char_exit_vehicle;               \
    g_game.load_display_path_push_op          = NS::load_display_path_push_op;       \
    g_game.load_display_dlc_flag_byte         = NS::load_display_dlc_flag_byte;      \
@@ -858,6 +871,15 @@ static ExeType detect_exe(uintptr_t exe_base)
    g_game.net_enabled                        = NS::net_enabled;                     \
    g_game.net_enabled_next                   = NS::net_enabled_next;                \
    g_game.net_on_client                      = NS::net_on_client;                   \
+   g_game.controller_base_global             = NS::controller_base_global;          \
+   g_game.num_joysticks_global               = NS::num_joysticks_global;            \
+   g_game.joystick_config_base               = NS::joystick_config_base;            \
+   g_game.joystick_discover                  = NS::joystick_discover;               \
+   g_game.joystick_sync                      = NS::joystick_sync;                   \
+   g_game.rumble_light_output                = NS::rumble_light_output;             \
+   g_game.rumble_heavy_output                = NS::rumble_heavy_output;             \
+   g_game.rumble_state_setup                 = NS::rumble_state_setup;              \
+   g_game.rumble_dispatch                    = NS::rumble_dispatch;                 \
 } while(0)
 
 // ---------------------------------------------------------------------------

@@ -404,6 +404,7 @@ namespace lua_addrs {
       constexpr unsigned soldierClass_maxSpeed_offset         = 0x890;
       constexpr unsigned soldierClass_maxStrafe_offset        = 0x894;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x0061CEC0;
+      constexpr uintptr_t weapon_update                        = 0x0061D850;
       constexpr uintptr_t char_exit_vehicle                    = 0x0052FC70;
       constexpr uintptr_t load_display_path_push_op            = 0x0067e388;
       constexpr uintptr_t load_display_dlc_flag_byte           = 0x0067e2ca;
@@ -412,6 +413,24 @@ namespace lua_addrs {
       // ReadDataFile stricmp("ingame.lvl") — CALL __stricmp (direct E8, 5 bytes)
       constexpr uintptr_t ingame_stricmp_call                  = 0x0046a8f6;
       constexpr unsigned  ingame_stricmp_call_size             = 5;
+
+      // Controller support — binding table setup
+      // set_function_for_button (0x733520) and set_function_for_analog (0x7335a0)
+      // write to 0x1ACC (Lua-only table) or are NOPs — not used.
+      constexpr uintptr_t controller_base_global   = 0x00CAEB20;
+      constexpr uintptr_t num_joysticks_global     = 0x00D2BDA8;
+      constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
+      constexpr uintptr_t joystick_discover        = 0x007485f0; // thunk_FUN_007485f0 — discover joystick index
+      constexpr uintptr_t joystick_sync            = 0x007489a0; // thunk_FUN_007489a0 — sync bindings + register device
+
+      // Rumble output stubs — vanilla tick calls these with motor intensity.
+      // Both are empty RET 4 on PC. Hook to route to XInput.
+      constexpr uintptr_t rumble_light_output      = 0x0084ff00; // __stdcall(float intensity)
+      constexpr uintptr_t rumble_heavy_output      = 0x0084fef0; // __thiscall(float intensity), ECX=device
+      // Rumble state setup — dispatch calls this to populate rumble state from regions.
+      // Empty RET 8 on PC. __thiscall(ECX=ctrl_base_global, int playerIdx, float* data)
+      constexpr uintptr_t rumble_state_setup       = 0x007413a0;
+      constexpr uintptr_t rumble_dispatch          = 0; // not needed — hook state_setup instead
 
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x00ADABC2;
@@ -604,14 +623,15 @@ namespace lua_addrs {
       constexpr unsigned soldierClass_maxSpeed_offset         = 0x69C;
       constexpr unsigned soldierClass_maxStrafe_offset        = 0x6A0;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x00677760;
+      constexpr uintptr_t weapon_update                        = 0x006781B0;
 
       constexpr uintptr_t pbl_hash_ctor                      = 0x726D20;
       constexpr uintptr_t hash_to_name                       = 0x652030;
       constexpr uintptr_t entity_class_registry              = 0x7EC560;
       constexpr uintptr_t char_array_base_ptr                = 0x1E30334;
       constexpr uintptr_t char_array_max_count               = 0x1E30330;
-      constexpr uintptr_t team_array_ptr                     = 0;         // TODO
-      constexpr uintptr_t game_log                           = 0x6F6FF0;         // TODO
+      constexpr uintptr_t team_array_ptr                     = 0x007E9AA0; // verified from SetReinforcementCount disasm
+      constexpr uintptr_t game_log                           = 0x6F6FF0;  // verified: LogMessage(char*)
       constexpr uintptr_t char_exit_vehicle                  = 0x004F1380;
       constexpr uintptr_t load_display_path_push_op          = 0x00577661;
       constexpr uintptr_t load_display_dlc_flag_byte         = 0x0057764a;
@@ -620,6 +640,22 @@ namespace lua_addrs {
       // ReadDataFile stricmp("ingame.lvl") — CALL [IAT] (indirect FF15, 6 bytes)
       constexpr uintptr_t ingame_stricmp_call                = 0x0058adc4;
       constexpr unsigned  ingame_stricmp_call_size           = 6;
+
+      // Controller support — binding table setup (found via ScriptCB_SetJoystickEnabled trace)
+      constexpr uintptr_t controller_base_global   = 0x01EBDC50;
+      constexpr uintptr_t num_joysticks_global     = 0x0099CD08;
+      constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
+      constexpr uintptr_t joystick_discover        = 0x0061D250;
+      constexpr uintptr_t joystick_sync            = 0x0061D590;
+
+      // Rumble output stubs — vanilla tick calls these with motor intensity.
+      constexpr uintptr_t rumble_light_output      = 0x006c5550;
+      constexpr uintptr_t rumble_heavy_output      = 0x006c5540;
+      constexpr uintptr_t rumble_state_setup       = 0; // stripped by compiler on Steam
+      // Rumble dispatch — called from CameraManager::Update, checks rumble regions.
+      // On modtools we hook the state setup stub instead. On Steam the stub was
+      // optimized out, so we hook the dispatch itself to capture intensity.
+      constexpr uintptr_t rumble_dispatch          = 0x00630d60;
 
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x007E8007;
@@ -808,6 +844,7 @@ namespace lua_addrs {
       constexpr unsigned soldierClass_maxSpeed_offset         = 0x69C;
       constexpr unsigned soldierClass_maxStrafe_offset        = 0x6A0;
       constexpr uintptr_t weapon_override_soldier_velocity     = 0x00678800;
+      constexpr uintptr_t weapon_update                        = 0x00679250;
 
       constexpr uintptr_t pbl_hash_ctor                      = 0x727DF0;
       constexpr uintptr_t hash_to_name                       = 0x6530D0;
@@ -824,6 +861,23 @@ namespace lua_addrs {
       // ReadDataFile stricmp("ingame.lvl") — CALL [IAT] (indirect FF15, 6 bytes)
       constexpr uintptr_t ingame_stricmp_call                = 0x0058bd74;
       constexpr unsigned  ingame_stricmp_call_size           = 6;
+
+      // Controller support — binding table setup (found via FUN_00637290 / joystick_sync xrefs)
+      constexpr uintptr_t controller_base_global   = 0x01EBF100;  // DAT ref in FUN_00637290 (GOG equiv of Steam 0x01EBDC50)
+      constexpr uintptr_t num_joysticks_global     = 0x0099E1A8;  // cleared in FUN_006dccd0 (GOG equiv of Steam 0x0099CD08)
+      constexpr uintptr_t joystick_config_base     = 0x01EFA590;  // CMP EDI,0x1efa590 in FUN_0061e5f0 (GOG equiv of Steam 0x01EF90D0)
+      constexpr uintptr_t joystick_discover        = 0x0061E2B0;  // byte-identical prologue to Steam 0x0061D250
+      constexpr uintptr_t joystick_sync            = 0x0061E5F0;  // byte-identical prologue to Steam 0x0061D590
+
+      // Rumble output stubs — vanilla tick calls these with motor intensity.
+      // Both are empty RET 4 on PC. Hook to route to XInput.
+      // light=0x006C65E0, heavy=0x006C65D0 confirmed via xref call-site matching Steam.
+      constexpr uintptr_t rumble_light_output      = 0x006C65E0;
+      constexpr uintptr_t rumble_heavy_output      = 0x006C65D0;
+      constexpr uintptr_t rumble_state_setup       = 0; // stripped by compiler on GOG (same as Steam)
+      // Rumble dispatch — called from CameraManager::Update, checks rumble regions.
+      // GOG dispatch does not call a state_setup stub (inlined/stripped like Steam).
+      constexpr uintptr_t rumble_dispatch          = 0x00631E00;
 
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x007E9007;
@@ -879,6 +933,7 @@ struct game_addrs {
    unsigned soldierClass_maxSpeed_offset         = 0;
    unsigned soldierClass_maxStrafe_offset        = 0;
    uintptr_t weapon_override_soldier_velocity    = 0;
+   uintptr_t weapon_update                      = 0;
    uintptr_t char_exit_vehicle                  = 0;
    uintptr_t load_display_path_push_op           = 0;
    uintptr_t load_display_dlc_flag_byte          = 0;
@@ -891,6 +946,20 @@ struct game_addrs {
    uintptr_t net_enabled      = 0;
    uintptr_t net_enabled_next = 0;
    uintptr_t net_on_client    = 0;
+
+   // Controller support — binding table setup
+   uintptr_t controller_base_global   = 0;
+   uintptr_t num_joysticks_global     = 0;
+   uintptr_t joystick_config_base     = 0;
+   uintptr_t joystick_discover        = 0;
+   uintptr_t joystick_sync            = 0;
+
+   // Rumble output stubs — hooked to route vanilla rumble to XInput
+   uintptr_t rumble_light_output      = 0;
+   uintptr_t rumble_heavy_output      = 0;
+   uintptr_t rumble_state_setup       = 0;
+   uintptr_t rumble_dispatch          = 0;
+
 };
 
 extern game_addrs g_game;

@@ -12,6 +12,11 @@
 #include "slim_vector.hpp"
 #include "particle_renderer_patch.hpp"
 #include "tentacle_patch.hpp"
+#include "controller_support.hpp"
+#include "controller_rumble.hpp"
+#include "anim_textures.hpp"
+#include "bone_transform.hpp"
+#include "lod_limit_patch.hpp"
 
 
 static void install_patches(uintptr_t exe_base, const char* ini_path);
@@ -28,7 +33,11 @@ extern "C" __declspec(dllexport) BOOL WINAPI BF2GameExt_Init(uintptr_t exe_base,
 
 extern "C" __declspec(dllexport) void WINAPI BF2GameExt_Shutdown()
 {
+   bone_transform_uninstall();
+   anim_textures_uninstall();
+   rumble_shutdown();
    lua_hooks_uninstall();
+   unpatch_lod_limits();
    unpatch_particle_renderer();
    unpatch_tentacle_limit();
 }
@@ -107,6 +116,10 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
    bool hooks_enabled = cfg.get_bool("Hooks", "LuaHooks", true);
 
    g_debugLogLevel = cfg.get_int("Debug", "LogLevel", 1);
+   g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
+   g_rumbleEnabled     = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
+   g_rumbleScale       = cfg.get_float("Controller", "RumbleScale", 1.0f);
+   controller_set_ini_path(ini_path);
 
    if (patches_enabled) {
       if (not apply_patches(exe_base, sections, ini_path)) {
@@ -118,14 +131,20 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
       patch_particle_renderer(exe_base);
    }
 
-   // Tentacle bone limit patch — disabled until simulation reimplementation is debugged.
-   // See memory/tentacle_rewrite.md for status and next steps.
-   // if (cfg.get_bool("Patches", "TentacleBoneLimit", true)) {
-   //    patch_tentacle_limit(exe_base);
-   // }
+   if (cfg.get_bool("Patches", "TentacleBoneLimit", true)) {
+      patch_tentacle_limit(exe_base);
+   }
+
+   if (cfg.get_bool("Patches", "LodLimitIncrease", true)) {
+      patch_lod_limits(exe_base);
+   }
 
    if (hooks_enabled) {
       lua_hooks_install(exe_base);
+      if (cfg.get_bool("Hooks", "AnimTextures", true))
+         anim_textures_install(exe_base);
+      if (cfg.get_bool("Hooks", "TransformBone", true))
+         bone_transform_install(exe_base);
    }
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
@@ -139,4 +158,6 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
    if (hooks_enabled) {
       lua_hooks_post_install();
    }
+
+   rumble_init(exe_base);
 }
