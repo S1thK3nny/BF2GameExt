@@ -53,17 +53,13 @@ static constexpr unsigned int kCargoNodeName_Hash    = 0x3e2c4da4u;
 static constexpr unsigned int kCargoNodeOffset_Hash  = 0x910a89fcu;
 
 // EntityCarrier instance offsets from ECX (= this in Update, = struct_base + 0x240).
-// EntityFlyer::Update computes struct_base as ECX - 0x240 (LEA EDI,[EBX-0x240] at 0x4fc98d).
-// AttachCargo/UpdateLandedHeight receive struct_base (ECX - 0x240) and use +0x66C etc.
 static constexpr uintptr_t kState_offset        = 0x364;  // int: 0=landed 1=ascending 2=flying 3=landing 4=dying 5=dead
 static constexpr uintptr_t kProgress_offset     = 0x368;  // float: takeoff/landing progress (0..1)
 static constexpr uintptr_t kLandedHeight_offset = 0x3C0;  // float: hover floor / landing threshold
-static constexpr uintptr_t kFlightTimer_offset  = 0x3C4;  // float: flight timer
 static constexpr uintptr_t kGroundDist_offset   = 0x490;  // float: last measured ground distance
-static constexpr uintptr_t kCargoSlots_offset   = 0x1b90; // CargoSlot[4] (stride 0x14) — from Update disasm
+static constexpr uintptr_t kCargoSlots_offset   = 0x1b90; // CargoSlot[4] (stride 0x14)
 static constexpr uintptr_t kCargoSlot_ObjPtr    = 0x0C;   // slot+0xC = object pointer
-static constexpr uintptr_t kClass_offset        = 0x42C;  // EntityCarrierClass* (inner+0x66C, inner = ECX-0x240)
-static constexpr uintptr_t kOccupantFlags_off   = 0x044;  // byte: (& 3)==3 means has pilot/occupant
+static constexpr uintptr_t kClass_offset        = 0x42C;  // EntityCarrierClass*
 
 // EntityFlyerClass offsets (from class pointer)
 static constexpr uintptr_t kClassLandedHt_off   = 0x8F4;  // float: -(bbox_Y_min)
@@ -133,31 +129,77 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 //   __thiscall(EntityFlyer* this_inner)    (this_inner = struct_base)
 //   Ghidra VA: 0x004F8B70      (thunk at 0x00408602)
 //
-// The AI carrier behavior (FUN_005af000) calls TakeOff when picking a new
-// destination (AI state 4), even if the carrier is mid-landing (entity state 3).
-// This forces entity state=1 (ASCENDING), interrupting the descent and creating
-// an infinite LANDING→ASCENDING cycle.
-//
-// Fix: if entity is already in state 3 (LANDING), return early.  The landing
-// physics will complete the descent naturally.  Once the carrier lands (state 0),
-// the AI state machine will detect it and proceed normally.
+// Fix: if entity is already in state 3 (LANDING), return early.
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kTakeOff_addr = 0x004F8B70;
-// Inner-base offset for flight state (struct_base + 0x5A4)
 static constexpr uintptr_t kInner_mFlightState = 0x5A4;
+static constexpr uintptr_t kEntityCarrier_vtable = 0x00A3A670;
+
+// World position offsets from struct_base (inner base).
+static constexpr uintptr_t kInner_mPosX = 0x120;
+static constexpr uintptr_t kInner_mPosY = 0x124;
+static constexpr uintptr_t kInner_mPosZ = 0x128;
 
 using fn_TakeOff_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_TakeOff_t original_TakeOff = nullptr;
+static void* g_carrierVtable = nullptr; // resolved at install time
+
+// Per-carrier transform snapshot, taken at TakeOff time.
+// The movement controller overwrites the entity's full transform (position +
+// rotation) to a flight-path start point that doesn't match the carrier's
+// current pose.  This causes the carrier to visibly jump and rotate for ~1s
+// until the path converges.  We save the pre-TakeOff transform and restore
+// it each tick during ASCENDING, allowing only Y (altitude) to change.
+//
+// Entity transform layout at struct_base (16 bytes per row):
+//   +0x100: rotation row 0 (right axis)
+//   +0x110: rotation row 1 (forward axis / direction vector)
+//   +0x120: X, Y, Z position  (+0x12C likely padding/W)
+struct CarrierPosSnapshot {
+   void*  ecx;           // inner-base pointer (struct_base), 0 = unused
+   float  savedX;        // X position at TakeOff time
+   float  savedZ;        // Z position at TakeOff time
+   float  rotRow0[4];    // struct_base+0x100..+0x10F
+   float  rotRow1[4];    // struct_base+0x110..+0x11F
+   bool   active;        // true while correction is active
+};
+static constexpr int kMaxTrackedCarriers = 4;
+static CarrierPosSnapshot g_takeoffPos[kMaxTrackedCarriers] = {};
 
 static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
 {
    __try {
-      int state = *(int*)((char*)ecx + kInner_mFlightState);
-      if (state == 3) {
-         // Carrier is landing — don't interrupt.  Let it reach the ground.
-         auto fn = get_gamelog();
-         if (fn) fn("[Carrier] TakeOff BLOCKED — entity is LANDING (state 3)\n");
+      void* vtable = *(void**)ecx;
+      if (vtable == g_carrierVtable) {
+         int state = *(int*)((char*)ecx + kInner_mFlightState);
+         if (state == 3) {
+            auto fn = get_gamelog();
+            if (fn) fn("[Carrier] TakeOff BLOCKED — entity is LANDING (state 3)\n");
+            return;
+         }
+
+         // Save full transform before TakeOff: rotation + position X/Z.
+         // The movement controller will overwrite the entity transform to a
+         // flight-path start point; we restore everything except Y each tick.
+         if (state == 0) {
+            char* p = (char*)ecx;
+            int slot = -1;
+            for (int i = 0; i < kMaxTrackedCarriers; i++) {
+               if (g_takeoffPos[i].ecx == ecx || g_takeoffPos[i].ecx == nullptr) {
+                  slot = i; break;
+               }
+            }
+            if (slot < 0) slot = 0;
+            g_takeoffPos[slot].ecx = ecx;
+            g_takeoffPos[slot].savedX = *(float*)(p + kInner_mPosX);
+            g_takeoffPos[slot].savedZ = *(float*)(p + kInner_mPosZ);
+            memcpy(g_takeoffPos[slot].rotRow0, p + 0x100, 16);
+            memcpy(g_takeoffPos[slot].rotRow1, p + 0x110, 16);
+            g_takeoffPos[slot].active = true;
+         }
+
+         original_TakeOff(ecx, nullptr);
          return;
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -169,9 +211,6 @@ static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
 // EntityCarrier::Update — diagnostic logging
 //   __thiscall(EntityCarrier* this, float dt)
 //   Ghidra VA: 0x004D7FE0
-//
-// Logs carrier state, position, landed height, and flight timer every ~1s
-// and on every state change.  Output goes to the game's debug log.
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kCarrierUpdate_addr = 0x004D7FE0;
@@ -184,104 +223,91 @@ static int  g_diagFrameCount = 0;
 
 static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 {
-   // One-shot confirmation that the hook is active and GameLog works from here.
-   static bool s_loggedOnce = false;
-   if (!s_loggedOnce) {
-      s_loggedOnce = true;
-      auto fn0 = get_gamelog();
-      if (fn0) fn0("[Carrier] Update hook active, this=%p\n", ecx);
-   }
+   char* inner = (char*)ecx - 0x240;
 
-   // Capture state BEFORE original Update to detect transitions
-   int stateBefore = -1;
-   float progBefore = -1.f;
-   float gndDistBefore = -1.f;
-   float yPosBefore = -1.f;
+   // Pre-Update: restore saved transform (rotation + X position).
+   // The movement controller overwrites the entity's full transform each tick
+   // to a flight-path position.  We restore rotation and X; let Y change
+   // (ascending) and Z change (forward movement along path).
    __try {
-      stateBefore  = *(int*)((char*)ecx + kState_offset);
-      progBefore   = *(float*)((char*)ecx + kProgress_offset);
-      gndDistBefore = *(float*)((char*)ecx + kGroundDist_offset);
-      // Y position from entity's position vector (mPose matrix row 3, Y component)
-      // ECX is struct_base+0x240, mPose is at struct+0x110, row3 starts at +0x30
-      // So posY = *(float*)(struct_base + 0x110 + 0x34) = *(float*)(ecx - 0x240 + 0x144)
-      // Actually, the position is at this[-1].mSoundEngine.field_0xc in decompiled code
-      // which corresponds to the world Y. Let's read from the matrix directly.
-      // struct_base = ecx - 0x240, position row3 = struct_base + 0x110 + 0x30 = struct_base + 0x140
-      // Y = struct_base + 0x144 = ecx - 0x240 + 0x144 = ecx - 0xFC
-      yPosBefore = *(float*)((char*)ecx - 0xFC);
+      void* carrierInner = (void*)inner;
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_takeoffPos[i].ecx == carrierInner && g_takeoffPos[i].active) {
+            int state = *(int*)((char*)ecx + kState_offset);
+            if (state != 1) {
+               g_takeoffPos[i].active = false;
+               g_takeoffPos[i].ecx = nullptr;
+            } else {
+               memcpy(inner + 0x100, g_takeoffPos[i].rotRow0, 16);
+               memcpy(inner + 0x110, g_takeoffPos[i].rotRow1, 16);
+               *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX;
+            }
+            break;
+         }
+      }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
    bool alive = original_CarrierUpdate(ecx, nullptr, dt);
    if (!alive) return false;
 
+   // Post-Update: restore again in case original Update overwrote transform.
+   __try {
+      void* carrierInner = (void*)inner;
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_takeoffPos[i].ecx == carrierInner && g_takeoffPos[i].active) {
+            int state = *(int*)((char*)ecx + kState_offset);
+            if (state != 1) {
+               g_takeoffPos[i].active = false;
+               g_takeoffPos[i].ecx = nullptr;
+            } else {
+               memcpy(inner + 0x100, g_takeoffPos[i].rotRow0, 16);
+               memcpy(inner + 0x110, g_takeoffPos[i].rotRow1, 16);
+               *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX;
+            }
+            break;
+         }
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+   // Diagnostic: state transitions
    __try {
       int   state = *(int*)((char*)ecx + kState_offset);
-      void* cargo = *(void**)((char*)ecx + kCargoSlots_offset + kCargoSlot_ObjPtr);
-      float landedHt    = *(float*)((char*)ecx + kLandedHeight_offset);
-      float progress    = *(float*)((char*)ecx + kProgress_offset);
-      float groundDist  = *(float*)((char*)ecx + kGroundDist_offset);
-      float yPos        = *(float*)((char*)ecx - 0xFC);
-      unsigned char occFlags = *(unsigned char*)((char*)ecx + kOccupantFlags_off);
-      bool hasPilot = (occFlags & 3) == 3;
+      float posX = *(float*)(inner + kInner_mPosX);
+      float posY = *(float*)(inner + kInner_mPosY);
+      float posZ = *(float*)(inner + kInner_mPosZ);
 
-      // Detect state transitions — always log these
-      if (stateBefore != state && stateBefore != -1) {
+      if (state != g_diagLastState) {
          auto fn = get_gamelog();
          if (fn) {
             static const char* sn[] = {"LANDED","ASCENDING","FLYING","LANDING","DYING","DEAD"};
-            const char* snB = (stateBefore >= 0 && stateBefore <= 5) ? sn[stateBefore] : "???";
-            const char* snA = (state >= 0 && state <= 5) ? sn[state] : "???";
-            fn("[Carrier] *** TRANSITION %d(%s)->%d(%s) ***\n"
-               "  before: prog=%.3f gndDist=%.2f yPos=%.2f\n"
-               "  after:  prog=%.3f gndDist=%.2f yPos=%.2f landedHt=%.2f pilot=%s\n",
-               stateBefore, snB, state, snA,
-               progBefore, gndDistBefore, yPosBefore,
-               progress, groundDist, yPos, landedHt,
-               hasPilot ? "YES" : "NO");
+            const char* snOld = (g_diagLastState >= 0 && g_diagLastState <= 5) ? sn[g_diagLastState] : "???";
+            const char* snNew = (state >= 0 && state <= 5) ? sn[state] : "???";
+            fn("[Carrier] *** TRANSITION %d(%s)->%d(%s) *** pos=(%.2f,%.2f,%.2f)\n",
+               g_diagLastState, snOld, state, snNew, posX, posY, posZ);
+         }
+         g_diagLastState = state;
+      }
+
+      void* cargo = *(void**)((char*)ecx + kCargoSlots_offset + kCargoSlot_ObjPtr);
+      if (cargo) {
+         g_diagFrameCount++;
+         if (g_diagFrameCount % 120 == 0) {
+            float progress   = *(float*)((char*)ecx + kProgress_offset);
+            float groundDist = *(float*)((char*)ecx + kGroundDist_offset);
+            float landedHt   = *(float*)((char*)ecx + kLandedHeight_offset);
+            static const char* stateNames[] = {
+               "LANDED", "ASCENDING", "FLYING", "LANDING", "DYING", "DEAD"
+            };
+            const char* snm = (state >= 0 && state <= 5) ? stateNames[state] : "???";
+            auto fn = get_gamelog();
+            if (fn) {
+               fn("[Carrier] state=%d(%s) prog=%.3f gndDist=%.2f pos=(%.2f,%.2f,%.2f) landedHt=%.2f\n",
+                  state, snm, progress, groundDist, posX, posY, posZ, landedHt);
+            }
          }
       }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      bool stateChanged = (state != g_diagLastState);
-      if (stateChanged) g_diagLastState = state;
-
-      if (!cargo && !stateChanged) return alive;
-
-      g_diagFrameCount++;
-      if (!stateChanged && (g_diagFrameCount % 60 != 0)) return alive;
-
-      void* cls = *(void**)((char*)ecx + kClass_offset);
-      float classLandedHt  = -1.f;
-      float classTakeoffHt = -1.f;
-      if (cls) {
-         __try {
-            classLandedHt  = *(float*)((char*)cls + kClassLandedHt_off);
-            classTakeoffHt = *(float*)((char*)cls + kClassTakeoffHt_off);
-         } __except(EXCEPTION_EXECUTE_HANDLER) {
-            classLandedHt = -99.f; // signal: class read failed
-         }
-      }
-
-      static const char* stateNames[] = {
-         "LANDED", "ASCENDING", "FLYING", "LANDING", "DYING", "DEAD"
-      };
-      const char* snm = (state >= 0 && state <= 5) ? stateNames[state] : "???";
-
-      auto fn = get_gamelog();
-      if (fn) {
-         fn("[Carrier] state=%d(%s) prog=%.3f gndDist=%.2f yPos=%.2f landedHt=%.2f "
-            "classHt=%.2f takeoffHt=%.2f pilot=%s cargo=%s\n",
-            state, snm, progress, groundDist, yPos, landedHt,
-            classLandedHt, classTakeoffHt,
-            hasPilot ? "YES" : "NO", cargo ? "YES" : "no");
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {
-      static bool s_loggedExc = false;
-      if (!s_loggedExc) {
-         s_loggedExc = true;
-         auto fn = get_gamelog();
-         if (fn) fn("[Carrier] EXCEPTION in diagnostic read — bad offset?\n");
-      }
-   }
    return alive;
 }
 
@@ -289,13 +315,10 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 // EntityCarrier::UpdateLandedHeight — diagnostic logging
 //   __thiscall(EntityCarrier* this_inner)    (this_inner = struct_base, NOT +0x240)
 //   Ghidra VA: 0x004D8130      (thunk at 0x004126DE)
-//
-// Logs the base class height, per-cargo adjustment, and final landedHt.
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kUpdateLandedHeight_addr = 0x004D8130;
 
-// Inner-base offsets (struct_base, NOT +0x240)
 static constexpr uintptr_t kInner_mLandedHt    = 0x600;  // float
 static constexpr uintptr_t kInner_mClass       = 0x66C;  // EntityCarrierClass*
 static constexpr uintptr_t kInner_mCargoCount  = 0x1E20; // int
@@ -305,13 +328,11 @@ static fn_UpdateLandedHeight_t original_UpdateLandedHeight = nullptr;
 
 static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
 {
-   // Read the class base height BEFORE the original updates it
    float beforeHt = -999.f;
    __try {
       beforeHt = *(float*)((char*)ecx + kInner_mLandedHt);
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-   // Call original — it sets mLandedHeight from class base, then adjusts per cargo
    original_UpdateLandedHeight(ecx, nullptr);
 
    __try {
@@ -325,7 +346,6 @@ static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
          } __except(EXCEPTION_EXECUTE_HANDLER) {}
       }
 
-      // Only log when there's cargo (otherwise it's just classHt copied over)
       if (cargoCount > 0) {
          auto fn = get_gamelog();
          if (fn) {
@@ -346,17 +366,18 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    original_SetProperty    = (fn_SetProperty_t)  resolve(exe_base, kSetProperty_addr);
    original_AttachCargo    = (fn_AttachCargo_t)   resolve(exe_base, kAttachCargo_addr);
    original_DetachCargo    = (fn_DetachCargo_t)   resolve(exe_base, kDetachCargo_addr);
-   original_TakeOff    = (fn_TakeOff_t)   resolve(exe_base, kTakeOff_addr);
-   original_CarrierUpdate  = (fn_CarrierUpdate_t)resolve(exe_base, kCarrierUpdate_addr);
+   original_TakeOff        = (fn_TakeOff_t)       resolve(exe_base, kTakeOff_addr);
+   g_carrierVtable         = resolve(exe_base, kEntityCarrier_vtable);
+   original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, kCarrierUpdate_addr);
    original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   DetourAttach(&(PVOID&)original_SetProperty,   hooked_SetProperty);
-   DetourAttach(&(PVOID&)original_AttachCargo,   hooked_AttachCargo);
-   DetourAttach(&(PVOID&)original_DetachCargo,   hooked_DetachCargo);
-   DetourAttach(&(PVOID&)original_TakeOff,   hooked_TakeOff);
-   DetourAttach(&(PVOID&)original_CarrierUpdate, hooked_CarrierUpdate);
+   DetourAttach(&(PVOID&)original_SetProperty,       hooked_SetProperty);
+   DetourAttach(&(PVOID&)original_AttachCargo,       hooked_AttachCargo);
+   DetourAttach(&(PVOID&)original_DetachCargo,       hooked_DetachCargo);
+   DetourAttach(&(PVOID&)original_TakeOff,           hooked_TakeOff);
+   DetourAttach(&(PVOID&)original_CarrierUpdate,     hooked_CarrierUpdate);
    DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    DetourTransactionCommit();
 }
@@ -368,7 +389,7 @@ void entity_carrier_fixes_uninstall()
    if (original_SetProperty)        DetourDetach(&(PVOID&)original_SetProperty,        hooked_SetProperty);
    if (original_AttachCargo)        DetourDetach(&(PVOID&)original_AttachCargo,        hooked_AttachCargo);
    if (original_DetachCargo)        DetourDetach(&(PVOID&)original_DetachCargo,        hooked_DetachCargo);
-   if (original_TakeOff)        DetourDetach(&(PVOID&)original_TakeOff,        hooked_TakeOff);
+   if (original_TakeOff)            DetourDetach(&(PVOID&)original_TakeOff,            hooked_TakeOff);
    if (original_CarrierUpdate)      DetourDetach(&(PVOID&)original_CarrierUpdate,      hooked_CarrierUpdate);
    if (original_UpdateLandedHeight) DetourDetach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    DetourTransactionCommit();
