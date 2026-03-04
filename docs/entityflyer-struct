@@ -1,0 +1,1445 @@
+
+/* WARNING: Enum "VOType": Some values do not have unique names */
+/* WARNING: Enum "Posture": Some values do not have unique names */
+/* WARNING: Enum "MovementAnimation": Some values do not have unique names */
+/* WARNING: Enum "WeaponAnimation": Some values do not have unique names */
+/* WARNING: Enum "POSE": Some values do not have unique names */
+/* WARNING: Enum "ANIMPOOL": Some values do not have unique names */
+/* WARNING: Struct "EntityFlyer": ignoring multiple overlapping fields */
+
+EntityFlyer * __thiscall EntityFlyer::EntityFlyer(EntityFlyer *this,int param_1,int *param_2)
+
+{
+  undefined1 *puVar1;
+  char *pcVar2;
+  byte *pbVar3;
+  undefined4 *this_00;
+  byte bVar4;
+  uint uVar5;
+  short *psVar6;
+  EntityFlyer *pEVar7;
+  int *piVar8;
+  PostCollision *pPVar9;
+  PassengerSlot *pPVar10;
+  undefined8 *puVar11;
+  undefined4 uVar12;
+  int iVar13;
+  undefined4 *extraout_ECX;
+  int *piVar14;
+  int iVar15;
+  int iVar16;
+  PassengerSlot_vftable1 **ppPVar17;
+  undefined1 *_Dst;
+  int iVar18;
+  uint unaff_EDI;
+  undefined4 local_3cc [226];
+  undefined1 local_44 [12];
+  EntityFlyer_vftable5 **local_38;
+  Aimer *local_34;
+  undefined1 *local_30;
+  undefined1 *puStack_2c;
+  uint uStack_28;
+  undefined4 uStack_24;
+  undefined4 local_20;
+  Aimer *local_1c;
+  EntityFlyer *local_18;
+  int local_14;
+  void *local_10;
+  undefined1 *puStack_c;
+  undefined4 local_8;
+  
+  local_8 = 0xffffffff;
+  puStack_c = &LAB_00757447;
+  local_10 = ExceptionList;
+  ExceptionList = &local_10;
+  local_18 = this;
+                    /* inlined constructor: EntityFlyer::EntityFlyer */
+  GameObject::GameObject((GameObject *)this,param_1,param_2,8,*(int *)(param_1 + 0x164) + 0x34);
+  local_8 = 0;
+  Controllable::AIThread::AIThread
+            ((AIThread *)&this->vftablePtr,param_1 + 0x380,(AIThread_vftable *)param_2[0x11]);
+  local_8._0_1_ = 1;
+  FUN_0066e510(&this->VehicleMusic,(undefined4 *)(param_1 + 0x540));
+  local_8._0_1_ = 2;
+  FUN_0066cb20(&this->VehicleEngine,(int *)(param_1 + 0x590));
+  local_8._0_1_ = 3;
+  EntityPathFollower::EntityPathFollower((EntityPathFollower *)&this->vftablePtr,param_1 + 0x5e4);
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  this->vftablePtr = &vftable;
+  (this->EntityFlyer_data).offset_0x4c = 0.0;
+  (this->EntityFlyer_data).offset_0x50 = 0.0;
+  (this->EntityFlyer_data).offset_0xec = (undefined4 *)(param_1 + 0xcb0);
+  (this->EntityFlyer_data).offset_0xf0 = *(undefined4 *)(param_1 + 0xcb0);
+  (this->EntityFlyer_data).offset_0xf4 = 2;
+  local_8._0_1_ = 5;
+  FUN_0072bbf0(&(this->EntityFlyer_data).offset_0x1b4);
+  local_8._0_1_ = 6;
+  FUN_0072cc90((int)&(this->EntityFlyer_data).field_0x9c4);
+  local_8._0_1_ = 7;
+  PblHashTableCode::_Clear(&this[1].EntityFlyer_data.field_0x4c4,0x80);
+  *(undefined4 *)&this[1].EntityFlyer_data.field_0x4c0 = 0;
+  *(undefined4 *)&this[1].EntityFlyer_data.field_0x8c4 = 0;
+  FUN_00735880((undefined4 *)&this[1].EntityFlyer_data.field_0x8c8);
+  *(undefined4 *)&this[1].EntityFlyer_data.field_0x8f4 = 0;
+  *(undefined4 *)&this[1].EntityFlyer_data.field_0x91c = 0;
+  GameSoundControllable::GameSoundControllable
+            ((GameSoundControllable *)&this[1].EntityFlyer_data.field_0x92c);
+  Thread::Thread((Thread *)&this[1].EntityFlyer_data.field_0x930);
+  *extraout_ECX = &PostCollision::vftable;
+  extraout_ECX[6] = this;
+  local_8._0_1_ = 10;
+  FUN_00752a6b(&this[1].EntityFlyer_data.field_0x94c,8,8,&LAB_004b97c0);
+  local_8._0_1_ = 0xb;
+  _Dst = &local_18[1].EntityFlyer_data.field_0x98c;
+  FUN_00752a6b(_Dst,8,0xc,&LAB_004b97c0);
+  local_8._0_1_ = 0xc;
+  *(int *)&local_18->field_0x218 = *(int *)&local_18->field_0x218 + 1;
+  puVar1 = &local_18->field_0x2f8;
+  *(undefined1 **)puVar1 = &local_18->field_0x208;
+  *(undefined1 **)&local_18->field_0x2fc = &local_18->field_0x208;
+  *(EntityFlyer_vftable5 ***)&local_18->field_0x304 = &local_18->vftablePtr;
+  *(undefined4 *)&local_18->field_0x300 = *(undefined4 *)&local_18->field_0x210;
+  *(undefined1 **)&local_18->field_0x210 = puVar1;
+  *(undefined1 **)(*(int *)&local_18->field_0x300 + 4) = puVar1;
+  *(undefined4 *)&local_18[1].EntityFlyer_data.field_0x928 = 0;
+  memset(&local_18[1].EntityFlyer_data.field_0x94c,0,0x40);
+  memset(_Dst,0,0x60);
+  pEVar7 = local_18;
+  piVar8 = (int *)(param_1 + 0xd50);
+  local_14 = 8;
+  (local_18->EntityFlyer_data).offset_0x174 = '\0';
+  do {
+    if (*piVar8 != 0) {
+      local_1c = (Aimer *)FUN_006dc370(&DAT_01ecb158);
+      local_8._0_1_ = 0xd;
+      if (local_1c == (Aimer *)0x0) {
+        pPVar9 = (PostCollision *)0x0;
+      }
+      else {
+        pPVar9 = MountedTurret::PostCollision::PostCollision
+                           ((PostCollision *)local_1c,(int)pEVar7,*piVar8,
+                            (int)&pEVar7[1].EntityFlyer_data.field_0x4c0);
+      }
+      local_8._0_1_ = 0xc;
+      *(PostCollision **)
+       (&(pEVar7->EntityFlyer_data).field_0x154 + (pEVar7->EntityFlyer_data).offset_0x174 * 4) =
+           pPVar9;
+      iVar15 = *(int *)(&(pEVar7->EntityFlyer_data).field_0x154 +
+                       (pEVar7->EntityFlyer_data).offset_0x174 * 4);
+      if (iVar15 == 0) {
+        iVar18 = 0;
+      }
+      else {
+        iVar18 = iVar15 + 0xc;
+      }
+      *(int *)&pEVar7->field_0x218 = *(int *)&pEVar7->field_0x218 + 1;
+      piVar14 = (int *)(iVar15 + 0xc4);
+      *(int *)(iVar15 + 0xd0) = iVar18;
+      *piVar14 = (int)&pEVar7->field_0x208;
+      *(undefined1 **)(iVar15 + 200) = &pEVar7->field_0x208;
+      *(undefined4 *)(iVar15 + 0xcc) = *(undefined4 *)&pEVar7->field_0x210;
+      *(int **)&pEVar7->field_0x210 = piVar14;
+      *(int **)(*(int *)(iVar15 + 0xcc) + 4) = piVar14;
+      pcVar2 = &(pEVar7->EntityFlyer_data).offset_0x174;
+      *pcVar2 = *pcVar2 + '\x01';
+    }
+    piVar8 = piVar8 + 1;
+    local_14 = local_14 + -1;
+  } while (local_14 != 0);
+  (pEVar7->EntityFlyer_data).offset_0x140 = param_1;
+  local_14 = 0;
+  if ((*(int *)(param_1 + 0xd48) != 0) && (local_14 = 0, *(char *)(param_1 + 0xd4c) != '\0')) {
+    param_2 = (int *)&(pEVar7->EntityFlyer_data).offset_0x144;
+    do {
+      local_1c = (Aimer *)FUN_006dc370(&DAT_01ef7ca0);
+      local_8._0_1_ = 0xe;
+      if (local_1c == (Aimer *)0x0) {
+        pPVar10 = (PassengerSlot *)0x0;
+      }
+      else {
+        pPVar10 = PassengerSlot::PassengerSlot
+                            ((PassengerSlot *)local_1c,(int)pEVar7,
+                             *(int *)((pEVar7->EntityFlyer_data).offset_0x140 + 0xd48));
+      }
+      local_8._0_1_ = 0xc;
+      *param_2 = (int)pPVar10;
+      if (pPVar10 == (PassengerSlot *)0x0) {
+        ppPVar17 = (PassengerSlot_vftable1 **)0x0;
+      }
+      else {
+        ppPVar17 = &pPVar10->vftablePtr;
+      }
+      *(int *)&pEVar7->field_0x218 = *(int *)&pEVar7->field_0x218 + 1;
+      puVar1 = &pPVar10->field_0xc4;
+      param_2 = param_2 + 1;
+      *(PassengerSlot_vftable1 ***)&pPVar10->field_0xd0 = ppPVar17;
+      *(undefined1 **)puVar1 = &pEVar7->field_0x208;
+      *(undefined1 **)&pPVar10->field_0xc8 = &pEVar7->field_0x208;
+      *(undefined4 *)&pPVar10->field_0xcc = *(undefined4 *)&pEVar7->field_0x210;
+      *(undefined1 **)&pEVar7->field_0x210 = puVar1;
+      *(undefined1 **)(*(int *)&pPVar10->field_0xcc + 4) = puVar1;
+      local_14 = local_14 + 1;
+    } while (local_14 < (int)(uint)*(byte *)((pEVar7->EntityFlyer_data).offset_0x140 + 0xd4c));
+  }
+  uVar12 = *(undefined4 *)&pEVar7->field_0x114;
+  iVar15 = (pEVar7->EntityFlyer_data).offset_0x140;
+  *(undefined ***)&pEVar7->field_0x328 = pEVar7->offset_0x10c;
+  *(undefined4 *)&pEVar7->field_0x32c = uVar12;
+  *(undefined4 *)&pEVar7->field_0x330 = *(undefined4 *)&pEVar7->field_0x118;
+  puVar11 = (undefined8 *)FUN_00658b20((void *)(iVar15 + 0xcf8),local_44,&pEVar7->field_0xf0);
+  *(undefined8 *)&pEVar7->field_0x31c = *puVar11;
+  *(undefined4 *)&pEVar7->field_0x324 = *(undefined4 *)(puVar11 + 1);
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x120 = *(undefined4 *)(param_1 + 0x7b0);
+  (*pEVar7->vftablePtr[1].IsRtti)(&pEVar7->vftablePtr,unaff_EDI);
+  if ((*(byte *)((pEVar7->EntityFlyer_data).offset_0x140 + 0x1050) & 2) == 0) {
+    FUN_004aa960((int *)pEVar7);
+  }
+  else {
+    FUN_004aaa60((int)pEVar7);
+  }
+  pbVar3 = &(pEVar7->EntityFlyer_data).offset_0xc8;
+  *pbVar3 = *pbVar3 & 0xfe;
+  (pEVar7->EntityFlyer_data).field35_0x80 = 0.0;
+  (pEVar7->EntityFlyer_data).field36_0x84 = 0.0;
+  (pEVar7->EntityFlyer_data).field37_0x88 = 0.0;
+  (pEVar7->EntityFlyer_data).field38_0x8c = 0.0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x1a4 = 0;
+  (pEVar7->EntityFlyer_data).field39_0x90 = 0.0;
+  (pEVar7->EntityFlyer_data).field40_0x94 = 0.0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xac = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xb0 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xb4 = 0;
+  bVar4 = (pEVar7->EntityFlyer_data).offset_0xc8;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xb8 = 7;
+  (pEVar7->EntityFlyer_data).offset_0xc8 = bVar4 & 0x19 | 0x40;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xbc = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xc0 = 0;
+  (pEVar7->EntityFlyer_data).field41_0x98 = 0.0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x9c = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xcc = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xa0 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xa4 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xa8 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xe4 = 0xbf800000;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xe8 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xd0 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xd8 = 0x41700000;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xdc = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xe0 = 0;
+  uVar12 = *(undefined4 *)((pEVar7->EntityFlyer_data).offset_0x140 + 0x82c);
+  (pEVar7->EntityFlyer_data).offset_0xc8 = bVar4 & 0x11 | 0x40;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xd4 = uVar12;
+  FUN_004ac0c0((int)pEVar7);
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xf8 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xfc = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x100 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x104 = 0x3dcccccd;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x108 = 0x3da3d70a;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x10c = 0x3d75c28f;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x110 = 0x3ecccccd;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x114 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x118 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x11c = 0;
+  (pEVar7->EntityFlyer_data).offset_0x17c = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x180 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x184 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x188 = 0;
+  param_2 = (int *)0x0;
+  (pEVar7->EntityFlyer_data).offset_0x18c = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x190 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x194 = 0;
+  *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x198 = 0;
+  if (0 < *(int *)((pEVar7->EntityFlyer_data).offset_0x140 + 0xc80)) {
+    iVar15 = param_1 + 0x860;
+    iVar18 = 0xc60;
+    local_14 = 0x5f8 - (int)pEVar7;
+    do {
+      if (*(int *)(iVar18 + -0x10 + (pEVar7->EntityFlyer_data).offset_0x140) != 0) {
+        local_1c = (Aimer *)FUN_006dc370(&DAT_01eb0460);
+        local_8._0_1_ = 0xf;
+        if (local_1c == (Aimer *)0x0) {
+          local_34 = (Aimer *)0x0;
+        }
+        else {
+          local_34 = Aimer::Aimer(local_1c,iVar15,&pEVar7->vftablePtr,(int)&pEVar7->field_0xf0,
+                                  &pEVar7[1].EntityFlyer_data.field_0x4c0,(undefined4 *)0x0);
+        }
+        local_8._0_1_ = 0xc;
+        local_38 = &pEVar7->vftablePtr;
+        local_20 = 0;
+        uStack_28 = 0;
+        uStack_24 = 0;
+        *(Aimer **)((int)pEVar7 + iVar18 + -0x5f8) = local_34;
+        iVar16 = (pEVar7->EntityFlyer_data).offset_0x140;
+        local_30 = &pEVar7->field_0x278 +
+                   *(int *)((int)pEVar7 + local_14 + iVar16 + iVar18 + -0x5e8) * 4;
+        puStack_2c = &pEVar7->field_0x280;
+        uVar5 = *(uint *)(iVar16 + iVar18);
+        if ((int)uVar5 < 0) {
+          uStack_24 = *(undefined4 *)
+                       ((&(pEVar7->EntityFlyer_data).offset_0x18c)[uVar5 & 0xffffff] + 0x88);
+        }
+        else if ((uVar5 & 0x20000000) == 0) {
+          uStack_28 = uVar5 & 0xffffff;
+        }
+        else {
+          uStack_28 = 0x7fffffff;
+        }
+        if ((*(uint *)(iVar16 + iVar18) & 0x40000000) != 0) {
+          local_20 = *(undefined4 *)
+                      ((&(pEVar7->EntityFlyer_data).offset_0x18c)
+                       [*(uint *)(iVar16 + iVar18) >> 0x18 & 0x1f] + 0x8c);
+        }
+        uVar12 = (**(code **)(**(int **)(iVar16 + -0x10 + iVar18) + 8))(&local_38);
+        *(undefined4 *)((int)pEVar7 + iVar18 + -0x5e8) = uVar12;
+      }
+      param_2 = (int *)((int)param_2 + 1);
+      iVar15 = iVar15 + 0xfc;
+      iVar18 = iVar18 + 4;
+    } while ((int)param_2 < *(int *)((pEVar7->EntityFlyer_data).offset_0x140 + 0xc80));
+  }
+  piVar8 = (int *)&(pEVar7->EntityFlyer_data).field_0x19c;
+  iVar15 = 0;
+  do {
+    *piVar8 = -1;
+    iVar16 = 0;
+    iVar18 = (pEVar7->EntityFlyer_data).offset_0x140;
+    if (0 < *(int *)(iVar18 + 0xc80)) {
+      iVar13 = 0xc70;
+      do {
+        if ((*(int *)((int)pEVar7 + iVar13 + -0x5f8) != 0) && (*(int *)(iVar13 + iVar18) == iVar15))
+        {
+          *piVar8 = iVar16;
+          break;
+        }
+        iVar16 = iVar16 + 1;
+        iVar13 = iVar13 + 4;
+      } while (iVar16 < *(int *)(iVar18 + 0xc80));
+    }
+    iVar15 = iVar15 + 1;
+    piVar8 = piVar8 + 1;
+    if (1 < iVar15) {
+      FUN_006524b0(pEVar7,CONCAT31((int3)((uint)iVar15 >> 8),1));
+      FUN_004837c0((int)&pEVar7->vftablePtr);
+      FUN_0066dd00((int)pEVar7);
+      if (*(int *)&(pEVar7->EntityFlyer_data).field_0x120 != 0) {
+        uVar12 = *(undefined4 *)(*(int *)((pEVar7->EntityFlyer_data).offset_0x140 + 0x7b0) + 0xc);
+        FUN_0072da90(local_3cc);
+        local_8 = CONCAT31(local_8._1_3_,0x10);
+        this_00 = &(pEVar7->EntityFlyer_data).offset_0x1b4;
+        FUN_0072cc40(this_00,uVar12,local_3cc);
+        FUN_0072df20(local_3cc,this_00);
+        FUN_0072d3f0(&(pEVar7->EntityFlyer_data).field_0x9c4,this_00);
+        psVar6 = *(short **)((pEVar7->EntityFlyer_data).offset_0x140 + 0x7b4);
+        if (psVar6 != (short *)0x0) {
+          FUN_0072d430(&(pEVar7->EntityFlyer_data).field_0x9c4,psVar6,0x41f00000);
+          pEVar7[1].EntityFlyer_data.field_0x4ba = 0;
+          FUN_0072d5b0(&(pEVar7->EntityFlyer_data).field_0x9c4,0);
+          FUN_0072dfd0(local_3cc,&(pEVar7->EntityFlyer_data).field_0x9c4,'\x01');
+          FUN_0072bc30(this_00,&DAT_009caee0);
+          FUN_006ddb30(this_00);
+        }
+        local_8._0_1_ = 0xc;
+        FUN_0072db10();
+      }
+      FUN_006c4b90(*(void **)(*(int *)&pEVar7->field_0x130 + 0x24),
+                   (int *)&pEVar7[1].EntityFlyer_data.field_0x4c0);
+      FUN_005bad20((int *)pEVar7);
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x8f0 = 0;
+      *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0x124 = 0xbf800000;
+      (pEVar7->EntityFlyer_data).offset_0x4c = 0.0;
+      (pEVar7->EntityFlyer_data).offset_0x50 = 0.0;
+      *(undefined4 *)&(pEVar7->EntityFlyer_data).field_0xc4 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x8fc = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x900 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x904 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x908 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x90c = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x910 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x914 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x918 = 0;
+      if ((pEVar7->field_0x78 & 1) == 0) {
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x8fc = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x900 = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x904 = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x910 = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x90c = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x908 = 0;
+        *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x918 = 0;
+      }
+      iVar15 = (pEVar7->EntityFlyer_data).offset_0x140;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x920 = 0;
+      pEVar7[1].EntityFlyer_data.field_0x924 = 0;
+      *(undefined4 *)&pEVar7[1].EntityFlyer_data.field_0x8f8 = *(undefined4 *)(iVar15 + 0x5e0);
+      ExceptionList = local_10;
+      return pEVar7;
+    }
+  } while( true );
+}
+
+0x0	0x4	EntityFlyer_vftable0 *	EntityFlyer_vftable0 *	vftablePtr	
+0x4	0x1	??	undefined		
+0x5	0x1	??	undefined		
+0x6	0x1	??	undefined		
+0x7	0x1	??	undefined		
+0x8	0x1	??	undefined		
+0x9	0x1	??	undefined		
+0xa	0x1	??	undefined		
+0xb	0x1	??	undefined		
+0xc	0x4	EntityFlyer_vftable1 *	EntityFlyer_vftable1 *	vftablePtr	
+0x10	0x4	addr *	undefined * *	offset_0xc	
+0x14	0x1	??	undefined		
+0x15	0x1	??	undefined		
+0x16	0x1	??	undefined		
+0x17	0x1	??	undefined		
+0x18	0x1	??	undefined		
+0x19	0x1	??	undefined		
+0x1a	0x1	??	undefined		
+0x1b	0x1	??	undefined		
+0x1c	0x1	??	undefined		
+0x1d	0x1	??	undefined		
+0x1e	0x1	??	undefined		
+0x1f	0x1	??	undefined		
+0x20	0x1	??	undefined		
+0x21	0x1	??	undefined		
+0x22	0x1	??	undefined		
+0x23	0x1	??	undefined		
+0x24	0x1	??	undefined		
+0x25	0x1	??	undefined		
+0x26	0x1	??	undefined		
+0x27	0x1	??	undefined		
+0x28	0x4	addr *	undefined * *	offset_0x24	
+0x2c	0x1	??	undefined		
+0x2d	0x1	??	undefined		
+0x2e	0x1	??	undefined		
+0x2f	0x1	??	undefined		
+0x30	0x4	uint	uint	offset_0x2c	
+0x34	0x4	undefined4	undefined4	offset_0x30	
+0x38	0x4	undefined4	undefined4	offset_0x34	
+0x3c	0x4	undefined4	undefined4	offset_0x38	
+0x40	0x4	undefined4	undefined4	offset_0x3c	
+0x44	0x1	??	undefined		
+0x45	0x1	??	undefined		
+0x46	0x1	??	undefined		
+0x47	0x1	??	undefined		
+0x48	0x1	??	undefined		
+0x49	0x1	??	undefined		
+0x4a	0x1	??	undefined		
+0x4b	0x1	??	undefined		
+0x4c	0x1	??	undefined		
+0x4d	0x1	??	undefined		
+0x4e	0x1	??	undefined		
+0x4f	0x1	??	undefined		
+0x50	0x1	??	undefined		
+0x51	0x1	??	undefined		
+0x52	0x1	??	undefined		
+0x53	0x1	??	undefined		
+0x54	0x1	??	undefined		
+0x55	0x1	??	undefined		
+0x56	0x1	??	undefined		
+0x57	0x1	??	undefined		
+0x58	0x1	??	undefined		
+0x59	0x1	??	undefined		
+0x5a	0x1	??	undefined		
+0x5b	0x1	??	undefined		
+0x5c	0x1	??	undefined		
+0x5d	0x1	??	undefined		
+0x5e	0x1	??	undefined		
+0x5f	0x1	??	undefined		
+0x60	0x1	??	undefined		
+0x61	0x1	??	undefined		
+0x62	0x1	??	undefined		
+0x63	0x1	??	undefined		
+0x64	0x1	??	undefined		
+0x65	0x1	??	undefined		
+0x66	0x1	??	undefined		
+0x67	0x1	??	undefined		
+0x68	0x1	??	undefined		
+0x69	0x1	??	undefined		
+0x6a	0x1	??	undefined		
+0x6b	0x1	??	undefined		
+0x6c	0x1	??	undefined		
+0x6d	0x1	??	undefined		
+0x6e	0x1	??	undefined		
+0x6f	0x1	??	undefined		
+0x70	0x1	??	undefined		
+0x71	0x1	??	undefined		
+0x72	0x1	??	undefined		
+0x73	0x1	??	undefined		
+0x74	0x1	??	undefined		
+0x75	0x1	??	undefined		
+0x76	0x1	??	undefined		
+0x77	0x1	??	undefined		
+0x78	0x1	??	undefined		
+0x79	0x1	??	undefined		
+0x7a	0x1	??	undefined		
+0x7b	0x1	??	undefined		
+0x7c	0x1	??	undefined		
+0x7d	0x1	??	undefined		
+0x7e	0x1	??	undefined		
+0x7f	0x1	??	undefined		
+0x80	0x1	??	undefined		
+0x81	0x1	??	undefined		
+0x82	0x1	??	undefined		
+0x83	0x1	??	undefined		
+0x84	0x1	??	undefined		
+0x85	0x1	??	undefined		
+0x86	0x1	??	undefined		
+0x87	0x1	??	undefined		
+0x88	0x1	??	undefined		
+0x89	0x1	??	undefined		
+0x8a	0x1	??	undefined		
+0x8b	0x1	??	undefined		
+0x8c	0x1	??	undefined		
+0x8d	0x1	??	undefined		
+0x8e	0x1	??	undefined		
+0x8f	0x1	??	undefined		
+0x90	0x4	void *	void *	offset_0x8c	
+0x94	0x4	EntityFlyer_vftable2 *	EntityFlyer_vftable2 *	vftablePtr	
+0x98	0x1	??	undefined		
+0x99	0x1	??	undefined		
+0x9a	0x1	??	undefined		
+0x9b	0x1	??	undefined		
+0x9c	0x1	??	undefined		
+0x9d	0x1	??	undefined		
+0x9e	0x1	??	undefined		
+0x9f	0x1	??	undefined		
+0xa0	0x4	addr *	undefined * *	offset_0x9c	
+0xa4	0x1	??	undefined		
+0xa5	0x1	??	undefined		
+0xa6	0x1	??	undefined		
+0xa7	0x1	??	undefined		
+0xa8	0x1	??	undefined		
+0xa9	0x1	??	undefined		
+0xaa	0x1	??	undefined		
+0xab	0x1	??	undefined		
+0xac	0x1	??	undefined		
+0xad	0x1	??	undefined		
+0xae	0x1	??	undefined		
+0xaf	0x1	??	undefined		
+0xb0	0x1	??	undefined		
+0xb1	0x1	??	undefined		
+0xb2	0x1	??	undefined		
+0xb3	0x1	??	undefined		
+0xb4	0x1	??	undefined		
+0xb5	0x1	??	undefined		
+0xb6	0x1	??	undefined		
+0xb7	0x1	??	undefined		
+0xb8	0x1	??	undefined		
+0xb9	0x1	??	undefined		
+0xba	0x1	??	undefined		
+0xbb	0x1	??	undefined		
+0xbc	0x1	??	undefined		
+0xbd	0x1	??	undefined		
+0xbe	0x1	??	undefined		
+0xbf	0x1	??	undefined		
+0xc0	0x1	??	undefined		
+0xc1	0x1	??	undefined		
+0xc2	0x1	??	undefined		
+0xc3	0x1	??	undefined		
+0xc4	0x1	??	undefined		
+0xc5	0x1	??	undefined		
+0xc6	0x1	??	undefined		
+0xc7	0x1	??	undefined		
+0xc8	0x1	??	undefined		
+0xc9	0x1	??	undefined		
+0xca	0x1	??	undefined		
+0xcb	0x1	??	undefined		
+0xcc	0x1	??	undefined		
+0xcd	0x1	??	undefined		
+0xce	0x1	??	undefined		
+0xcf	0x1	??	undefined		
+0xd0	0x1	??	undefined		
+0xd1	0x1	??	undefined		
+0xd2	0x1	??	undefined		
+0xd3	0x1	??	undefined		
+0xd4	0x1	??	undefined		
+0xd5	0x1	??	undefined		
+0xd6	0x1	??	undefined		
+0xd7	0x1	??	undefined		
+0xd8	0x1	??	undefined		
+0xd9	0x1	??	undefined		
+0xda	0x1	??	undefined		
+0xdb	0x1	??	undefined		
+0xdc	0x1	??	undefined		
+0xdd	0x1	??	undefined		
+0xde	0x1	??	undefined		
+0xdf	0x1	??	undefined		
+0xe0	0x1	??	undefined		
+0xe1	0x1	??	undefined		
+0xe2	0x1	??	undefined		
+0xe3	0x1	??	undefined		
+0xe4	0x1	??	undefined		
+0xe5	0x1	??	undefined		
+0xe6	0x1	??	undefined		
+0xe7	0x1	??	undefined		
+0xe8	0x1	??	undefined		
+0xe9	0x1	??	undefined		
+0xea	0x1	??	undefined		
+0xeb	0x1	??	undefined		
+0xec	0x1	??	undefined		
+0xed	0x1	??	undefined		
+0xee	0x1	??	undefined		
+0xef	0x1	??	undefined		
+0xf0	0x1	??	undefined		
+0xf1	0x1	??	undefined		
+0xf2	0x1	??	undefined		
+0xf3	0x1	??	undefined		
+0xf4	0x1	??	undefined		
+0xf5	0x1	??	undefined		
+0xf6	0x1	??	undefined		
+0xf7	0x1	??	undefined		
+0xf8	0x1	??	undefined		
+0xf9	0x1	??	undefined		
+0xfa	0x1	??	undefined		
+0xfb	0x1	??	undefined		
+0xfc	0x1	??	undefined		
+0xfd	0x1	??	undefined		
+0xfe	0x1	??	undefined		
+0xff	0x1	??	undefined		
+0x100	0x4	addr *	undefined * *	offset_0xfc	
+0x104	0x1	??	undefined		
+0x105	0x1	??	undefined		
+0x106	0x1	??	undefined		
+0x107	0x1	??	undefined		
+0x108	0x1	??	undefined		
+0x109	0x1	??	undefined		
+0x10a	0x1	??	undefined		
+0x10b	0x1	??	undefined		
+0x10c	0x1	??	undefined		
+0x10d	0x1	??	undefined		
+0x10e	0x1	??	undefined		
+0x10f	0x1	??	undefined		
+0x110	0x4	addr *	undefined * *	offset_0x10c	
+0x114	0x1	??	undefined		
+0x115	0x1	??	undefined		
+0x116	0x1	??	undefined		
+0x117	0x1	??	undefined		
+0x118	0x1	??	undefined		
+0x119	0x1	??	undefined		
+0x11a	0x1	??	undefined		
+0x11b	0x1	??	undefined		
+0x11c	0x1	??	undefined		
+0x11d	0x1	??	undefined		
+0x11e	0x1	??	undefined		
+0x11f	0x1	??	undefined		
+0x120	0x1	??	undefined		
+0x121	0x1	??	undefined		
+0x122	0x1	??	undefined		
+0x123	0x1	??	undefined		
+0x124	0x1	??	undefined		
+0x125	0x1	??	undefined		
+0x126	0x1	??	undefined		
+0x127	0x1	??	undefined		
+0x128	0x4	addr *	undefined * *	offset_0x124	
+0x12c	0x1	??	undefined		
+0x12d	0x1	??	undefined		
+0x12e	0x1	??	undefined		
+0x12f	0x1	??	undefined		
+0x130	0x1	??	undefined		
+0x131	0x1	??	undefined		
+0x132	0x1	??	undefined		
+0x133	0x1	??	undefined		
+0x134	0x1	??	undefined		
+0x135	0x1	??	undefined		
+0x136	0x1	??	undefined		
+0x137	0x1	??	undefined		
+0x138	0x1	??	undefined		
+0x139	0x1	??	undefined		
+0x13a	0x1	??	undefined		
+0x13b	0x1	??	undefined		
+0x13c	0x1	??	undefined		
+0x13d	0x1	??	undefined		
+0x13e	0x1	??	undefined		
+0x13f	0x1	??	undefined		
+0x140	0x4	EntityFlyer_vftable3 *	EntityFlyer_vftable3 *	vftablePtr	
+0x144	0x1	??	undefined		
+0x145	0x1	??	undefined		
+0x146	0x1	??	undefined		
+0x147	0x1	??	undefined		
+0x148	0x1	??	undefined		
+0x149	0x1	??	undefined		
+0x14a	0x1	??	undefined		
+0x14b	0x1	??	undefined		
+0x14c	0x1	??	undefined		
+0x14d	0x1	??	undefined		
+0x14e	0x1	??	undefined		
+0x14f	0x1	??	undefined		
+0x150	0x1	??	undefined		
+0x151	0x1	??	undefined		
+0x152	0x1	??	undefined		
+0x153	0x1	??	undefined		
+0x154	0x1	??	undefined		
+0x155	0x1	??	undefined		
+0x156	0x1	??	undefined		
+0x157	0x1	??	undefined		
+0x158	0x1	??	undefined		
+0x159	0x1	??	undefined		
+0x15a	0x1	??	undefined		
+0x15b	0x1	??	undefined		
+0x15c	0x1	??	undefined		
+0x15d	0x1	??	undefined		
+0x15e	0x1	??	undefined		
+0x15f	0x1	??	undefined		
+0x160	0x1	??	undefined		
+0x161	0x1	??	undefined		
+0x162	0x1	??	undefined		
+0x163	0x1	??	undefined		
+0x164	0x1	??	undefined		
+0x165	0x1	??	undefined		
+0x166	0x1	??	undefined		
+0x167	0x1	??	undefined		
+0x168	0x1	??	undefined		
+0x169	0x1	??	undefined		
+0x16a	0x1	??	undefined		
+0x16b	0x1	??	undefined		
+0x16c	0x1	??	undefined		
+0x16d	0x1	??	undefined		
+0x16e	0x1	??	undefined		
+0x16f	0x1	??	undefined		
+0x170	0x1	??	undefined		
+0x171	0x1	??	undefined		
+0x172	0x1	??	undefined		
+0x173	0x1	??	undefined		
+0x174	0x1	??	undefined		
+0x175	0x1	??	undefined		
+0x176	0x1	??	undefined		
+0x177	0x1	??	undefined		
+0x178	0x1	??	undefined		
+0x179	0x1	??	undefined		
+0x17a	0x1	??	undefined		
+0x17b	0x1	??	undefined		
+0x17c	0x1	??	undefined		
+0x17d	0x1	??	undefined		
+0x17e	0x1	??	undefined		
+0x17f	0x1	??	undefined		
+0x180	0x1	??	undefined		
+0x181	0x1	??	undefined		
+0x182	0x1	??	undefined		
+0x183	0x1	??	undefined		
+0x184	0x1	??	undefined		
+0x185	0x1	??	undefined		
+0x186	0x1	??	undefined		
+0x187	0x1	??	undefined		
+0x188	0x1	??	undefined		
+0x189	0x1	??	undefined		
+0x18a	0x1	??	undefined		
+0x18b	0x1	??	undefined		
+0x18c	0x1	??	undefined		
+0x18d	0x1	??	undefined		
+0x18e	0x1	??	undefined		
+0x18f	0x1	??	undefined		
+0x190	0x1	??	undefined		
+0x191	0x1	??	undefined		
+0x192	0x1	??	undefined		
+0x193	0x1	??	undefined		
+0x194	0x1	??	undefined		
+0x195	0x1	??	undefined		
+0x196	0x1	??	undefined		
+0x197	0x1	??	undefined		
+0x198	0x1	??	undefined		
+0x199	0x1	??	undefined		
+0x19a	0x1	??	undefined		
+0x19b	0x1	??	undefined		
+0x19c	0x1	??	undefined		
+0x19d	0x1	??	undefined		
+0x19e	0x1	??	undefined		
+0x19f	0x1	??	undefined		
+0x1a0	0x1	??	undefined		
+0x1a1	0x1	??	undefined		
+0x1a2	0x1	??	undefined		
+0x1a3	0x1	??	undefined		
+0x1a4	0x1	??	undefined		
+0x1a5	0x1	??	undefined		
+0x1a6	0x1	??	undefined		
+0x1a7	0x1	??	undefined		
+0x1a8	0x1	??	undefined		
+0x1a9	0x1	??	undefined		
+0x1aa	0x1	??	undefined		
+0x1ab	0x1	??	undefined		
+0x1ac	0x1	??	undefined		
+0x1ad	0x1	??	undefined		
+0x1ae	0x1	??	undefined		
+0x1af	0x1	??	undefined		
+0x1b0	0x1	??	undefined		
+0x1b1	0x1	??	undefined		
+0x1b2	0x1	??	undefined		
+0x1b3	0x1	??	undefined		
+0x1b4	0x1	??	undefined		
+0x1b5	0x1	??	undefined		
+0x1b6	0x1	??	undefined		
+0x1b7	0x1	??	undefined		
+0x1b8	0x1	??	undefined		
+0x1b9	0x1	??	undefined		
+0x1ba	0x1	??	undefined		
+0x1bb	0x1	??	undefined		
+0x1bc	0x1	??	undefined		
+0x1bd	0x1	??	undefined		
+0x1be	0x1	??	undefined		
+0x1bf	0x1	??	undefined		
+0x1c0	0x1	??	undefined		
+0x1c1	0x1	??	undefined		
+0x1c2	0x1	??	undefined		
+0x1c3	0x1	??	undefined		
+0x1c4	0x1	??	undefined		
+0x1c5	0x1	??	undefined		
+0x1c6	0x1	??	undefined		
+0x1c7	0x1	??	undefined		
+0x1c8	0x1	??	undefined		
+0x1c9	0x1	??	undefined		
+0x1ca	0x1	??	undefined		
+0x1cb	0x1	??	undefined		
+0x1cc	0x1	??	undefined		
+0x1cd	0x1	??	undefined		
+0x1ce	0x1	??	undefined		
+0x1cf	0x1	??	undefined		
+0x1d0	0x1	??	undefined		
+0x1d1	0x1	??	undefined		
+0x1d2	0x1	??	undefined		
+0x1d3	0x1	??	undefined		
+0x1d4	0x1	??	undefined		
+0x1d5	0x1	??	undefined		
+0x1d6	0x1	??	undefined		
+0x1d7	0x1	??	undefined		
+0x1d8	0x1	??	undefined		
+0x1d9	0x1	??	undefined		
+0x1da	0x1	??	undefined		
+0x1db	0x1	??	undefined		
+0x1dc	0x1	??	undefined		
+0x1dd	0x1	??	undefined		
+0x1de	0x1	??	undefined		
+0x1df	0x1	??	undefined		
+0x1e0	0x1	??	undefined		
+0x1e1	0x1	??	undefined		
+0x1e2	0x1	??	undefined		
+0x1e3	0x1	??	undefined		
+0x1e4	0x1	??	undefined		
+0x1e5	0x1	??	undefined		
+0x1e6	0x1	??	undefined		
+0x1e7	0x1	??	undefined		
+0x1e8	0x1	??	undefined		
+0x1e9	0x1	??	undefined		
+0x1ea	0x1	??	undefined		
+0x1eb	0x1	??	undefined		
+0x1ec	0x1	??	undefined		
+0x1ed	0x1	??	undefined		
+0x1ee	0x1	??	undefined		
+0x1ef	0x1	??	undefined		
+0x1f0	0x1	??	undefined		
+0x1f1	0x1	??	undefined		
+0x1f2	0x1	??	undefined		
+0x1f3	0x1	??	undefined		
+0x1f4	0x1	??	undefined		
+0x1f5	0x1	??	undefined		
+0x1f6	0x1	??	undefined		
+0x1f7	0x1	??	undefined		
+0x1f8	0x1	??	undefined		
+0x1f9	0x1	??	undefined		
+0x1fa	0x1	??	undefined		
+0x1fb	0x1	??	undefined		
+0x1fc	0x1	??	undefined		
+0x1fd	0x1	??	undefined		
+0x1fe	0x1	??	undefined		
+0x1ff	0x1	??	undefined		
+0x200	0x4	EntityFlyer_vftable4 *	EntityFlyer_vftable4 *	vftablePtr	
+0x204	0x1	??	undefined		
+0x205	0x1	??	undefined		
+0x206	0x1	??	undefined		
+0x207	0x1	??	undefined		
+0x208	0x1	??	undefined		
+0x209	0x1	??	undefined		
+0x20a	0x1	??	undefined		
+0x20b	0x1	??	undefined		
+0x20c	0x1	??	undefined		
+0x20d	0x1	??	undefined		
+0x20e	0x1	??	undefined		
+0x20f	0x1	??	undefined		
+0x210	0x1	??	undefined		
+0x211	0x1	??	undefined		
+0x212	0x1	??	undefined		
+0x213	0x1	??	undefined		
+0x214	0x1	??	undefined		
+0x215	0x1	??	undefined		
+0x216	0x1	??	undefined		
+0x217	0x1	??	undefined		
+0x218	0x1	??	undefined		
+0x219	0x1	??	undefined		
+0x21a	0x1	??	undefined		
+0x21b	0x1	??	undefined		
+0x21c	0x1	??	undefined		
+0x21d	0x1	??	undefined		
+0x21e	0x1	??	undefined		
+0x21f	0x1	??	undefined		
+0x220	0x1	??	undefined		
+0x221	0x1	??	undefined		
+0x222	0x1	??	undefined		
+0x223	0x1	??	undefined		
+0x224	0x4	undefined4 *	undefined4 *	offset_0x220	
+0x228	0x4	float	float	offset_0x224	
+0x22c	0x1	??	undefined		
+0x22d	0x1	??	undefined		
+0x22e	0x1	??	undefined		
+0x22f	0x1	??	undefined		
+0x230	0x1	??	undefined		
+0x231	0x1	??	undefined		
+0x232	0x1	??	undefined		
+0x233	0x1	??	undefined		
+0x234	0x1	??	undefined		
+0x235	0x1	??	undefined		
+0x236	0x1	??	undefined		
+0x237	0x1	??	undefined		
+0x238	0x1	??	undefined		
+0x239	0x1	??	undefined		
+0x23a	0x1	??	undefined		
+0x23b	0x1	??	undefined		
+0x23c	0x1	??	undefined		
+0x23d	0x1	??	undefined		
+0x23e	0x1	??	undefined		
+0x23f	0x1	??	undefined		
+0x240	0x4	EntityFlyer_vftable5 *	EntityFlyer_vftable5 *	vftablePtr	
+0x244	0x1	??	undefined		
+0x245	0x1	??	undefined		
+0x246	0x1	??	undefined		
+0x247	0x1	??	undefined		
+0x248	0x1	??	undefined		
+0x249	0x1	??	undefined		
+0x24a	0x1	??	undefined		
+0x24b	0x1	??	undefined		
+0x24c	0x1	??	undefined		
+0x24d	0x1	??	undefined		
+0x24e	0x1	??	undefined		
+0x24f	0x1	??	undefined		
+0x250	0x1	??	undefined		
+0x251	0x1	??	undefined		
+0x252	0x1	??	undefined		
+0x253	0x1	??	undefined		
+0x254	0x1	??	undefined		
+0x255	0x1	??	undefined		
+0x256	0x1	??	undefined		
+0x257	0x1	??	undefined		
+0x258	0x4	EntityFlyer_vftable6 *	EntityFlyer_vftable6 *	vftablePtr	
+0x25c	0x1	??	undefined		
+0x25d	0x1	??	undefined		
+0x25e	0x1	??	undefined		
+0x25f	0x1	??	undefined		
+0x260	0x1	??	undefined		
+0x261	0x1	??	undefined		
+0x262	0x1	??	undefined		
+0x263	0x1	??	undefined		
+0x264	0x1	??	undefined		
+0x265	0x1	??	undefined		
+0x266	0x1	??	undefined		
+0x267	0x1	??	undefined		
+0x268	0x3	undefined3	undefined3	offset_0x264	
+0x26b	0x1	db	byte	offset_0x267	
+0x26c	0x1	??	undefined		
+0x26d	0x1	??	undefined		
+0x26e	0x1	??	undefined		
+0x26f	0x1	??	undefined		
+0x270	0x1	??	undefined		
+0x271	0x1	??	undefined		
+0x272	0x1	??	undefined		
+0x273	0x1	??	undefined		
+0x274	0x1	??	undefined		
+0x275	0x1	??	undefined		
+0x276	0x1	??	undefined		
+0x277	0x1	??	undefined		
+0x278	0x1	??	undefined		
+0x279	0x1	??	undefined		
+0x27a	0x1	??	undefined		
+0x27b	0x1	??	undefined		
+0x27c	0x1	??	undefined		
+0x27d	0x1	??	undefined		
+0x27e	0x1	??	undefined		
+0x27f	0x1	??	undefined		
+0x280	0x1	??	undefined		
+0x281	0x1	??	undefined		
+0x282	0x1	??	undefined		
+0x283	0x1	??	undefined		
+0x284	0x4	undefined4	undefined4	offset_0x280	
+0x288	0x4	float	float	offset_0x284	
+0x28c	0x4	float	float	offset_0x288	
+0x290	0x4	undefined4	undefined4	offset_0x28c	
+0x294	0x1	??	undefined		
+0x295	0x1	??	undefined		
+0x296	0x1	??	undefined		
+0x297	0x1	??	undefined		
+0x298	0x1	??	undefined		
+0x299	0x1	??	undefined		
+0x29a	0x1	??	undefined		
+0x29b	0x1	??	undefined		
+0x29c	0x1	??	undefined		
+0x29d	0x1	??	undefined		
+0x29e	0x1	??	undefined		
+0x29f	0x1	??	undefined		
+0x2a0	0x4	undefined4	undefined4	offset_0x29c	
+0x2a4	0x1	??	undefined		
+0x2a5	0x1	??	undefined		
+0x2a6	0x1	??	undefined		
+0x2a7	0x1	??	undefined		
+0x2a8	0x1	??	undefined		
+0x2a9	0x1	??	undefined		
+0x2aa	0x1	??	undefined		
+0x2ab	0x1	??	undefined		
+0x2ac	0x1	??	undefined		
+0x2ad	0x1	??	undefined		
+0x2ae	0x1	??	undefined		
+0x2af	0x1	??	undefined		
+0x2b0	0x1	char	char	offset_0x2ac	
+0x2b1	0x4	undefined4	undefined4	offset_0x2ad	
+0x2b5	0x1	??	undefined		
+0x2b6	0x1	??	undefined		
+0x2b7	0x1	??	undefined		
+0x2b8	0x4	float	float	offset_0x2b4	
+0x2bc	0x4	float	float	offset_0x2b8	
+0x2c0	0x4	float	float	offset_0x2bc	
+0x2c4	0x4	float	float	offset_0x2c0	
+0x2c8	0x4	undefined4	undefined4	offset_0x2c4	
+0x2cc	0x4	undefined4	undefined4	offset_0x2c8	
+0x2d0	0x4	int	int	offset_0x2cc	
+0x2d4	0x1	??	undefined		
+0x2d5	0x1	??	undefined		
+0x2d6	0x1	??	undefined		
+0x2d7	0x1	??	undefined		
+0x2d8	0x1	??	undefined		
+0x2d9	0x1	??	undefined		
+0x2da	0x1	??	undefined		
+0x2db	0x1	??	undefined		
+0x2dc	0x1	??	undefined		
+0x2dd	0x1	??	undefined		
+0x2de	0x1	??	undefined		
+0x2df	0x1	??	undefined		
+0x2e0	0x1	??	undefined		
+0x2e1	0x1	??	undefined		
+0x2e2	0x1	??	undefined		
+0x2e3	0x1	??	undefined		
+0x2e4	0x1	??	undefined		
+0x2e5	0x1	??	undefined		
+0x2e6	0x1	??	undefined		
+0x2e7	0x1	??	undefined		
+0x2e8	0x1	??	undefined		
+0x2e9	0x1	??	undefined		
+0x2ea	0x1	??	undefined		
+0x2eb	0x1	??	undefined		
+0x2ec	0x1	??	undefined		
+0x2ed	0x1	??	undefined		
+0x2ee	0x1	??	undefined		
+0x2ef	0x1	??	undefined		
+0x2f0	0x1	??	undefined		
+0x2f1	0x1	??	undefined		
+0x2f2	0x1	??	undefined		
+0x2f3	0x1	??	undefined		
+0x2f4	0x1	??	undefined		
+0x2f5	0x1	??	undefined		
+0x2f6	0x1	??	undefined		
+0x2f7	0x1	??	undefined		
+0x2f8	0x1	??	undefined		
+0x2f9	0x1	??	undefined		
+0x2fa	0x1	??	undefined		
+0x2fb	0x1	??	undefined		
+0x2fc	0x1	??	undefined		
+0x2fd	0x1	??	undefined		
+0x2fe	0x1	??	undefined		
+0x2ff	0x1	??	undefined		
+0x300	0x1	??	undefined		
+0x301	0x1	??	undefined		
+0x302	0x1	??	undefined		
+0x303	0x1	??	undefined		
+0x304	0x1	??	undefined		
+0x305	0x1	??	undefined		
+0x306	0x1	??	undefined		
+0x307	0x1	??	undefined		
+0x308	0x1	??	undefined		
+0x309	0x1	??	undefined		
+0x30a	0x1	??	undefined		
+0x30b	0x1	??	undefined		
+0x30c	0x1	??	undefined		
+0x30d	0x1	??	undefined		
+0x30e	0x1	??	undefined		
+0x30f	0x1	??	undefined		
+0x310	0x1	??	undefined		
+0x311	0x1	??	undefined		
+0x312	0x1	??	undefined		
+0x313	0x1	??	undefined		
+0x314	0x1	??	undefined		
+0x315	0x1	??	undefined		
+0x316	0x1	??	undefined		
+0x317	0x1	??	undefined		
+0x318	0x1	??	undefined		
+0x319	0x1	??	undefined		
+0x31a	0x1	??	undefined		
+0x31b	0x1	??	undefined		
+0x31c	0x1	??	undefined		
+0x31d	0x1	??	undefined		
+0x31e	0x1	??	undefined		
+0x31f	0x1	??	undefined		
+0x320	0x1	??	undefined		
+0x321	0x1	??	undefined		
+0x322	0x1	??	undefined		
+0x323	0x1	??	undefined		
+0x324	0x1	??	undefined		
+0x325	0x1	??	undefined		
+0x326	0x1	??	undefined		
+0x327	0x1	??	undefined		
+0x328	0x1	??	undefined		
+0x329	0x1	??	undefined		
+0x32a	0x1	??	undefined		
+0x32b	0x1	??	undefined		
+0x32c	0x1	??	undefined		
+0x32d	0x1	??	undefined		
+0x32e	0x1	??	undefined		
+0x32f	0x1	??	undefined		
+0x330	0x1	??	undefined		
+0x331	0x1	??	undefined		
+0x332	0x1	??	undefined		
+0x333	0x1	??	undefined		
+0x334	0x1	??	undefined		
+0x335	0x1	??	undefined		
+0x336	0x1	??	undefined		
+0x337	0x1	??	undefined		
+0x338	0x1	??	undefined		
+0x339	0x1	??	undefined		
+0x33a	0x1	??	undefined		
+0x33b	0x1	??	undefined		
+0x33c	0x1	??	undefined		
+0x33d	0x1	??	undefined		
+0x33e	0x1	??	undefined		
+0x33f	0x1	??	undefined		
+0x340	0x1	??	undefined		
+0x341	0x1	??	undefined		
+0x342	0x1	??	undefined		
+0x343	0x1	??	undefined		
+0x344	0x1	??	undefined		
+0x345	0x1	??	undefined		
+0x346	0x1	??	undefined		
+0x347	0x1	??	undefined		
+0x348	0x1	??	undefined		
+0x349	0x1	??	undefined		
+0x34a	0x1	??	undefined		
+0x34b	0x1	??	undefined		
+0x34c	0x1	??	undefined		
+0x34d	0x1	??	undefined		
+0x34e	0x1	??	undefined		
+0x34f	0x1	??	undefined		
+0x350	0x1	??	undefined		
+0x351	0x1	??	undefined		
+0x352	0x1	??	undefined		
+0x353	0x1	??	undefined		
+0x354	0x1	??	undefined		
+0x355	0x1	??	undefined		
+0x356	0x1	??	undefined		
+0x357	0x1	??	undefined		
+0x358	0x1	??	undefined		
+0x359	0x1	??	undefined		
+0x35a	0x1	??	undefined		
+0x35b	0x1	??	undefined		
+0x35c	0x1	??	undefined		
+0x35d	0x1	??	undefined		
+0x35e	0x1	??	undefined		
+0x35f	0x1	??	undefined		
+0x360	0x1	??	undefined		
+0x361	0x1	??	undefined		
+0x362	0x1	??	undefined		
+0x363	0x1	??	undefined		
+0x364	0x1	??	undefined		
+0x365	0x1	??	undefined		
+0x366	0x1	??	undefined		
+0x367	0x1	??	undefined		
+0x368	0x1	??	undefined		
+0x369	0x1	??	undefined		
+0x36a	0x1	??	undefined		
+0x36b	0x1	??	undefined		
+0x36c	0x1	??	undefined		
+0x36d	0x1	??	undefined		
+0x36e	0x1	??	undefined		
+0x36f	0x1	??	undefined		
+0x370	0x1	??	undefined		
+0x371	0x1	??	undefined		
+0x372	0x1	??	undefined		
+0x373	0x1	??	undefined		
+0x374	0x1	??	undefined		
+0x375	0x1	??	undefined		
+0x376	0x1	??	undefined		
+0x377	0x1	??	undefined		
+0x378	0x1	??	undefined		
+0x379	0x1	??	undefined		
+0x37a	0x1	??	undefined		
+0x37b	0x1	??	undefined		
+0x37c	0x1	??	undefined		
+0x37d	0x1	??	undefined		
+0x37e	0x1	??	undefined		
+0x37f	0x1	??	undefined		
+0x380	0x1	??	undefined		
+0x381	0x1	??	undefined		
+0x382	0x1	??	undefined		
+0x383	0x1	??	undefined		
+0x384	0x1	??	undefined		
+0x385	0x1	??	undefined		
+0x386	0x1	??	undefined		
+0x387	0x1	??	undefined		
+0x388	0x1	??	undefined		
+0x389	0x1	??	undefined		
+0x38a	0x1	??	undefined		
+0x38b	0x1	??	undefined		
+0x38c	0x1	??	undefined		
+0x38d	0x1	??	undefined		
+0x38e	0x1	??	undefined		
+0x38f	0x1	??	undefined		
+0x390	0x1	??	undefined		
+0x391	0x1	??	undefined		
+0x392	0x1	??	undefined		
+0x393	0x1	??	undefined		
+0x394	0x1	??	undefined		
+0x395	0x1	??	undefined		
+0x396	0x1	??	undefined		
+0x397	0x1	??	undefined		
+0x398	0x1	??	undefined		
+0x399	0x1	??	undefined		
+0x39a	0x1	??	undefined		
+0x39b	0x1	??	undefined		
+0x39c	0x1	??	undefined		
+0x39d	0x1	??	undefined		
+0x39e	0x1	??	undefined		
+0x39f	0x1	??	undefined		
+0x3a0	0x1	??	undefined		
+0x3a1	0x1	??	undefined		
+0x3a2	0x1	??	undefined		
+0x3a3	0x1	??	undefined		
+0x3a4	0x1	??	undefined		
+0x3a5	0x1	??	undefined		
+0x3a6	0x1	??	undefined		
+0x3a7	0x1	??	undefined		
+0x3a8	0x1	??	undefined		
+0x3a9	0x1	??	undefined		
+0x3aa	0x1	??	undefined		
+0x3ab	0x1	??	undefined		
+0x3ac	0x1	??	undefined		
+0x3ad	0x1	??	undefined		
+0x3ae	0x1	??	undefined		
+0x3af	0x1	??	undefined		
+0x3b0	0x1	??	undefined		
+0x3b1	0x1	??	undefined		
+0x3b2	0x1	??	undefined		
+0x3b3	0x1	??	undefined		
+0x3b4	0x1	??	undefined		
+0x3b5	0x1	??	undefined		
+0x3b6	0x1	??	undefined		
+0x3b7	0x1	??	undefined		
+0x3b8	0x1	??	undefined		
+0x3b9	0x1	??	undefined		
+0x3ba	0x1	??	undefined		
+0x3bb	0x1	??	undefined		
+0x3bc	0x1	??	undefined		
+0x3bd	0x1	??	undefined		
+0x3be	0x1	??	undefined		
+0x3bf	0x1	??	undefined		
+0x3c0	0x1	??	undefined		
+0x3c1	0x1	??	undefined		
+0x3c2	0x1	??	undefined		
+0x3c3	0x1	??	undefined		
+0x3c4	0x1	??	undefined		
+0x3c5	0x1	??	undefined		
+0x3c6	0x1	??	undefined		
+0x3c7	0x1	??	undefined		
+0x3c8	0x1	??	undefined		
+0x3c9	0x1	??	undefined		
+0x3ca	0x1	??	undefined		
+0x3cb	0x1	??	undefined		
+0x3cc	0x4	EntityFlyer_vftable7 *	EntityFlyer_vftable7 *	vftablePtr	
+0x3d0	0x2c	TooBig: EntitySquadron_data needs 60 has 44	/ClassDataTypes/EntitySquadron/EntitySquadron_data
+pack()
+Structure EntitySquadron_data {
+   0   EntityFormation *   4   mFormation   ""
+   4   int   4   mFormationSlot   ""
+   8   Node   8   mNode   ""
+   16   EntitySquadron *   4   mLeader   ""
+   20   PblListDouble   8   mList   ""
+   28   float   4   mTime   ""
+   32   PblVector3   12   mOffset   ""
+   44   int   4   mSquadronIndex   ""
+   48   undefined4   4   offset_0x20   ""
+   52   undefined4   4   offset_0x24   ""
+   56   undefined4   4   offset_0x28   ""
+}
+Length: 60 Alignment: 4
+	EntitySquadron_data	
+0x3fc	0x4	Node	/ClassDataTypes/PblList<class_EntityPathFollower>/Node/Node
+pack(disabled)
+Structure Node {
+}
+Length: 4 Alignment: 1
+	Node	
+0x400	0xa0	EntityPathFollower_data	/ClassDataTypes/EntityPathFollower/EntityPathFollower_data
+pack(disabled)
+Structure EntityPathFollower_data {
+   0   undefined * *   4   offset_0x0   ""
+   4   undefined *   4   offset_0x4   ""
+   8   void *   4   offset_0x8   ""
+   12   int   4   offset_0xc   ""
+   16   undefined4 *   4   offset_0x10   ""
+   20   undefined4   4   offset_0x14   ""
+   24   undefined4   4   offset_0x18   ""
+   28   undefined4   4   offset_0x1c   ""
+   32   undefined4   4   offset_0x20   ""
+   36   undefined4   4   offset_0x24   ""
+   40   undefined4   4   offset_0x28   ""
+   44   undefined4   4   offset_0x2c   ""
+   48   undefined4   4   offset_0x30   ""
+   52   undefined4   4   offset_0x34   ""
+   56   undefined4   4   offset_0x38   ""
+   60   undefined4   4   offset_0x3c   ""
+   64   undefined4   4   offset_0x40   ""
+   112   undefined4   4   offset_0x70   ""
+   116   undefined4   4   offset_0x74   ""
+   120   undefined2   2   offset_0x78   ""
+   124   undefined4   4   offset_0x7c   ""
+   140   undefined4   4   offset_0x8c   ""
+   144   undefined4   4   offset_0x90   ""
+   148   undefined4   4   offset_0x94   ""
+   152   undefined4   4   offset_0x98   ""
+   156   undefined2   2   offset_0x9c   ""
+   158   undefined1   1   offset_0x9e   ""
+}
+Length: 160 Alignment: 1
+	EntityPathFollower_data	
+0x4a0	0x1	??	undefined		
+0x4a1	0x1	??	undefined		
+0x4a2	0x1	??	undefined		
+0x4a3	0x1	??	undefined		
+0x4a4	0x4	VehicleMusic	/ClassDataTypes/VehicleMusic/VehicleMusic
+pack(disabled)
+Structure VehicleMusic {
+}
+Length: 4 Alignment: 1
+	VehicleMusic	
+0x4a8	0x1	??	undefined		
+0x4a9	0x1	??	undefined		
+0x4aa	0x1	??	undefined		
+0x4ab	0x1	??	undefined		
+0x4ac	0x1	??	undefined		
+0x4ad	0x1	??	undefined		
+0x4ae	0x1	??	undefined		
+0x4af	0x1	??	undefined		
+0x4b0	0x1	??	undefined		
+0x4b1	0x1	??	undefined		
+0x4b2	0x1	??	undefined		
+0x4b3	0x1	??	undefined		
+0x4b4	0x1	??	undefined		
+0x4b5	0x1	??	undefined		
+0x4b6	0x1	??	undefined		
+0x4b7	0x1	??	undefined		
+0x4b8	0x1	??	undefined		
+0x4b9	0x1	??	undefined		
+0x4ba	0x1	??	undefined		
+0x4bb	0x1	??	undefined		
+0x4bc	0x1	??	undefined		
+0x4bd	0x1	??	undefined		
+0x4be	0x1	??	undefined		
+0x4bf	0x1	??	undefined		
+0x4c0	0x1	??	undefined		
+0x4c1	0x1	??	undefined		
+0x4c2	0x1	??	undefined		
+0x4c3	0x1	??	undefined		
+0x4c4	0x1	??	undefined		
+0x4c5	0x1	??	undefined		
+0x4c6	0x1	??	undefined		
+0x4c7	0x1	??	undefined		
+0x4c8	0x1	??	undefined		
+0x4c9	0x1	??	undefined		
+0x4ca	0x1	??	undefined		
+0x4cb	0x1	??	undefined		
+0x4cc	0x1	??	undefined		
+0x4cd	0x1	??	undefined		
+0x4ce	0x1	??	undefined		
+0x4cf	0x1	??	undefined		
+0x4d0	0x1	??	undefined		
+0x4d1	0x1	??	undefined		
+0x4d2	0x1	??	undefined		
+0x4d3	0x1	??	undefined		
+0x4d4	0x1	??	undefined		
+0x4d5	0x1	??	undefined		
+0x4d6	0x1	??	undefined		
+0x4d7	0x1	??	undefined		
+0x4d8	0x1	??	undefined		
+0x4d9	0x1	??	undefined		
+0x4da	0x1	??	undefined		
+0x4db	0x1	??	undefined		
+0x4dc	0x1	??	undefined		
+0x4dd	0x1	??	undefined		
+0x4de	0x1	??	undefined		
+0x4df	0x1	??	undefined		
+0x4e0	0x1	??	undefined		
+0x4e1	0x1	??	undefined		
+0x4e2	0x1	??	undefined		
+0x4e3	0x1	??	undefined		
+0x4e4	0x1	??	undefined		
+0x4e5	0x1	??	undefined		
+0x4e6	0x1	??	undefined		
+0x4e7	0x1	??	undefined		
+0x4e8	0x4	VehicleEngine	/ClassDataTypes/VehicleEngine/VehicleEngine
+pack(disabled)
+Structure VehicleEngine {
+}
+Length: 4 Alignment: 1
+	VehicleEngine	
+0x4ec	0x9c8	EntityFlyer_data	/ClassDataTypes/EntityFlyer/EntityFlyer_data
+pack(disabled)
+Structure EntityFlyer_data {
+   0   PblHandle<GameObject>   8      ""
+   8   PblVector3   12      ""
+   20   PblVector3   12      ""
+   32   float   4      ""
+   36   float   4      ""
+   40   float   4      ""
+   44   undefined4   4   mState   ""
+   48   float   4      ""
+   52   float   4      ""
+   56   float   4      ""
+   60   float   4      ""
+   64   float   4      ""
+   68   float   4      ""
+   72   float   4      ""
+   76   float   4   offset_0x4c   ""
+   80   float   4   offset_0x50   ""
+   84   float   4      ""
+   88   float   4      ""
+   92   float   4      ""
+   96   PblVector3   12      ""
+   108   undefined4   4      ""
+   112   float   4      ""
+   116   float   4      ""
+   120   bool:1(0)   1   mInRoll   ""
+   120   bool:1(1)   1   mInFlip   ""
+   120   bool:1(2)   1   mBoost   ""
+   120   bool:1(3)   1   mFollowingPath   ""
+   120   bool:1(4)   1   mSliding   ""
+   120   bool:1(5)   1   mInLandingRegionFlag   ""
+   120   bool:1(6)   1   mInLandingRegionFlag_ToolTip   ""
+   120   bool:1(7)   1   mFlyerAutoCorrectToStayInBattlefield   ""
+   124   float   4   mGetSpeedSpeed   ""
+   128   float   4      ""
+   132   float   4      ""
+   136   float   4      ""
+   140   float   4      ""
+   144   float   4      ""
+   148   float   4      ""
+   152   float   4      ""
+   200   byte   1   offset_0xc8   ""
+   236   undefined4 *   4   offset_0xec   ""
+   240   undefined4   4   offset_0xf0   ""
+   244   undefined4   4   offset_0xf4   ""
+   320   int   4   offset_0x140   ""
+   324   int *   4   offset_0x144   ""
+   372   char   1   offset_0x174   ""
+   380   int   4   offset_0x17c   ""
+   396   int   4   offset_0x18c   ""
+   436   undefined4   4   offset_0x1b4   ""
+}
+Length: 2504 Alignment: 1
+	EntityFlyer_data	

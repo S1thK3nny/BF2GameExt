@@ -217,6 +217,52 @@ confirmed (possibly `WeaponClass+0x020` based on `FUN_006740d0` decompile).
 
 ---
 
+## SoldierElement — Render-Side Weapon Pool Overflow Root Cause
+
+`SoldierElement::RenderUsingContext` (0x00674890) is called every render frame and:
+1. Reads `this->mWeaponClass[this->mWeaponIndex]` — cached WeaponClass* array
+2. Calls `FUN_00570760(BANK, WC->mSoldierAnimationWeapon)` to derive MAP
+3. Calls `SoldierAnimator::SetWeaponAnimationMap(this->mSoldierAnimator, MAP)` unconditionally
+
+`mWeaponClass[]` is populated from `EntitySoldierClass::vtable[13](slot)` — the **static ODF-defined**
+weapon class — only during setup (when `mIsSetup == false`). After setup it is cached forever.
+
+Since `SetCharacterWeapon` writes `foundWc` to the **runtime weapon** (`ctrl+0x4D8[slot]+0x060`) but NOT
+to `SoldierElement::mWeaponClass[mWeaponIndex]`, `RenderUsingContext` keeps computing the OLD MAP
+and calling `SetWeaponAnimationMap` with it — reverting our change and allocating +4 pool objects each time.
+
+### Fix: write foundWc to SoldierElement.mWeaponClass[mWeaponIndex]
+
+**Finding SoldierElement from our pointers:**
+```
+entity_base = entity - 0x240     (ctrl+0x290 returns EntitySoldier_base + 0x240)
+                                  Confirmed: struct.mWeapon @ +0x730 == entity+0x4F0
+                                            struct.mSoldierAnimator @ +0x760 == entity+0x520
+SoldierElement* = *(entity_base + 0x098)  [= EntitySoldier.mRedSceneObject]
+```
+
+**Self-validation before write** (both must hold):
+- `*(SE + 0x0A0) == entity`         (SE.mID)
+- `*(SE + 0x0A4) == soldierAnimator` (SE.mSoldierAnimator)
+
+**Write:**
+```
+wIdx = *(int32_t*)(SE + 0x12C)         // SE.mWeaponIndex
+*(SE + 0x10C + wIdx*4) = foundWc       // SE.mWeaponClass[wIdx]
+```
+
+### SoldierElement layout (Ghidra struct, confirmed fields)
+| Offset | Field |
+|--------|-------|
+| +0x0A0 | `EntitySoldier* mID` |
+| +0x0A4 | `SoldierAnimator* mSoldierAnimator` |
+| +0x10C | `WeaponClass*[8] mWeaponClass` |
+| +0x12C | `int mWeaponIndex` |
+| +0x130 | `EntitySoldierClass* mClass` |
+| +0x154 | `bool mIsSetup` |
+
+---
+
 ## AnimBank (`*(im+0x034) = 0x00b799d8`)
 
 Static global pointer shared by all active characters. Dumps `+0x000..+0x07F` showed it is a fixed-size table — not per-character.

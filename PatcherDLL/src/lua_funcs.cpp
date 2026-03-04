@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
+#include "entity_carrier_fixes.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -453,6 +454,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
 
       // Scan for a live weapon of the target type to borrow its OrdnanceClass* and vtable.
       uintptr_t sourceWpn = 0;
+      int32_t newMapFromEntity = -1;  // entity-side MAP from source char (set by UpdateIndirect each frame)
       int scanMax = 0;
       __try { scanMax = *(int*)res(0xB939F4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       const int scanLimit = (scanMax < 512) ? 512 : scanMax;
@@ -474,8 +476,22 @@ static int lua_SetCharacterWeapon(lua_State* L)
                      __try {
                         size_t wl = strlen(wcName), tl = strlen(targetOdf);
                         if ((_stricmp(wcName, targetOdf) == 0) ||
-                            (wl > tl && _stricmp(wcName + wl - tl, targetOdf) == 0))
+                            (wl > tl && _stricmp(wcName + wl - tl, targetOdf) == 0)) {
                            sourceWpn = w;
+                           // Also grab the MAP from this source character's entity-side weapon slot
+                           // (entity+0x4F0[si]+0xC8). Entity-side weapons carry the live MAP that
+                           // UpdateIndirect maintains — ctrl-side +0xC8 is often uninitialised (-1).
+                           __try {
+                              uintptr_t srcEnt = *(uintptr_t*)((uintptr_t)ct2 + 0x290);
+                              if (srcEnt && srcEnt != 0xCDCDCDCDu) {
+                                 uintptr_t ewpn = *(uintptr_t*)(srcEnt + 0x4F0 + si * 4);
+                                 if (ewpn && ewpn != 0xCDCDCDCDu) {
+                                    int32_t em = *(int32_t*)(ewpn + 0x0C8);
+                                    if (em != -1) newMapFromEntity = em;
+                                 }
+                              }
+                           } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                        }
                      } __except(EXCEPTION_EXECUTE_HANDLER) {}
                   } __except(EXCEPTION_EXECUTE_HANDLER) {}
                }
@@ -509,45 +525,97 @@ static int lua_SetCharacterWeapon(lua_State* L)
       __try { *(uintptr_t*)(wpn + 0x068) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
       // Trigger per-character animation update.
-      // EntitySoldier::UpdateIndirect (0x0053b920) reads wpn+0xC8 (cached animation MAP)
-      // every frame and calls SoldierAnimator::SetWeaponAnimationMap with it.
-      // SetCharacterWeapon used to leave wpn+0xC8 stale (old weapon's MAP), so the
-      // animation stance never changed visually even though gameplay used the new WC.
       //
-      // Fix: copy the correct MAP from sourceWpn (a live weapon of the target type),
-      // write it to wpn+0xC8 so future frames stay correct, then call
-      // SetWeaponAnimationMap directly for an immediate this-frame visual update.
+      // UpdateIndirect (0x0053b920) reads entity+0x4F0[slotIdx]+0xC8 every tick and calls
+      // SetWeaponAnimationMap (SWAM) when that MAP differs from the animator's current MAP.
+      // SWAM has an internal guard (only acts on MAP change), but if two paths alternate
+      // between different MAPs every frame the pool grows +4/frame.
       //
-      // Offsets confirmed from disasm of EntitySoldier::UpdateIndirect (0x0053be5c):
-      //   ctrl+0x290 -> EntitySoldier*  (back-pointer, already documented)
-      //   entity+0x520 -> SoldierAnimator*  (MOV ECX,[ESI+0x520])
-      //   weapon+0xC8  -> int MAP           (MOV EAX,[EAX+0xC8]; CMP EAX,-1)
-      if (sourceWpn) {
-         int32_t newMap = -1;
-         __try { newMap = *(int32_t*)(sourceWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         if (newMap != -1) {
-            // Update cached MAP on the player's weapon so future frames read the right value.
-            __try { *(int32_t*)(wpn + 0x0C8) = newMap; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      // MAP is an index into a global (BANK, WEAPON_type) table at 0xacf558.
+      // FUN_00570760(BANK, WEAPON_type) scans this table and returns the matching index.
+      //
+      // Strategy: compute correctMAP for the TARGET character's own animation bank.
+      //   entity+0x21C  -> EntitySoldierClass* (mClass)
+      //                    [EntitySoldier struct base = entity-0x240;
+      //                     mClass at struct+0x45C → entity+0x21C]
+      //   entityClass+0x1378 -> BANK (EntitySoldierClass::mAnimationBank)
+      //   FUN_00570760(BANK, foundWc->mSoldierAnimationWeapon) -> correctMAP
+      //
+      // Confirmed struct offsets:
+      //   ctrl+0x290        -> entity  (EntitySoldier* = struct_base+0x240)
+      //   entity+0x4F0[N]   -> Weapon* (rendering-side array; struct mWeapon @ +0x730)
+      //   entity+0x520      -> SoldierAnimator* (struct mSoldierAnimator @ +0x760)
+      //   entity+0x21C      -> EntitySoldierClass* (struct mClass @ +0x45C)
+      //   EntitySoldierClass+0x1378 -> BANK (mAnimationBank)
+      //   WeaponClass+0x020 -> WEAPON (mSoldierAnimationWeapon)
+      //   weapon+0xC8       -> int MAP
+      {
+         uintptr_t entity          = 0;
+         uintptr_t soldierAnimator = 0;
+         uintptr_t entityWpn       = 0;
+         uintptr_t targetBank      = 0;
+         int32_t   correctMAP      = -1;
 
-            // Call SetWeaponAnimationMap (0x004170d5) for an immediate visual switch.
-            uintptr_t entity = 0;
-            __try { entity = *(uintptr_t*)((uintptr_t)ctrl + 0x290); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         // Resolve entity, SoldierAnimator, and entity-side weapon.
+         __try {
+            entity = *(uintptr_t*)((uintptr_t)ctrl + 0x290);
             if (entity) {
-               uintptr_t soldierAnimator = 0;
-               __try { soldierAnimator = *(uintptr_t*)(entity + 0x520); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-               if (soldierAnimator) {
-                  typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
-                  auto fn_SetWAM = (SetWeaponAnimMap_t)res(0x4170D5);
-                  __try { fn_SetWAM((void*)soldierAnimator, newMap); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-               }
+               soldierAnimator = *(uintptr_t*)(entity + 0x520);
+               entityWpn       = *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4);
+               if (entityWpn == 0xCDCDCDCDu) entityWpn = 0;
+            }
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+         // Get the target character's animation bank directly from EntitySoldierClass.
+         // This is the BANK that was used when registering all this soldier's weapon MAPs.
+         if (entity) {
+            __try {
+               uintptr_t entityClass = *(uintptr_t*)(entity + 0x21C);
+               if (entityClass && entityClass != 0xCDCDCDCDu)
+                  targetBank = *(uintptr_t*)(entityClass + 0x1378);
+            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+            if (targetBank) {
+               __try {
+                  uint32_t wSA = *(uint32_t*)((uintptr_t)foundWc + 0x020);
+                  typedef int32_t (__cdecl* FN570760_t)(uintptr_t, uint32_t);
+                  correctMAP = ((FN570760_t)res(0x570760))(targetBank, wSA);
+               } __except(EXCEPTION_EXECUTE_HANDLER) {}
             }
          }
-      }
 
-      fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' (newWc=0x%08x src=%s map=%d)\n",
-                 charIndex, channel, slotIdx, targetOdf,
-                 (unsigned)foundWc, sourceWpn ? "found" : "none",
-                 sourceWpn ? *(int32_t*)(sourceWpn + 0x0C8) : -1);
+         // Fallback: weapon type not registered in target bank, or entity not reachable.
+         // Use source weapon MAP as last resort (may be in a different bank).
+         if (correctMAP == -1) {
+            if (newMapFromEntity != -1)  correctMAP = newMapFromEntity;
+            else if (sourceWpn)
+               __try { correctMAP = *(int32_t*)(sourceWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         }
+
+         // --- Apply writes ---
+
+         // ctrl-side weapon.MAP
+         if (correctMAP != -1)
+            __try { *(int32_t*)(wpn + 0x0C8) = correctMAP; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+         if (entity) {
+            // entity-side weapon.MAP — UpdateIndirect reads this every tick.
+            if (correctMAP != -1 && entityWpn)
+               __try { *(int32_t*)(entityWpn + 0x0C8) = correctMAP; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+            if (soldierAnimator) {
+               // Immediate visual switch.
+               typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
+               __try { ((SetWeaponAnimMap_t)res(0x4170D5))((void*)soldierAnimator, correctMAP); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            }
+         }
+
+         fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' "
+                    "(wc=0x%08x src=%s bank=0x%08x cMAP=%d sa=0x%08x)\n",
+                    charIndex, channel, slotIdx, targetOdf,
+                    (unsigned)foundWc, sourceWpn ? "found" : "none",
+                    (unsigned)targetBank, correctMAP, (unsigned)soldierAnimator);
+      }
 
       g_lua.pushnumber(L, 1);
       return 1;
@@ -1192,9 +1260,9 @@ static const lua_func_entry custom_functions[] = {
    { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },
    { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
    { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
-   { "SetBarrelFireOrigin",   lua_SetBarrelFireOrigin },
-   { "DumpAimerInfo",         lua_DumpAimerInfo },
-   { "SetLoadDisplayLevel",   lua_SetLoadDisplayLevel },
+   { "SetBarrelFireOrigin",      lua_SetBarrelFireOrigin },
+   { "DumpAimerInfo",            lua_DumpAimerInfo },
+   { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
    { nullptr, nullptr }
 };
 

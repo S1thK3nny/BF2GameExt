@@ -2,6 +2,7 @@
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
 #include "bf1_load_ext.hpp"
+#include "entity_carrier_fixes.hpp"
 
 #include <detours.h>
 
@@ -295,6 +296,7 @@ void lua_hooks_install(uintptr_t exe_base)
    fn_ZoomFirstPerson = (ZoomFirstPerson_t)resolve(exe_base, weapon_zoom_first_person);
 
    bf1_load_ext_install(exe_base);
+   entity_carrier_fixes_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -314,6 +316,7 @@ void lua_hooks_install(uintptr_t exe_base)
 void lua_hooks_uninstall()
 {
    bf1_load_ext_uninstall();
+   entity_carrier_fixes_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
