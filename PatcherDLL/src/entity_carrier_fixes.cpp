@@ -69,6 +69,23 @@ static constexpr uintptr_t kClass_offset        = 0x42C;  // EntityCarrierClass*
 
 static constexpr int kMaxTrackedCarriers = 4;
 
+// ---------------------------------------------------------------------------
+// Custom Landing Descent — override state 3 position with straight-line lerp
+// ---------------------------------------------------------------------------
+static constexpr float kDefaultDescentSeconds = 10.0f;
+
+struct CarrierLandingOverride {
+   void*  structBase;    // carrier identity (struct_base ptr), nullptr = unused
+   float  padX, padY, padZ;      // pad world position (raw, from spawn matrix)
+   float  startX, startY, startZ; // carrier position when state 3 began
+   float  targetY;       // computed Y target: padY + landedHt - 1.0 (just below threshold)
+   float  elapsed;       // seconds since landing started
+   float  duration;      // total descent time (seconds)
+   int    lastState;     // per-carrier last known state (avoids shared g_diagLastState)
+   bool   active;
+};
+static CarrierLandingOverride g_landingOverride[kMaxTrackedCarriers] = {};
+
 // Cargo slot offsets from struct_base (inner base)
 static constexpr uintptr_t kInner_mCargoSlot0Obj = 0x1DDC; // first cargo slot object ptr
 static constexpr uintptr_t kCargoSlotStride      = 0x14;   // stride between cargo slots
@@ -105,14 +122,14 @@ static void* g_VehicleTrackerPool = nullptr;
 
 // Dropoff animation state tracking (used by SetProperty, DetachCargo, render hooks)
 struct CarrierDropoffState {
-   void* structBase;  // carrier struct_base, nullptr = unused
-   DWORD startTick;   // GetTickCount() when dropoff started
-   float duration;    // animation duration in seconds (numFrames / 30.0)
+   void* structBase;    // carrier struct_base, nullptr = unused
+   void* dropoffAnim;   // per-instance anim pointer (from this carrier's class bank)
+   DWORD startTick;     // GetTickCount() when dropoff started
+   float duration;      // animation duration in seconds (numFrames / 30.0)
    bool  active;
+   bool  lookupDone;    // true if anim lookup was attempted for this carrier
 };
 static CarrierDropoffState g_dropoff[kMaxTrackedCarriers] = {};
-static void* g_dropoffAnim = nullptr;
-static bool  g_dropoffLookupDone = false;
 
 // ---------------------------------------------------------------------------
 // EntityCarrierClass::SetProperty
@@ -130,13 +147,13 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
-      // Carrier class is being (re)initialized — invalidate cached dropoff anim
+      // Carrier class is being (re)initialized — invalidate cached dropoff anims
       // since animation data from the previous match has been freed.
-      g_dropoffLookupDone = false;
-      g_dropoffAnim = nullptr;
       for (int i = 0; i < kMaxTrackedCarriers; i++) {
          g_dropoff[i].active = false;
          g_dropoff[i].structBase = nullptr;
+         g_dropoff[i].dropoffAnim = nullptr;
+         g_dropoff[i].lookupDone = false;
       }
 
       int count = *(int*)((char*)ecx + kMCargoCount_offset);
@@ -219,43 +236,49 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
    // Start dropoff animation on first cargo slot drop
    if (hadCargo && slotIdx == 0) {
       __try {
-         // Lazy lookup of "dropoff" animation from the flyer's animation bank
-         if (!g_dropoffLookupDone && g_ZephyrAnimBankFind) {
-            g_dropoffLookupDone = true;
+         // Find or allocate a dropoff slot for this carrier
+         int slot = -1;
+         for (int i = 0; i < kMaxTrackedCarriers; i++) {
+            if (g_dropoff[i].structBase == ecx || g_dropoff[i].structBase == nullptr) {
+               slot = i; break;
+            }
+         }
+         if (slot < 0) slot = 0; // overwrite oldest if full
+
+         g_dropoff[slot].structBase = ecx;
+
+         // Per-instance anim lookup from this carrier's own animation bank
+         if (!g_dropoff[slot].lookupDone && g_ZephyrAnimBankFind) {
+            g_dropoff[slot].lookupDone = true;
             void* classPtr = *(void**)((char*)ecx + kInner_mClass);
+            auto fn2 = get_gamelog();
+            if (fn2) fn2("[Carrier] Dropoff anim lookup: ecx=%p classPtr=%p\n", ecx, classPtr);
             if (classPtr) {
                void* bank = *(void**)((char*)classPtr + kClassAnimBank_off);
+               if (fn2) fn2("[Carrier]   bank=%p (classPtr+0x%X)\n", bank, (unsigned)kClassAnimBank_off);
                if (bank) {
-                  g_dropoffAnim = g_ZephyrAnimBankFind(bank, "dropoff");
-                  auto fn = get_gamelog();
-                  if (fn) {
-                     fn("[Carrier] Dropoff anim lookup: bank=%p anim=%p\n", bank, g_dropoffAnim);
-                     if (g_dropoffAnim) {
-                        unsigned short nFrames = *(unsigned short*)((char*)g_dropoffAnim + 8);
-                        fn("[Carrier]   numFrames=%u\n", nFrames);
+                  g_dropoff[slot].dropoffAnim = g_ZephyrAnimBankFind(bank, "dropoff");
+                  if (fn2) {
+                     fn2("[Carrier]   anim=%p\n", g_dropoff[slot].dropoffAnim);
+                     if (g_dropoff[slot].dropoffAnim) {
+                        unsigned short nFrames = *(unsigned short*)((char*)g_dropoff[slot].dropoffAnim + 8);
+                        fn2("[Carrier]   numFrames=%u\n", nFrames);
                      }
                   }
+               } else {
+                  if (fn2) fn2("[Carrier]   bank is null — no dropoff anim for this carrier class\n");
                }
             }
          }
 
-         if (g_dropoffAnim) {
-            int slot = -1;
-            for (int i = 0; i < kMaxTrackedCarriers; i++) {
-               if (g_dropoff[i].structBase == ecx || g_dropoff[i].structBase == nullptr) {
-                  slot = i; break;
-               }
-            }
-            if (slot >= 0) {
-               unsigned short nf = *(unsigned short*)((char*)g_dropoffAnim + 8);
-               g_dropoff[slot].structBase = ecx;
-               g_dropoff[slot].startTick = GetTickCount();
-               g_dropoff[slot].duration = (float)nf / 30.0f; // play at 30fps
-               g_dropoff[slot].active = true;
-               auto fn = get_gamelog();
-               if (fn) fn("[Carrier] Dropoff animation started for carrier %p (dur=%.2fs)\n",
-                          ecx, g_dropoff[slot].duration);
-            }
+         if (g_dropoff[slot].dropoffAnim) {
+            unsigned short nf = *(unsigned short*)((char*)g_dropoff[slot].dropoffAnim + 8);
+            g_dropoff[slot].startTick = GetTickCount();
+            g_dropoff[slot].duration = (float)nf / 30.0f;
+            g_dropoff[slot].active = true;
+            auto fn = get_gamelog();
+            if (fn) fn("[Carrier] Dropoff animation started for carrier %p (dur=%.2fs)\n",
+                       ecx, g_dropoff[slot].duration);
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
    }
@@ -293,7 +316,9 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-   if (dropoffSlot >= 0 && g_dropoffAnim) {
+   if (dropoffSlot >= 0 && g_dropoff[dropoffSlot].dropoffAnim) {
+      void* thisAnim = g_dropoff[dropoffSlot].dropoffAnim;
+
       // Compute time-based animation progress (independent of ascent speed)
       DWORD now = GetTickCount();
       float elapsed = (float)(now - g_dropoff[dropoffSlot].startTick) / 1000.0f;
@@ -309,7 +334,7 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
          void* classPtr = *(void**)(structBase + kInner_mClass);
          animSlot = (void**)((char*)classPtr + kClassTakeoffAnim_off);
          savedAnim = *animSlot;
-         *animSlot = g_dropoffAnim;
+         *animSlot = thisAnim;
          savedProg = *progSlot;
          *progSlot = animProgress;
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -464,6 +489,10 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             g_dropoff[i].active = false;
             g_dropoff[i].structBase = nullptr;
          }
+         if (g_landingOverride[i].structBase == (void*)inner) {
+            g_landingOverride[i].active = false;
+            g_landingOverride[i].structBase = nullptr;
+         }
       }
       return false;
    }
@@ -484,6 +513,63 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             }
             break;
          }
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+   // Custom landing descent: override position during state 3 with straight-line lerp
+   __try {
+      int state = *(int*)((char*)ecx + kState_offset);
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_landingOverride[i].structBase != (void*)inner) continue;
+
+         int prevState = g_landingOverride[i].lastState;
+         g_landingOverride[i].lastState = state;
+
+         // State just entered 3 — capture start position, compute targetY
+         if (state == 3 && prevState != 3 && !g_landingOverride[i].active) {
+            g_landingOverride[i].startX = *(float*)(inner + kInner_mPosX);
+            g_landingOverride[i].startY = *(float*)(inner + kInner_mPosY);
+            g_landingOverride[i].startZ = *(float*)(inner + kInner_mPosZ);
+            g_landingOverride[i].elapsed = 0.0f;
+            g_landingOverride[i].active = true;
+
+            // Y target = padY + landedHt - 1.0: just below the vanilla landing
+            // threshold (gndDist < landedHt). The carrier descends to this Y at
+            // t=1.0, triggering landing exactly when X/Z are at the pad.
+            float landedHt = *(float*)((char*)ecx + kLandedHeight_offset);
+            g_landingOverride[i].targetY = g_landingOverride[i].padY + landedHt - 1.0f;
+
+            auto fn = get_gamelog();
+            if (fn) fn("[Carrier] Landing override: ACTIVE start=(%.2f,%.2f,%.2f) pad=(%.2f,%.2f,%.2f) targetY=%.2f landedHt=%.2f dur=%.1fs\n",
+                       g_landingOverride[i].startX, g_landingOverride[i].startY, g_landingOverride[i].startZ,
+                       g_landingOverride[i].padX, g_landingOverride[i].padY, g_landingOverride[i].padZ,
+                       g_landingOverride[i].targetY, landedHt, g_landingOverride[i].duration);
+         }
+
+         // Override position each frame during state 3
+         if (state == 3 && g_landingOverride[i].active) {
+            g_landingOverride[i].elapsed += dt;
+            float t = g_landingOverride[i].elapsed / g_landingOverride[i].duration;
+            if (t > 1.0f) t = 1.0f;
+
+            // Lerp X/Z to pad, Y to targetY (just below landing threshold)
+            float newX = g_landingOverride[i].startX + (g_landingOverride[i].padX - g_landingOverride[i].startX) * t;
+            float newY = g_landingOverride[i].startY + (g_landingOverride[i].targetY - g_landingOverride[i].startY) * t;
+            float newZ = g_landingOverride[i].startZ + (g_landingOverride[i].padZ - g_landingOverride[i].startZ) * t;
+
+            *(float*)(inner + kInner_mPosX) = newX;
+            *(float*)(inner + kInner_mPosY) = newY;
+            *(float*)(inner + kInner_mPosZ) = newZ;
+         }
+
+         // Deactivate when leaving state 3
+         if (state != 3 && g_landingOverride[i].active) {
+            g_landingOverride[i].active = false;
+            auto fn = get_gamelog();
+            if (fn) fn("[Carrier] Landing override: DEACTIVATED (state=%d)\n", state);
+         }
+
+         break;
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -717,6 +803,33 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 
       // AttachCargo expects struct_base as ECX
       // Inner for class access = struct_base + 0x240
+
+      // Store pad position for landing override (from VehicleSpawn's pad transform)
+      // PblMatrix is row-major 4×4; position = floats at indices 12,13,14
+      {
+         float* padMtx = (float*)(vs + kVS_PadTransform);
+         float pX = padMtx[12], pY = padMtx[13], pZ = padMtx[14];
+
+         int loSlot = -1;
+         for (int i = 0; i < kMaxTrackedCarriers; i++) {
+            if (g_landingOverride[i].structBase == (void*)carrierStructBase ||
+                g_landingOverride[i].structBase == nullptr) {
+               loSlot = i; break;
+            }
+         }
+         if (loSlot < 0) loSlot = 0; // overwrite oldest if full
+         g_landingOverride[loSlot].structBase = (void*)carrierStructBase;
+         g_landingOverride[loSlot].padX = pX;
+         g_landingOverride[loSlot].padY = pY;
+         g_landingOverride[loSlot].padZ = pZ;
+         g_landingOverride[loSlot].active = false;
+         g_landingOverride[loSlot].elapsed = 0.0f;
+         g_landingOverride[loSlot].duration = kDefaultDescentSeconds;
+         g_landingOverride[loSlot].lastState = -1;
+
+         if (fn) fn("[Carrier] Landing override: stored pad pos=(%.2f,%.2f,%.2f) for carrier %p\n",
+                    pX, pY, pZ, carrierStructBase);
+      }
 
       // Read carrier class → mCargoCount
       // kInner_mClass (0x66C) is already from struct_base, NOT from inner
