@@ -81,6 +81,28 @@ static constexpr uintptr_t kInner_mClass       = 0x66C;    // EntityCarrierClass
 static constexpr uintptr_t kClassLandedHt_off   = 0x8F4;  // float: -(bbox_Y_min)
 static constexpr uintptr_t kClassTakeoffHt_off  = 0x8E0;  // float: TakeoffHeight ODF property
 
+// ---------------------------------------------------------------------------
+// VehicleSpawn offsets (from UpdateSpawn's ECX)
+// ---------------------------------------------------------------------------
+static constexpr uintptr_t kVS_SpawnCount   = 0x7C;   // int: max active vehicles from this pad
+static constexpr uintptr_t kVS_SpawnClass   = 0x90;   // EntityClass*[8] — cargo class per team
+static constexpr uintptr_t kVS_UseCarrier   = 0xD0;   // bool[8] — carrier mode per team
+static constexpr uintptr_t kVS_ListSentinel = 0xD8;   // linked list sentinel node
+static constexpr uintptr_t kVS_TrackerCount = 0xE8;   // int: active VehicleTracker count
+static constexpr uintptr_t kVS_CarrierPtr   = 0xEC;   // carrier entity ptr (PblHandle)
+static constexpr uintptr_t kVS_CarrierGen   = 0xF0;   // carrier entity generation
+static constexpr uintptr_t kVS_Team         = 0xF8;    // int: current vehicle team (1-based)
+static constexpr uintptr_t kVS_PadTransform = 0x30;    // PblMatrix (16 floats)
+
+// MemoryPool::Allocate — thiscall(MemoryPool*, uint size) → void*
+static constexpr uintptr_t kMemPoolAlloc_addr       = 0x00802300;
+typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
+static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
+
+// VehicleTracker::sMemoryPool global
+static constexpr uintptr_t kVehicleTrackerPool_addr = 0x00B9A758;
+static void* g_VehicleTrackerPool = nullptr;
+
 // Dropoff animation state tracking (used by SetProperty, DetachCargo, render hooks)
 struct CarrierDropoffState {
    void* structBase;  // carrier struct_base, nullptr = unused
@@ -465,6 +487,23 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
+   // Multi-slot detach: when carrier transitions to LANDED (state 0),
+   // CalculateDest only detaches slot 0.  We detach slots 1..3 here.
+   __try {
+      int state = *(int*)((char*)ecx + kState_offset);
+      if (state == 0 && g_diagLastState == 3) {
+         // Just landed — detach all extra cargo slots
+         for (int s = 1; s < kMaxCargo; s++) {
+            void* cargoObj = *(void**)((char*)inner + kInner_mCargoSlot0Obj + s * kCargoSlotStride);
+            if (cargoObj) {
+               auto fn = get_gamelog();
+               if (fn) fn("[Carrier] Multi-detach: detaching slot %d\n", s);
+               original_DetachCargo(inner, nullptr, s);
+            }
+         }
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
    // Diagnostic: state transitions
    __try {
       int   state = *(int*)((char*)ecx + kState_offset);
@@ -553,6 +592,215 @@ static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
 }
 
 // ---------------------------------------------------------------------------
+// VehicleSpawn::UpdateSpawn — multi-cargo carrier spawning
+//   __thiscall(void* vehicleSpawn, float dt)
+//   Ghidra VA: 0x00665A50
+//
+// After the original spawns carrier + 1 cargo (slot 0), we spawn additional
+// cargo entities and attach them to slots 1..N-1, creating a VehicleTracker
+// for each.  This fills carrier cargo slots based on SpawnCount.
+// ---------------------------------------------------------------------------
+
+static constexpr uintptr_t kUpdateSpawn_addr = 0x00665A50;
+
+using fn_UpdateSpawn_t = void(__fastcall*)(void* ecx, void* edx, float dt);
+static fn_UpdateSpawn_t original_UpdateSpawn = nullptr;
+
+// Helper: allocate and link a VehicleTracker for a cargo entity
+static void CreateTracker(char* vs, void* cargoEntity)
+{
+   if (!g_MemPoolAlloc || !g_VehicleTrackerPool || !cargoEntity) return;
+
+   // Allocate 0x1C bytes from VehicleTracker::sMemoryPool
+   int* tracker = (int*)g_MemPoolAlloc(g_VehicleTrackerPool, 0x1C);
+   if (!tracker) return;
+
+   // Zero all 7 dwords
+   for (int i = 0; i < 7; i++) tracker[i] = 0;
+
+   char* sentinel = vs + kVS_ListSentinel;
+
+   // Set list pointers
+   tracker[0] = (int)sentinel;        // +0x00: list owner
+   tracker[1] = (int)sentinel;        // +0x04: list owner
+   tracker[3] = (int)tracker;         // +0x0C: self-ptr
+
+   // Set cargo entity reference
+   tracker[4] = (int)cargoEntity;                    // +0x10: entity ptr
+   tracker[5] = *(int*)((char*)cargoEntity + 0x204); // +0x14: entity generation
+
+   // Link into doubly-linked list at head
+   // sentinel+0x08 = first element ptr
+   int* sentinelI = (int*)sentinel;
+   tracker[2] = sentinelI[2];                     // new->next = old first
+   sentinelI[2] = (int)tracker;                   // sentinel->first = new
+   *(int*)(tracker[2] + 4) = (int)tracker;        // old_first->prev = new
+
+   // Increment tracker count
+   *(int*)(vs + kVS_TrackerCount) = *(int*)(vs + kVS_TrackerCount) + 1;
+}
+
+static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
+{
+   char* vs = (char*)ecx;
+
+   // Read tracker count BEFORE original call
+   int countBefore = 0;
+   __try {
+      countBefore = *(int*)(vs + kVS_TrackerCount);
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+   // Call original — spawns carrier + 1 cargo in slot 0 (if conditions met)
+   original_UpdateSpawn(ecx, nullptr, dt);
+
+   // Check if a carrier was just spawned
+   __try {
+      int countAfter = *(int*)(vs + kVS_TrackerCount);
+      if (countAfter <= countBefore) return; // nothing spawned
+
+      int team = *(int*)(vs + kVS_Team);
+      int spawnCount = *(int*)(vs + kVS_SpawnCount);
+      auto fn = get_gamelog();
+      if (fn) fn("[Carrier] UpdateSpawn: spawned! countBefore=%d countAfter=%d team=%d spawnCount=%d\n",
+                 countBefore, countAfter, team, spawnCount);
+
+      if (team < 1 || team > 7) return;
+
+      // Only apply to carrier spawns — game indexes by team directly (1-based)
+      char useCarrier = *(char*)(vs + kVS_UseCarrier + team);
+      if (!useCarrier) {
+         if (fn) fn("[Carrier] UpdateSpawn: not a carrier spawn (useCarrier=0)\n");
+         return;
+      }
+
+      // Get the carrier entity
+      void* carrierEntity = *(void**)(vs + kVS_CarrierPtr);
+      if (!carrierEntity) {
+         if (fn) fn("[Carrier] UpdateSpawn: no carrier entity at +0xEC\n");
+         return;
+      }
+      if (fn) fn("[Carrier] UpdateSpawn: carrierEntity=%p\n", carrierEntity);
+
+      int carrierGen = *(int*)(vs + kVS_CarrierGen);
+      if (*(int*)((char*)carrierEntity + 0x204) != carrierGen) {
+         if (fn) fn("[Carrier] UpdateSpawn: carrier gen mismatch\n");
+         return;
+      }
+
+      // Get carrier inner base (for AttachCargo, which expects struct_base as ECX)
+      // carrierEntity from VehicleSpawn+0xEC — need to figure out if this is
+      // struct_base or inner (struct_base+0x240).
+      // Check vtable to determine: EntityCarrier vtable at struct_base[0].
+      void* entityVtbl = *(void**)carrierEntity;
+      if (fn) fn("[Carrier] UpdateSpawn: entity vtable=%p, expected carrier vtable~=%p\n",
+                 entityVtbl, (void*)g_carrierVtable);
+
+      // The entity from VehicleSpawn might already be the inner base (entity+0x240),
+      // not the struct_base. If vtable doesn't match carrier vtable, try -0x240.
+      char* carrierStructBase = nullptr;
+      if ((uintptr_t)entityVtbl == (uintptr_t)g_carrierVtable) {
+         carrierStructBase = (char*)carrierEntity;
+         if (fn) fn("[Carrier] UpdateSpawn: entity IS struct_base (vtable matches)\n");
+      } else {
+         // Maybe it's inner base already — check struct_base = entity - 0x240
+         char* maybeBase = (char*)carrierEntity - 0x240;
+         void* maybeVtbl = *(void**)maybeBase;
+         if ((uintptr_t)maybeVtbl == (uintptr_t)g_carrierVtable) {
+            carrierStructBase = maybeBase;
+            if (fn) fn("[Carrier] UpdateSpawn: entity is inner (+0x240), struct_base=%p\n", maybeBase);
+         } else {
+            if (fn) fn("[Carrier] UpdateSpawn: can't identify carrier base (vtbl=%p, -0x240 vtbl=%p)\n",
+                       entityVtbl, maybeVtbl);
+            return;
+         }
+      }
+
+      // AttachCargo expects struct_base as ECX
+      // Inner for class access = struct_base + 0x240
+
+      // Read carrier class → mCargoCount
+      // kInner_mClass (0x66C) is already from struct_base, NOT from inner
+      void* carrierClass = *(void**)(carrierStructBase + kInner_mClass);
+      if (!carrierClass) { if (fn) fn("[Carrier] UpdateSpawn: no carrier class\n"); return; }
+      int cargoCount = *(int*)((char*)carrierClass + kMCargoCount_offset);
+      if (fn) fn("[Carrier] UpdateSpawn: carrierClass=%p, cargoCount=%d\n", carrierClass, cargoCount);
+      if (cargoCount <= 1) return; // only 1 slot defined, nothing extra to do
+
+      // How many slots can we fill?
+      int budget = spawnCount - countAfter; // remaining spawn budget
+      int slotsToFill = cargoCount;
+      if (slotsToFill > budget + 1) slotsToFill = budget + 1; // +1 because slot 0 already used 1
+      if (slotsToFill > kMaxCargo) slotsToFill = kMaxCargo;
+
+      if (slotsToFill <= 1) return; // slot 0 already filled, no budget for more
+
+      // Get cargo spawn class
+      void* spawnClass = *(void**)(vs + kVS_SpawnClass + team * 4);
+      if (!spawnClass) return;
+
+      // Get pad transform for spawning cargo at the right position
+      // We use VehicleSpawn+0x30 (the pad's world transform matrix)
+      char* padTransform = vs + kVS_PadTransform;
+
+      if (fn) fn("[Carrier] Multi-cargo: filling %d slots (cargoCount=%d, budget=%d)\n",
+                 slotsToFill, cargoCount, budget);
+
+      for (int slot = 1; slot < slotsToFill; slot++) {
+         if (fn) fn("[Carrier]   Slot %d: spawning cargo...\n", slot);
+
+         // Spawn cargo entity: spawnClass->vtable[2](transform)
+         void** vtbl = *(void***)spawnClass;
+         typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
+         SpawnEntity_t spawnFn = (SpawnEntity_t)vtbl[2];
+         void* spawned = spawnFn(spawnClass, padTransform);
+         if (!spawned) { if (fn) fn("[Carrier]   Slot %d: spawn returned null\n", slot); continue; }
+
+         // Get actual entity: spawned->vtable[9]()
+         void** spawnedVtbl = *(void***)spawned;
+         typedef void* (__thiscall* GetEntity_t)(void* obj);
+         GetEntity_t getEntityFn = (GetEntity_t)spawnedVtbl[9];
+         void* cargoEntity = getEntityFn(spawned);
+         if (!cargoEntity) { if (fn) fn("[Carrier]   Slot %d: entity is null\n", slot); continue; }
+
+         if (fn) fn("[Carrier]   Slot %d: cargo=%p\n", slot, cargoEntity);
+
+         // Match original UpdateSpawn order exactly:
+         // Original: AttachCargo → vtable[36](team) → team bits → vtable[5]
+
+         // 1. Attach cargo to carrier first (original does this before team/activate)
+         original_AttachCargo(carrierStructBase, nullptr, slot, cargoEntity);
+
+         // 2. cargo->vtable[36](team) — SetTeam
+         void** cargoVtbl = *(void***)cargoEntity;
+         typedef void (__thiscall* SetTeam_t)(void* entity, int team);
+         ((SetTeam_t)cargoVtbl[36])(cargoEntity, team);
+
+         // 3. Set team bits 0xF0 and 0xF00
+         int* teamBits = (int*)((char*)cargoEntity + 0x234);
+         *teamBits = *teamBits ^ (((team << 4) ^ *teamBits) & 0xF0);
+         *teamBits = *teamBits ^ (((team << 8) ^ *teamBits) & 0xF00);
+
+         // 4. cargo->vtable[5]() — activation (in own __try so tracker still created)
+         __try {
+            typedef void (__thiscall* Activate_t)(void* entity);
+            ((Activate_t)cargoVtbl[5])(cargoEntity);
+            if (fn) fn("[Carrier]   Slot %d: activated OK\n", slot);
+         } __except(EXCEPTION_EXECUTE_HANDLER) {
+            if (fn) fn("[Carrier]   Slot %d: vtable[5] exception (non-fatal)\n", slot);
+         }
+
+         // 5. Create VehicleTracker (runs even if activation failed)
+         CreateTracker(vs, cargoEntity);
+
+         if (fn) fn("[Carrier]   Slot %d: done!\n", slot);
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {
+      auto fn = get_gamelog();
+      if (fn) fn("[Carrier] Multi-cargo: exception during extra spawn\n");
+   }
+}
+
+// ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
@@ -567,6 +815,9 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
    g_ZephyrAnimBankFind    = (fn_ZephyrAnimBankFind_t)resolve(exe_base, kZephyrAnimBankFind_addr);
    original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, kFlyerRender_addr);
+   original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, kUpdateSpawn_addr);
+   g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, kMemPoolAlloc_addr);
+   g_VehicleTrackerPool    = resolve(exe_base, kVehicleTrackerPool_addr);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -577,6 +828,7 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_CarrierUpdate,     hooked_CarrierUpdate);
    DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    DetourAttach(&(PVOID&)original_FlyerRender,       hooked_FlyerRender);
+   DetourAttach(&(PVOID&)original_UpdateSpawn,       hooked_UpdateSpawn);
    DetourTransactionCommit();
 }
 
@@ -591,5 +843,6 @@ void entity_carrier_fixes_uninstall()
    if (original_CarrierUpdate)      DetourDetach(&(PVOID&)original_CarrierUpdate,      hooked_CarrierUpdate);
    if (original_UpdateLandedHeight) DetourDetach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    if (original_FlyerRender)        DetourDetach(&(PVOID&)original_FlyerRender,        hooked_FlyerRender);
+   if (original_UpdateSpawn)        DetourDetach(&(PVOID&)original_UpdateSpawn,        hooked_UpdateSpawn);
    DetourTransactionCommit();
 }
