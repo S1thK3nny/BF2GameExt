@@ -6,6 +6,12 @@
 // =============================================================================
 // EntityCarrier / EntityCarrierClass bug fixes
 //
+// IMPORTANT: EntityCarrier meshes MUST have at least one collision primitive
+// (p_ shape) in the .msh file.  EntityFlyerClass::SetProperty (0x004FA310)
+// auto-generates a "main_body" capsule/cylinder from the model's bounding box
+// if zero primitives are found.  This fallback collision is usually wrong
+// (oversized cylinder) and causes visual/physics issues during flight.
+//
 // Bugs fixed:
 //   1. EntityCarrierClass::SetProperty — no bounds check on mCargoCount before
 //      writing to mCargoInfo[mCargoCount].  At count==4, the write destination

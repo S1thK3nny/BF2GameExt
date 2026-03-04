@@ -854,3 +854,68 @@ player-controlled:
 VehicleSpawn or another system (likely `FUN_004f8b70` at address `0x004f8b70`, the unnamed
 takeoff function) directly writes `state=1` between frames. This creates the observed
 LANDING→ASCENDING→LANDING cycle.
+
+---
+
+## Collision Primitive Generation
+
+EntityFlyerClass (and by inheritance EntityCarrierClass) generates collision primitives
+during ODF property processing. The collision model is built from the mesh geometry and
+has a fallback path that creates a bounding-volume approximation when no explicit collision
+shapes are defined in the `.msh` file.
+
+### `EntityFlyerClass::SetProperty` — `004FA310`
+
+When the `GeometryName` property is processed, `SetProperty` loads the referenced model
+and iterates its mesh hierarchy looking for **`p_` prefixed shapes** (collision primitives).
+These are the standard naming convention for collision geometry in BF2 mesh files
+(e.g. `p_hull`, `p_wing`, `p_body`).
+
+### Primitive type system
+
+Collision primitives use a type enum:
+
+| Type | Shape              |
+|------|--------------------|
+| 0    | Sphere             |
+| 2    | Box                |
+| 3    | Capsule / Cylinder |
+| 4    | Cylinder           |
+
+### Auto-generated fallback — "main_body"
+
+If the mesh contains **zero** `p_` primitives after scanning, `SetProperty` creates a
+synthetic fallback collision primitive derived from the model's axis-aligned bounding box:
+
+1. Reads the model AABB: `min` at `model+0x98`, `max` at `model+0xA4`.
+2. Computes half-extents: `half_X = (max.X - min.X) / 2`, `half_Y = (max.Y - min.Y) / 2`,
+   `half_Z = (max.Z - min.Z) / 2`.
+3. Derives capsule dimensions:
+   - `radius = (half_X + half_Z) * 0.5`
+   - `height = half_Y * 2.0`
+4. Creates a **type 3** primitive (capsule/cylinder) named `"main_body"`.
+
+**Important consequence**: removing all `p_` collision shapes from a `.msh` file does
+**not** remove collision from the entity. Instead, the engine falls back to this
+auto-generated capsule, which is often a worse fit than hand-authored collision primitives.
+The fallback capsule is a rough cylinder/capsule that encloses the entire model bounding box,
+so it will be larger and less precise than purpose-built collision shapes.
+
+### ODF-defined collision (alternative to mesh primitives)
+
+Collision can also be specified directly in the ODF via properties such as:
+
+- `VehicleCollision` — vehicle-to-world collision shape
+- `OrdnanceCollision` — projectile hit collision shape
+- `SoldierCollision` — soldier interaction collision shape
+
+These are processed by the base class property handlers and are independent of the
+mesh-based `p_` primitive system.
+
+### Flying collision model — class offset `+0x728`
+
+`EntityFlyerClass` maintains a separate `mFlyingCollisionModel` at class offset `+0x728`.
+This is distinct from the standard collision model and is used specifically during flight.
+The standard collision model (built from `p_` shapes or the `main_body` fallback) and the
+flying collision model may differ, allowing entities to have different collision behavior
+on the ground versus in the air.
