@@ -15,8 +15,8 @@ void* resolved  = (void*)((unrelocated_addr - 0x400000u) + base);
 | Finding                                                        | Status       |
 |----------------------------------------------------------------|--------------|
 | EntityCarrier inherits EntityFlyer                             | ✅ Confirmed |
-| `mClass` pointer at `this+0x66C`                               | ✅ Confirmed |
-| `mCargoSlots[4]` at `this+0x1DD0`, stride `0x14`              | ✅ Confirmed |
+| `mClass` pointer at `inner+0x66C (= primary+0x8AC)`            | ✅ Confirmed |
+| `mCargoSlots[4]` at `inner+0x1DD0 (= primary+0x2010)`, stride `0x14` | ✅ Confirmed |
 | `CargoSlot` layout (offset + PblHandle ptr+gen)                | ✅ Confirmed |
 | `EntityCarrierClass::mCargoInfo[4]` at `+0x1180`, stride `0x10`| ✅ Confirmed |
 | `EntityCarrierClass::mCargoCount` at `+0x11C0`                 | ✅ Confirmed |
@@ -28,6 +28,27 @@ void* resolved  = (void*)((unrelocated_addr - 0x400000u) + base);
 | GetDerivedRtti/GetDerivedRttiName — COMDAT-folded with GetRtti | ✅ Confirmed |
 | `unaff_EBX + 0x340` in Update — decompiler artifact           | ✅ Confirmed |
 | Float cast in AttachCargo offset math — decompiler artifact    | ✅ Confirmed |
+
+---
+
+## Pointer Layout
+
+EntityCarrier / EntityFlyer use **two distinct `this`-pointer bases**:
+
+- **Primary base** — ECX received by `EntityCarrier::Update` (`0x004D7FE0`) and
+  `EntityFlyer::Update` (`0x004fc930`).  The thunk at `0x00412ad0` is a plain
+  `JMP 0x004fc930` with **no ECX adjustment**, so both functions see the same pointer.
+- **Inner base** — ECX received by `AttachCargo` (`0x004D81F0`),
+  `DetachCargo` (`0x004D8350`), `UpdateLandedHeight` (`0x004D8130`), and most
+  other EntityCarrier methods.  Always equals **primary + 0x240**.
+
+The old documentation used a "struct_base" concept where "struct_base + 0x240 = Update's ECX".
+That was incorrect — **Update's ECX is the primary base**; there is no separate struct_base.
+
+Confirmed by disassembly:
+- `EntityCarrier::Update` reads cargo at ECX+0x1b9c, count at ECX+0x1be0 (primary offsets).
+- `EntityCarrier::AttachCargo` reads cargo at ECX+0x1DDC, count at ECX+0x1E20 (inner offsets).
+- All differences are exactly 0x240.
 
 ---
 
@@ -74,7 +95,7 @@ no separate function symbols exist at distinct addresses.
 
 ### `EntityCarrier::CargoSlot` — 20 bytes (`0x14`)
 
-Defined as a Ghidra struct. Four of these live at `EntityCarrier + 0x1DD0`.
+Defined as a Ghidra struct. Four of these live at `inner+0x1DD0` (accessible from AttachCargo/UpdateLandedHeight's ECX).
 
 ```cpp
 struct CargoSlot {          // stride 0x14
@@ -104,12 +125,18 @@ struct CargoInfo {          // stride 0x10
 
 ### Relevant `EntityCarrier` offsets
 
-| Offset   | Type                   | Field                                      |
-|----------|------------------------|--------------------------------------------|
-| `+0x66C` | `EntityCarrierClass*`  | `mClass` — pointer to the class descriptor |
-| `+0x1DD0`| `CargoSlot[4]`         | `mCargoSlots`                              |
-| `+0x1DDC`| `void*`                | `mCargoSlots[0].mObjectPtr` (derived)      |
-| `+0x1DE0`| `int`                  | `mCargoSlots[0].mObjectGen` (derived)      |
+"Inner" = ECX in AttachCargo/DetachCargo/UpdateLandedHeight.
+"Primary" = ECX in Update/EntityFlyer::Update. Primary = inner + 0x240.
+
+| Offset (inner) | Offset (primary) | Type                  | Field                                          |
+|----------------|-------------------|-----------------------|------------------------------------------------|
+| `+0x66C`       | `+0x8AC`          | `EntityCarrierClass*` | `mClass` — pointer to the class descriptor     |
+| `+0x1DD0`      | `+0x2010`         | `CargoSlot[4]`        | `mCargoSlots` (AttachCargo/DetachCargo array)  |
+| `+0x1DDC`      | `+0x201C`         | `void*`               | `mCargoSlots[0].mObjectPtr` (derived)          |
+| `+0x1DE0`      | `+0x2020`         | `int`                 | `mCargoSlots[0].mObjectGen` (derived)          |
+| —              | `+0x1b90`         | `CargoSlot[4]`        | Cargo slots (Update position array)            |
+| —              | `+0x1b9c`         | `void*`               | Update cargo slot 0 obj ptr                    |
+| —              | `+0x1be0`         | `int`                 | Update cargo count                             |
 
 ### Relevant `EntityCarrierClass` offsets
 
@@ -198,6 +225,15 @@ Lua callbacks:
 | `00665a50` | `VehicleSpawn::UpdateSpawn`         | Spawn sequence: cargo + carrier + attach + takeoff |
 | `00664c50` | `VehicleSpawn::VehicleSpawn`        | Constructor                                |
 
+### AI Carrier Behavior
+
+| Address    | Symbol                              | Notes                                      |
+|------------|-------------------------------------|--------------------------------------------|
+| `005af000` | AI carrier goal (6-state FSM)       | Controls entire carrier flight lifecycle   |
+| `005aee80` | Get entity from AI goal object      | Returns entity pointer from AI goal param  |
+| `004f8b70` | `EntityFlyer::TakeOff`              | Sets state=1 (ASCENDING); called from AI   |
+| `00408602` | `thunk_EntityFlyer::TakeOff`        | Thunk → `004f8b70`                         |
+
 Standalone:
 
 | Address    | Symbol              | Notes                                   |
@@ -230,7 +266,7 @@ Signature: `void __thiscall(EntityCarrier* this, int slotIdx, void* cargo)`
 2. **Pre-check**: if `mCargoSlots[slotIdx].mObjectPtr` is non-null and its generation
    still matches, the slot is already occupied — returns immediately without attaching.
 3. Otherwise clears the existing stale handle.
-4. Reads `this->mClass` (`+0x66C`) → `mCargoInfo[slotIdx]` → attach-point offset.
+4. Reads `this->mClass` (`inner+0x66C`) → `mCargoInfo[slotIdx]` → attach-point offset.
 5. Calls `cargo->vtable[0x28](cargo_ptr_arg)` to notify cargo it is being attached
    (no null check before this call — **bug, guarded by our hook**).
 6. Computes `slot.mOffset = mCargoInfo[slotIdx].mOffset − cargo_world_pos`
@@ -430,11 +466,12 @@ When `mUseCarrier[team]` is true and the spawn timer fires:
    the flight AI via `(**(entity+0x0c))->vtable[1]()`.
 9. Allocates a `VehicleTracker` for the **cargo** entity (not the carrier) and links it.
 
-### EntityFlyer State Machine (`+0x5A4`)
+### EntityFlyer State Machine (`primary+0x364`)
 
-EntityCarrier inherits from EntityFlyer.  The flight state is stored at `struct_base + 0x5A4`.
-In `EntityFlyer::Update` (actual body at `0x004fc930`), `this` = `struct_base + 0x240`,
-so the state field is accessed as `this + 0x364`.
+EntityCarrier inherits from EntityFlyer.  The thunk at `0x00412ad0` is a plain
+`JMP 0x004fc930` with no `this`-pointer adjustment, so `EntityFlyer::Update` and
+`EntityCarrier::Update` receive the same ECX value (the **primary base**).
+The flight state is at `primary + 0x364`.
 
 | State | Name       | Description                                              |
 |-------|------------|----------------------------------------------------------|
@@ -474,14 +511,77 @@ so the state field is accessed as `this + 0x364`.
 | `0x004fec0b` | **0** | **Landing → landed** (ground reached, surface valid)      |
 | `0x005004a7` | 5     | Dying → dead (crash timer expired)                        |
 
-Other functions that write `+0x5A4`:
+Other functions that write `primary+0x364` (flight state):
 
 | Address      | Function                         | Value | Notes                                |
 |--------------|----------------------------------|-------|--------------------------------------|
 | `0x004fc730` | `EntityFlyer::SetStateLanded`    | 0     | Zeroes velocity, positions on ground |
 | `0x004fc830` | `EntityFlyer::SetStateTakeOff`   | 2     | Sets initial velocity, flight timer  |
 | `0x004f1380` | `EntityFlyer::InitiateLanding`   | 3     | Called from Lua `EntityFlyerLand`    |
-| `0x004f8b70` | (unnamed takeoff)                | 1     | Begins ascent                        |
+| `0x004f8b70` | `EntityFlyer::TakeOff`           | 1     | Takes off; called by AI behavior     |
+
+### AI Carrier Behavior State Machine — `005af000`
+
+The carrier's flight lifecycle is controlled by a 6-state AI goal function at `0x005af000`.
+This function runs independently of `EntityFlyer::Update` and manages path generation,
+destination selection, and flight state transitions. It is called via the AI system between
+entity Update frames.
+
+The AI goal object is passed as `param_1`. Key fields:
+- `param_1[1]` — current AI state (1–6, used as switch case)
+- `param_1[3]` — reference to controller/entity data
+- `param_1[0x13]` — VehicleSpawn/destination reference
+- `param_1[0x15]` — flag byte (toggled during landing sequence)
+- `param_1[0x16]` — timer value
+
+Entity access: `thunk_FUN_005aee80(param_1)` returns the actual entity pointer
+(inner/struct base, where `+0x5A4` = flight state, `+0x66C` = class pointer).
+
+#### AI states
+
+| AI State | Name | Behaviour |
+|----------|------|-----------|
+| 1 | CHECK LANDED | If entity flight state == 0 → clear AI path, return (landing complete). Otherwise → set AI state to 4 (pick destination). |
+| 2 | INITIAL TAKEOFF | Creates a 2-point AIPath: current position → 200 units straight ahead. If entity state ≠ 2 (FLYING) → calls `TakeOff` → entity state = 1. |
+| 3 | AT DESTINATION | If arrived at destination and flag is set, records timer = `now + 10`. Clears AI path. |
+| 4 | PICK NEXT DEST | Picks a **random command post** (`AIUtil::GetRandomInt(0, numCPs-1)`). Loops up to 10 times to find one >100 units away. Sets destination to `CP.position + (0, 20, 0)`. If entity state ≠ 2 → calls `TakeOff` → **entity state = 1 (BUG: interrupts LANDING)**. |
+| 5 | LANDING APPROACH | Reads destination from `param_1[0x13]` (VehicleSpawn ref). Adjusts position via `FUN_006646b0` (carrier bbox adjustment). Computes approach direction with `y = -0.2` (slight descent). Creates 3-point AIPath: current → approach point (2× entity radius back) → destination. |
+| 6 | HANDLE LANDING | Toggles landing flag. If flag was set, registers landing zone and transitions to AI state 3. Otherwise sets flag, transitions AI to state 3. |
+
+#### AI state flow
+
+```
+Spawn → AI state 2 (takeoff) → AI state 4 (pick random CP)
+  → fly to CP → AI state 3 (arrived) → AI state 5 (landing approach)
+  → AI state 6 (landing) → AI state 3 (at destination)
+  → AI state 1 (check landed) → if state==0: cargo drop. else: AI state 4 (cycle)
+```
+
+#### Bug: Case 4 interrupts landing
+
+In AI state 4, the check `if (entity_state != 2)` triggers `TakeOff`, which forces
+entity state = 1 (ASCENDING). This runs even when the entity is in state 3 (LANDING),
+yanking the carrier back up mid-descent. The AI state machine runs between `EntityFlyer::Update`
+frames, so the transition is invisible to hooks inside Update.
+
+**Result**: carrier oscillates LANDING → ASCENDING → LANDING indefinitely, never reaching
+`gndDist < landedHt`, so it never lands (state 0) and VehicleSpawn never drops cargo.
+
+**Fix**: hook `TakeOff` (`0x004f8b70` / thunk `0x00408602`) to suppress the 3→1
+transition. If entity is already in state 3, return early without calling the original.
+The existing landing physics will complete the descent naturally.
+
+#### Path generation (not placed splines)
+
+The carrier does **not** use placed spline paths from Zero Editor. The AI behavior generates
+its own `AIPath` objects on the fly:
+- Case 2: simple 200-unit forward path
+- Case 4: single waypoint at random CP + 20 height
+- Case 5: 3-point approach path with slight descent angle
+
+The ODF `PathFollower*` properties (`PathFollowerClass`, `PathFollowerBranchPaths`, etc.) may
+be consumed by a lower-level path-following system, but the destination selection and path
+construction is entirely controlled by `FUN_005af000`.
 
 ### Landing condition (state 3 → 0)
 
@@ -495,7 +595,7 @@ The condition chain (disassembly at `0x004feb17`–`0x004fec0b`):
 4. collision node is NULL  OR  NOT (water OR DenyFlyerLand)
 ```
 
-**`field_0x3c0`** = `struct_base + 0x600` = the **landed height** (hover floor).
+**`field_0x3c0`** = `primary + 0x3C0` = the **landed height** (hover floor).
 This is the distance below which the flyer is considered "on the ground."
 
 If `ground_distance >= field_0x3c0`, landing never completes and the carrier
@@ -504,7 +604,11 @@ state ≠ 0 → destroys the carrier instead of dropping cargo.
 
 ### `mLandedHeight` — hover floor / landing threshold
 
-**Instance field**: `struct_base + 0x600` (= `EntityFlyer::Update this + 0x3c0`)
+**Instance field**: `primary + 0x3C0` (read by EntityFlyer::Update landing condition)
+
+**Note**: `UpdateLandedHeight` writes to `inner + 0x600` (= `primary + 0x840`).  This appears
+to be a separate copy — the landing condition reads from `primary + 0x3C0` which is the
+EntityFlyer-level field initialized from `EntityFlyerClass + 0x8F4` during construction.
 
 **Class field**: `EntityFlyerClass + 0x8F4`
 
@@ -517,12 +621,12 @@ mLandedHeight = -(*(float*)(redModel + 0x9C));  // = -(bounding_box_min.Y)
 If the model's lowest point is at Y = -2.0 in local space, then mLandedHeight = 2.0.
 
 **Instance override**: `EntityCarrier::UpdateLandedHeight` (`0x004D8130`) adjusts
-the per-instance value:
+the per-instance value (offsets here use UpdateLandedHeight's ECX = inner base):
 ```cpp
-entity+0x600 = mClass+0x8F4;   // start with class base height
+inner+0x600 = mClass+0x8F4;   // start with class base height  (= primary+0x840)
 for each cargo slot:
     cargoHeight = -(cargoOffsetY) - cargoGeometryHeight;
-    entity+0x600 = max(entity+0x600, cargoHeight);
+    inner+0x600 = max(inner+0x600, cargoHeight);
 ```
 
 So the effective landing threshold = `max(carrier_bbox_height, cargo_adjusted_heights)`.
@@ -536,7 +640,7 @@ velocity set in step 7 above indefinitely.
 **Normal drop mechanism** — `VehicleSpawn::CalculateDest` (`0x00665300`):
 - VehicleSpawn stores a carrier handle at `+0xEC`/`+0xF0` when the carrier reaches
   its destination.
-- On subsequent calls, checks `carrier->state` (`+0x5A4`):
+- On subsequent calls, checks `carrier->state` (`primary+0x364`):
   - **State 0** (landed): calls `DetachCargo(0)` — cargo drops at current position.
   - **State 2** (still flying): destroys the carrier (timeout path).
 - The carrier must successfully land (state 3 → 0) for cargo to drop.  If it never
@@ -556,6 +660,12 @@ velocity set in step 7 above indefinitely.
 3. **Water / DenyFlyerLand surface**: collision model has the deny flag set.
 4. **LandedHeight too small**: if `field_0x3c0` is near zero (model bbox bottom at Y≈0),
    the carrier must nearly touch the ground to satisfy the distance check.
+5. **External state=1 writes** (confirmed for VehicleSpawn carrier): something outside
+   `EntityFlyer::Update` sets state=1 between frames, interrupting the landing approach
+   before the carrier reaches `gndDist < landedHt`. This creates a 3→1→3 cycle where the
+   carrier oscillates between LANDING (descending ~5-10 units) and ASCENDING (climbing back up),
+   never reaching the ground. The source of the external state=1 write is likely `FUN_004f8b70`
+   called by the VehicleSpawn/AI path system.
 
 ### Required world setup for vtrans carrier
 
@@ -569,37 +679,178 @@ velocity set in step 7 above indefinitely.
 
 ### Key EntityFlyer / EntityFlyerClass fields
 
-| Offset (struct_base) | Offset (Update this) | Type    | Field                                |
-|----------------------|----------------------|---------|--------------------------------------|
-| `+0x120`             | —                    | float   | World position X (matrix row 3)      |
-| `+0x124`             | —                    | float   | World position Y                     |
-| `+0x128`             | —                    | float   | World position Z                     |
-| `+0x5A4`             | `+0x364`             | int     | Flight state (0–5)                   |
-| `+0x5A8`             | `+0x368`             | float   | Takeoff/landing progress (0.0–1.0)   |
-| `+0x580`             | `+0x340`             | Vec3    | Velocity vector                      |
-| `+0x598`             | `+0x358`             | float   | Speed magnitude                      |
-| `+0x600`             | `+0x3C0`             | float   | LandedHeight (landing threshold)     |
-| `+0x604`             | `+0x3C4`             | float   | Flight timer                         |
-| `+0x66C`             | `+0x42C`             | ptr     | EntityFlyerClass* / EntityCarrierClass*|
+All offsets use the **primary base** (= ECX in Update / EntityFlyer::Update).
+Inner-base equivalents = primary offset − 0x240.
+
+| Primary offset | Type    | Field                                    |
+|----------------|---------|------------------------------------------|
+| `+0x364`       | int     | Flight state (0–5)                       |
+| `+0x368`       | float   | Takeoff/landing progress (0.0–1.0)       |
+| `+0x340`       | Vec3    | Velocity vector                          |
+| `+0x358`       | float   | Speed magnitude                          |
+| `+0x3C0`       | float   | LandedHeight (landing threshold)         |
+| `+0x3C4`       | float   | Flight timer                             |
+| `+0x8AC`       | ptr     | EntityFlyerClass* / EntityCarrierClass*  |
 
 | Offset (class)  | Type    | Field                                          |
 |------------------|---------|-------------------------------------------------|
-| `+0x88C`         | float   | Flight speed                                   |
+| `+0x884`         | float   | Gravity (applied per-frame as velocity change)  |
+| `+0x888`         | float   | Gravity (alternate, used when boosting)         |
+| `+0x88C`         | float   | MinSpeed / FlightSpeed (ODF `MinSpeed`)         |
+| `+0x890`         | float   | MidSpeed / MidFlyerSpeed (ODF `MidSpeed`)       |
+| `+0x894`         | float   | MaxSpeed / MaxFlyerSpeed (ODF `MaxSpeed`)        |
+| `+0x898`         | float   | BoostSpeed (ODF `BoostSpeed`)                   |
 | `+0x8E0`         | float   | TakeoffHeight (ODF property)                   |
+| `+0x8E4`         | float   | TakeoffTime (ODF property)                     |
+| `+0x8E8`         | float   | TakeoffSpeed (ODF property)                    |
+| `+0x8EC`         | float   | LandingTime (ODF property)                     |
+| `+0x8F0`         | float   | LandingSpeed (ODF property)                    |
 | `+0x8F4`         | float   | mLandedHeight = -(model_bbox_Y_min), NOT ODF   |
-| `+0x1118`        | byte    | Flags; bit 1 = is carrier class                |
+| `+0x1118`        | byte    | Flags; bit 0 = is carrier class; bit 1 = auto-land capable |
 
 ### `FUN_004fc830` / `SetStateTakeOff` field reference
 
-| Offset (struct)  | Value set       | Notes                                        |
+All offsets use the **primary base** (ECX as received by SetStateTakeOff).
+
+| Offset (primary) | Value set       | Notes                                        |
 |------------------|-----------------|----------------------------------------------|
-| `+0x5B8..C`      | `gVectorZero`   | clears stored velocity                       |
-| `+0x2C0`         | `-4.0f`         | initial Y-velocity / hover offset            |
-| `+0x580..8`      | `speed × fwd`   | initial flight velocity vector               |
-| `+0x598`         | `speed`         | flight speed magnitude                       |
-| `+0x59C..0`      | zeros           | clears extra velocity state                  |
-| `+0x5A4`         | `2`             | flight mode state = FLYING                   |
-| `+0x604`         | `15.0f`         | internal timer (`0x41700000`)                |
-| `+0x5A8`         | `1.0f`          | takeoff progress = complete                  |
+| `+0x378..C`      | `gVectorZero`   | clears stored velocity                       |
+| `+0x080`         | `-4.0f`         | initial Y-velocity / hover offset            |
+| `+0x340..8`      | `speed × fwd`   | initial flight velocity vector               |
+| `+0x358`         | `speed`         | flight speed magnitude                       |
+| `+0x35C..0`      | zeros           | clears extra velocity state                  |
+| `+0x364`         | `2`             | flight mode state = FLYING                   |
+| `+0x3C4`         | `15.0f`         | internal timer (`0x41700000`)                |
+| `+0x368`         | `1.0f`          | takeoff progress = complete                  |
 
 Speed source: `FUN_004f0a10(entity)` reads `mClass + 0x88c` (EntityFlyerClass flight speed).
+
+---
+
+## ODF Flight Parameters — Detailed Behaviour
+
+All five flight parameters are set in the carrier's ODF (e.g. `com_fly_vtrans.odf`) and stored
+in the `EntityFlyerClass` struct. `EntityFlyer::Update` reads them from the class pointer at
+`primary+0x42C`.
+
+### `TakeoffHeight` — cls+0x8E0
+
+**ODF**: `TakeoffHeight = 2`
+
+Used in two contexts:
+
+1. **Vertical velocity scaling** (cases 1 and 3, second switch):
+   ```
+   scale = clamp(gndDist / TakeoffHeight, 0.0, 1.0)
+   vertical_speed = (scale * 0.875 + 0.125) * TakeoffSpeed_or_LandingSpeed
+   ```
+   With `TakeoffHeight=2`, the scale maxes out at 1.0 whenever `gndDist > 2`. This means the
+   carrier gets full vertical speed almost immediately. A larger TakeoffHeight would create a
+   gradual ramp-up as the carrier gets further from the ground.
+
+2. **Ascending progress gate** (case 1, first switch):
+   ```
+   if (gndDist > TakeoffHeight + landedHt) {
+       progress += dt / TakeoffTime;
+   }
+   ```
+   Progress only increases while the carrier is above `TakeoffHeight + landedHt`. With
+   `TakeoffHeight=2` and `landedHt≈0.77`, this gate is always open (carrier is at gndDist≈25).
+
+**Player flyer vs carrier**: for a player-controlled flyer, this is the height at which the
+pilot's turn controls ramp up to full authority. For the VehicleSpawn carrier, the value is
+irrelevant because gndDist always far exceeds it.
+
+### `TakeoffTime` — cls+0x8E4
+
+**ODF**: `TakeoffTime = 215`
+
+Used only in case 1 (ASCENDING), first switch:
+```
+progress += dt / TakeoffTime
+if (progress >= 1.0) → state = 2 (FLYING)
+```
+
+Controls how long ASCENDING takes to complete. At 215 seconds, the carrier needs **3.5 minutes**
+of uninterrupted ascending to reach state=2 (FLYING). This is intentionally extreme — the carrier
+is never meant to reach FLYING on its own. VehicleSpawn externally sets state=2 via the
+`EntityFlyerTakeOff` Lua callback.
+
+**Player flyer vs carrier**: a player flyer typically uses a short TakeoffTime (1-3 seconds) so
+the player quickly reaches flight altitude. The carrier uses 215 because VehicleSpawn manages the
+lifecycle externally — TakeoffTime is effectively a "safety timeout."
+
+### `TakeoffSpeed` — cls+0x8E8
+
+**ODF**: `TakeoffSpeed = 12.0`
+
+Used in case 1 (ASCENDING), second switch (velocity computation):
+```
+upward_velocity.y = (scale * 0.875 + 0.125) * TakeoffSpeed
+velocity = Interpolate_(upward_vec, forward_velocity, progress)
+```
+
+Controls the **upward climb rate** during ASCENDING. The carrier rises at up to 12 units/sec.
+The actual rate is blended by `Interpolate_` — at `progress=0.6`, about 40% of the upward
+velocity applies (~4.8 u/s effective climb rate).
+
+**Player flyer vs carrier**: same role for both — the speed at which the vehicle rises after
+leaving the ground.
+
+### `LandingTime` — cls+0x8EC
+
+**ODF**: `LandingTime = 10`
+
+Used in case 3 (LANDING), first switch:
+```
+progress -= dt / LandingTime
+```
+
+Controls how long the landing approach takes. Progress decreases from its current value toward 0
+over `LandingTime` seconds. As progress decreases, the `Interpolate_` in the velocity switch
+shifts more weight toward the downward vector, causing the carrier to descend faster.
+
+**Player flyer vs carrier**: for a player flyer, this controls the graceful descent duration.
+For the carrier, same physics apply, but the carrier gets interrupted by external state changes
+(3→1) before completing the approach.
+
+### `LandingSpeed` — cls+0x8F0
+
+**ODF**: `LandingSpeed = 30.0`
+
+Used in case 3 (LANDING), second switch (velocity computation):
+```
+downward_velocity.y = -((scale * 0.875 + 0.125) * LandingSpeed)
+velocity = Interpolate_(downward_vec, forward_velocity, progress)
+```
+
+Controls the **maximum descent rate** during LANDING. With `LandingSpeed=30`, the carrier can
+descend at up to 30 units/sec. However, the `Interpolate_` blending with `progress` means the
+effective initial descent rate is much lower. At `progress=0.8`, only ~20% of the downward
+velocity applies (~6 u/s effective descent rate). As progress approaches 0, the full 30 u/s
+descent rate is applied.
+
+**Player flyer vs carrier**: same role for both. However, the carrier never reaches the low
+progress values where the full descent rate kicks in, because external code interrupts the
+landing by setting state=1 (ASCENDING).
+
+### Why these parameters behave differently for EntityCarrier
+
+The fundamental difference is that an EntityCarrier is **VehicleSpawn-controlled**, not
+player-controlled:
+
+| Aspect | Player-controlled flyer | VehicleSpawn carrier |
+|--------|------------------------|---------------------|
+| State driver | Player input + physics | VehicleSpawn Lua callbacks |
+| pilot flag | `(field_0x44 & 3) == 3` (YES) | `(field_0x44 & 3) != 3` (NO) |
+| State 1→3 | Auto-transitions when `pilot=YES && progress > 0.75` | Never auto-transitions; only via external `EntityFlyerLand` Lua call |
+| State 2→3 | Player presses brake (`field_0x3bc > 0.99`) | Never auto-transitions with `pilot=NO`; only via external `EntityFlyerLand` |
+| State 3→0 | `gndDist < landedHt && normal > 0.9375` | Same condition, but carrier rarely reaches it |
+| State 3→1 | Only if surface is water/denied, or pilot bails (`progress < 0.05`) | **External code sets state=1 between Update frames** (confirmed: no TRANSITION log from within Update) |
+
+**Critical finding**: the 3→1 state change for the carrier happens **outside** of
+`EntityFlyer::Update`. The diagnostic hook captures state before and after calling
+`original_CarrierUpdate` — no transition is detected within the Update call. This means
+VehicleSpawn or another system (likely `FUN_004f8b70` at address `0x004f8b70`, the unnamed
+takeoff function) directly writes `state=1` between frames. This creates the observed
+LANDING→ASCENDING→LANDING cycle.
