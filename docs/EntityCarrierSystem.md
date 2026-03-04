@@ -466,6 +466,33 @@ When `mUseCarrier[team]` is true and the spawn timer fires:
    the flight AI via `(**(entity+0x0c))->vtable[1]()`.
 9. Allocates a `VehicleTracker` for the **cargo** entity (not the carrier) and links it.
 
+### Carrier Spawn Height Calculation
+
+The carrier's initial spawn Y position is computed by `FUN_006646b0`, called in step 4 above.
+This function reads `LandingTime`, `LandingSpeed`, and `LandedHeight` from the `EntityFlyerClass`:
+
+```
+Y_offset = LandingTime * LandingSpeed * 0.5 + LandedHeight
+Z_offset = LandingTime * FlightSpeed * -0.5
+```
+
+Where `FlightSpeed` is the carrier's current forward speed. The carrier spawns this far above
+the VehiclePad's ground position. In practice:
+
+```
+Example: LandingTime = 15, LandingSpeed = 30, LandedHeight = 3
+Y_offset = 15 * 30 * 0.5 + 3 = 228 units above the pad
+```
+
+After spawning, the carrier's Y is **clamped every frame** by `AIUtil::gMaxFlyHeight`
+(global at `0x00b8e9ec`, default `200.0`). The clamp applies as `Y <= gMaxFlyHeight + 0.2`.
+This value can be set from Lua via `SetMaxFlyHeight(height)`.
+
+If the computed spawn offset exceeds `gMaxFlyHeight`, the carrier will immediately be pulled
+down to the fly ceiling on its first update frame. To get a lower spawn without altering
+the landing behaviour, reduce `LandingTime` or `LandingSpeed`, or set `SetMaxFlyHeight`
+to the desired ceiling in your mission Lua.
+
 ### EntityFlyer State Machine (`primary+0x364`)
 
 EntityCarrier inherits from EntityFlyer.  The thunk at `0x00412ad0` is a plain
@@ -854,6 +881,128 @@ player-controlled:
 VehicleSpawn or another system (likely `FUN_004f8b70` at address `0x004f8b70`, the unnamed
 takeoff function) directly writes `state=1` between frames. This creates the observed
 LANDING→ASCENDING→LANDING cycle.
+
+---
+
+## ODF Flight Parameter Reference
+
+These five ODF properties are stored as consecutive floats in `EntityFlyerClass`:
+
+| ODF Property    | Class Offset | Description                              |
+|-----------------|-------------|------------------------------------------|
+| `TakeoffHeight` | `+0x8E0`   | Altitude threshold for speed scaling and progress gate |
+| `TakeoffTime`   | `+0x8E4`   | Duration of ASCENDING→FLYING transition  |
+| `TakeoffSpeed`  | `+0x8E8`   | Vertical ascent rate                     |
+| `LandingTime`   | `+0x8EC`   | Duration of FLYING→LANDED transition     |
+| `LandingSpeed`  | `+0x8F0`   | Vertical descent rate                    |
+| `LandedHeight`  | `+0x8F4`   | Ground-contact threshold (auto-computed from model bbox if not set) |
+
+### `TakeoffHeight`
+
+Controls two things during ASCENDING (state 1):
+
+1. **Speed ramp** — vertical speed scales with altitude:
+   ```
+   heightRatio = clamp(groundDistance / TakeoffHeight, 0, 1)
+   speed = (heightRatio * 0.875 + 0.125) * TakeoffSpeed
+   ```
+   Example: `TakeoffHeight = 20`, `TakeoffSpeed = 10`
+   - At ground level: `0.125 * 10 = 1.25 u/s` (slow start)
+   - At 10 units up: `(0.5 * 0.875 + 0.125) * 10 = 5.625 u/s`
+   - At 20+ units up: `1.0 * 10 = 10.0 u/s` (full speed)
+
+2. **Progress gate** — the ascending timer only ticks while above this height:
+   ```
+   if (groundDistance > TakeoffHeight + LandedHeight)
+       progress += dt / TakeoffTime
+   ```
+   Example: `TakeoffHeight = 20`, `LandedHeight = 3` — progress only advances
+   once the carrier is 23+ units above ground.
+
+Also used as the denominator for the same speed ramp during LANDING (state 3).
+
+### `TakeoffTime`
+
+How long the ASCENDING phase lasts after the carrier clears `TakeoffHeight`:
+```
+progress += dt / TakeoffTime
+if (progress >= 1.0) → state = FLYING
+```
+
+Example: `TakeoffTime = 5` — after reaching TakeoffHeight, the carrier stays
+in ASCENDING for 5 more seconds before transitioning to FLYING.
+
+For VehicleSpawn carriers, this is typically set very high (e.g. 200+) because
+VehicleSpawn manages the state externally. The carrier never reaches FLYING on its own;
+`TakeoffTime` acts as a safety timeout.
+
+### `TakeoffSpeed`
+
+Maximum vertical ascent rate in units/second during ASCENDING:
+```
+speed = (heightRatio * 0.875 + 0.125) * TakeoffSpeed
+```
+
+Example: `TakeoffSpeed = 15` — the carrier rises at up to 15 u/s. The `heightRatio`
+ramp means it starts slow (1.875 u/s) and reaches full speed at `TakeoffHeight`.
+
+### `LandingTime`
+
+How long the descent approach takes during LANDING (state 3):
+```
+progress -= dt / LandingTime
+```
+
+Example: `LandingTime = 8` — progress decreases from 1.0 toward 0 over 8 seconds.
+As progress decreases, velocity shifts from forward flight toward pure downward descent.
+
+### `LandingSpeed`
+
+Maximum vertical descent rate in units/second during LANDING:
+```
+speed = -((heightRatio * 0.875 + 0.125) * LandingSpeed)
+```
+
+Example: `LandingSpeed = 25` — the carrier descends at up to 25 u/s. Like
+TakeoffSpeed, the heightRatio ramp reduces speed near the ground.
+
+### Dropoff Animation Interaction
+
+The DLL hooks the render function (`FUN_004f6970`) to swap the takeoff animation
+(`class+0x87c`) with a "dropoff" animation looked up from the animation bank
+(`class+0x878`) via `ZephyrAnimBank::Find(bank, "dropoff")`.
+
+The render function computes the displayed animation frame as:
+```
+frame = (numFrames - 1) * progress
+```
+
+Where `progress` is the flight transition float at `inner+0x5A8`. During ASCENDING,
+the state machine drives this value from 0.0 toward 1.0. The dropoff animation plays
+in sync with this progression.
+
+**How ODF parameters affect the dropoff animation:**
+
+| Parameter       | Effect on dropoff animation                           |
+|-----------------|-------------------------------------------------------|
+| `TakeoffHeight` | Higher = longer speed ramp = carrier rises slower near ground, giving more time for early animation frames |
+| `TakeoffSpeed`  | Lower = slower ascent = more time for the animation to play during ascending |
+| `TakeoffTime`   | No direct effect on animation speed (only controls ASCENDING→FLYING transition timer, not the progress float used by the render) |
+
+The DLL overrides the progress float in the render hook with a time-based value
+(`elapsed / duration`, where `duration = numFrames / 30.0`), so the animation always
+plays at 30fps regardless of ascent speed. The animation plays for its full duration
+(~2 seconds for 61 frames) even if the carrier has already transitioned to FLYING.
+
+**Tuning example:**
+```ini
+TakeoffSpeed  = 10     ; ascent rate — carrier rises ~10 u/s
+TakeoffHeight = 20     ; speed ramp zone — ~2s to clear at full speed
+```
+With these values, the carrier spends ~2 seconds visibly ascending near the ground,
+during which the dropoff animation (also ~2 seconds) plays completely. The visual
+result: cargo drops, doors/mechanism animate open while the carrier rises, then it
+flies away normally.
 
 ---
 
