@@ -81,6 +81,17 @@ static constexpr uintptr_t kInner_mClass       = 0x66C;    // EntityCarrierClass
 static constexpr uintptr_t kClassLandedHt_off   = 0x8F4;  // float: -(bbox_Y_min)
 static constexpr uintptr_t kClassTakeoffHt_off  = 0x8E0;  // float: TakeoffHeight ODF property
 
+// Dropoff animation state tracking (used by SetProperty, DetachCargo, render hooks)
+struct CarrierDropoffState {
+   void* structBase;  // carrier struct_base, nullptr = unused
+   DWORD startTick;   // GetTickCount() when dropoff started
+   float duration;    // animation duration in seconds (numFrames / 30.0)
+   bool  active;
+};
+static CarrierDropoffState g_dropoff[kMaxTrackedCarriers] = {};
+static void* g_dropoffAnim = nullptr;
+static bool  g_dropoffLookupDone = false;
+
 // ---------------------------------------------------------------------------
 // EntityCarrierClass::SetProperty
 //   __thiscall(EntityCarrierClass* this, unsigned int hash, const char* value)
@@ -97,6 +108,15 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
+      // Carrier class is being (re)initialized — invalidate cached dropoff anim
+      // since animation data from the previous match has been freed.
+      g_dropoffLookupDone = false;
+      g_dropoffAnim = nullptr;
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         g_dropoff[i].active = false;
+         g_dropoff[i].structBase = nullptr;
+      }
+
       int count = *(int*)((char*)ecx + kMCargoCount_offset);
       if (count >= kMaxCargo) return; // array full — silently ignore extra nodes
    }
@@ -152,17 +172,6 @@ static fn_ZephyrAnimBankFind_t g_ZephyrAnimBankFind = nullptr;
 // EntityFlyerClass offsets for animation data
 static constexpr uintptr_t kClassAnimBank_off    = 0x878;  // RedAnimation* (animation bank)
 static constexpr uintptr_t kClassTakeoffAnim_off = 0x87c;  // ZephyrAnim* (takeoff anim)
-
-// Dropoff animation state tracking
-struct CarrierDropoffState {
-   void* structBase;  // carrier struct_base, nullptr = unused
-   DWORD startTick;   // GetTickCount() when dropoff started
-   float duration;    // animation duration in seconds (numFrames / 30.0)
-   bool  active;
-};
-static CarrierDropoffState g_dropoff[kMaxTrackedCarriers] = {};
-static void* g_dropoffAnim = nullptr;
-static bool  g_dropoffLookupDone = false;
 
 static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 {
