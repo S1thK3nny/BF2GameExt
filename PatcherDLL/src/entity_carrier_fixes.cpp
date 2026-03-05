@@ -71,13 +71,158 @@ static constexpr uintptr_t kClass_offset        = 0x42C;  // EntityCarrierClass*
 static constexpr int kMaxTrackedCarriers = 8;
 
 // ---------------------------------------------------------------------------
-// Custom carrier flight system — quadratic descent/ascent with range trigger
+// Custom carrier flight system
+// ---------------------------------------------------------------------------
+//
+// PROBLEM
+//   Vanilla carriers use progress-based interpolation for landing. The
+//   carrier's position is lerped between a flight-path waypoint and the
+//   VehiclePad based on a progress float (1.0 → 0.0). This causes the
+//   carrier to land far from the pad because the interpolation start
+//   point is wherever the carrier happens to be on the flight path —
+//   not aligned with the pad's X/Z coordinates.
+//
+//   After cargo drop, vanilla's ascent (state 1) is purely vertical
+//   progress-based interpolation with no forward movement. The carrier
+//   rises straight up, then snaps to a flight-path position when it
+//   reaches state 2. This looks unnatural.
+//
+// SOLUTION
+//   We override the carrier's position during two phases:
+//
+//   1. DESCENT — quadratic easing toward the pad
+//   2. ASCENT  — forward displacement while vanilla handles altitude
+//
+//   Everything else (AI direction, cargo attach/detach, state machine,
+//   landing condition, flight altitude) stays vanilla.
+//
+// ─── PHASE 1: DESCENT (state 3 — LANDING) ───
+//
+//   When the carrier enters state 3, we capture its world position as
+//   the interpolation start point. Each frame we compute:
+//
+//     t = clamp(elapsed / LandingTime, 0, 1)
+//
+//     X = lerp(startX, padX, t)          — linear horizontal
+//     Z = lerp(startZ, padZ, t)          — linear horizontal
+//     Y = lerp(startY, targetY, t*t)     — ease-in (t^2) vertical
+//
+//   targetY = padY + instanceLandedHt - 1.0
+//
+//   The ease-in on Y delays most of the altitude drop to the end of
+//   the descent. This is critical because vanilla's landing condition
+//   fires when groundDistance < LandedHeight. With ease-in, the carrier
+//   crosses that threshold at t≈0.97, ensuring it's directly above the
+//   pad when it lands. Ease-out (1-(1-t)^2) would cross at t≈0.74,
+//   landing the carrier hundreds of units away.
+//
+//   We use the INSTANCE LandedHeight (ECX+0x3C0), not the class value.
+//   The instance value includes the cargo bounding box and matches what
+//   vanilla's landing condition actually checks.
+//
+// ─── PHASE 2: ASCENT (state 1 — ASCENDING, post-drop only) ───
+//
+//   After cargo drop (state 3 → 0 → TakeOff → state 1), vanilla's
+//   state 1 raises the carrier to flight altitude via progress-based
+//   Y interpolation. This is purely vertical — no forward movement.
+//
+//   We fix this by saving the carrier's heading (rotation row 1) at
+//   TakeOff time and applying forward displacement to X/Z each frame:
+//
+//     if elapsed <= 3s:
+//       displacement = TakeoffSpeed * elapsed^2 / 6    (ramp up)
+//     else:
+//       displacement = TakeoffSpeed * 1.5 + TakeoffSpeed * (elapsed - 3)
+//
+//   The speed ramps from 0 to TakeoffSpeed over ~3 seconds, simulating
+//   the carrier regaining momentum after the stop-and-drop. After the
+//   ramp, it continues at constant TakeoffSpeed.
+//
+//   We also restore the carrier's rotation and X/Z from a snapshot
+//   taken at TakeOff time. This prevents the visual "jump" caused by
+//   vanilla's movement controller teleporting the carrier to a flight-
+//   path start point during state 1.
+//
+//   For the FIRST takeoff (pre-drop, carrier flying to the pad), only
+//   X and rotation are locked from the snapshot. Z is left free so
+//   vanilla's flight path drives forward movement naturally.
+//
+//   For POST-DROP takeoff, both X and Z are set from the snapshot +
+//   our forward displacement. This gives smooth forward flight.
+//
+//   Re-landing prevention: if vanilla tries to set state 3 during
+//   post-drop ascent, we force it back to state 1.
+//
+// ─── CARRIER LIFECYCLE ───
+//
+//   1. VehicleSpawn spawns carrier + cargo → state 3 (LANDING)
+//      - UpdateSpawn assigns a CarrierFlightOverride slot
+//      - Additional cargo spawned for multi-cargo carriers
+//
+//   2. Carrier descends (our PHASE 1) → lands → state 0 (LANDED)
+//      - Vanilla's landing condition (gndDist < landedHt) triggers
+//      - Cargo is detached (slot 0 by vanilla, slots 1-3 by us)
+//
+//   3. CalculateDest calls TakeOff → state 1 (ASCENDING)
+//      - Our hooked TakeOff saves transform snapshot
+//      - Post-drop: captures forward direction, activates PHASE 2
+//
+//   4. Carrier ascends (vanilla Y + our forward displacement)
+//      - Vanilla's progress interpolation raises Y to TakeoffHeight
+//      - Our forward displacement moves X/Z along the saved heading
+//
+//   5. Ascent completes → state 2 (FLYING)
+//      - CalculateDest sees state 2 → destroys the carrier
+//      - Safety despawn timer runs as fallback
+//
+// ─── ODF PROPERTIES ───
+//
+//   Set these in the carrier's ODF (EntityFlyer section):
+//
+//   | Property      | Offset | What it controls                              |
+//   |---------------|--------|-----------------------------------------------|
+//   | LandingTime   | +0x8EC | Descent duration (seconds). How long the      |
+//   |               |        | carrier takes to fly from spawn point to pad. |
+//   | TakeoffTime   | +0x8E4 | Ascent duration (seconds). How long the       |
+//   |               |        | carrier takes to rise to flight altitude.      |
+//   | TakeoffSpeed  | +0x8E8 | Post-drop forward speed (units/sec). How fast |
+//   |               |        | the carrier flies away after dropping cargo.   |
+//   |               |        | Speed ramps from 0 to this value over ~3s.    |
+//   | TakeoffHeight | +0x8E0 | Flight altitude (units above pad Y). The      |
+//   |               |        | carrier ascends to padY + TakeoffHeight.      |
+//   | MinSpeed      | +0x88C | Vanilla flight speed. Controls spawn distance |
+//   |               |        | (MinSpeed * LandingTime = distance from pad). |
+//   |               |        | NOT used by our system for post-drop speed.   |
+//   | LandingSpeed  | +0x8F0 | Not used by our system.                       |
+//   | LandedHeight  | +0x8F4 | Auto-calculated from model bounding box.      |
+//   |               |        | NOT an ODF property. Affects when vanilla's    |
+//   |               |        | landing condition triggers (gndDist < this).   |
+//
+// ─── SLOT TRACKING ───
+//
+//   Three parallel arrays track per-carrier state:
+//
+//   - g_flightOverride[8]: pad position, class params, descent/ascent
+//     state, forward direction, elapsed timers, despawn timer.
+//     Assigned in UpdateSpawn, freed on carrier death.
+//
+//   - g_takeoffPos[8]: transform snapshot (X, Z, rotation rows) saved
+//     at TakeOff time. Restored each frame during state 1 to prevent
+//     visual jumping from the movement controller.
+//
+//   - g_dropoff[8]: dropoff animation state for the cargo-release
+//     animation (swapped into the render pipeline during ascent).
+//
+//   All three arrays are cleaned of stale entries (dead carriers) via
+//   vtable validation whenever a new carrier spawns. This handles
+//   carriers destroyed outside our Update hook (e.g., by CalculateDest)
+//   and prevents stale data from interfering on match restart.
 // ---------------------------------------------------------------------------
 
 // EntityFlyerClass offsets for flight parameters
 static constexpr uintptr_t kClassTakeoffTime_off   = 0x8E4;  // float: TakeoffTime (ascent duration)
+static constexpr uintptr_t kClassTakeoffSpeed_off  = 0x8E8;  // float: TakeoffSpeed (post-drop forward speed)
 static constexpr uintptr_t kClassLandingTime_off   = 0x8EC;  // float: LandingTime (descent duration)
-static constexpr uintptr_t kClassForwardSpeed_off  = 0x88C;  // float: MinSpeed (ODF MinSpeed, used by vanilla as flight speed)
 
 // EntityFlyer::InitiateLanding — thiscall(struct_base), sets state=3
 static constexpr uintptr_t kInitiateLanding_addr   = 0x004f1380;
@@ -102,7 +247,7 @@ struct CarrierFlightOverride {
    float  flightAltitude;    // TakeoffHeight (+0x8E0) — cruise altitude above pad
    float  ascentDuration;    // TakeoffTime (+0x8E4) — ascent duration (seconds)
    float  descentDuration;   // LandingTime (+0x8EC) — descent duration (seconds)
-   float  forwardSpeed;      // MinSpeed (+0x88C) — vanilla flight speed, used for post-drop forward displacement
+   float  forwardSpeed;      // TakeoffSpeed (+0x8E8) — post-drop forward displacement speed
    float  landedHt;          // LandedHeight (+0x8F4) — bbox threshold
 
    // Descent state (state 3)
@@ -539,10 +684,18 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             bool isPostDrop = false;
             for (int j = 0; j < kMaxTrackedCarriers; j++) {
                if (g_flightOverride[j].structBase == carrierInner && g_flightOverride[j].ascentActive) {
-                  float offsetX = g_flightOverride[j].fwdDirX * g_flightOverride[j].forwardSpeed * g_flightOverride[j].ascentElapsed;
-                  float offsetZ = g_flightOverride[j].fwdDirZ * g_flightOverride[j].forwardSpeed * g_flightOverride[j].ascentElapsed;
-                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + offsetX;
-                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + offsetZ;
+                  // Ramp from 0 to forwardSpeed over ~3s, then hold at full speed
+                  float spd = g_flightOverride[j].forwardSpeed;
+                  float ramp = 3.0f; // seconds to reach full speed
+                  float t   = g_flightOverride[j].ascentElapsed;
+                  float dist;
+                  if (t <= ramp) {
+                     dist = spd * t * t / (2.0f * ramp); // accelerating
+                  } else {
+                     dist = spd * ramp / 2.0f + spd * (t - ramp); // constant
+                  }
+                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + g_flightOverride[j].fwdDirX * dist;
+                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + g_flightOverride[j].fwdDirZ * dist;
                   isPostDrop = true;
                   break;
                }
@@ -586,10 +739,17 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             bool isPostDrop = false;
             for (int j = 0; j < kMaxTrackedCarriers; j++) {
                if (g_flightOverride[j].structBase == carrierInner && g_flightOverride[j].ascentActive) {
-                  float offsetX = g_flightOverride[j].fwdDirX * g_flightOverride[j].forwardSpeed * g_flightOverride[j].ascentElapsed;
-                  float offsetZ = g_flightOverride[j].fwdDirZ * g_flightOverride[j].forwardSpeed * g_flightOverride[j].ascentElapsed;
-                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + offsetX;
-                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + offsetZ;
+                  float spd = g_flightOverride[j].forwardSpeed;
+                  float ramp = 3.0f;
+                  float t   = g_flightOverride[j].ascentElapsed;
+                  float dist;
+                  if (t <= ramp) {
+                     dist = spd * t * t / (2.0f * ramp);
+                  } else {
+                     dist = spd * ramp / 2.0f + spd * (t - ramp);
+                  }
+                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + g_flightOverride[j].fwdDirX * dist;
+                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + g_flightOverride[j].fwdDirZ * dist;
                   isPostDrop = true;
                   break;
                }
@@ -1010,6 +1170,32 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             }
          }
 
+         // Also evict stale snapshot entries (same logic: dead carrier = bad vtable)
+         for (int i = 0; i < kMaxTrackedCarriers; i++) {
+            if (g_takeoffPos[i].ecx == nullptr) continue;
+            __try {
+               void* vtbl = *(void**)g_takeoffPos[i].ecx;
+               if (vtbl != g_carrierVtable) {
+                  g_takeoffPos[i] = {};
+               }
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+               g_takeoffPos[i] = {};
+            }
+         }
+
+         // Also evict stale dropoff entries
+         for (int i = 0; i < kMaxTrackedCarriers; i++) {
+            if (g_dropoff[i].structBase == nullptr) continue;
+            __try {
+               void* vtbl = *(void**)g_dropoff[i].structBase;
+               if (vtbl != g_carrierVtable) {
+                  g_dropoff[i] = {};
+               }
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+               g_dropoff[i] = {};
+            }
+         }
+
          int loSlot = -1;
          for (int i = 0; i < kMaxTrackedCarriers; i++) {
             if (g_flightOverride[i].structBase == (void*)carrierStructBase ||
@@ -1033,17 +1219,17 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          if (classPtr) {
             float takeoffHt  = *(float*)((char*)classPtr + kClassTakeoffHt_off);
             float takeoffTm  = *(float*)((char*)classPtr + kClassTakeoffTime_off);
+            float takeoffSpd = *(float*)((char*)classPtr + kClassTakeoffSpeed_off);
             float landingTm  = *(float*)((char*)classPtr + kClassLandingTime_off);
-            float fwdSpeed   = *(float*)((char*)classPtr + kClassForwardSpeed_off);
             float landHt     = *(float*)((char*)classPtr + kClassLandedHt_off);
 
             g_flightOverride[loSlot].flightAltitude  = takeoffHt;
             g_flightOverride[loSlot].ascentDuration   = (takeoffTm > kMinDuration) ? takeoffTm : kMinDuration;
             g_flightOverride[loSlot].descentDuration  = (landingTm > kMinDuration) ? landingTm : kMinDuration;
-            g_flightOverride[loSlot].forwardSpeed     = (fwdSpeed > 1.0f) ? fwdSpeed : 1.0f;
+            g_flightOverride[loSlot].forwardSpeed     = (takeoffSpd > 1.0f) ? takeoffSpd : 1.0f;
             g_flightOverride[loSlot].landedHt         = landHt;
 
-            if (fn) fn("[Carrier:%p] Flight init: pad=(%.2f,%.2f,%.2f) alt=%.1f ascT=%.1f descT=%.1f spd=%.1f lHt=%.2f\n",
+            if (fn) fn("[Carrier:%p] Flight init: pad=(%.2f,%.2f,%.2f) alt=%.1f ascT=%.1f descT=%.1f takeoffSpd=%.1f lHt=%.2f\n",
                        carrierStructBase, pX, pY, pZ, takeoffHt, g_flightOverride[loSlot].ascentDuration,
                        g_flightOverride[loSlot].descentDuration, g_flightOverride[loSlot].forwardSpeed,
                        landHt);
