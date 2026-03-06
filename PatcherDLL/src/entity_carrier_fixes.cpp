@@ -210,10 +210,9 @@ static constexpr int kMaxTrackedCarriers = 8;
 //     at TakeOff time. Restored each frame during state 1 to prevent
 //     visual jumping from the movement controller.
 //
-//   - g_dropoff[8]: dropoff animation state for the cargo-release
-//     animation (swapped into the render pipeline during ascent).
+//   - g_animOverride[8]: animation progress override for the render hook.
 //
-//   All three arrays are cleaned of stale entries (dead carriers) via
+//   All arrays are cleaned of stale entries (dead carriers) via
 //   vtable validation whenever a new carrier spawns. This handles
 //   carriers destroyed outside our Update hook (e.g., by CalculateDest)
 //   and prevents stale data from interfering on match restart.
@@ -305,16 +304,16 @@ static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
 static constexpr uintptr_t kVehicleTrackerPool_addr = 0x00B9A758;
 static void* g_VehicleTrackerPool = nullptr;
 
-// Dropoff animation state tracking (used by SetProperty, DetachCargo, render hooks)
-struct CarrierDropoffState {
-   void* structBase;    // carrier struct_base, nullptr = unused
-   void* dropoffAnim;   // per-instance anim pointer (from this carrier's class bank)
-   DWORD startTick;     // GetTickCount() when dropoff started
-   float duration;      // animation duration in seconds (numFrames / 30.0)
+// Per-carrier animation progress override (used by render hook)
+struct CarrierAnimOverride {
+   void* structBase;    // carrier struct_base (inner), nullptr = unused
+   DWORD startTick;     // GetTickCount() at activation
+   float duration;      // seconds to play from start → end
+   float startProg;     // progress value at activation
+   float endProg;       // progress value at end
    bool  active;
-   bool  lookupDone;    // true if anim lookup was attempted for this carrier
 };
-static CarrierDropoffState g_dropoff[kMaxTrackedCarriers] = {};
+static CarrierAnimOverride g_animOverride[kMaxTrackedCarriers] = {};
 
 // ---------------------------------------------------------------------------
 // EntityCarrierClass::SetProperty
@@ -332,15 +331,6 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
-      // Carrier class is being (re)initialized — invalidate cached dropoff anims
-      // since animation data from the previous match has been freed.
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         g_dropoff[i].active = false;
-         g_dropoff[i].structBase = nullptr;
-         g_dropoff[i].dropoffAnim = nullptr;
-         g_dropoff[i].lookupDone = false;
-      }
-
       int count = *(int*)((char*)ecx + kMCargoCount_offset);
       if (count >= kMaxCargo) return; // array full — silently ignore extra nodes
    }
@@ -378,25 +368,6 @@ static constexpr uintptr_t kDetachCargo_addr = 0x004D8350;
 using fn_DetachCargo_t = void(__fastcall*)(void* ecx, void* edx, int slotIdx);
 static fn_DetachCargo_t original_DetachCargo = nullptr;
 
-// ---------------------------------------------------------------------------
-// Dropoff animation support
-//
-// When cargo is dropped, we play the "dropoff" animation from the flyer's
-// animation bank VISUALLY during the ascending phase (state 1).  The animation
-// pointer at EntityFlyerClass+0x87c (takeoff anim) is swapped to the dropoff
-// anim in the render hook for the duration of ascending.  No state machine
-// interference — purely visual.
-// ---------------------------------------------------------------------------
-
-// ZephyrAnimBank::Find — thiscall on RedAnimation* (animation bank)
-static constexpr uintptr_t kZephyrAnimBankFind_addr = 0x00803750;
-typedef void* (__thiscall* fn_ZephyrAnimBankFind_t)(void* bank, const char* name);
-static fn_ZephyrAnimBankFind_t g_ZephyrAnimBankFind = nullptr;
-
-// EntityFlyerClass offsets for animation data
-static constexpr uintptr_t kClassAnimBank_off    = 0x878;  // RedAnimation* (animation bank)
-static constexpr uintptr_t kClassTakeoffAnim_off = 0x87c;  // ZephyrAnim* (takeoff anim)
-
 static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 {
    if ((unsigned int)slotIdx >= (unsigned int)kMaxCargo) return; // OOB slot
@@ -418,54 +389,39 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 
    original_DetachCargo(ecx, nullptr, slotIdx);
 
-   // Start dropoff animation on first cargo slot drop
+   // Activate animation override on first cargo slot drop — progress starts at 1.0
+   // (fully deployed) and will be driven down toward 0.0 by the Update hook.
    if (hadCargo && slotIdx == 0) {
+      int slot = -1;
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_animOverride[i].structBase == ecx || g_animOverride[i].structBase == nullptr) {
+            slot = i; break;
+         }
+      }
+      if (slot < 0) slot = 0;
+
+      // Read animation duration from the takeoff anim's nFrames (class+0x87c -> +8)
+      float dur = 3.0f; // fallback
       __try {
-         // Find or allocate a dropoff slot for this carrier
-         int slot = -1;
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_dropoff[i].structBase == ecx || g_dropoff[i].structBase == nullptr) {
-               slot = i; break;
+         void* classPtr = *(void**)((char*)ecx + kInner_mClass);
+         if (classPtr) {
+            void* takeoffAnim = *(void**)((char*)classPtr + 0x87c);
+            if (takeoffAnim) {
+               unsigned short nFrames = *(unsigned short*)((char*)takeoffAnim + 8);
+               if (nFrames > 0) dur = (float)nFrames / 30.0f;
             }
-         }
-         if (slot < 0) slot = 0; // overwrite oldest if full
-
-         g_dropoff[slot].structBase = ecx;
-
-         // Per-instance anim lookup from this carrier's own animation bank
-         if (!g_dropoff[slot].lookupDone && g_ZephyrAnimBankFind) {
-            g_dropoff[slot].lookupDone = true;
-            void* classPtr = *(void**)((char*)ecx + kInner_mClass);
-            auto fn2 = get_gamelog();
-            if (fn2) fn2("[Carrier:%p] Dropoff anim lookup: classPtr=%p\n", ecx, classPtr);
-            if (classPtr) {
-               void* bank = *(void**)((char*)classPtr + kClassAnimBank_off);
-               if (fn2) fn2("[Carrier:%p]   bank=%p (classPtr+0x%X)\n", ecx, bank, (unsigned)kClassAnimBank_off);
-               if (bank) {
-                  g_dropoff[slot].dropoffAnim = g_ZephyrAnimBankFind(bank, "dropoff");
-                  if (fn2) {
-                     fn2("[Carrier:%p]   anim=%p\n", ecx, g_dropoff[slot].dropoffAnim);
-                     if (g_dropoff[slot].dropoffAnim) {
-                        unsigned short nFrames = *(unsigned short*)((char*)g_dropoff[slot].dropoffAnim + 8);
-                        fn2("[Carrier:%p]   numFrames=%u\n", ecx, nFrames);
-                     }
-                  }
-               } else {
-                  if (fn2) fn2("[Carrier:%p]   bank is null — no dropoff anim\n", ecx);
-               }
-            }
-         }
-
-         if (g_dropoff[slot].dropoffAnim) {
-            unsigned short nf = *(unsigned short*)((char*)g_dropoff[slot].dropoffAnim + 8);
-            g_dropoff[slot].startTick = GetTickCount();
-            g_dropoff[slot].duration = (float)nf / 30.0f;
-            g_dropoff[slot].active = true;
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] Dropoff animation started (dur=%.2fs)\n",
-                       ecx, g_dropoff[slot].duration);
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      g_animOverride[slot].structBase = ecx;
+      g_animOverride[slot].startTick = GetTickCount();
+      g_animOverride[slot].duration = dur;
+      g_animOverride[slot].startProg = 0.0f;    // start at first frame
+      g_animOverride[slot].endProg = 1.0f;      // end at last frame
+      g_animOverride[slot].active = true;
+
+      auto fn = get_gamelog();
+      if (fn) fn("[Carrier:%p] Anim override activated (0.0 -> 1.0 over %.2fs)\n", ecx, dur);
    }
 }
 
@@ -474,8 +430,9 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 //   __thiscall(void* this, uint param2, float param3, uint param4)
 //   this = struct_base + 0x94
 //
-// During ascending (state 1) after cargo drop, swap the takeoff animation
-// pointer with the dropoff animation so the render shows the dropoff.
+// Override the progress float for the render call when an animation override
+// is active.  The vanilla render function uses progress to compute the
+// animation frame: frame = (nFrames - 1) * progress.
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kFlyerRender_addr = 0x004f6970;
@@ -485,60 +442,141 @@ using fn_FlyerRender_t = void(__fastcall*)(void* ecx, void* edx,
                                            unsigned int param2, float param3, unsigned int param4);
 static fn_FlyerRender_t original_FlyerRender = nullptr;
 
+// Render hook — installed via Detour on FUN_004f6970.
+// Intercepts ALL flyer renders but only applies animation override to carriers
+// (identified by matching g_animOverride structBase).
 static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
                                           unsigned int param2, float param3, unsigned int param4)
 {
    char* structBase = (char*)ecx - kRender_thisToBase;
 
-   // Check if this carrier has an active dropoff animation
-   int dropoffSlot = -1;
-   __try {
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_dropoff[i].structBase == (void*)structBase && g_dropoff[i].active) {
-            dropoffSlot = i;
-            break;
+   // Find active animation override for this carrier
+   int overrideSlot = -1;
+   for (int i = 0; i < kMaxTrackedCarriers; i++) {
+      if (g_animOverride[i].structBase == (void*)structBase && g_animOverride[i].active) {
+         overrideSlot = i;
+         break;
+      }
+   }
+
+   if (overrideSlot >= 0) {
+      CarrierAnimOverride& ov = g_animOverride[overrideSlot];
+      float elapsed = (float)(GetTickCount() - ov.startTick) / 1000.0f;
+      float t = (ov.duration > 0.0f) ? elapsed / ov.duration : 1.0f;
+      if (t > 1.0f) t = 1.0f;
+
+      float animProg = ov.startProg + (ov.endProg - ov.startProg) * t;
+
+      // Diagnostic: log skeleton internals and bone matrices (limited to first 5 calls)
+      static int renderDiagCount = 0;
+      bool doDiag = (renderDiagCount < 5);
+      if (doDiag) {
+         renderDiagCount++;
+         __try {
+            // ecx+0x5b8 = null-gate pointer, ecx+0x64c = embedded ZephyrSkeleton (used by Open)
+            void* skelGate = *(void**)((char*)ecx + 0x5b8);
+            void* skelShared = *(void**)((char*)ecx + 0x64c);  // ZephyrSkeletonShared* used by Open
+            void* ref17dc = *(void**)((char*)ecx + 0x17dc);
+            float progVal = *(float*)((char*)ecx + 0x514);     // progress the render func reads
+            void* classPtr2 = *(void**)((char*)ecx + 0x5d8);
+            void* tkAnim = classPtr2 ? *(void**)((char*)classPtr2 + 0x87c) : nullptr;
+            // Check if ref17dc == tkAnim (CRITICAL: if different, nFrames comes from wrong anim!)
+            int refMatch = (ref17dc == tkAnim) ? 1 : 0;
+            unsigned short nFramesRef = 0, nFramesTk = 0;
+            __try { if (ref17dc) nFramesRef = *(unsigned short*)((char*)ref17dc + 8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            __try { if (tkAnim)  nFramesTk  = *(unsigned short*)((char*)tkAnim + 8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            auto fn = get_gamelog();
+            if (fn) fn("[RenderDiag:%p] skelGate=%p skelShared=%p ref17dc=%p tkAnim=%p match=%d nRef=%u nTk=%u prog=%.4f animProg=%.4f lod=%u flags=0x%X\n",
+                       structBase, skelGate, skelShared, ref17dc, tkAnim, refMatch,
+                       nFramesRef, nFramesTk, progVal, animProg, param2, param4);
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      }
+
+      // Override progress, ref17dc (nFrames source), and network delta.
+      float* progSlot = (float*)(structBase + 0x5A8);
+      float* netDeltaSlot = (float*)(structBase + 0x1D00);
+      void** ref17dcSlot = (void**)(structBase + 0x1870);
+      float savedProg = 0.0f;
+      float savedNetDelta = 0.0f;
+      void* savedRef17dc = nullptr;
+      bool  didFixRef17dc = false;
+      __try {
+         savedProg = *progSlot;
+         *progSlot = animProg;
+         savedNetDelta = *netDeltaSlot;
+         *netDeltaSlot = 0.0f;
+         savedRef17dc = *ref17dcSlot;
+         // Always force ref17dc to the takeoff anim — it may point to the
+         // wrong animation (e.g. landing anim) causing incorrect nFrames.
+         {
+            void* classPtr = *(void**)(structBase + kInner_mClass);
+            if (classPtr) {
+               void* takeoffAnim = *(void**)((char*)classPtr + 0x87c);
+               if (takeoffAnim && *ref17dcSlot != takeoffAnim) {
+                  *ref17dcSlot = takeoffAnim;
+                  didFixRef17dc = true;
+               }
+            }
+         }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // Bypass visibility check (JZ at 0x004f6999, 6 bytes) so animation
+      // always runs for carriers with active overrides.  NOP before call, restore after.
+      static unsigned char* s_jzAddr = nullptr;
+      static unsigned char  s_jzOriginal[6] = {};
+      static bool           s_jzPatched = false;
+      if (!s_jzAddr) {
+         uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+         s_jzAddr = (unsigned char*)((0x004f6999 - kUnrelocatedBase) + base);
+      }
+      if (!s_jzPatched) {
+         DWORD oldProt;
+         if (VirtualProtect(s_jzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+            memcpy(s_jzOriginal, s_jzAddr, 6);
+            memset(s_jzAddr, 0x90, 6);  // NOP x6
+            VirtualProtect(s_jzAddr, 6, oldProt, &oldProt);
+            s_jzPatched = true;
          }
       }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-   if (dropoffSlot >= 0 && g_dropoff[dropoffSlot].dropoffAnim) {
-      void* thisAnim = g_dropoff[dropoffSlot].dropoffAnim;
+      // Force LOD 0 so the full-detail skinned mesh is used for animation.
+      // Higher LODs (e.g. lod3) strip bone weights, making animation invisible.
+      original_FlyerRender(ecx, nullptr, 0, param3, param4);
 
-      // Compute time-based animation progress (independent of ascent speed)
-      DWORD now = GetTickCount();
-      float elapsed = (float)(now - g_dropoff[dropoffSlot].startTick) / 1000.0f;
-      float animProgress = elapsed / g_dropoff[dropoffSlot].duration;
-      if (animProgress > 1.0f) animProgress = 1.0f;
-
-      // Swap both the animation pointer AND the progress float for this render call
-      void** animSlot = nullptr;
-      void*  savedAnim = nullptr;
-      float* progSlot = (float*)(structBase + 0x5A8); // progress float
-      float  savedProg = 0.0f;
-      __try {
-         void* classPtr = *(void**)(structBase + kInner_mClass);
-         animSlot = (void**)((char*)classPtr + kClassTakeoffAnim_off);
-         savedAnim = *animSlot;
-         *animSlot = thisAnim;
-         savedProg = *progSlot;
-         *progSlot = animProgress;
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      original_FlyerRender(ecx, nullptr, param2, param3, param4);
-
-      // Restore both
-      __try {
-         if (animSlot) *animSlot = savedAnim;
-         *progSlot = savedProg;
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      // Deactivate when animation is done
-      if (animProgress >= 1.0f) {
-         g_dropoff[dropoffSlot].active = false;
-         g_dropoff[dropoffSlot].structBase = nullptr;
-         auto fn = get_gamelog();
-         if (fn) fn("[Carrier:%p] Dropoff animation finished (elapsed=%.2fs)\n", structBase, elapsed);
+      // Restore JZ after call
+      if (s_jzPatched) {
+         DWORD oldProt;
+         if (VirtualProtect(s_jzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+            memcpy(s_jzAddr, s_jzOriginal, 6);
+            VirtualProtect(s_jzAddr, 6, oldProt, &oldProt);
+            s_jzPatched = false;
+         }
       }
+
+      // Post-call diagnostic: check bone matrices AFTER BuildWorldMatrices ran
+      if (doDiag) {
+         __try {
+            float bmPost[4] = {0,0,0,0};
+            memcpy(bmPost, (char*)ecx + 0x180c, sizeof(bmPost));
+            // Also read bone 1 (offset +0x40 = 64 bytes = one 4x4 matrix later)
+            float bm1Post[4] = {0,0,0,0};
+            __try { memcpy(bm1Post, (char*)ecx + 0x180c + 0x40, sizeof(bm1Post)); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            auto fn = get_gamelog();
+            if (fn) fn("[RenderDiag:%p] bmPost0=[%.3f,%.3f,%.3f,%.3f] bmPost1=[%.3f,%.3f,%.3f,%.3f]\n",
+                       structBase,
+                       bmPost[0], bmPost[1], bmPost[2], bmPost[3],
+                       bm1Post[0], bm1Post[1], bm1Post[2], bm1Post[3]);
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      }
+
+      __try {
+         *progSlot = savedProg;
+         *netDeltaSlot = savedNetDelta;
+         if (didFixRef17dc) *ref17dcSlot = savedRef17dc;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // Keep override active at endProg — don't deactivate.
+      // The override is cleaned up when the carrier is destroyed.
       return;
    }
 
@@ -711,11 +749,10 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 
    bool alive = original_CarrierUpdate(ecx, nullptr, dt);
    if (!alive) {
-      // Clean up dropoff state for destroyed carriers
+      // Clean up animation override for destroyed carriers
       for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_dropoff[i].structBase == (void*)inner) {
-            g_dropoff[i].active = false;
-            g_dropoff[i].structBase = nullptr;
+         if (g_animOverride[i].structBase == (void*)inner) {
+            g_animOverride[i] = {};
          }
          if (g_flightOverride[i].structBase == (void*)inner) {
             g_flightOverride[i] = {};
@@ -1183,16 +1220,16 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             }
          }
 
-         // Also evict stale dropoff entries
+         // Also evict stale animation override entries
          for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_dropoff[i].structBase == nullptr) continue;
+            if (g_animOverride[i].structBase == nullptr) continue;
             __try {
-               void* vtbl = *(void**)g_dropoff[i].structBase;
+               void* vtbl = *(void**)g_animOverride[i].structBase;
                if (vtbl != g_carrierVtable) {
-                  g_dropoff[i] = {};
+                  g_animOverride[i] = {};
                }
             } __except(EXCEPTION_EXECUTE_HANDLER) {
-               g_dropoff[i] = {};
+               g_animOverride[i] = {};
             }
          }
 
@@ -1339,9 +1376,9 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    g_carrierVtable         = resolve(exe_base, kEntityCarrier_vtable);
    original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, kCarrierUpdate_addr);
    original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
-   g_ZephyrAnimBankFind    = (fn_ZephyrAnimBankFind_t)resolve(exe_base, kZephyrAnimBankFind_addr);
    original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, kFlyerRender_addr);
    original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, kUpdateSpawn_addr);
+
    g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, kMemPoolAlloc_addr);
    g_VehicleTrackerPool    = resolve(exe_base, kVehicleTrackerPool_addr);
    original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, kInitiateLanding_addr);
@@ -1355,8 +1392,8 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_TakeOff,           hooked_TakeOff);
    DetourAttach(&(PVOID&)original_CarrierUpdate,     hooked_CarrierUpdate);
    DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
-   DetourAttach(&(PVOID&)original_FlyerRender,       hooked_FlyerRender);
    DetourAttach(&(PVOID&)original_UpdateSpawn,       hooked_UpdateSpawn);
+   DetourAttach(&(PVOID&)original_FlyerRender,      hooked_FlyerRender);
    DetourTransactionCommit();
 }
 
@@ -1370,7 +1407,7 @@ void entity_carrier_fixes_uninstall()
    if (original_TakeOff)            DetourDetach(&(PVOID&)original_TakeOff,            hooked_TakeOff);
    if (original_CarrierUpdate)      DetourDetach(&(PVOID&)original_CarrierUpdate,      hooked_CarrierUpdate);
    if (original_UpdateLandedHeight) DetourDetach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
-   if (original_FlyerRender)        DetourDetach(&(PVOID&)original_FlyerRender,        hooked_FlyerRender);
    if (original_UpdateSpawn)        DetourDetach(&(PVOID&)original_UpdateSpawn,        hooked_UpdateSpawn);
+   if (original_FlyerRender)        DetourDetach(&(PVOID&)original_FlyerRender,        hooked_FlyerRender);
    DetourTransactionCommit();
 }

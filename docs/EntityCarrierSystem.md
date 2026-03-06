@@ -966,33 +966,36 @@ speed = -((heightRatio * 0.875 + 0.125) * LandingSpeed)
 Example: `LandingSpeed = 25` — the carrier descends at up to 25 u/s. Like
 TakeoffSpeed, the heightRatio ramp reduces speed near the ground.
 
-### Dropoff Animation Interaction
+### Takeoff Animation Override
 
-The DLL hooks the render function (`FUN_004f6970`) to swap the takeoff animation
-(`class+0x87c`) with a "dropoff" animation looked up from the animation bank
-(`class+0x878`) via `ZephyrAnimBank::Find(bank, "dropoff")`.
+The DLL hooks the render function (`FUN_004f6970`) via Detour to override the
+animation progress for carriers with an active animation override. The vanilla
+render function uses the **TakeoffAnimation** (`class+0x87c`) — not a separate
+"dropoff" animation. The same TakeoffAnimation is used for both vanilla
+takeoff/landing visuals and our post-drop animation override.
 
 The render function computes the displayed animation frame as:
 ```
 frame = (numFrames - 1) * progress
 ```
 
-Where `progress` is the flight transition float at `inner+0x5A8`. During ASCENDING,
-the state machine drives this value from 0.0 toward 1.0. The dropoff animation plays
-in sync with this progression.
-
-**How ODF parameters affect the dropoff animation:**
-
-| Parameter       | Effect on dropoff animation                           |
-|-----------------|-------------------------------------------------------|
-| `TakeoffHeight` | Higher = longer speed ramp = carrier rises slower near ground, giving more time for early animation frames |
-| `TakeoffSpeed`  | Lower = slower ascent = more time for the animation to play during ascending |
-| `TakeoffTime`   | No direct effect on animation speed (only controls ASCENDING→FLYING transition timer, not the progress float used by the render) |
+Where `progress` is the flight transition float at `inner+0x5A8` and `numFrames`
+is read from `inner+0x1870` (a cached pointer to the animation, `+8` = frame count).
+The DLL forces `inner+0x1870` to match the TakeoffAnimation (`class+0x87c`) to
+ensure the correct frame count is used.
 
 The DLL overrides the progress float in the render hook with a time-based value
 (`elapsed / duration`, where `duration = numFrames / 30.0`), so the animation always
 plays at 30fps regardless of ascent speed. The animation plays for its full duration
-(~2 seconds for 61 frames) even if the carrier has already transitioned to FLYING.
+(~1.4 seconds for 41 frames) even if the carrier has already transitioned to FLYING.
+
+**How ODF parameters affect the animation:**
+
+| Parameter       | Effect on animation                                   |
+|-----------------|-------------------------------------------------------|
+| `TakeoffHeight` | Higher = longer speed ramp = carrier rises slower near ground, giving more time for early animation frames |
+| `TakeoffSpeed`  | Lower = slower ascent = more time for the animation to play during ascending |
+| `TakeoffTime`   | No direct effect on animation speed (only controls ASCENDING→FLYING transition timer, not the progress float used by the render) |
 
 **Tuning example:**
 ```ini
@@ -1000,9 +1003,40 @@ TakeoffSpeed  = 10     ; ascent rate — carrier rises ~10 u/s
 TakeoffHeight = 20     ; speed ramp zone — ~2s to clear at full speed
 ```
 With these values, the carrier spends ~2 seconds visibly ascending near the ground,
-during which the dropoff animation (also ~2 seconds) plays completely. The visual
-result: cargo drops, doors/mechanism animate open while the carrier rises, then it
-flies away normally.
+during which the takeoff animation (~1.4 seconds) plays completely. The visual
+result: cargo drops, doors/mechanism animate, carrier rises and flies away.
+
+### LOD and Near/Far Scene
+
+The render function receives a **LOD level** as its first argument (`param_2`,
+low byte selects the mesh segment). The geometry render function (`FUN_004b0990`)
+uses this to select from up to 5 mesh segments stored in the geometry object:
+
+| LOD | Geometry offset | Profiler label           |
+|-----|-----------------|--------------------------|
+| 0   | geom+0x24       | `GameModel:Render-lod0`  |
+| 1   | geom+0x28       | `GameModel:Render-lod1`  |
+| 2   | geom+0x2c       | `GameModel:Render-lod2`  |
+| 3   | geom+0x30       | `GameModel:Render-lod3`  |
+| 4   | geom+0x34       | `GameModel:Render-lod4`  |
+
+If the requested LOD mesh is null, fallback tries lod0 → lod1 → lod2 (in that
+order). **Higher LODs may strip bone weights**, making skeletal animation invisible
+even though the animation code runs correctly and bone matrices are computed.
+
+BF2 has two render passes managed by `RedSceneManager::_Render`:
+
+- **Near scene** (`flags & 0x40000 == 0`): normal objects, uses
+  `RedLodManager::Render` for LOD selection based on screen-space size. Typically
+  selects LOD 0 for nearby objects.
+- **Far scene** (`flags & 0x40000 != 0`): distant/large objects, uses
+  `RenderFarObjects()`. `FLRenderer::RenderFarScene` calls `_Render` with flags
+  `0x60000`. Far scene objects typically render at LOD 3.
+
+**Critical**: if the carrier is assigned to the far scene, it renders at LOD 3,
+which likely has no bone weights → animation is invisible. The DLL render hook
+forces LOD 0 when an animation override is active to ensure the full-detail
+skinned mesh is always used.
 
 ---
 
