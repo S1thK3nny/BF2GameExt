@@ -255,6 +255,9 @@ struct CarrierFlightOverride {
    float  landElapsed;
    bool   landActive;
 
+   // Cargo team save/restore (disable spawning while carried)
+   int    savedCargoTeam[4]; // team per cargo slot, -1 = not saved
+
    // Post-drop ascent state (state 1, with forward movement)
    float  ascentElapsed;
    float  fwdDirX, fwdDirZ;  // forward direction at takeoff (normalized XZ)
@@ -355,6 +358,32 @@ static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
    if ((unsigned int)slotIdx >= (unsigned int)kMaxCargo) return; // OOB slot
    if (!cargo) return;                                            // null cargo
    original_AttachCargo(ecx, nullptr, slotIdx, cargo);
+
+   // Save cargo's team and set to 0 to disable spawning while carried.
+   // ECX = struct_base in AttachCargo.
+   __try {
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_flightOverride[i].structBase != ecx) continue;
+
+         int* teamBits = (int*)((char*)cargo + 0x234);
+         int team = (*teamBits >> 4) & 0xF;
+         g_flightOverride[i].savedCargoTeam[slotIdx] = team;
+
+         if (team != 0) {
+            // SetTeam(0) via vtable[36]
+            typedef void (__thiscall* SetTeam_t)(void* entity, int team);
+            void** vtbl = *(void***)cargo;
+            ((SetTeam_t)vtbl[36])(cargo, 0);
+            // Clear team bits
+            *teamBits = *teamBits & ~0xFF0; // clear bits 4-11
+
+            auto fn = get_gamelog();
+            if (fn) fn("[Carrier:%p] AttachCargo slot=%d: saved team %d, set to 0\n",
+                       ecx, slotIdx, team);
+         }
+         break;
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +417,30 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
    }
 
    original_DetachCargo(ecx, nullptr, slotIdx);
+
+   // Restore cargo team that was saved at attach time.
+   if (hadCargo && cargoObj) {
+      __try {
+         for (int i = 0; i < kMaxTrackedCarriers; i++) {
+            if (g_flightOverride[i].structBase != ecx) continue;
+            int savedTeam = g_flightOverride[i].savedCargoTeam[slotIdx];
+            if (savedTeam > 0) {
+               typedef void (__thiscall* SetTeam_t)(void* entity, int team);
+               void** vtbl = *(void***)cargoObj;
+               ((SetTeam_t)vtbl[36])(cargoObj, savedTeam);
+               int* teamBits = (int*)((char*)cargoObj + 0x234);
+               *teamBits = *teamBits ^ (((savedTeam << 4) ^ *teamBits) & 0xF0);
+               *teamBits = *teamBits ^ (((savedTeam << 8) ^ *teamBits) & 0xF00);
+
+               auto fn = get_gamelog();
+               if (fn) fn("[Carrier:%p] DetachCargo slot=%d: restored team %d\n",
+                          ecx, slotIdx, savedTeam);
+            }
+            g_flightOverride[i].savedCargoTeam[slotIdx] = -1;
+            break;
+         }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+   }
 
    // Activate animation override on first cargo slot drop — progress starts at 1.0
    // (fully deployed) and will be driven down toward 0.0 by the Update hook.
@@ -1281,6 +1334,7 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          g_flightOverride[loSlot].padZ = pZ;
          g_flightOverride[loSlot].lastState = -1;
          g_flightOverride[loSlot].despawnTimer = -1.0f;
+         for (int c = 0; c < kMaxCargo; c++) g_flightOverride[loSlot].savedCargoTeam[c] = -1;
 
          // Cache class params from EntityFlyerClass
          void* classPtr = *(void**)(carrierStructBase + kInner_mClass);
@@ -1309,6 +1363,27 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             g_flightOverride[loSlot].forwardSpeed     = 20.0f;
             g_flightOverride[loSlot].landedHt         = 5.0f;
             if (fn) fn("[Carrier:%p] Flight init: no class ptr, using defaults\n", carrierStructBase);
+         }
+
+         // Slot 0 cargo was attached inside original_UpdateSpawn, before the
+         // flight override existed.  Save its team and set to 0 now.
+         {
+            void* cargo0 = *(void**)(carrierStructBase + kInner_mCargoSlot0Obj);
+            if (cargo0) {
+               __try {
+                  int* teamBits = (int*)((char*)cargo0 + 0x234);
+                  int team0 = (*teamBits >> 4) & 0xF;
+                  g_flightOverride[loSlot].savedCargoTeam[0] = team0;
+                  if (team0 != 0) {
+                     typedef void (__thiscall* SetTeam_t)(void* entity, int t);
+                     void** vtbl = *(void***)cargo0;
+                     ((SetTeam_t)vtbl[36])(cargo0, 0);
+                     *teamBits = *teamBits & ~0xFF0;
+                     if (fn) fn("[Carrier:%p] Slot 0 cargo=%p: saved team %d, set to 0\n",
+                                carrierStructBase, cargo0, team0);
+                  }
+               } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            }
          }
       }
 
