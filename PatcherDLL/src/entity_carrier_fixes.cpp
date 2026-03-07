@@ -574,10 +574,29 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
       }
    }
    if (isTrackedCarrier) {
+      // During descent (state 3, before cargo drop), force progress=0 so the
+      // carrier shows frame 0 (closed/folded).  Vanilla's progress goes 1→0
+      // during landing, which plays the animation backwards — we don't want that.
+      float* progSlot = (float*)(structBase + 0x5A8);
+      float savedProg = 0.0f;
+      bool didOverrideProg = false;
+      __try {
+         int flightState = *(int*)(structBase + kInner_mFlightState);
+         if (flightState == 3) {
+            savedProg = *progSlot;
+            *progSlot = 0.0f;
+            didOverrideProg = true;
+         }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
       unsigned char jzSaved[6];
       visJzNop(jzSaved);
       original_FlyerRender(ecx, nullptr, param2, param3, param4);
       visJzRestore(jzSaved);
+
+      if (didOverrideProg) {
+         __try { *progSlot = savedProg; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      }
       return;
    }
 
