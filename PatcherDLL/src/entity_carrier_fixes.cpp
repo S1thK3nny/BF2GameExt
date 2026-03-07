@@ -442,6 +442,36 @@ using fn_FlyerRender_t = void(__fastcall*)(void* ecx, void* edx,
                                            unsigned int param2, float param3, unsigned int param4);
 static fn_FlyerRender_t original_FlyerRender = nullptr;
 
+// Visibility JZ bypass — NOP/restore the 6-byte JZ at 0x004f6999
+// that skips the entire render when the bounding sphere fails frustum culling.
+static unsigned char* s_visJzAddr = nullptr;
+
+static void visJzInit() {
+   if (!s_visJzAddr) {
+      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+      s_visJzAddr = (unsigned char*)((0x004f6999 - kUnrelocatedBase) + base);
+   }
+}
+
+static void visJzNop(unsigned char savedOut[6]) {
+   if (!s_visJzAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_visJzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(savedOut, s_visJzAddr, 6);
+      memset(s_visJzAddr, 0x90, 6);
+      VirtualProtect(s_visJzAddr, 6, oldProt, &oldProt);
+   }
+}
+
+static void visJzRestore(const unsigned char saved[6]) {
+   if (!s_visJzAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_visJzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_visJzAddr, saved, 6);
+      VirtualProtect(s_visJzAddr, 6, oldProt, &oldProt);
+   }
+}
+
 // Render hook — installed via Detour on FUN_004f6970.
 // Intercepts ALL flyer renders but only applies animation override to carriers
 // (identified by matching g_animOverride structBase).
@@ -467,28 +497,24 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
 
       float animProg = ov.startProg + (ov.endProg - ov.startProg) * t;
 
-      // Diagnostic: log skeleton internals and bone matrices (limited to first 5 calls)
+      // Diagnostic: bounding sphere + world pos (limited to first 5 calls)
       static int renderDiagCount = 0;
       bool doDiag = (renderDiagCount < 5);
       if (doDiag) {
          renderDiagCount++;
          __try {
-            // ecx+0x5b8 = null-gate pointer, ecx+0x64c = embedded ZephyrSkeleton (used by Open)
-            void* skelGate = *(void**)((char*)ecx + 0x5b8);
-            void* skelShared = *(void**)((char*)ecx + 0x64c);  // ZephyrSkeletonShared* used by Open
-            void* ref17dc = *(void**)((char*)ecx + 0x17dc);
-            float progVal = *(float*)((char*)ecx + 0x514);     // progress the render func reads
-            void* classPtr2 = *(void**)((char*)ecx + 0x5d8);
-            void* tkAnim = classPtr2 ? *(void**)((char*)classPtr2 + 0x87c) : nullptr;
-            // Check if ref17dc == tkAnim (CRITICAL: if different, nFrames comes from wrong anim!)
-            int refMatch = (ref17dc == tkAnim) ? 1 : 0;
-            unsigned short nFramesRef = 0, nFramesTk = 0;
-            __try { if (ref17dc) nFramesRef = *(unsigned short*)((char*)ref17dc + 8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            __try { if (tkAnim)  nFramesTk  = *(unsigned short*)((char*)tkAnim + 8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+            // ecx+0x30 = bounding sphere center? ecx+0x3c = radius? (used by IsReflected)
+            float bsX = *(float*)((char*)ecx + 0x30);
+            float bsY = *(float*)((char*)ecx + 0x34);
+            float bsZ = *(float*)((char*)ecx + 0x38);
+            float bsR = *(float*)((char*)ecx + 0x3c);
+            // World position for comparison (struct_base + 0x120/124/128)
+            float wX = *(float*)(structBase + 0x120);
+            float wY = *(float*)(structBase + 0x124);
+            float wZ = *(float*)(structBase + 0x128);
             auto fn = get_gamelog();
-            if (fn) fn("[RenderDiag:%p] skelGate=%p skelShared=%p ref17dc=%p tkAnim=%p match=%d nRef=%u nTk=%u prog=%.4f animProg=%.4f lod=%u flags=0x%X\n",
-                       structBase, skelGate, skelShared, ref17dc, tkAnim, refMatch,
-                       nFramesRef, nFramesTk, progVal, animProg, param2, param4);
+            if (fn) fn("[RenderDiag:%p] bs=(%.1f,%.1f,%.1f) r=%.2f worldPos=(%.1f,%.1f,%.1f) lod=%u flags=0x%X\n",
+                       structBase, bsX, bsY, bsZ, bsR, wX, wY, wZ, param2, param4);
          } __except(EXCEPTION_EXECUTE_HANDLER) {}
       }
 
@@ -520,54 +546,11 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      // Bypass visibility check (JZ at 0x004f6999, 6 bytes) so animation
-      // always runs for carriers with active overrides.  NOP before call, restore after.
-      static unsigned char* s_jzAddr = nullptr;
-      static unsigned char  s_jzOriginal[6] = {};
-      static bool           s_jzPatched = false;
-      if (!s_jzAddr) {
-         uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-         s_jzAddr = (unsigned char*)((0x004f6999 - kUnrelocatedBase) + base);
-      }
-      if (!s_jzPatched) {
-         DWORD oldProt;
-         if (VirtualProtect(s_jzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
-            memcpy(s_jzOriginal, s_jzAddr, 6);
-            memset(s_jzAddr, 0x90, 6);  // NOP x6
-            VirtualProtect(s_jzAddr, 6, oldProt, &oldProt);
-            s_jzPatched = true;
-         }
-      }
-
-      // Force LOD 0 so the full-detail skinned mesh is used for animation.
-      // Higher LODs (e.g. lod3) strip bone weights, making animation invisible.
+      // Bypass visibility/frustum cull + force LOD 0 (skinned mesh) for animation.
+      unsigned char jzSaved[6];
+      visJzNop(jzSaved);
       original_FlyerRender(ecx, nullptr, 0, param3, param4);
-
-      // Restore JZ after call
-      if (s_jzPatched) {
-         DWORD oldProt;
-         if (VirtualProtect(s_jzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
-            memcpy(s_jzAddr, s_jzOriginal, 6);
-            VirtualProtect(s_jzAddr, 6, oldProt, &oldProt);
-            s_jzPatched = false;
-         }
-      }
-
-      // Post-call diagnostic: check bone matrices AFTER BuildWorldMatrices ran
-      if (doDiag) {
-         __try {
-            float bmPost[4] = {0,0,0,0};
-            memcpy(bmPost, (char*)ecx + 0x180c, sizeof(bmPost));
-            // Also read bone 1 (offset +0x40 = 64 bytes = one 4x4 matrix later)
-            float bm1Post[4] = {0,0,0,0};
-            __try { memcpy(bm1Post, (char*)ecx + 0x180c + 0x40, sizeof(bm1Post)); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            auto fn = get_gamelog();
-            if (fn) fn("[RenderDiag:%p] bmPost0=[%.3f,%.3f,%.3f,%.3f] bmPost1=[%.3f,%.3f,%.3f,%.3f]\n",
-                       structBase,
-                       bmPost[0], bmPost[1], bmPost[2], bmPost[3],
-                       bm1Post[0], bm1Post[1], bm1Post[2], bm1Post[3]);
-         } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      }
+      visJzRestore(jzSaved);
 
       __try {
          *progSlot = savedProg;
@@ -577,6 +560,24 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
 
       // Keep override active at endProg — don't deactivate.
       // The override is cleaned up when the carrier is destroyed.
+      return;
+   }
+
+   // For tracked carriers (even without active anim override), bypass the
+   // frustum/visibility cull.  The carrier's bounding sphere is often too small
+   // or offset, causing flicker when viewed from behind or up close.
+   bool isTrackedCarrier = false;
+   for (int i = 0; i < kMaxTrackedCarriers; i++) {
+      if (g_flightOverride[i].structBase == (void*)structBase) {
+         isTrackedCarrier = true;
+         break;
+      }
+   }
+   if (isTrackedCarrier) {
+      unsigned char jzSaved[6];
+      visJzNop(jzSaved);
+      original_FlyerRender(ecx, nullptr, param2, param3, param4);
+      visJzRestore(jzSaved);
       return;
    }
 
@@ -1008,6 +1009,17 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
+   // Sync bounding sphere to FINAL world position (after all position overrides).
+   // The engine does not update the scene-object bounding sphere for carriers,
+   // leaving it at the spawn position.  Even with the correct center, the
+   // default radius (~23 units) is too small, causing frustum-cull flicker.
+   __try {
+      *(float*)(inner + 0xC4) = *(float*)(inner + kInner_mPosX);
+      *(float*)(inner + 0xC8) = *(float*)(inner + kInner_mPosY);
+      *(float*)(inner + 0xCC) = *(float*)(inner + kInner_mPosZ);
+      if (*(float*)(inner + 0xD0) < 80.0f) *(float*)(inner + 0xD0) = 80.0f;
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
    return alive;
 }
 
@@ -1377,6 +1389,7 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, kCarrierUpdate_addr);
    original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
    original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, kFlyerRender_addr);
+   visJzInit();
    original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, kUpdateSpawn_addr);
 
    g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, kMemPoolAlloc_addr);
