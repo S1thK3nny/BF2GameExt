@@ -1449,6 +1449,17 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          *teamBits = *teamBits ^ (((team << 4) ^ *teamBits) & 0xF0);
          *teamBits = *teamBits ^ (((team << 8) ^ *teamBits) & 0xF00);
 
+         // 3b. Save cargo team and set to 0 (disable spawning while carried)
+         for (int fi = 0; fi < kMaxTrackedCarriers; fi++) {
+            if (g_flightOverride[fi].structBase != (void*)carrierStructBase) continue;
+            g_flightOverride[fi].savedCargoTeam[slot] = team;
+            ((SetTeam_t)cargoVtbl[36])(cargoEntity, 0);
+            *teamBits = *teamBits & ~0xFF0;
+            if (fn) fn("[Carrier:%p] Slot %d cargo=%p: saved team %d, set to 0\n",
+                       carrierStructBase, slot, cargoEntity, team);
+            break;
+         }
+
          // 4. cargo->vtable[5]() — activation (in own __try so tracker still created)
          __try {
             typedef void (__thiscall* Activate_t)(void* entity);
