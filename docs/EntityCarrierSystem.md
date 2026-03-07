@@ -28,6 +28,9 @@ void* resolved  = (void*)((unrelocated_addr - 0x400000u) + base);
 | GetDerivedRtti/GetDerivedRttiName — COMDAT-folded with GetRtti | ✅ Confirmed |
 | `unaff_EBX + 0x340` in Update — decompiler artifact           | ✅ Confirmed |
 | Float cast in AttachCargo offset math — decompiler artifact    | ✅ Confirmed |
+| Altitude-based RayHit NOP prevents terrain wobble at altitude  | ✅ Confirmed |
+| Cargo team save/restore disables spawning while carried        | ✅ Confirmed |
+| Descent animation lock (progress=0 during state 3)            | ✅ Confirmed |
 
 ---
 
@@ -1102,3 +1105,124 @@ This is distinct from the standard collision model and is used specifically duri
 The standard collision model (built from `p_` shapes or the `main_body` fallback) and the
 flying collision model may differ, allowing entities to have different collision behavior
 on the ground versus in the air.
+
+---
+
+## Altitude-Based RayHit NOP — Terrain Wobble Fix
+
+### Problem
+
+During states 1 (ASCENDING) and 3 (LANDING), `EntityFlyer::Update` fires
+`CollisionManager::RayHit` downward (direction `0,-1,0`, distance `1024.0`) to sample
+the terrain surface normal. This normal feeds into angular velocity calculations that
+drive heading and pitch adjustments each frame:
+
+```
+angular_velocity = -(dot(rotMatrix_row1, terrainNormal) * class+0x8d4)
+heading += (target - current) * response_rate * dt
+pitch   += (target - current) * response_rate * dt
+```
+
+Over uneven terrain, the surface normal changes rapidly between frames, causing the
+carrier to swirl/wobble visibly. This is especially noticeable during the long descent
+from spawn point to pad.
+
+### Solution
+
+The DLL hooks `EntityCarrier::Update` and conditionally NOPs the two RayHit CALL
+instructions based on the carrier's altitude above its pad:
+
+- **High altitude** (`posY - padY > max(2 * landedHt, 10.0)`): both RayHit CALLs are
+  replaced with `FLD1; NOP; NOP; NOP` (`D9 E8 90 90 90`). This pushes `1.0` onto the
+  FPU stack, and the subsequent `FMUL` by `1024.0` produces a ground distance of `1024`,
+  effectively making the terrain invisible to the rotation system.
+- **Near ground**: RayHit calls are left active so the carrier naturally aligns to
+  terrain for landing.
+
+The original bytes are saved before patching and restored immediately after
+`original_CarrierUpdate` returns. The NOP window is only the duration of one Update call.
+
+### Patched addresses
+
+| Context | Address      | Original bytes           | Patch bytes           |
+|---------|--------------|--------------------------|-----------------------|
+| State 1 | `0x004fe8cd` | `E8 AF 8C F0 FF` (CALL)  | `D9 E8 90 90 90` (FLD1) |
+| State 3 | `0x004feae2` | `E8 9A 8A F0 FF` (CALL)  | `D9 E8 90 90 90` (FLD1) |
+
+Both call `CollisionManager::RayHit` at `0x00407581`. The return value (fraction in
+ST(0)) is multiplied by `1024.0` at `[0x00a37e14]` to get ground distance, then stored
+at `primary+0x490`.
+
+### Scope
+
+Only affects EntityCarrier instances (the hook is on `EntityCarrier::Update`). Regular
+EntityFlyers are completely unaffected.
+
+---
+
+## Cargo Team Save/Restore — Disable Spawning While Carried
+
+### Problem
+
+Command vehicles (EntityCommandWalker, EntityCommandHover, etc.) allow unit spawning
+based on their team assignment. When carried by a carrier, the command vehicle is airborne
+and unreachable, but players can still spawn on it, leading to undesirable gameplay.
+
+### Solution
+
+The DLL saves each cargo entity's team on attach and sets it to 0 (no team), then
+restores the original team on detach:
+
+- **AttachCargo**: after the original attach, reads `cargo+0x234` bits 4-7 to extract
+  the team number. Saves it in `CarrierFlightOverride::savedCargoTeam[slotIdx]`, then
+  calls `cargo->vtable[36](0)` (SetTeam) and clears team bits 4-11 at `+0x234`.
+- **DetachCargo**: before the original detach clears the slot, saves the cargo pointer.
+  After detach, calls `cargo->vtable[36](savedTeam)` and restores the team bits.
+- **Slot 0 special case**: slot 0 is attached inside `original_UpdateSpawn` before the
+  flight override slot exists. The team save/clear for slot 0 happens in the UpdateSpawn
+  post-hook after the flight override is created.
+
+### Entity team bits layout — `entity+0x234`
+
+```
+bits  0-3:  base team field
+bits  4-7:  team << 4  (used by spawning system)
+bits  8-11: team << 8  (used by spawning system)
+```
+
+SetTeam (`vtable[36]`) sets internal team state. The bit fields at `+0x234` are set
+separately by VehicleSpawn using XOR-mask operations.
+
+### Per-carrier storage
+
+`CarrierFlightOverride::savedCargoTeam[4]` stores one team value per cargo slot.
+Initialized to `-1` (not saved). Cleared back to `-1` after restore.
+
+---
+
+## Descent Animation Lock
+
+### Problem
+
+During state 3 (LANDING), vanilla's progress float decreases from `1.0` toward `0.0`.
+The render function computes the animation frame as `(nFrames - 1) * progress`, which
+means the animation plays backwards during descent — the cargo bay visually opens and
+closes before the carrier has even landed.
+
+### Solution
+
+The DLL's render hook (`hooked_FlyerRender`) forces `progress = 0.0` for tracked
+carriers in state 3 that don't have an active animation override. This keeps the
+carrier at frame 0 (closed/folded position) throughout the entire descent.
+
+The animation sequence is:
+
+| Phase | State | Progress | Animation |
+|-------|-------|----------|-----------|
+| Descent | 3 (LANDING) | Forced to 0.0 | Frame 0 — cargo bay closed |
+| Cargo drop | 0 (LANDED) | Anim override 0→1 | Plays opening animation |
+| Post-drop | 1 (ASCENDING) | Anim override holds at 1.0 | Last frame — cargo bay open |
+
+The flight state is read from `structBase + kInner_mFlightState` (`0x5A4` from
+struct_base). The progress override is temporary — the original progress value is
+saved before the render call and restored after.

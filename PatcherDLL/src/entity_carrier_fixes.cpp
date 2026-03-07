@@ -499,10 +499,58 @@ static fn_FlyerRender_t original_FlyerRender = nullptr;
 // that skips the entire render when the bounding sphere fails frustum culling.
 static unsigned char* s_visJzAddr = nullptr;
 
+// RayHit call NOP — disable the two downward RayHit calls in EntityFlyer::Update
+// (states 1 and 3) that read terrain surface normals and cause the carrier to
+// swirl/wobble over uneven terrain.  Each is a 5-byte CALL instruction.
+// Only applied when the carrier is above a height threshold so terrain alignment
+// still works near the ground for natural landing.
+static unsigned char* s_rayHitCall1 = nullptr;  // state 1: 0x004fe8cd
+static unsigned char* s_rayHitCall2 = nullptr;  // state 3: 0x004feae2
+
 static void visJzInit() {
    if (!s_visJzAddr) {
       uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
       s_visJzAddr = (unsigned char*)((0x004f6999 - kUnrelocatedBase) + base);
+   }
+}
+
+static void rayHitInit() {
+   if (!s_rayHitCall1) {
+      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+      s_rayHitCall1 = (unsigned char*)((0x004fe8cd - kUnrelocatedBase) + base);
+      s_rayHitCall2 = (unsigned char*)((0x004feae2 - kUnrelocatedBase) + base);
+   }
+}
+
+// Replace a 5-byte CALL with FLD1 (D9 E8) + 3×NOP.
+// FLD1 pushes 1.0 onto FPU stack so the subsequent FMUL (×1024)
+// produces a large ground distance (1024), preventing terrain normal influence.
+static void rayHitNop(unsigned char saved1[5], unsigned char saved2[5]) {
+   if (!s_rayHitCall1) return;
+   static const unsigned char patch[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
+   DWORD oldProt;
+   if (VirtualProtect(s_rayHitCall1, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(saved1, s_rayHitCall1, 5);
+      memcpy(s_rayHitCall1, patch, 5);
+      VirtualProtect(s_rayHitCall1, 5, oldProt, &oldProt);
+   }
+   if (VirtualProtect(s_rayHitCall2, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(saved2, s_rayHitCall2, 5);
+      memcpy(s_rayHitCall2, patch, 5);
+      VirtualProtect(s_rayHitCall2, 5, oldProt, &oldProt);
+   }
+}
+
+static void rayHitRestore(const unsigned char saved1[5], const unsigned char saved2[5]) {
+   if (!s_rayHitCall1) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_rayHitCall1, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_rayHitCall1, saved1, 5);
+      VirtualProtect(s_rayHitCall1, 5, oldProt, &oldProt);
+   }
+   if (VirtualProtect(s_rayHitCall2, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_rayHitCall2, saved2, 5);
+      VirtualProtect(s_rayHitCall2, 5, oldProt, &oldProt);
    }
 }
 
@@ -820,7 +868,35 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
+   // NOP the downward RayHit calls when the carrier is high above its pad.
+   // This prevents terrain surface normals from causing heading/pitch wobble
+   // at altitude.  Near the ground (within 2× landedHt), leave RayHit active
+   // so the carrier aligns naturally to terrain for landing.
+   bool didNopRayHit = false;
+   unsigned char rhSaved1[5] = {}, rhSaved2[5] = {};
+   __try {
+      for (int i = 0; i < kMaxTrackedCarriers; i++) {
+         if (g_flightOverride[i].structBase != (void*)inner) continue;
+         float posY = *(float*)(inner + kInner_mPosY);
+         float padY = g_flightOverride[i].padY;
+         float landedHt = g_flightOverride[i].landedHt;
+         float heightAbovePad = posY - padY;
+         // NOP raycasts when more than 2× landedHt above pad (or at least 10 units)
+         float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
+         if (heightAbovePad > threshold) {
+            rayHitNop(rhSaved1, rhSaved2);
+            didNopRayHit = true;
+         }
+         break;
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
    bool alive = original_CarrierUpdate(ecx, nullptr, dt);
+
+   if (didNopRayHit) {
+      rayHitRestore(rhSaved1, rhSaved2);
+   }
+
    if (!alive) {
       // Clean up animation override for destroyed carriers
       for (int i = 0; i < kMaxTrackedCarriers; i++) {
@@ -1495,6 +1571,7 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
    original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, kFlyerRender_addr);
    visJzInit();
+   rayHitInit();
    original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, kUpdateSpawn_addr);
 
    g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, kMemPoolAlloc_addr);
