@@ -376,10 +376,6 @@ static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
             ((SetTeam_t)vtbl[36])(cargo, 0);
             // Clear team bits
             *teamBits = *teamBits & ~0xFF0; // clear bits 4-11
-
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] AttachCargo slot=%d: saved team %d, set to 0\n",
-                       ecx, slotIdx, team);
          }
          break;
       }
@@ -410,12 +406,6 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
       hadCargo = (cargoObj != nullptr);
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-   {
-      auto fn = get_gamelog();
-      if (fn) fn("[Carrier:%p] DetachCargo slot=%d cargoObj=%p hadCargo=%d\n",
-                 ecx, slotIdx, cargoObj, hadCargo ? 1 : 0);
-   }
-
    original_DetachCargo(ecx, nullptr, slotIdx);
 
    // Restore cargo team that was saved at attach time.
@@ -432,9 +422,6 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
                *teamBits = *teamBits ^ (((savedTeam << 4) ^ *teamBits) & 0xF0);
                *teamBits = *teamBits ^ (((savedTeam << 8) ^ *teamBits) & 0xF00);
 
-               auto fn = get_gamelog();
-               if (fn) fn("[Carrier:%p] DetachCargo slot=%d: restored team %d\n",
-                          ecx, slotIdx, savedTeam);
             }
             g_flightOverride[i].savedCargoTeam[slotIdx] = -1;
             break;
@@ -472,9 +459,6 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
       g_animOverride[slot].startProg = 0.0f;    // start at first frame
       g_animOverride[slot].endProg = 1.0f;      // end at last frame
       g_animOverride[slot].active = true;
-
-      auto fn = get_gamelog();
-      if (fn) fn("[Carrier:%p] Anim override activated (0.0 -> 1.0 over %.2fs)\n", ecx, dur);
    }
 }
 
@@ -589,19 +573,19 @@ static void* g_carrierVtable = nullptr;
 // is skipped — allowing carrier turrets to fire in any flight state.
 // Non-carrier EntityFlyers keep the original behavior.
 //
-// Patched bytes (unrelocated 0x565c4c–0x565c60):
+// Patched bytes (unrelocated 0x565c4c–0x565c5c, 17 bytes):
 //   8B16           MOV EDX,[ESI]
 //   8BCE           MOV ECX,ESI
 //   FF5224         CALL [EDX+0x24]
 //   8B88A4050000   MOV ECX,[EAX+0x5A4]
 //   85C9           TEST ECX,ECX
-//   0F8522000000   JNZ 0x565c83
+//   7526           JNZ short 0x565c83
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kTurretFireCheck_addr = 0x00565c4c; // patch site
 static constexpr uintptr_t kTurretFireAllow_addr = 0x00565c5d; // continue → fire
 static constexpr uintptr_t kTurretFireBlock_addr = 0x00565c83; // skip → no fire
-static constexpr size_t    kTurretFirePatch_len  = 21;
+static constexpr size_t    kTurretFirePatch_len  = 17;
 
 static unsigned char* s_turretFirePatchAddr = nullptr;
 static uintptr_t      s_turretFireAllowJmp  = 0;
@@ -896,19 +880,6 @@ static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, flo
       }
    }
 
-   // Diagnostic
-   static int s_turretAiDiagCount = 0;
-   if (s_turretAiDiagCount < 10) {
-      s_turretAiDiagCount++;
-      auto fn = get_gamelog();
-      if (fn) {
-         fn("[TurretAI:%p] aiWantsToFire=%d onTarget=%d turn=%.3f pitch=%.3f wpn=%d "
-            "parentFire=0x%X/0x%X\n",
-            ecx, aiWantsToFire, onTarget, newTurn, newPitch, weaponIdx,
-            newParentFire0, newParentFire1);
-      }
-   }
-
    return result;
 }
 
@@ -936,27 +907,6 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
       if (t > 1.0f) t = 1.0f;
 
       float animProg = ov.startProg + (ov.endProg - ov.startProg) * t;
-
-      // Diagnostic: bounding sphere + world pos (limited to first 5 calls)
-      static int renderDiagCount = 0;
-      bool doDiag = (renderDiagCount < 5);
-      if (doDiag) {
-         renderDiagCount++;
-         __try {
-            // ecx+0x30 = bounding sphere center? ecx+0x3c = radius? (used by IsReflected)
-            float bsX = *(float*)((char*)ecx + 0x30);
-            float bsY = *(float*)((char*)ecx + 0x34);
-            float bsZ = *(float*)((char*)ecx + 0x38);
-            float bsR = *(float*)((char*)ecx + 0x3c);
-            // World position for comparison (struct_base + 0x120/124/128)
-            float wX = *(float*)(structBase + 0x120);
-            float wY = *(float*)(structBase + 0x124);
-            float wZ = *(float*)(structBase + 0x128);
-            auto fn = get_gamelog();
-            if (fn) fn("[RenderDiag:%p] bs=(%.1f,%.1f,%.1f) r=%.2f worldPos=(%.1f,%.1f,%.1f) lod=%u flags=0x%X\n",
-                       structBase, bsX, bsY, bsZ, bsR, wX, wY, wZ, param2, param4);
-         } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      }
 
       // Override progress, ref17dc (nFrames source), and network delta.
       float* progSlot = (float*)(structBase + 0x5A8);
@@ -1173,9 +1123,7 @@ static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
       if (vtable == g_carrierVtable) {
          int state = *(int*)((char*)ecx + kInner_mFlightState);
          if (state == 3) {
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] TakeOff BLOCKED — entity is LANDING (state 3)\n", ecx);
-            return;
+            return; // Block TakeOff during landing
          }
 
          if (state == 0) {
@@ -1209,10 +1157,6 @@ static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
                   g_flightOverride[j].fwdDirZ = fwdZ;
                   g_flightOverride[j].ascentElapsed = 0.0f;
                   g_flightOverride[j].ascentActive = true;
-
-                  auto fn = get_gamelog();
-                  if (fn) fn("[Carrier:%p] Post-drop TakeOff: fwd=(%.3f,%.3f) speed=%.1f\n",
-                             ecx, fwdX, fwdZ, g_flightOverride[j].forwardSpeed);
                   break;
                }
             }
@@ -1236,9 +1180,6 @@ static constexpr uintptr_t kCarrierUpdate_addr = 0x004D7FE0;
 
 using fn_CarrierUpdate_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
 static fn_CarrierUpdate_t original_CarrierUpdate = nullptr;
-
-static int  g_diagLastState = -1;
-static int  g_diagFrameCount = 0;
 
 static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 {
@@ -1406,18 +1347,6 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          float posY = *(float*)(inner + kInner_mPosY);
          float posZ = *(float*)(inner + kInner_mPosZ);
 
-         // Per-carrier state transition log
-         if (state != prevState) {
-            auto fn = get_gamelog();
-            if (fn) {
-               static const char* sn[] = {"LANDED","ASCENDING","FLYING","LANDING","DYING","DEAD"};
-               const char* snOld = (prevState >= 0 && prevState <= 5) ? sn[prevState] : "???";
-               const char* snNew = (state >= 0 && state <= 5) ? sn[state] : "???";
-               fn("[Carrier:%p] *** %d(%s)->%d(%s) *** pos=(%.2f,%.2f,%.2f)\n",
-                  inner, prevState, snOld, state, snNew, posX, posY, posZ);
-            }
-         }
-
          // --- Quadratic descent (state 3) ---
          // On state 3 entry: capture start position
          if (state == 3 && prevState != 3 && !fo.landActive) {
@@ -1432,11 +1361,6 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             // vanilla's landing condition (gndDist < landedHt) actually checks.
             float instanceLandedHt = *(float*)((char*)ecx + kLandedHeight_offset);
             fo.landTargetY = fo.padY + instanceLandedHt - 1.0f;
-
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] Descent: ACTIVE start=(%.2f,%.2f,%.2f) pad=(%.2f,%.2f,%.2f) targetY=%.2f instLH=%.2f dur=%.1fs\n",
-                       inner, fo.landStartX, fo.landStartY, fo.landStartZ,
-                       fo.padX, fo.padY, fo.padZ, fo.landTargetY, instanceLandedHt, fo.descentDuration);
          }
 
          // Override position each frame during state 3
@@ -1463,9 +1387,6 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          if (state != 3 && fo.landActive) {
             fo.landActive = false;
             if (state == 0) fo.cargoDropped = true;
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] Descent: DEACTIVATED (state=%d, cargoDropped=%d)\n",
-                       inner, state, fo.cargoDropped ? 1 : 0);
          }
 
          // --- Post-drop ascent (state 1 with forward movement) ---
@@ -1482,8 +1403,6 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          if (fo.ascentActive && state == 3) {
             *(int*)((char*)ecx + kState_offset) = 1;
             state = 1;
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] Post-drop ascent: blocked re-landing (forced state 3→1)\n", inner);
          }
 
          // Deactivate when carrier finishes ascending (state 1→2) or dies.
@@ -1494,17 +1413,12 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
                fo.despawnTimer = kDefaultDespawnDelay;
                fo.despawnActive = true;
             }
-            auto fn = get_gamelog();
-            if (fn) fn("[Carrier:%p] Post-drop ascent: done (state=%d, elapsed=%.1fs), despawn fallback in %.1fs\n",
-                       inner, state, fo.ascentElapsed, kDefaultDespawnDelay);
          }
 
          // --- Despawn timer ---
          if (fo.despawnActive) {
             fo.despawnTimer -= dt;
             if (fo.despawnTimer <= 0.0f && g_CarrierKill) {
-               auto fn = get_gamelog();
-               if (fn) fn("[Carrier:%p] Despawn: killing carrier\n", inner);
                fo.despawnActive = false;
                g_CarrierKill((void*)inner, nullptr);
                fo = {};
@@ -1525,53 +1439,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          for (int s = 1; s < kMaxCargo; s++) {
             void* cargoObj = *(void**)((char*)inner + kInner_mCargoSlot0Obj + s * kCargoSlotStride);
             if (cargoObj) {
-               auto fn = get_gamelog();
-               if (fn) fn("[Carrier:%p] Multi-detach: detaching slot %d\n", inner, s);
                original_DetachCargo(inner, nullptr, s);
-            }
-         }
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   // Diagnostic: per-carrier state transitions (uses flight override's lastState
-   // so each carrier logs independently instead of thrashing a shared global)
-   __try {
-      int   state = *(int*)((char*)ecx + kState_offset);
-      float posX = *(float*)(inner + kInner_mPosX);
-      float posY = *(float*)(inner + kInner_mPosY);
-      float posZ = *(float*)(inner + kInner_mPosZ);
-
-      // Find this carrier's flight override slot for per-carrier lastState
-      // (lastState was already updated in the flight system block above,
-      //  but prevState captured the value before the update — use that for logging)
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_flightOverride[i].structBase != (void*)inner) continue;
-         // The flight system already logged transitions implicitly via lastState.
-         // We log state transitions here using the fact that lastState was just updated.
-         // Compare current state with what we stored — if lastState was just written
-         // to 'state', we can detect transitions by checking prevState == state.
-         // But prevState is local to the block above, so we use g_diagLastState
-         // only for carriers WITHOUT a flight override. For tracked carriers,
-         // transitions are logged in the flight override block already.
-         break;
-      }
-
-      // Periodic diagnostic (every 120 frames, per-carrier using frame count)
-      void* cargo = *(void**)((char*)ecx + kCargoSlots_offset + kCargoSlot_ObjPtr);
-      if (cargo) {
-         g_diagFrameCount++;
-         if (g_diagFrameCount % 120 == 0) {
-            float progress   = *(float*)((char*)ecx + kProgress_offset);
-            float groundDist = *(float*)((char*)ecx + kGroundDist_offset);
-            float landedHt   = *(float*)((char*)ecx + kLandedHeight_offset);
-            static const char* stateNames[] = {
-               "LANDED", "ASCENDING", "FLYING", "LANDING", "DYING", "DEAD"
-            };
-            const char* snm = (state >= 0 && state <= 5) ? stateNames[state] : "???";
-            auto fn = get_gamelog();
-            if (fn) {
-               fn("[Carrier:%p] state=%d(%s) prog=%.3f gndDist=%.2f pos=(%.2f,%.2f,%.2f) landedHt=%.2f\n",
-                  inner, state, snm, progress, groundDist, posX, posY, posZ, landedHt);
             }
          }
       }
@@ -1592,48 +1460,19 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 }
 
 // ---------------------------------------------------------------------------
-// EntityCarrier::UpdateLandedHeight — diagnostic logging
+// EntityCarrier::UpdateLandedHeight — passthrough hook (kept for future use)
 //   __thiscall(EntityCarrier* this_inner)    (this_inner = struct_base, NOT +0x240)
 //   Ghidra VA: 0x004D8130      (thunk at 0x004126DE)
 // ---------------------------------------------------------------------------
 
 static constexpr uintptr_t kUpdateLandedHeight_addr = 0x004D8130;
 
-static constexpr uintptr_t kInner_mLandedHt    = 0x600;  // float
-static constexpr uintptr_t kInner_mCargoCount  = 0x1E20; // int
-
 using fn_UpdateLandedHeight_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_UpdateLandedHeight_t original_UpdateLandedHeight = nullptr;
 
 static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
 {
-   float beforeHt = -999.f;
-   __try {
-      beforeHt = *(float*)((char*)ecx + kInner_mLandedHt);
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
    original_UpdateLandedHeight(ecx, nullptr);
-
-   __try {
-      float afterHt = *(float*)((char*)ecx + kInner_mLandedHt);
-      int cargoCount = *(int*)((char*)ecx + kInner_mCargoCount);
-      void* cls = *(void**)((char*)ecx + kInner_mClass);
-      float classHt = -1.f;
-      if (cls) {
-         __try {
-            classHt = *(float*)((char*)cls + kClassLandedHt_off);
-         } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      }
-
-      if (cargoCount > 0) {
-         auto fn = get_gamelog();
-         if (fn) {
-            fn("[Carrier:ULH] classHt=%.2f before=%.2f after=%.2f "
-               "cargoCount=%d delta=%.2f\n",
-               classHt, beforeHt, afterHt, cargoCount, afterHt - classHt);
-         }
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -1706,17 +1545,12 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       int team = *(int*)(vs + kVS_Team);
       int spawnCount = *(int*)(vs + kVS_SpawnCount);
       auto fn = get_gamelog();
-      if (fn) fn("[Carrier] UpdateSpawn: spawned! countBefore=%d countAfter=%d team=%d spawnCount=%d\n",
-                 countBefore, countAfter, team, spawnCount);
 
       if (team < 1 || team > 7) return;
 
       // Only apply to carrier spawns — game indexes by team directly (1-based)
       char useCarrier = *(char*)(vs + kVS_UseCarrier + team);
-      if (!useCarrier) {
-         if (fn) fn("[Carrier] UpdateSpawn: not a carrier spawn (useCarrier=0)\n");
-         return;
-      }
+      if (!useCarrier) return;
 
       // Get the carrier entity
       void* carrierEntity = *(void**)(vs + kVS_CarrierPtr);
@@ -1724,7 +1558,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          if (fn) fn("[Carrier] UpdateSpawn: no carrier entity at +0xEC\n");
          return;
       }
-      if (fn) fn("[Carrier] UpdateSpawn: carrierEntity=%p\n", carrierEntity);
 
       int carrierGen = *(int*)(vs + kVS_CarrierGen);
       if (*(int*)((char*)carrierEntity + 0x204) != carrierGen) {
@@ -1733,29 +1566,21 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       }
 
       // Get carrier inner base (for AttachCargo, which expects struct_base as ECX)
-      // carrierEntity from VehicleSpawn+0xEC — need to figure out if this is
-      // struct_base or inner (struct_base+0x240).
       // Check vtable to determine: EntityCarrier vtable at struct_base[0].
       void* entityVtbl = *(void**)carrierEntity;
-      if (fn) fn("[Carrier] UpdateSpawn: entity vtable=%p, expected carrier vtable~=%p\n",
-                 entityVtbl, (void*)g_carrierVtable);
 
       // The entity from VehicleSpawn might already be the inner base (entity+0x240),
       // not the struct_base. If vtable doesn't match carrier vtable, try -0x240.
       char* carrierStructBase = nullptr;
       if ((uintptr_t)entityVtbl == (uintptr_t)g_carrierVtable) {
          carrierStructBase = (char*)carrierEntity;
-         if (fn) fn("[Carrier] UpdateSpawn: entity IS struct_base (vtable matches)\n");
       } else {
-         // Maybe it's inner base already — check struct_base = entity - 0x240
          char* maybeBase = (char*)carrierEntity - 0x240;
          void* maybeVtbl = *(void**)maybeBase;
          if ((uintptr_t)maybeVtbl == (uintptr_t)g_carrierVtable) {
             carrierStructBase = maybeBase;
-            if (fn) fn("[Carrier] UpdateSpawn: entity is inner (+0x240), struct_base=%p\n", maybeBase);
          } else {
-            if (fn) fn("[Carrier] UpdateSpawn: can't identify carrier base (vtbl=%p, -0x240 vtbl=%p)\n",
-                       entityVtbl, maybeVtbl);
+            if (fn) fn("[Carrier] UpdateSpawn: can't identify carrier base\n");
             return;
          }
       }
@@ -1776,13 +1601,9 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             __try {
                void* vtbl = *(void**)g_flightOverride[i].structBase;
                if (vtbl != g_carrierVtable) {
-                  if (fn) fn("[Carrier:%p] Stale slot %d evicted (vtbl=%p)\n",
-                             g_flightOverride[i].structBase, i, vtbl);
                   g_flightOverride[i] = {};
                }
             } __except(EXCEPTION_EXECUTE_HANDLER) {
-               if (fn) fn("[Carrier:%p] Stale slot %d evicted (access fault)\n",
-                          g_flightOverride[i].structBase, i);
                g_flightOverride[i] = {};
             }
          }
@@ -1846,11 +1667,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             g_flightOverride[loSlot].descentDuration  = (landingTm > kMinDuration) ? landingTm : kMinDuration;
             g_flightOverride[loSlot].forwardSpeed     = (takeoffSpd > 1.0f) ? takeoffSpd : 1.0f;
             g_flightOverride[loSlot].landedHt         = landHt;
-
-            if (fn) fn("[Carrier:%p] Flight init: pad=(%.2f,%.2f,%.2f) alt=%.1f ascT=%.1f descT=%.1f takeoffSpd=%.1f lHt=%.2f\n",
-                       carrierStructBase, pX, pY, pZ, takeoffHt, g_flightOverride[loSlot].ascentDuration,
-                       g_flightOverride[loSlot].descentDuration, g_flightOverride[loSlot].forwardSpeed,
-                       landHt);
          } else {
             // Fallback defaults
             g_flightOverride[loSlot].flightAltitude  = 100.0f;
@@ -1875,8 +1691,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
                      void** vtbl = *(void***)cargo0;
                      ((SetTeam_t)vtbl[36])(cargo0, 0);
                      *teamBits = *teamBits & ~0xFF0;
-                     if (fn) fn("[Carrier:%p] Slot 0 cargo=%p: saved team %d, set to 0\n",
-                                carrierStructBase, cargo0, team0);
                   }
                } __except(EXCEPTION_EXECUTE_HANDLER) {}
             }
@@ -1888,7 +1702,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       void* carrierClass = *(void**)(carrierStructBase + kInner_mClass);
       if (!carrierClass) { if (fn) fn("[Carrier] UpdateSpawn: no carrier class\n"); return; }
       int cargoCount = *(int*)((char*)carrierClass + kMCargoCount_offset);
-      if (fn) fn("[Carrier] UpdateSpawn: carrierClass=%p, cargoCount=%d\n", carrierClass, cargoCount);
       if (cargoCount <= 1) return; // only 1 slot defined, nothing extra to do
 
       // How many slots can we fill?
@@ -1907,12 +1720,7 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       // We use VehicleSpawn+0x30 (the pad's world transform matrix)
       char* padTransform = vs + kVS_PadTransform;
 
-      if (fn) fn("[Carrier] Multi-cargo: filling %d slots (cargoCount=%d, budget=%d)\n",
-                 slotsToFill, cargoCount, budget);
-
       for (int slot = 1; slot < slotsToFill; slot++) {
-         if (fn) fn("[Carrier]   Slot %d: spawning cargo...\n", slot);
-
          // Spawn cargo entity: spawnClass->vtable[2](transform)
          void** vtbl = *(void***)spawnClass;
          typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
@@ -1926,8 +1734,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          GetEntity_t getEntityFn = (GetEntity_t)spawnedVtbl[9];
          void* cargoEntity = getEntityFn(spawned);
          if (!cargoEntity) { if (fn) fn("[Carrier]   Slot %d: entity is null\n", slot); continue; }
-
-         if (fn) fn("[Carrier]   Slot %d: cargo=%p\n", slot, cargoEntity);
 
          // Match original UpdateSpawn order exactly:
          // Original: AttachCargo → vtable[36](team) → team bits → vtable[5]
@@ -1951,8 +1757,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
             g_flightOverride[fi].savedCargoTeam[slot] = team;
             ((SetTeam_t)cargoVtbl[36])(cargoEntity, 0);
             *teamBits = *teamBits & ~0xFF0;
-            if (fn) fn("[Carrier:%p] Slot %d cargo=%p: saved team %d, set to 0\n",
-                       carrierStructBase, slot, cargoEntity, team);
             break;
          }
 
@@ -1960,15 +1764,12 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          __try {
             typedef void (__thiscall* Activate_t)(void* entity);
             ((Activate_t)cargoVtbl[5])(cargoEntity);
-            if (fn) fn("[Carrier]   Slot %d: activated OK\n", slot);
          } __except(EXCEPTION_EXECUTE_HANDLER) {
             if (fn) fn("[Carrier]   Slot %d: vtable[5] exception (non-fatal)\n", slot);
          }
 
          // 5. Create VehicleTracker (runs even if activation failed)
          CreateTracker(vs, cargoEntity);
-
-         if (fn) fn("[Carrier]   Slot %d: done!\n", slot);
       }
    } __except(EXCEPTION_EXECUTE_HANDLER) {
       auto fn = get_gamelog();
