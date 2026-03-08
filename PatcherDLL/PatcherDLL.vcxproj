@@ -105,7 +105,7 @@
   <ItemGroup>
     <ClInclude Include="resource.h" />
     <ClInclude Include="src\bf1_load_ext.hpp" />
-    <ClInclude Include="src\entity_carrier_fixes.hpp" />
+<ClInclude Include="src\entity_carrier_fixes.hpp" />
     <ClInclude Include="src\apply_patches.hpp" />
     <ClInclude Include="src\cfile.hpp" />
     <ClInclude Include="src\lua_hooks.hpp" />
@@ -117,7 +117,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\bf1_load_ext.cpp" />
-    <ClCompile Include="src\entity_carrier_fixes.cpp" />
+<ClCompile Include="src\entity_carrier_fixes.cpp" />
     <ClCompile Include="src\apply_patches.cpp" />
     <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />

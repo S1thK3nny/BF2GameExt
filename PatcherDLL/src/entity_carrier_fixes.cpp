@@ -573,6 +573,345 @@ static void visJzRestore(const unsigned char saved[6]) {
    }
 }
 
+// EntityCarrier vtable (unrelocated 0x00A3A670), resolved at install time.
+// Declared here (before the turret fire code cave) so inline asm can reference it.
+static void* g_carrierVtable = nullptr;
+
+// ---------------------------------------------------------------------------
+// Carrier turret fire patch
+//
+// In MountedTurret::Update (0x00565630), when PilotType is PILOT_VEHICLE (2)
+// or PILOT_VEHICLESELF (4), the code at 0x565c4c reads the parent EntityFlyer's
+// state and blocks the occupant fire command when state != 0 (not landed).
+//
+// This patch replaces those 21 bytes with a JMP to a code cave that first
+// checks whether the parent is an EntityCarrier. If it is, the state check
+// is skipped — allowing carrier turrets to fire in any flight state.
+// Non-carrier EntityFlyers keep the original behavior.
+//
+// Patched bytes (unrelocated 0x565c4c–0x565c60):
+//   8B16           MOV EDX,[ESI]
+//   8BCE           MOV ECX,ESI
+//   FF5224         CALL [EDX+0x24]
+//   8B88A4050000   MOV ECX,[EAX+0x5A4]
+//   85C9           TEST ECX,ECX
+//   0F8522000000   JNZ 0x565c83
+// ---------------------------------------------------------------------------
+
+static constexpr uintptr_t kTurretFireCheck_addr = 0x00565c4c; // patch site
+static constexpr uintptr_t kTurretFireAllow_addr = 0x00565c5d; // continue → fire
+static constexpr uintptr_t kTurretFireBlock_addr = 0x00565c83; // skip → no fire
+static constexpr size_t    kTurretFirePatch_len  = 21;
+
+static unsigned char* s_turretFirePatchAddr = nullptr;
+static uintptr_t      s_turretFireAllowJmp  = 0;
+static uintptr_t      s_turretFireBlockJmp  = 0;
+static unsigned char   s_turretFireSaved[kTurretFirePatch_len] = {};
+
+// Code cave — entered via JMP from 0x565c4c.
+// At entry: ESI = MountedTurret parent ptr (EBX-0xC). We are inside the
+// "parent IS EntityFlyer" branch (RTTI already confirmed).
+static __declspec(naked) void turretFire_cave()
+{
+   __asm {
+      // Replicate original: get parent entity via vtable[0x24]
+      mov  edx, [esi]
+      mov  ecx, esi
+      call dword ptr [edx + 0x24]     // EAX = parent EntityFlyer (struct_base)
+
+      // Is the parent an EntityCarrier?
+      mov  ecx, [eax]                 // ECX = parent vtable
+      cmp  ecx, dword ptr [g_carrierVtable]
+      je   _allow                     // carrier → skip state check
+
+      // Not a carrier — original state check
+      mov  ecx, [eax + 0x5A4]         // ECX = EntityFlyer state
+      test ecx, ecx
+      jnz  _block                     // state != 0 → block fire
+
+   _allow:
+      jmp  dword ptr [s_turretFireAllowJmp]
+
+   _block:
+      jmp  dword ptr [s_turretFireBlockJmp]
+   }
+}
+
+static void turretFireInit()
+{
+   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   s_turretFirePatchAddr = (unsigned char*)((kTurretFireCheck_addr - kUnrelocatedBase) + base);
+   s_turretFireAllowJmp  = (kTurretFireAllow_addr - kUnrelocatedBase) + base;
+   s_turretFireBlockJmp  = (kTurretFireBlock_addr - kUnrelocatedBase) + base;
+}
+
+static void turretFireInstall()
+{
+   if (!s_turretFirePatchAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len,
+                      PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_turretFireSaved, s_turretFirePatchAddr, kTurretFirePatch_len);
+      // Write JMP rel32 to code cave
+      s_turretFirePatchAddr[0] = 0xE9;
+      uintptr_t rel = (uintptr_t)&turretFire_cave
+                     - ((uintptr_t)s_turretFirePatchAddr + 5);
+      memcpy(s_turretFirePatchAddr + 1, &rel, 4);
+      // NOP remaining bytes
+      memset(s_turretFirePatchAddr + 5, 0x90, kTurretFirePatch_len - 5);
+      VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len, oldProt, &oldProt);
+   }
+}
+
+static void turretFireUninstall()
+{
+   if (!s_turretFirePatchAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len,
+                      PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_turretFirePatchAddr, s_turretFireSaved, kTurretFirePatch_len);
+      VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len, oldProt, &oldProt);
+   }
+}
+
+// ---------------------------------------------------------------------------
+// Controllable::CreateController null-check fix (vanilla bug)
+//
+// FUN_0055b2a0 creates a PlayerController or UnitController when entering a
+// vehicle.  At 0x0055b2e8 (PlayerController path), it reads [ESI+0xD0] (a
+// class pointer) and immediately dereferences [EAX+0xD4] without a null
+// check.  The UnitController path at 0x0055b2ff correctly checks for null.
+//
+// Under a debugger, timing differences can leave ctrl+0xD0 still null when
+// this function runs, causing an access violation at 0x0055b2ee.
+//
+// Fix: replace the 23-byte sequence at 0x0055b2e8..0x0055b2fe with a JMP to
+// a code cave that checks for null.  If null, set EDI=0 (so the subsequent
+// AddController check at 0x0055b359 also skips) and jump past the init.
+// ---------------------------------------------------------------------------
+
+static constexpr uintptr_t kCreateCtrlPatch_addr  = 0x0055b2e8; // patch site
+static constexpr uintptr_t kCreateCtrlResume_addr  = 0x0055b359; // TEST EDI,EDI (after JMP)
+static constexpr uintptr_t kPlayerCtrlCtor_addr    = 0x0040d1e8; // PlayerController::PlayerController_
+static constexpr size_t    kCreateCtrlPatch_len    = 23;         // 0x0055b2e8..0x0055b2fe
+
+static unsigned char* s_createCtrlPatchAddr = nullptr;
+static uintptr_t      s_createCtrlResumeJmp = 0;
+static uintptr_t      s_playerCtrlCtorAddr  = 0;
+static unsigned char   s_createCtrlSaved[kCreateCtrlPatch_len] = {};
+
+// Code cave: replicate original PlayerController init with a null guard.
+static __declspec(naked) void createCtrl_cave()
+{
+   __asm {
+      mov  eax, [esi + 0xD0]
+      test eax, eax
+      jz   _null
+
+      // Original code: PlayerController::PlayerController_(this=ctrl+0x18, param=*(class+0xD4))
+      mov  ecx, [eax + 0xD4]
+      push ecx
+      lea  ecx, [esi + 0x18]
+      call dword ptr [s_playerCtrlCtorAddr]
+      jmp  dword ptr [s_createCtrlResumeJmp]
+
+   _null:
+      xor  edi, edi                          // EDI = 0 → AddController check skips
+      jmp  dword ptr [s_createCtrlResumeJmp]
+   }
+}
+
+static void createCtrlNullCheckInit()
+{
+   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   s_createCtrlPatchAddr = (unsigned char*)((kCreateCtrlPatch_addr - kUnrelocatedBase) + base);
+   s_createCtrlResumeJmp = (kCreateCtrlResume_addr - kUnrelocatedBase) + base;
+   s_playerCtrlCtorAddr  = (kPlayerCtrlCtor_addr - kUnrelocatedBase) + base;
+}
+
+static void createCtrlNullCheckInstall()
+{
+   if (!s_createCtrlPatchAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len,
+                      PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_createCtrlSaved, s_createCtrlPatchAddr, kCreateCtrlPatch_len);
+      // JMP rel32 to code cave
+      s_createCtrlPatchAddr[0] = 0xE9;
+      uintptr_t rel = (uintptr_t)&createCtrl_cave
+                     - ((uintptr_t)s_createCtrlPatchAddr + 5);
+      memcpy(s_createCtrlPatchAddr + 1, &rel, 4);
+      // NOP remaining bytes
+      memset(s_createCtrlPatchAddr + 5, 0x90, kCreateCtrlPatch_len - 5);
+      VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len, oldProt, &oldProt);
+   }
+}
+
+static void createCtrlNullCheckUninstall()
+{
+   if (!s_createCtrlPatchAddr) return;
+   DWORD oldProt;
+   if (VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len,
+                      PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(s_createCtrlPatchAddr, s_createCtrlSaved, kCreateCtrlPatch_len);
+      VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len, oldProt, &oldProt);
+   }
+}
+
+// ---------------------------------------------------------------------------
+// Carrier PILOT_SELF turret AI — autonomous aiming and firing
+//
+// PILOT_SELF turrets have no UnitController (mCtrl == null at ctrl+0xC8),
+// so MountedTurret::UpdateIndirect does nothing — no AI targeting or aiming.
+//
+// This hook temporarily borrows the parent carrier's UnitController so that
+// AILowLevel::UpdateIndirect finds enemies and CalculateHeadingControls
+// aims the turret.  Fire is determined independently: if the AI set the
+// turret's aim controls (target exists) AND the controls are small (turret
+// is on target), we call the fire state machine on the turret's own trigger.
+//
+// ProcessFire (called inside the original) writes to the PARENT's fire
+// triggers via the AI's linked Controllable, but the parent carrier body has
+// no weapons so those writes are harmless.  We never read them.
+// ---------------------------------------------------------------------------
+
+static constexpr uintptr_t kTurretUpdateIndirect_addr = 0x005673a0;
+static constexpr uintptr_t kFireStateMachine_addr     = 0x00562dd0; // thunk 0x00405376
+
+using fn_TurretUpdateIndirect_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
+// FUN_00562dd0: __thiscall(uint32_t* fireTrigger, float dt, char fire)
+using fn_FireStateMachine_t = void(__fastcall*)(void* ecx, void* edx, float dt, char fire);
+
+static fn_TurretUpdateIndirect_t original_TurretUpdateIndirect = nullptr;
+static fn_FireStateMachine_t g_FireStateMachine = nullptr;
+
+static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, float dt)
+{
+   char* ctrl = (char*)ecx;
+
+   // Only for PILOT_SELF turrets (PilotType == 1)
+   if (*(int*)(ctrl + 0x144) != 1)
+      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+
+   // Get parent entity via mParent (ctrl + 0x24C)
+   void* parent = *(void**)(ctrl + 0x24C);
+   if (!parent)
+      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+
+   // Only for carrier parents (vtable check)
+   __try {
+      if (*(void**)parent != g_carrierVtable)
+         return original_TurretUpdateIndirect(ecx, nullptr, dt);
+   } __except(EXCEPTION_EXECUTE_HANDLER) {
+      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+   }
+
+   // Get parent's UnitController from its Controllable subobject
+   char* parentCtrl = (char*)parent + 0x240;
+   void* parentAI = *(void**)(parentCtrl + 0xC8);
+   if (!parentAI)
+      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+
+   // --- Swap turret's AI with parent's for aiming + fire decision ---
+   // The turret has its own UnitController but it receives no VisibleObject
+   // events (no threat data).  The parent carrier's AI has actual targets.
+   void* turretAI = *(void**)(ctrl + 0xC8);
+
+   // Save parent's fire triggers.  ProcessFire (inside UpdateIndirect) uses
+   // the AI's linked Controllable to write its fire decision.  When we swap
+   // in parentAI, ProcessFire writes to parentCtrl's fire triggers instead
+   // of the turret's.  We read those after the call to get the AI's actual
+   // fire decision, then restore them.
+   uint32_t savedParentFire0 = *(uint32_t*)(parentCtrl + 0x38);
+   uint32_t savedParentFire1 = *(uint32_t*)(parentCtrl + 0x3C);
+
+   // Temporarily install parent's AI controller
+   *(void**)(ctrl + 0xC8) = parentAI;
+   bool result = original_TurretUpdateIndirect(ecx, nullptr, dt);
+   *(void**)(ctrl + 0xC8) = turretAI; // restore turret's own AI
+
+   // --- Read AI fire decision from parent's fire trigger ---
+   // ProcessFire wrote the fire decision to parentCtrl+0x38 (weapon idx 0).
+   // Bit 0 = currently wants to fire.  This is the ground truth for whether
+   // the AI sees a valid target, replacing the broken sentinel approach.
+   // (CalculateHeadingControls ALWAYS writes heading values, even without a
+   // target, so sentinel-based detection was always returning hasTarget=true.)
+   uint32_t newParentFire0 = *(uint32_t*)(parentCtrl + 0x38);
+   uint32_t newParentFire1 = *(uint32_t*)(parentCtrl + 0x3C);
+   bool aiWantsToFire = ((newParentFire0 & 1) != 0) || ((newParentFire1 & 1) != 0);
+
+   // Restore parent's fire triggers so we don't affect the carrier itself
+   *(uint32_t*)(parentCtrl + 0x38) = savedParentFire0;
+   *(uint32_t*)(parentCtrl + 0x3C) = savedParentFire1;
+
+   // Check heading controls for on-target precision (small values = aimed)
+   float newTurn  = *(float*)(ctrl + 0x88);
+   float newPitch = *(float*)(ctrl + 0x8C);
+
+   static constexpr float kAimThreshold = 0.3f;
+   bool onTarget = aiWantsToFire
+      && (newTurn  > -kAimThreshold && newTurn  < kAimThreshold)
+      && (newPitch > -kAimThreshold && newPitch < kAimThreshold);
+
+   // Apply fire decision to turret's own fire trigger AND pump Weapon::Update_
+   //
+   // Nobody calls Weapon::Update_ for PILOT_SELF turret weapons (the engine's
+   // external weapon updater skips them).  So we pump it directly.
+   // Only call Weapon::Update_ when onTarget to prevent constant firing.
+   int weaponIdx = *(int*)(ctrl + 0x234);
+   if (weaponIdx >= 0 && weaponIdx < 2) {
+      uint32_t* turretFire = (uint32_t*)(ctrl + 0x38 + weaponIdx * 4);
+      void* wpnPtr = *(void**)(ctrl + 0x224 + weaponIdx * 4);
+
+      if (onTarget) {
+         // Set fire trigger and pump weapon to enter/stay in FIRING state
+         g_FireStateMachine(turretFire, nullptr, dt, 1);
+
+         if (wpnPtr) {
+            using fn_WeaponUpdate_t = bool(__thiscall*)(void* thisWeapon, float dt);
+            void** wpnVtable = *(void***)wpnPtr;
+            auto weaponUpdate = (fn_WeaponUpdate_t)wpnVtable[1];
+
+            __try {
+               weaponUpdate(wpnPtr, dt);
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+               static bool s_wpnUpdateFailed = false;
+               if (!s_wpnUpdateFailed) {
+                  s_wpnUpdateFailed = true;
+                  auto fn = get_gamelog();
+                  if (fn) fn("[TurretAI] Weapon::Update_ exception for wpn=%p\n", wpnPtr);
+               }
+            }
+         }
+      } else {
+         // Clear fire trigger and force weapon back to IDLE
+         g_FireStateMachine(turretFire, nullptr, dt, 0);
+
+         if (wpnPtr) {
+            uint32_t* wpnState = (uint32_t*)((char*)wpnPtr + 0xB0);
+            if (*wpnState != 0) {
+               *wpnState = 0; // Force IDLE
+            }
+         }
+      }
+   }
+
+   // Diagnostic
+   static int s_turretAiDiagCount = 0;
+   if (s_turretAiDiagCount < 10) {
+      s_turretAiDiagCount++;
+      auto fn = get_gamelog();
+      if (fn) {
+         fn("[TurretAI:%p] aiWantsToFire=%d onTarget=%d turn=%.3f pitch=%.3f wpn=%d "
+            "parentFire=0x%X/0x%X\n",
+            ecx, aiWantsToFire, onTarget, newTurn, newPitch, weaponIdx,
+            newParentFire0, newParentFire1);
+      }
+   }
+
+   return result;
+}
+
 // Render hook — installed via Detour on FUN_004f6970.
 // Intercepts ALL flyer renders but only applies animation override to carriers
 // (identified by matching g_animOverride structBase).
@@ -715,6 +1054,88 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
 static constexpr uintptr_t kTakeOff_addr = 0x004F8B70;
 static constexpr uintptr_t kEntityCarrier_vtable = 0x00A3A670;
 
+// ---------------------------------------------------------------------------
+// EntityCarrier turret fix — ActivatePhysics vtable patch
+//
+// BUG: EntityCarrier::ActivatePhysics (vtable[41]) only activates the main
+//      Controllable physics with priority -1. The EntityFlyer version also
+//      activates: sub-object at +0x1d10, aimers, turrets, and passenger slots.
+//      Without these calls, turrets are created but never activated — they
+//      exist in memory but are invisible and non-functional.
+//
+// FIX: Replace the carrier's vtable[41] with a custom function that does
+//      the carrier's -1 physics call, then the rest from the flyer version.
+// ---------------------------------------------------------------------------
+static constexpr uintptr_t kActivatePhysics_vtableOffset = 41 * 4; // byte offset in vtable
+
+// Turret activation: FUN_00563a90 — __fastcall(MountedTurret* this)
+static constexpr uintptr_t kTurretActivate_addr    = 0x00563a90;
+// Aimer activation: FUN_005ef020 — __fastcall(Aimer* this)  (actually thiscall)
+static constexpr uintptr_t kAimerActivate_addr     = 0x005ef020;
+// PassengerSlot activation: FUN_00568540 — __fastcall(PassengerSlot* this)
+static constexpr uintptr_t kPassengerActivate_addr = 0x00568540;
+
+using fn_ActivateChild_t = void(__fastcall*)(void* ecx, void* edx);
+static fn_ActivateChild_t g_TurretActivate    = nullptr;
+static fn_ActivateChild_t g_AimerActivate     = nullptr;
+static fn_ActivateChild_t g_PassengerActivate = nullptr;
+
+// struct_base offsets for turret/aimer/passenger data
+static constexpr uintptr_t kTurretArray_off       = 0x680;  // MountedTurret*[8]
+static constexpr uintptr_t kTurretCount_off       = 0x6A0;  // char: turret count
+static constexpr uintptr_t kAimerArray_off        = 0x6A8;  // Aimer*[] array
+static constexpr uintptr_t kPassengerArray_off    = 0x670;  // PassengerSlot*[] array
+static constexpr uintptr_t kClass_AimerCount_off  = 0xD48;  // int: aimer count (in class)
+static constexpr uintptr_t kClass_PassCount_off   = 0xE14;  // char: passenger slot count (in class)
+static constexpr uintptr_t kSubObj1D10_off        = 0x1D10; // sub-object vtable ptr
+
+// Custom ActivatePhysics for EntityCarrier — replaces vtable[41]
+static void __fastcall carrier_ActivatePhysics(void* ecx, void* /*edx*/)
+{
+   char* base = (char*)ecx;
+
+   // 1. Activate main Controllable physics with carrier's priority -1
+   //    (**(code**)(*(base+0x240)+8))(-1, 2)
+   {
+      int* vtbl = *(int**)(base + 0x240);
+      typedef void (__thiscall* fn_t)(void*, int, int);
+      ((fn_t)(*(void**)(vtbl + 2)))(base + 0x240, -1, 2);  // vtable[2] at byte offset 8
+   }
+
+   // 2. Activate sub-object at +0x1d10 (embedded): (**(code**)(*(base+0x1d10)+8))(-15, 2)
+   {
+      int* vtbl = *(int**)(base + kSubObj1D10_off);
+      typedef void (__thiscall* fn_t)(void*, int, int);
+      ((fn_t)(*(void**)(vtbl + 2)))(base + kSubObj1D10_off, -15, 2);
+   }
+
+   // 3. Activate aimers
+   void* classPtr = *(void**)(base + kInner_mClass);
+   if (classPtr) {
+      int aimerCount = *(int*)((char*)classPtr + kClass_AimerCount_off);
+      void** aimers = (void**)(base + kAimerArray_off);
+      for (int i = 0; i < aimerCount; i++) {
+         if (aimers[i]) g_AimerActivate(aimers[i], nullptr);
+      }
+   }
+
+   // 4. Activate turrets
+   int turretCount = *(char*)(base + kTurretCount_off);
+   int** turrets = (int**)(base + kTurretArray_off);
+   for (int i = 0; i < turretCount; i++) {
+      if (turrets[i]) g_TurretActivate(turrets[i], nullptr);
+   }
+
+   // 5. Activate passenger slots
+   if (classPtr) {
+      int passCount = (int)*(unsigned char*)((char*)classPtr + kClass_PassCount_off);
+      void** passengers = (void**)(base + kPassengerArray_off);
+      for (int i = 0; i < passCount; i++) {
+         if (passengers[i]) g_PassengerActivate(passengers[i], nullptr);
+      }
+   }
+}
+
 // World position offsets from struct_base (inner base).
 static constexpr uintptr_t kInner_mPosX = 0x120;
 static constexpr uintptr_t kInner_mPosY = 0x124;
@@ -722,7 +1143,7 @@ static constexpr uintptr_t kInner_mPosZ = 0x128;
 
 using fn_TakeOff_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_TakeOff_t original_TakeOff = nullptr;
-static void* g_carrierVtable = nullptr; // resolved at install time
+// g_carrierVtable declared above (before turret fire cave)
 
 // Per-carrier transform snapshot, taken at TakeOff time.
 // The movement controller overwrites the entity's full transform (position +
@@ -1024,15 +1445,14 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
             float t = fo.landElapsed / fo.descentDuration;
             if (t > 1.0f) t = 1.0f;
 
-            // Ease-in on Y (t^2): slow initial descent, fast near ground.
-            // This delays the gndDist < landedHt threshold crossing to t≈0.97,
-            // ensuring the carrier lands on the pad, not hundreds of units away.
-            // Ease-out (1-(1-t)^2) crossed the threshold at t≈0.74 for high-landedHt carriers.
-            float tEased = t * t;
+            // Smoothstep ease-in-out on Y (3t²-2t³): slow start AND slow finish.
+            // Keeps the delayed threshold crossing of ease-in (t≈0.97 for landedHt)
+            // while decelerating in the final meters for a gentle landing.
+            float tEased = t * t * (3.0f - 2.0f * t);
 
-            float newX = fo.landStartX + (fo.padX - fo.landStartX) * t;
+            float newX = fo.landStartX + (fo.padX - fo.landStartX) * tEased;
             float newY = fo.landStartY + (fo.landTargetY - fo.landStartY) * tEased;
-            float newZ = fo.landStartZ + (fo.padZ - fo.landStartZ) * t;
+            float newZ = fo.landStartZ + (fo.padZ - fo.landStartZ) * tEased;
 
             *(float*)(inner + kInner_mPosX) = newX;
             *(float*)(inner + kInner_mPosY) = newY;
@@ -1579,6 +1999,23 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, kInitiateLanding_addr);
    g_CarrierKill           = (fn_CarrierKill_t)   resolve(exe_base, kCarrierKill_addr);
 
+   // Turret/aimer/passenger activation functions
+   g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, kTurretActivate_addr);
+   g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, kAimerActivate_addr);
+   g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, kPassengerActivate_addr);
+
+   // Carrier turret fire patch — must be after g_carrierVtable is resolved
+   turretFireInit();
+   turretFireInstall();
+
+   // Controllable::CreateController null-check fix (vanilla bug)
+   createCtrlNullCheckInit();
+   createCtrlNullCheckInstall();
+
+   // PILOT_SELF turret AI hook
+   original_TurretUpdateIndirect = (fn_TurretUpdateIndirect_t)resolve(exe_base, kTurretUpdateIndirect_addr);
+   g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, kFireStateMachine_addr);
+
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SetProperty,       hooked_SetProperty);
@@ -1589,7 +2026,20 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    DetourAttach(&(PVOID&)original_UpdateSpawn,       hooked_UpdateSpawn);
    DetourAttach(&(PVOID&)original_FlyerRender,      hooked_FlyerRender);
+   DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
    DetourTransactionCommit();
+
+   // Patch EntityCarrier vtable[41] (ActivatePhysics) to our custom version
+   // that also activates turrets, aimers, and passenger slots.
+   // Must be done AFTER DetourTransactionCommit to avoid page protection conflicts.
+   {
+      void** vtableSlot = (void**)((char*)g_carrierVtable + kActivatePhysics_vtableOffset);
+      DWORD oldProt;
+      if (VirtualProtect(vtableSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
+         *vtableSlot = (void*)&carrier_ActivatePhysics;
+         VirtualProtect(vtableSlot, sizeof(void*), oldProt, &oldProt);
+      }
+   }
 }
 
 void entity_carrier_fixes_uninstall()
@@ -1604,5 +2054,9 @@ void entity_carrier_fixes_uninstall()
    if (original_UpdateLandedHeight) DetourDetach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
    if (original_UpdateSpawn)        DetourDetach(&(PVOID&)original_UpdateSpawn,        hooked_UpdateSpawn);
    if (original_FlyerRender)        DetourDetach(&(PVOID&)original_FlyerRender,        hooked_FlyerRender);
+   if (original_TurretUpdateIndirect) DetourDetach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
    DetourTransactionCommit();
+
+   turretFireUninstall();
+   createCtrlNullCheckUninstall();
 }
