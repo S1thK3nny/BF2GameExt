@@ -176,6 +176,14 @@ static WORD s_prevRight = 0;
 // Staleness safety: timestamp of last output_vibration call
 static LARGE_INTEGER s_lastOutputTime = {};
 
+// Game-over rumble decay — resolved pointer to sGameOver global
+static volatile BYTE* s_pGameOver = nullptr;
+static bool  s_gameOverDecaying   = false;
+static float s_gameOverDecayLeft  = 0.0f;   // left motor level at decay start
+static float s_gameOverDecayRight = 0.0f;   // right motor level at decay start
+static LARGE_INTEGER s_gameOverDecayStart = {};
+static constexpr float GAMEOVER_DECAY_SECS = 0.3f;
+
 // ---------------------------------------------------------------------------
 // rumble_on_damage — trigger damage pulse (Xbox FUN_00085e20 formula)
 // ---------------------------------------------------------------------------
@@ -439,6 +447,50 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
    bool result = original_weapon_update(weapon, dt);
 
    if (!g_rumbleEnabled || !s_XInputSetState) return result;
+
+   // Game-over decay: smoothly ramp motors to zero over GAMEOVER_DECAY_SECS.
+   // Checked before dt guard so it runs even if game pauses time.
+   if (s_pGameOver && *s_pGameOver) {
+      if (!s_gameOverDecaying) {
+         // Capture current motor levels and start decay
+         s_gameOverDecaying   = true;
+         s_gameOverDecayLeft  = s_prevLeft  / 65535.0f;
+         s_gameOverDecayRight = s_prevRight / 65535.0f;
+         QueryPerformanceCounter(&s_gameOverDecayStart);
+         // Kill all rumble sources so they don't restart
+         s_recoilActive   = false;
+         s_damageActive   = false;
+         s_chargingWeapon = nullptr;
+         s_chargeLight = s_chargeHeavy = 0.0f;
+         s_vanillaLight = s_vanillaHeavy = 0.0f;
+      }
+      float t = seconds_since(s_gameOverDecayStart) / GAMEOVER_DECAY_SECS;
+      if (t >= 1.0f) {
+         // Decay complete — zero motors
+         if (s_prevLeft != 0 || s_prevRight != 0) {
+            XINPUT_VIBRATION vib = { 0, 0 };
+            s_XInputSetState(0, &vib);
+            s_prevLeft = s_prevRight = 0;
+         }
+      } else {
+         float scale = 1.0f - t;
+         WORD wL = (WORD)(s_gameOverDecayLeft  * scale * 65535.0f);
+         WORD wR = (WORD)(s_gameOverDecayRight * scale * 65535.0f);
+         XINPUT_VIBRATION vib = { wL, wR };
+         s_XInputSetState(0, &vib);
+         s_prevLeft = wL;
+         s_prevRight = wR;
+      }
+      return result;
+   }
+
+   // sGameOver cleared (new round) — reset decay state
+   if (s_gameOverDecaying) {
+      s_gameOverDecaying = false;
+      s_prevPlayerHealth = -1.0f;
+      s_lastHealthOwner = nullptr;
+   }
+
    if (dt <= 0.0f || dt > 0.5f) return result;
 
    // Safety: if motors are stuck on but output_vibration stopped being called
@@ -659,7 +711,14 @@ void rumble_init(uintptr_t exe_base)
       dbg_log("[Rumble] No Weapon::Update address — charge rumble disabled\n");
    }
 
+   // Resolve sGameOver global for game-over motor decay
+   if (g_game.s_game_over) {
+      s_pGameOver = (volatile BYTE*)resolve(g_game.s_game_over);
+      dbg_log("[Rumble] sGameOver at %p\n", s_pGameOver);
+   }
+
    // Reset all state
+   s_gameOverDecaying = false;
    s_recoilLight = s_recoilHeavy = 0.0f;
    s_recoilDecayRateLight = s_recoilDecayRateHeavy = 0.0f;
    s_recoilDurLight = s_recoilDurHeavy = 0.0f;

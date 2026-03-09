@@ -880,6 +880,7 @@ static ExeType detect_exe(uintptr_t exe_base)
    g_game.rumble_heavy_output                = NS::rumble_heavy_output;             \
    g_game.rumble_state_setup                 = NS::rumble_state_setup;              \
    g_game.rumble_dispatch                    = NS::rumble_dispatch;                 \
+   g_game.s_game_over                        = NS::s_game_over;                     \
 } while(0)
 
 // ---------------------------------------------------------------------------

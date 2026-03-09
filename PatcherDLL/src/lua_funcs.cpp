@@ -657,9 +657,40 @@ static int lua_EnableFlyerLandingFire(lua_State* L)
       enable = g_lua.toboolean(L, 1) != 0;
 
    DWORD oldProt;
-   if (VirtualProtect(g_flyerLandingFirePatch, 1, PAGE_READWRITE, &oldProt)) {
+   if (VirtualProtect(g_flyerLandingFirePatch, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
       *g_flyerLandingFirePatch = enable ? (unsigned char)0xEB : (unsigned char)0x7B;
       VirtualProtect(g_flyerLandingFirePatch, 1, oldProt, &oldProt);
+   }
+   return 0;
+}
+
+// EnableLandOnArrival(enable) — toggle the LandOnArrival path node fix.
+// When enabled, NOPs the JG that restricts the LandOnArrival check to mIndex==0.
+// When disabled, restores the original JG so only the first node is checked.
+extern uint8_t* g_landOnArrivalPatch;
+extern uint8_t  g_landOnArrivalOrigJG;
+
+static int lua_EnableLandOnArrival(lua_State* L)
+{
+   if (isMultiplayer()) { dbg_log_verbose("[EnableLandOnArrival] blocked — multiplayer\n"); return 0; }
+   if (!g_landOnArrivalPatch) return 0;
+
+   bool enable;
+   if (g_lua.isnumber(L, 1))
+      enable = g_lua.tonumber(L, 1) != 0.0f;
+   else
+      enable = g_lua.toboolean(L, 1) != 0;
+
+   DWORD oldProt;
+   if (VirtualProtect(g_landOnArrivalPatch, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      if (enable) {
+         g_landOnArrivalPatch[0] = 0x90;  // NOP
+         g_landOnArrivalPatch[1] = 0x90;  // NOP
+      } else {
+         g_landOnArrivalPatch[0] = 0x7F;  // JG
+         g_landOnArrivalPatch[1] = g_landOnArrivalOrigJG;
+      }
+      VirtualProtect(g_landOnArrivalPatch, 2, oldProt, &oldProt);
    }
    return 0;
 }
@@ -1429,6 +1460,7 @@ static const lua_func_entry custom_functions[] = {
    { "DumpAimerInfo",         lua_DumpAimerInfo },
    { "DebugCharacterInfo",    lua_DebugCharacterInfo },
    { "EnableFlyerLandingFire", lua_EnableFlyerLandingFire },
+   { "EnableLandOnArrival",    lua_EnableLandOnArrival },
    { "SetCharacterSpeedFactor",      lua_SetCharacterSpeedFactor },
    { "SetCharacterAimSpeedFactor",   lua_SetCharacterAimSpeedFactor },
    { "ClearCharacterSpeedFactor",    lua_ClearCharacterSpeedFactor },

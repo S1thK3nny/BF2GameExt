@@ -4,7 +4,7 @@
 
 #include "slim_vector.hpp"
 
-#define PATCH_COUNT 4
+#define PATCH_COUNT 9
 #define EXE_COUNT 3
 
 struct patch_flags {
@@ -13,6 +13,9 @@ struct patch_flags {
 
    /// expected_value is an unrelocated virtual address (what would be displayed in tools like Ghidra/IDA)
    bool expected_is_va : 1 = false;
+
+   /// Compare and write only the low byte of expected_value/replacement_value (for imm8 patches)
+   bool values_are_8bit : 1 = false;
 };
 
 struct patch {
@@ -43,3 +46,7 @@ extern const exe_patch_list patch_lists[EXE_COUNT];
 // Renderer cache storage — redirected from s_caches[15] by binary patches.
 // Used by particle_renderer_patch.cpp to set the overflow hook's array pointer.
 extern char g_sCaches_storage[];
+
+// Initialize the sentinel value at the end of the relocated EntityEx::mIdMap hash table.
+// The RTTI class name differs per build (different BSS layouts after mIdMap).
+void init_object_limit_sentinel(const char* rtti_class_name);

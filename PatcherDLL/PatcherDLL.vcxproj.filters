@@ -69,6 +69,19 @@
     <ClInclude Include="src\lod_limit_patch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\land_on_arrival_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\flyer_sound_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+
+    <ClInclude Include="src\door_limit_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\aim_assist_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp">
@@ -114,6 +127,19 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\lod_limit_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\land_on_arrival_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\flyer_sound_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+
+    <ClCompile Include="src\door_limit_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\aim_assist_patch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

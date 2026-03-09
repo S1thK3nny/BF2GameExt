@@ -115,6 +115,8 @@
     <ClInclude Include="src\apply_patches.hpp" />
     <ClInclude Include="src\ini_config.hpp" />
     <ClInclude Include="src\cfile.hpp" />
+    <ClInclude Include="src\land_on_arrival_patch.hpp" />
+    <ClInclude Include="src\door_limit_patch.hpp" />
     <ClInclude Include="src\lua_hooks.hpp" />
     <ClInclude Include="src\lua_funcs.hpp" />
     <ClInclude Include="src\game_events.hpp" />
@@ -129,11 +131,16 @@
     <ClInclude Include="src\anim_textures.hpp" />
     <ClInclude Include="src\bone_transform.hpp" />
     <ClInclude Include="src\lod_limit_patch.hpp" />
+    <ClInclude Include="src\flyer_sound_patch.hpp" />
+    <ClInclude Include="src\aim_assist_patch.hpp" />
+
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\apply_patches.cpp" />
     <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
+    <ClCompile Include="src\land_on_arrival_patch.cpp" />
+    <ClCompile Include="src\door_limit_patch.cpp" />
     <ClCompile Include="src\patch_table.cpp" />
     <ClCompile Include="src\lua_hooks.cpp" />
     <ClCompile Include="src\lua_funcs.cpp" />
@@ -145,6 +152,9 @@
     <ClCompile Include="src\anim_textures.cpp" />
     <ClCompile Include="src\bone_transform.cpp" />
     <ClCompile Include="src\lod_limit_patch.cpp" />
+    <ClCompile Include="src\flyer_sound_patch.cpp" />
+    <ClCompile Include="src\aim_assist_patch.cpp" />
+
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>

@@ -364,3 +364,4 @@ pipeline library.bin
 /.claude
 /.mcp.json
 /PLAN.md
+/ghidra_scripts

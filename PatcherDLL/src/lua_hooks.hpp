@@ -432,6 +432,9 @@ namespace lua_addrs {
       constexpr uintptr_t rumble_state_setup       = 0x007413a0;
       constexpr uintptr_t rumble_dispatch          = 0; // not needed — hook state_setup instead
 
+      // GameLoop state globals
+      constexpr uintptr_t s_game_over        = 0x00c6aae0;
+
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x00ADABC2;
       constexpr uintptr_t net_enabled        = 0x00BE14F0;
@@ -657,6 +660,9 @@ namespace lua_addrs {
       // optimized out, so we hook the dispatch itself to capture intensity.
       constexpr uintptr_t rumble_dispatch          = 0x00630d60;
 
+      // GameLoop state globals
+      constexpr uintptr_t s_game_over        = 0x01e5600a;
+
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x007E8007;
       constexpr uintptr_t net_enabled        = 0x01E62EA9;
@@ -879,6 +885,9 @@ namespace lua_addrs {
       // GOG dispatch does not call a state_setup stub (inlined/stripped like Steam).
       constexpr uintptr_t rumble_dispatch          = 0x00631E00;
 
+      // GameLoop state globals
+      constexpr uintptr_t s_game_over        = 0x01e574b6;
+
       // Networking state globals (for MP guards — direct byte reads)
       constexpr uintptr_t net_in_shell       = 0x007E9007;
       constexpr uintptr_t net_enabled        = 0x01E64359;
@@ -959,6 +968,9 @@ struct game_addrs {
    uintptr_t rumble_heavy_output      = 0;
    uintptr_t rumble_state_setup       = 0;
    uintptr_t rumble_dispatch          = 0;
+
+   // GameLoop state globals
+   uintptr_t s_game_over              = 0;
 
 };
 

@@ -43,11 +43,13 @@ static bool apply_patch(const patch& patch, const uintptr_t relocated_executable
                                       ? patch.expected_value - unrelocated_executable_base + relocated_executable_base
                                       : patch.expected_value;
 
-   if (not memeq(patch_address, sizeof(expected_value), &expected_value, sizeof(expected_value))) {
+   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(expected_value);
+
+   if (not memeq(patch_address, cmp_size, &expected_value, cmp_size)) {
       return false;
    }
 
-   memcpy(patch_address, &patch.replacement_value, sizeof(patch.replacement_value));
+   memcpy(patch_address, &patch.replacement_value, cmp_size);
 
    return true;
 }
@@ -59,7 +61,11 @@ static const char* patch_set_ini_key(const char* set_name)
    if (strcmp(set_name, "RedMemory Heap Extensions") == 0) return "HeapExtension";
    if (strcmp(set_name, "SoundParameterized Layer Limit Extension") == 0) return "SoundLayerLimit";
    if (strcmp(set_name, "DLC Mission Limit Extension") == 0) return "DLCMissionLimit";
+   if (strcmp(set_name, "Sound Limit Extension") == 0) return "SoundLimit";
    if (strcmp(set_name, "Particle Cache Increase") == 0) return "ParticleCacheIncrease";
+   if (strcmp(set_name, "Object Limit Increase") == 0) return "ObjectLimitIncrease";
+   if (strcmp(set_name, "Combo Anims Increase") == 0) return "ComboAnimIncrease";
+   if (strcmp(set_name, "High-Res Animation Limit") == 0) return "HighResAnimLimit";
    return nullptr;
 }
 
@@ -116,6 +122,20 @@ bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<
                return false;
             }
          }
+      }
+
+      // Initialize the sentinel value at the end of the relocated EntityEx::mIdMap.
+      // Iterator functions read 1 past the values array and compare against an RTTI
+      // hash global that sits right after the old table in BSS. The class name differs
+      // per build due to different BSS layouts.
+      if (cfg.get_bool("Patches", "ObjectLimitIncrease", true)) {
+         const char* sentinel_class = "Entity"; // modtools default
+         if (strcmp(exe_list.name, "BattlefrontII.exe Steam") == 0)
+            sentinel_class = "EntityBuilding";
+         else if (strcmp(exe_list.name, "BattlefrontII.exe GOG") == 0)
+            sentinel_class = "EntityBuildingClass";
+         init_object_limit_sentinel(sentinel_class);
+         log.printf("Object limit sentinel initialized (PblHash(\"%s\"))\n", sentinel_class);
       }
 
       return true;

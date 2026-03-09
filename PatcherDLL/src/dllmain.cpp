@@ -17,6 +17,10 @@
 #include "anim_textures.hpp"
 #include "bone_transform.hpp"
 #include "lod_limit_patch.hpp"
+#include "land_on_arrival_patch.hpp"
+#include "flyer_sound_patch.hpp"
+#include "door_limit_patch.hpp"
+#include "aim_assist_patch.hpp"
 
 
 static void install_patches(uintptr_t exe_base, const char* ini_path);
@@ -33,8 +37,12 @@ extern "C" __declspec(dllexport) BOOL WINAPI BF2GameExt_Init(uintptr_t exe_base,
 
 extern "C" __declspec(dllexport) void WINAPI BF2GameExt_Shutdown()
 {
+   // flyer_sound_uninstall();  // DISABLED — see install_patches
+   aim_assist_uninstall();
+   unpatch_door_limit();
    bone_transform_uninstall();
    anim_textures_uninstall();
+   land_on_arrival_uninstall();
    rumble_shutdown();
    lua_hooks_uninstall();
    unpatch_lod_limits();
@@ -110,8 +118,10 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
 
    bool patches_enabled = cfg.get_bool("Patches", "HeapExtension", true)
                         || cfg.get_bool("Patches", "SoundLayerLimit", true)
+                        || cfg.get_bool("Patches", "SoundLimit", true)
                         || cfg.get_bool("Patches", "DLCMissionLimit", true)
-                        || cfg.get_bool("Patches", "ParticleCacheIncrease", true);
+                        || cfg.get_bool("Patches", "ParticleCacheIncrease", true)
+                        || cfg.get_bool("Patches", "ObjectLimitIncrease", true);
 
    bool hooks_enabled = cfg.get_bool("Hooks", "LuaHooks", true);
 
@@ -139,12 +149,35 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
       patch_lod_limits(exe_base);
    }
 
+   if (cfg.get_bool("Patches", "DoorLimitIncrease", true)) {
+      patch_door_limit(exe_base);
+   }
+
+   if (cfg.get_bool("Patches", "LandOnArrival", true)) {
+      identify_land_on_arrival(exe_base);
+      land_on_arrival_install();
+   }
+
+   // DISABLED — causes erroneous sounds when entering vehicles.
+   // Needs investigation: VehicleEngine::Update is shared by all vehicles,
+   // EMA smoothing likely distorts initial transients on engine start.
+   // See memory/flyer_path_sound.md for fix approach notes.
+#if 0
+   if (cfg.get_bool("Hooks", "FlyerSoundSmooth", true)) {
+      identify_flyer_sound(exe_base);
+      flyer_sound_install();
+   }
+#endif
+
    if (hooks_enabled) {
       lua_hooks_install(exe_base);
       if (cfg.get_bool("Hooks", "AnimTextures", true))
          anim_textures_install(exe_base);
       if (cfg.get_bool("Hooks", "TransformBone", true))
          bone_transform_install(exe_base);
+
+      aim_assist_load_config(ini_path);
+      aim_assist_install(exe_base);
    }
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
