@@ -2,7 +2,6 @@
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "entity_carrier_fixes.hpp"
-#include "prone_system.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -1264,7 +1263,6 @@ static const lua_func_entry custom_functions[] = {
    { "SetBarrelFireOrigin",      lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",            lua_DumpAimerInfo },
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
-   { "EnableProne",               lua_EnableProne },
    { nullptr, nullptr }
 };
 
