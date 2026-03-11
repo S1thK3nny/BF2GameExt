@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "prone_system.hpp"
 
+#include <cmath>
 #include <detours.h>
 
 // =============================================================================
@@ -49,6 +50,9 @@ static constexpr uintptr_t kProneGuardJnz   = 0x00545BA6; // JNZ in EntitySoldie
 static constexpr uintptr_t kHeightJumpTable = 0x0053C000; // Jump table for AI height dispatch (5 entries)
 static constexpr uintptr_t kHeightSwitchEnd = 0x0053BD67; // End-of-switch target for the height dispatch
 static constexpr uintptr_t kPrimaryStanceAnd = 0x005C4506; // AND immediate byte in GetRandomPrimaryStance (0x03 -> 0x07)
+static constexpr uintptr_t kPostCollisionUpdate = 0x00530B20; // EntitySoldier::PostCollisionUpdate (camera/springs)
+static constexpr uintptr_t kTerrainAlign        = 0x0052C0F0; // EntitySoldier::PostCollisionUpdate (terrain alignment, Acklay)
+static constexpr uintptr_t kGameLog         = 0x007E3D50; // GameLog(const char* fmt, ...)
 
 // SoldierState enum values
 static constexpr int STATE_STAND  = 0;
@@ -95,6 +99,17 @@ typedef unsigned short (__fastcall* fn_AnimAccessor_t)(void* ecx, void* edx);
 // Sets mPosture, mAction, mSoldierAction based on the entity's current SoldierState.
 typedef void (__fastcall* fn_SetAction_t)(void* ecx, void* edx, int param_2, void* param_3, unsigned int param_4);
 
+// EntitySoldier::PostCollisionUpdate — builds the character's world orientation matrix.
+// ECX = entity (struct_base + 0x240), param_2 = output 4x4 matrix, param_3 = deltaTime.
+typedef void (__fastcall* fn_PostCollisionUpdate_t)(void* ecx, void* edx, float* param_2, float param_3);
+
+// Terrain alignment PostCollisionUpdate (0x0052C0F0, Acklay system).
+// ECX = struct_base, param = deltaTime.
+typedef void (__fastcall* fn_TerrainAlign_t)(void* ecx, void* edx, float deltaTime);
+
+// GameLog — printf-style logging to the game console.
+typedef void (__cdecl* fn_GameLog_t)(const char* fmt, ...);
+
 // ---------------------------------------------------------------------------
 // Resolved pointers (set during install)
 // ---------------------------------------------------------------------------
@@ -106,6 +121,9 @@ static fn_GameSoundPlay_t    fn_gameSoundPlay   = nullptr;
 static fn_WeaponPlayFoley_t  fn_weaponPlayFoley = nullptr;
 static fn_AnimAccessor_t     original_animAccessor = nullptr;
 static fn_SetAction_t        original_SetAction    = nullptr;
+static fn_PostCollisionUpdate_t original_PostCollisionUpdate = nullptr;
+static fn_TerrainAlign_t        original_TerrainAlign = nullptr;
+static fn_GameLog_t             fn_gameLog = nullptr;
 
 
 
@@ -208,6 +226,36 @@ static bool do_prone_transition(void* entity)
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// hooked_PostCollisionUpdate — DIAGNOSTIC phase 2: find stored transform.
+//
+// The entity's world matrix is read via vtable[0x44] on struct_base at the
+// start of PostCollisionUpdate.  Before the original runs, we call it
+// ourselves to get the stored matrix pointer and log its contents.
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// hooked_PostCollisionUpdate — passthrough (kept for original_PostCollisionUpdate ptr)
+// ---------------------------------------------------------------------------
+static void __fastcall hooked_PostCollisionUpdate(void* ecx, void* edx, float* mat, float dt)
+{
+    original_PostCollisionUpdate(ecx, edx, mat, dt);
+}
+
+// ---------------------------------------------------------------------------
+// hooked_TerrainAlign — skip entirely for prone to test if this function
+// is the source of the yaw rotation.
+// ---------------------------------------------------------------------------
+static void __fastcall hooked_TerrainAlign(void* ecx, void* edx, float deltaTime)
+{
+    char* base = (char*)ecx;
+    int state = *(int*)(base + 0x754);
+
+    if (state == STATE_PRONE)
+        return; // skip entirely — isolate whether rotation comes from here
+
+    original_TerrainAlign(ecx, edx, deltaTime);
 }
 
 // ---------------------------------------------------------------------------
@@ -337,14 +385,19 @@ void prone_system_install(uintptr_t exe_base)
     fn_weaponPlayFoley = (fn_WeaponPlayFoley_t)resolve(exe_base, kWeaponPlayFoley);
     original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, kAnimAccessor);
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, kSetAction);
+    original_PostCollisionUpdate = (fn_PostCollisionUpdate_t)resolve(exe_base, kPostCollisionUpdate);
+    original_TerrainAlign = (fn_TerrainAlign_t)resolve(exe_base, kTerrainAlign);
+    fn_gameLog = (fn_GameLog_t)resolve(exe_base, kGameLog);
 
-    // Detour Crouch, StandUp, animation accessor, and SetAction
+    // Detour Crouch, StandUp, animation accessor, SetAction, PostCollisionUpdate
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
     DetourAttach(&(PVOID&)original_Crouch, hooked_Crouch);
     DetourAttach(&(PVOID&)original_StandUp, hooked_StandUp);
     DetourAttach(&(PVOID&)original_animAccessor, hooked_animAccessor);
     DetourAttach(&(PVOID&)original_SetAction, hooked_SetAction);
+    DetourAttach(&(PVOID&)original_PostCollisionUpdate, hooked_PostCollisionUpdate);
+    DetourAttach(&(PVOID&)original_TerrainAlign, hooked_TerrainAlign);
     DetourTransactionCommit();
 
     // Patch out the PRONE guard in EntitySoldier::Update.
@@ -416,6 +469,7 @@ void prone_system_install(uintptr_t exe_base)
         if (*pAnd == 0x03)
             *pAnd = 0x07;
     }
+
 }
 
 void prone_system_uninstall()
@@ -447,5 +501,7 @@ void prone_system_uninstall()
     if (original_StandUp)      DetourDetach(&(PVOID&)original_StandUp, hooked_StandUp);
     if (original_animAccessor) DetourDetach(&(PVOID&)original_animAccessor, hooked_animAccessor);
     if (original_SetAction)    DetourDetach(&(PVOID&)original_SetAction, hooked_SetAction);
+    if (original_PostCollisionUpdate) DetourDetach(&(PVOID&)original_PostCollisionUpdate, hooked_PostCollisionUpdate);
+    if (original_TerrainAlign) DetourDetach(&(PVOID&)original_TerrainAlign, hooked_TerrainAlign);
     DetourTransactionCommit();
 }
