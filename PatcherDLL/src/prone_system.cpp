@@ -215,22 +215,14 @@ static bool do_prone_transition(void* entity)
 //
 // The game's toggle logic: if state != CROUCH -> Crouch(), else StandUp().
 // So Crouch() fires for STAND->CROUCH and PRONE->??? (since PRONE != CROUCH).
-// We intercept to make the cycle: CROUCH->PRONE, PRONE->STAND.
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 {
     int state = *(int*)((char*)ecx + kMState);
 
     if (state == STATE_PRONE) {
-        // PRONE -> STAND, but only for player input.
-        // AI posture code can also call Crouch() on prone soldiers — let
-        // that fall through to original_Crouch so it doesn't kick them out.
-        if (GetAsyncKeyState(VK_LCONTROL) & 0x8000 ||
-            GetAsyncKeyState(VK_RCONTROL) & 0x8000 ||
-            GetAsyncKeyState('C') & 0x8000)
-            return original_StandUp(ecx, nullptr);
-
-        return original_Crouch(ecx, nullptr);
+        // PRONE -> STAND
+        return original_StandUp(ecx, nullptr);
     }
 
     // STAND -> CROUCH (vanilla behavior)
@@ -243,6 +235,7 @@ static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 // The game calls StandUp() when state == CROUCH and the crouch key is pressed.
 // We redirect that to CROUCH -> PRONE.  PlayerController also calls StandUp()
 // before Jump when state is STAND/SPRINT — we let those through unchanged.
+// If prone is blocked (melee weapon), fall through to vanilla STAND.
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_StandUp(void* ecx, void* /*edx*/)
 {
@@ -254,7 +247,7 @@ static bool __fastcall hooked_StandUp(void* ecx, void* /*edx*/)
             return true;
     }
 
-    // STAND/SPRINT -> STAND (jump path, vanilla behavior)
+    // STAND/SPRINT -> STAND (jump path or melee fallback)
     return original_StandUp(ecx, nullptr);
 }
 
