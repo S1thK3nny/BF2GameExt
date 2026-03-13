@@ -298,7 +298,8 @@ void lua_hooks_install(uintptr_t exe_base)
 
    bf1_load_ext_install(exe_base);
    entity_carrier_fixes_install(exe_base);
-   prone_system_install(exe_base);
+   // TODO: Prone system disabled — crashes, probably due to terrain alignment hook
+   // prone_system_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -319,7 +320,7 @@ void lua_hooks_uninstall()
 {
    bf1_load_ext_uninstall();
    entity_carrier_fixes_uninstall();
-   prone_system_uninstall();
+   // prone_system_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

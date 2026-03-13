@@ -110,6 +110,7 @@ typedef void (__fastcall* fn_TerrainAlign_t)(void* ecx, void* edx, float deltaTi
 // GameLog — printf-style logging to the game console.
 typedef void (__cdecl* fn_GameLog_t)(const char* fmt, ...);
 
+
 // ---------------------------------------------------------------------------
 // Resolved pointers (set during install)
 // ---------------------------------------------------------------------------
@@ -229,12 +230,6 @@ static bool do_prone_transition(void* entity)
 }
 
 // ---------------------------------------------------------------------------
-// hooked_PostCollisionUpdate — DIAGNOSTIC phase 2: find stored transform.
-//
-// The entity's world matrix is read via vtable[0x44] on struct_base at the
-// start of PostCollisionUpdate.  Before the original runs, we call it
-// ourselves to get the stored matrix pointer and log its contents.
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // hooked_PostCollisionUpdate — passthrough (kept for original_PostCollisionUpdate ptr)
 // ---------------------------------------------------------------------------
@@ -244,8 +239,19 @@ static void __fastcall hooked_PostCollisionUpdate(void* ecx, void* edx, float* m
 }
 
 // ---------------------------------------------------------------------------
-// hooked_TerrainAlign — skip entirely for prone to test if this function
-// is the source of the yaw rotation.
+// hooked_TerrainAlign — skip TA for prone soldiers to prevent yaw rotation.
+//
+// BF2's TA function processes the collision accumulator and stores a surface
+// normal with lateral components on slopes.  Some downstream system reads
+// this and rotates the world matrix, causing continuous yaw drift.
+//
+// BF1 avoids this by running per-frame prone terrain alignment (raycasts +
+// SetWorldMatrix) that corrects any drift.  BF2's equivalent (Acklay block)
+// is gated behind posture bits that aren't set for soldiers.
+//
+// Fix: skip TA entirely for prone, and zero the collision accumulator so
+// it doesn't build up.  The position sync (handled by the collision system
+// independently) keeps the character on the terrain.
 // ---------------------------------------------------------------------------
 static void __fastcall hooked_TerrainAlign(void* ecx, void* edx, float deltaTime)
 {
@@ -253,7 +259,7 @@ static void __fastcall hooked_TerrainAlign(void* ecx, void* edx, float deltaTime
     int state = *(int*)(base + 0x754);
 
     if (state == STATE_PRONE)
-        return; // skip entirely — isolate whether rotation comes from here
+        return;
 
     original_TerrainAlign(ecx, edx, deltaTime);
 }
@@ -388,7 +394,6 @@ void prone_system_install(uintptr_t exe_base)
     original_PostCollisionUpdate = (fn_PostCollisionUpdate_t)resolve(exe_base, kPostCollisionUpdate);
     original_TerrainAlign = (fn_TerrainAlign_t)resolve(exe_base, kTerrainAlign);
     fn_gameLog = (fn_GameLog_t)resolve(exe_base, kGameLog);
-
     // Detour Crouch, StandUp, animation accessor, SetAction, PostCollisionUpdate
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
