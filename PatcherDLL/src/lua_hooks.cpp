@@ -5,6 +5,8 @@
 #include "entity_carrier_fixes.hpp"
 #include "prone_system.hpp"
 #include "fp_anim_bank.hpp"
+#include "cloth_collision_fix.hpp"
+#include "disguise_ext.hpp"
 
 #include <detours.h>
 
@@ -238,6 +240,7 @@ static void __cdecl hooked_init_state()
 
    // Reset FP animation bank mappings (stale class pointers from previous level)
    fp_anim_bank_reset();
+   disguise_ext_reset();
 
    if (g_L) {
       register_lua_functions(g_L);
@@ -305,6 +308,8 @@ void lua_hooks_install(uintptr_t exe_base)
    // TODO: Prone system disabled — crashes, probably due to terrain alignment hook
    // prone_system_install(exe_base);
    fp_anim_bank_install(exe_base);
+   cloth_collision_fix_install(exe_base);
+   disguise_ext_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -327,6 +332,8 @@ void lua_hooks_uninstall()
    entity_carrier_fixes_uninstall();
    // prone_system_uninstall();
    fp_anim_bank_uninstall();
+   cloth_collision_fix_uninstall();
+   disguise_ext_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
