@@ -120,12 +120,6 @@ static void**        g_mAnim         = nullptr;  // -> mAnim[48]
 static const char**  g_animNameTable = nullptr;   // -> s_AnimNameTable[48]
 
 // ---------------------------------------------------------------------------
-// One-shot logging throttle for UpdateSoldier (avoid flooding)
-// ---------------------------------------------------------------------------
-
-static bool g_loggedUpdateOnce = false;
-
-// ---------------------------------------------------------------------------
 // Helper: find or create a bank cache entry by name
 // ---------------------------------------------------------------------------
 
@@ -147,7 +141,6 @@ static int findOrCreateBankCache(const char* bankName)
              bankName, _TRUNCATE);
    memset(g_bankCaches[idx].anims, 0, sizeof(g_bankCaches[idx].anims));
    g_bankCaches[idx].loaded = false;
-   get_gamelog()("[FPAnimBank] Created bank cache [%d] for '%s'\n", idx, bankName);
    return idx;
 }
 
@@ -159,36 +152,25 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
    if (hash == g_fpBankPropHash && g_fpBankPropHash != 0) {
-      auto log = get_gamelog();
-      log("[FPAnimBank] SetProperty HIT: class=%p value='%s'\n", ecx, value ? value : "(null)");
-
-      if (!value || value[0] == '\0') {
-         log("[FPAnimBank]   -> empty value, ignoring\n");
-         return;
-      }
+      if (!value || value[0] == '\0') return;
 
       int bankIdx = findOrCreateBankCache(value);
       if (bankIdx < 0) return;
 
-      // Check if this class already has a mapping
       for (int i = 0; i < g_classBankCount; i++) {
          if (g_classBanks[i].classPtr == ecx) {
             g_classBanks[i].bankIndex = bankIdx;
-            log("[FPAnimBank]   -> updated existing class mapping [%d] -> cache[%d]\n", i, bankIdx);
             return;
          }
       }
 
-      // New mapping
       if (g_classBankCount >= kMaxClassBanks) {
-         log("[FPAnimBank]   -> class table full (%d)\n", kMaxClassBanks);
+         get_gamelog()("[FPAnimBank] Class table full (%d)\n", kMaxClassBanks);
          return;
       }
       g_classBanks[g_classBankCount].classPtr  = ecx;
       g_classBanks[g_classBankCount].bankIndex = bankIdx;
       g_classBankCount++;
-      log("[FPAnimBank]   -> new class mapping [%d]: class=%p -> bank '%s' (cache[%d])\n",
-          g_classBankCount - 1, ecx, value, bankIdx);
       return;
    }
 
@@ -205,40 +187,28 @@ static void loadBankCache(FPAnimCache* cache)
 
    log("[FPAnimBank] Loading bank '%s'...\n", cache->bankName);
 
-   // Register the bank with FirstPerson system so FindAnimation can search it.
-   // AddBank returns bool in low bit: 1 = success.
    uint32_t addResult = fn_AddBank(cache->bankName);
-   log("[FPAnimBank]   AddBank('%s') returned 0x%08x (%s)\n",
-       cache->bankName, addResult, (addResult & 1) ? "OK" : "FAILED");
+   if (!(addResult & 1)) {
+      log("[FPAnimBank]   AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
+   }
 
    int bankNameLen = (int)strlen(cache->bankName);
    char newName[128];
 
    for (int i = 0; i < kAnimCount; i++) {
       const char* origName = g_animNameTable[i];
-      if (!origName || origName[0] == '\0') {
-         log("[FPAnimBank]   slot[%2d]: (null/empty) -> skip\n", i);
-         continue;
-      }
+      if (!origName || origName[0] == '\0') continue;
 
-      // Determine the prefix to strip
       int prefixLen = (i >= kDroidekaFirstSlot) ? kDroidekaFPPrefixLen
                                                 : kHumanFPPrefixLen;
 
       int origLen = (int)strlen(origName);
-      if (origLen <= prefixLen) {
-         log("[FPAnimBank]   slot[%2d]: '%s' too short for prefix, skip\n", i, origName);
-         continue;
-      }
+      if (origLen <= prefixLen) continue;
 
-      // suffix includes the underscore, e.g. "_rifle_idle"
       const char* suffix = origName + prefixLen;
       int suffixLen = origLen - prefixLen;
 
-      if (bankNameLen + suffixLen >= (int)sizeof(newName)) {
-         log("[FPAnimBank]   slot[%2d]: name too long, skip\n", i);
-         continue;
-      }
+      if (bankNameLen + suffixLen >= (int)sizeof(newName)) continue;
 
       memcpy(newName, cache->bankName, bankNameLen);
       memcpy(newName + bankNameLen, suffix, suffixLen + 1);
@@ -246,9 +216,6 @@ static void loadBankCache(FPAnimCache* cache)
       void* anim = fn_FindAnimation(newName);
       if (anim) {
          cache->anims[i] = anim;
-         log("[FPAnimBank]   slot[%2d]: '%s' -> %p (OK)\n", i, newName, anim);
-      } else {
-         log("[FPAnimBank]   slot[%2d]: '%s' -> NOT FOUND (will use default)\n", i, newName);
       }
    }
 
@@ -277,21 +244,12 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
    FPAnimCache* cache = nullptr;
 
    __try {
-      // The param passed to UpdateSoldier is the 'intermediate' pointer
-      // (charSlot+0x148). EntitySoldierClass* is at intermediate + 0x218.
+      // The param is the 'intermediate' pointer (charSlot+0x148).
+      // EntitySoldierClass* is at intermediate + 0x218.
       void* entityClass = *(void**)((uintptr_t)ctrl + 0x218);
       if (!entityClass || entityClass == (void*)0xFFFFFFFF) {
          original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
          return;
-      }
-
-      if (!g_loggedUpdateOnce) {
-         get_gamelog()("[FPAnimBank] UpdateSoldier: soldier=%p entityClass=%p (searching %d classes)\n",
-                       ctrl, entityClass, g_classBankCount);
-         for (int j = 0; j < g_classBankCount; j++) {
-            get_gamelog()("[FPAnimBank]   registered[%d]: classPtr=%p bankIdx=%d\n",
-                          j, g_classBanks[j].classPtr, g_classBanks[j].bankIndex);
-         }
       }
 
       for (int i = 0; i < g_classBankCount; i++) {
@@ -300,25 +258,12 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
             if (bankIdx >= 0 && bankIdx < g_bankCacheCount) {
                cache = &g_bankCaches[bankIdx];
             }
-            if (!g_loggedUpdateOnce) {
-               get_gamelog()("[FPAnimBank]   -> MATCH at [%d], bankIdx=%d, cache=%p\n",
-                             i, bankIdx, cache);
-            }
             break;
          }
       }
-
-      if (!cache && !g_loggedUpdateOnce) {
-         get_gamelog()("[FPAnimBank]   -> no match for entityClass=%p\n", entityClass);
-      }
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
-      if (!g_loggedUpdateOnce) {
-         get_gamelog()("[FPAnimBank] UpdateSoldier: EXCEPTION during pointer navigation\n");
-      }
    }
-
-   g_loggedUpdateOnce = true;
 
    if (!cache) {
       original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
@@ -334,20 +279,13 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
    void* saved[kAnimCount];
    memcpy(saved, g_mAnim, sizeof(saved));
 
-   int swapped = 0;
    for (int i = 0; i < kAnimCount; i++) {
       if (cache->anims[i]) {
          g_mAnim[i] = cache->anims[i];
-         swapped++;
       }
    }
 
-   __try {
-      original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
-   }
-   __except (EXCEPTION_EXECUTE_HANDLER) {
-      get_gamelog()("[FPAnimBank] UpdateSoldier CRASHED during original call\n");
-   }
+   original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
 
    // Restore original mAnim[]
    memcpy(g_mAnim, saved, sizeof(saved));
@@ -377,18 +315,8 @@ void fp_anim_bank_install(uintptr_t exe_base)
    LONG r2 = DetourAttach(&(PVOID&)original_UpdateSoldier, hooked_UpdateSoldier);
    LONG rc = DetourTransactionCommit();
 
-   auto log = get_gamelog();
-   log("[FPAnimBank] Install: SetProperty=%ld UpdateSoldier=%ld commit=%ld hash=0x%08x\n",
-       r1, r2, rc, g_fpBankPropHash);
-   log("[FPAnimBank]   g_mAnim=%p  g_animNameTable=%p\n", g_mAnim, g_animNameTable);
-
-   // Dump the name table so we can verify it's resolved correctly
-   for (int i = 0; i < kAnimCount; i++) {
-      const char* name = g_animNameTable[i];
-      if (name && name[0] != '\0') {
-         log("[FPAnimBank]   nameTable[%2d] = '%s'\n", i, name);
-      }
-   }
+   get_gamelog()("[FPAnimBank] Installed (SetProperty=%ld UpdateSoldier=%ld commit=%ld)\n",
+                 r1, r2, rc);
 }
 
 void fp_anim_bank_uninstall()
@@ -402,11 +330,8 @@ void fp_anim_bank_uninstall()
 
 void fp_anim_bank_reset()
 {
-   get_gamelog()("[FPAnimBank] Reset: clearing %d class mappings, %d bank caches\n",
-                 g_classBankCount, g_bankCacheCount);
    memset(g_classBanks, 0, sizeof(g_classBanks));
    g_classBankCount = 0;
    memset(g_bankCaches, 0, sizeof(g_bankCaches));
    g_bankCacheCount = 0;
-   g_loggedUpdateOnce = false;
 }
