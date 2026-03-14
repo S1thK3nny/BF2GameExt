@@ -4,6 +4,7 @@
 #include "bf1_load_ext.hpp"
 #include "entity_carrier_fixes.hpp"
 #include "prone_system.hpp"
+#include "fp_anim_bank.hpp"
 
 #include <detours.h>
 
@@ -235,6 +236,9 @@ static void __cdecl hooked_init_state()
    memset(g_cevCallbacks, 0, sizeof(g_cevCallbacks));
    g_cevNextKey = -1000;
 
+   // Reset FP animation bank mappings (stale class pointers from previous level)
+   fp_anim_bank_reset();
+
    if (g_L) {
       register_lua_functions(g_L);
    }
@@ -300,6 +304,7 @@ void lua_hooks_install(uintptr_t exe_base)
    entity_carrier_fixes_install(exe_base);
    // TODO: Prone system disabled — crashes, probably due to terrain alignment hook
    // prone_system_install(exe_base);
+   fp_anim_bank_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -321,6 +326,7 @@ void lua_hooks_uninstall()
    bf1_load_ext_uninstall();
    entity_carrier_fixes_uninstall();
    // prone_system_uninstall();
+   fp_anim_bank_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
