@@ -193,9 +193,26 @@ static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, u
 
    __try {
       float* solPos = (float*)((char*)g_soldierPtr + kSol_Position);
-      // TODO: Replace +1.5m hack with proper bone position lookup
-      // (e.g. weapon bone or right hand bone from the soldier's model)
-      float startPos[3] = { solPos[0], solPos[1] + 1.5f, solPos[2] };
+      // Get cable start from weapon's mFirePointMatrix (hp_fire world position).
+      // Same approach as SetBarrelFireOrigin: weapon+0x50 = mFirePointMatrix.trans
+      float startPos[3] = { solPos[0], solPos[1] + 1.5f, solPos[2] };  // fallback
+      {
+         // entity+0x4F0 = Weapon*[8], entity+0x512 = active slot index
+         // entity = struct_base + 0x240
+         uint8_t slotIdx = *(uint8_t*)((char*)g_soldierPtr + 0x752);
+         if (slotIdx < 8) {
+            void* weapon = *(void**)((char*)g_soldierPtr + 0x730 + slotIdx * 4);
+            if (weapon) {
+               float* firePos = (float*)((char*)weapon + 0x50);
+               uint32_t raw = *(uint32_t*)&firePos[0];
+               if (raw != 0 && raw != 0xCDCDCDCD) {
+                  startPos[0] = firePos[0];
+                  startPos[1] = firePos[1];
+                  startPos[2] = firePos[2];
+               }
+            }
+         }
+      }
       float hookPos[3] = { g_hookPosX, g_hookPosY, g_hookPosZ };
 
       // Build cubic Hermite spline between soldier and hook
