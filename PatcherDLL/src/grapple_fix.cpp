@@ -43,6 +43,10 @@ static constexpr uintptr_t kFUN005297b0_addr  = 0x005297b0;
 
 static constexpr uintptr_t kCheckFire_addr    = 0x0062c760;
 static constexpr uintptr_t kTriggerUpdate_addr = 0x00562dd0; // Trigger::Update(this, dt, buttonDown)
+static constexpr uintptr_t kOrdRender_addr     = 0x0060fb80; // OrdnanceGrapplingHook RSO Render(this=ord+0x98, p2, p3, p4)
+static constexpr uintptr_t kSplineBuild_addr   = 0x0083e720; // Cubic Hermite spline coefficient builder
+static constexpr uintptr_t kCableRender_addr   = 0x006d2370; // Cable triangle strip renderer
+static constexpr uintptr_t kVecScale_addr      = 0x004294b0; // PblVector3 scale(out, scalar, in)
 
 // Ordnance offsets
 static constexpr int kOrd_SoldierPtr  = 0x54;
@@ -51,11 +55,15 @@ static constexpr int kOrd_Position    = 0x48;   // PblVector3 (hook attachment p
 static constexpr int kOrd_State       = 0x12C;
 
 // Soldier offsets (from struct_base)
+// The confirmed runtime offsets were found by hooking Trigger::Update
+// (0x00562dd0) and matching trigger pointers during gameplay.
+// Confirmed triggers: +0x284=Jump, +0x2A8=ThrustFwd, +0x2AC=ThrustBack,
+//                     +0x2B0=StrafeLeft, +0x2B4=StrafeRight
 static constexpr int kSol_CollBody    = 0x0C;
 static constexpr int kSol_Position    = 0x120;  // PblVector3 world position
 static constexpr int kSol_HandleKey   = 0x204;
 static constexpr int kSol_FlagByte    = 0x489;  // animation state flags
-static constexpr int kSol_JumpTrigger = 0x284;  // Controllable::mControlJump (Trigger, 4 bytes)
+static constexpr int kSol_JumpTrigger = 0x284;  // Controllable::mControlJump (runtime-confirmed)
 static constexpr int kSol_VelocityX   = 0x4EC;
 static constexpr int kSol_VelocityY   = 0x4F0;
 static constexpr int kSol_VelocityZ   = 0x4F4;
@@ -78,6 +86,12 @@ typedef bool (__fastcall* fn_IsRtti_t)(void* ecx, void* edx, uint32_t hash);
 typedef void (__fastcall* fn_005297b0_t)(void* soldier, void* edx, int value);
 typedef unsigned int (__fastcall* fn_CheckFire_t)(void* weapon, void* edx);
 typedef void (__fastcall* fn_TriggerUpdate_t)(uint32_t* trigger, void* edx, uint32_t dt, char buttonDown);
+typedef void (__fastcall* fn_OrdRender_t)(void* rso, void* edx, uint32_t p2, uint32_t p3, uint32_t p4);
+// RET 0x14 = cleans 5 dwords. 1st param (coefs_out) is in ECX (__thiscall-like).
+// Remaining 5 stack params: start, end, tan_start, tan_end, length (float).
+typedef void (__fastcall* fn_SplineBuild_t)(float* coefs_out, void* edx, float* start, float* end, float* tan_start, float* tan_end, float length);
+typedef void (__cdecl* fn_CableRender_t)(float* coefs, uint32_t param2, uint32_t param3, float cable_width);
+typedef float* (__cdecl* fn_VecScale_t)(float* out, float scalar, float* vec);
 
 // ---------------------------------------------------------------------------
 // Resolved pointers
@@ -90,6 +104,10 @@ static fn_AddItemBody_t fn_AddItemBody     = nullptr;
 static fn_005297b0_t    original_005297b0  = nullptr;
 static fn_CheckFire_t   original_CheckFire = nullptr;
 static fn_TriggerUpdate_t original_TriggerUpdate = nullptr;
+static fn_OrdRender_t   original_OrdRender = nullptr;
+static fn_SplineBuild_t fn_SplineBuild     = nullptr;
+static fn_CableRender_t fn_CableRender     = nullptr;
+static fn_VecScale_t    fn_VecScale        = nullptr;
 static uint32_t*        g_rttiHashPtr      = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -126,6 +144,11 @@ static float g_pullDirX = 0.0f;
 static float g_pullDirY = 0.0f;
 static float g_pullDirZ = 0.0f;
 
+// Hook head position — cached during Update for the render hook
+static float g_hookPosX = 0.0f;
+static float g_hookPosY = 0.0f;
+static float g_hookPosZ = 0.0f;
+
 // Dummy soldier buffer
 static uint8_t g_dummySoldier[0x500] = {};
 
@@ -146,6 +169,49 @@ static void __fastcall hooked_TriggerUpdate(uint32_t* trigger, void* /*edx*/, ui
       }
    }
    original_TriggerUpdate(trigger, nullptr, dt, buttonDown);
+}
+
+// ---------------------------------------------------------------------------
+// Hook: OrdnanceGrapplingHook RSO Render — draws hook model + rope cable.
+//
+// this (ECX) = ordnance + 0x98 (RedSceneObject part).
+// Called by the scene system with proper D3D render state.
+// Uses the same cubic Hermite spline + billboard strip renderer as
+// OrdnanceTowCable (FUN_0083e720 + FUN_006d2370).
+// ---------------------------------------------------------------------------
+
+static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, uint32_t p3, uint32_t p4)
+{
+   // Call original render (draws hook head model)
+   original_OrdRender(rso, nullptr, p2, p3, p4);
+
+   // Draw rope whenever grapple is active (flight + pull)
+   if (!g_grappleActive || !g_soldierPtr)
+      return;
+   if (g_hookPosX == 0.0f && g_hookPosY == 0.0f && g_hookPosZ == 0.0f)
+      return;
+
+   __try {
+      float* solPos = (float*)((char*)g_soldierPtr + kSol_Position);
+      // TODO: Replace +1.5m hack with proper bone position lookup
+      // (e.g. weapon bone or right hand bone from the soldier's model)
+      float startPos[3] = { solPos[0], solPos[1] + 1.5f, solPos[2] };
+      float hookPos[3] = { g_hookPosX, g_hookPosY, g_hookPosZ };
+
+      // Build cubic Hermite spline between soldier and hook
+      float startTangent[3] = { 0.0f, 0.0f, 0.0f };
+      float upDir[3] = { 0.0f, 1.0f, 0.0f };
+      float endTangent[3];
+      fn_VecScale(endTangent, -15.0f, upDir);
+
+      float coefs[12];
+      fn_SplineBuild(coefs, nullptr, startPos, hookPos, startTangent, endTangent, 1.0f);
+
+      // Render cable strip — pass RSO render params for D3D context
+      // CableRender(coefs, unused, unused, cable_width) — 4 cdecl params
+      fn_CableRender(coefs, p2, p3, 0.3f);
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -333,9 +399,22 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_lastDist = 999999.0f;
       g_stuckFrames = 0;
       g_pullDirX = g_pullDirY = g_pullDirZ = 0.0f;
+      g_hookPosX = g_hookPosY = g_hookPosZ = 0.0f;
       __try {
          g_savedFlagByte = *(uint8_t*)((char*)soldierPtr + kSol_FlagByte);
       } __except (EXCEPTION_EXECUTE_HANDLER) {}
+   }
+
+   // Fix RSO vtable: the constructor sets 0x00A50E98 (with the grapple render
+   // at slot 19) but something post-construction overwrites it to 0x00A50D40
+   // (base class vtable without the grapple render). Force the correct vtable.
+   {
+      void** rsoVtable = *(void***)(ord + 0x98);
+      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+      void* correctVtable = (void*)((0x00A50E98 - kUnrelocatedBase) + base);
+      if (rsoVtable != (void**)correctVtable) {
+         *(void**)(ord + 0x98) = correctVtable;
+      }
    }
 
    // Force collision-enabled flag bit0 on
@@ -368,6 +447,14 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
    *(int*)(ord + kOrd_SoldierKey) = savedKey;
 
    int stateAfter = *(int*)(ord + kOrd_State);
+
+   // Cache hook position every frame for the render hook
+   {
+      float* hookPos = (float*)(ord + kOrd_Position);
+      g_hookPosX = hookPos[0];
+      g_hookPosY = hookPos[1];
+      g_hookPosZ = hookPos[2];
+   }
 
    // --- Safety checks (prevent crashes) ---
 
@@ -406,9 +493,8 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_pullTimer += dt;
 
       __try {
-         if (g_pullTimer < dt * 1.5f)  // first frame only
-            get_gamelog()("[Grapple] Pull started, unitCtrl=%p\n",
-                *(void**)((char*)g_soldierPtr + 0x308));
+         if (g_pullTimer < dt * 1.5f)
+            get_gamelog()("[Grapple] Pull started\n");
 
          float* hookPos = (float*)(ord + kOrd_Position);
          float dist = distance_to_hook(g_soldierPtr, hookPos);
@@ -467,6 +553,10 @@ void grapple_fix_install(uintptr_t exe_base)
    original_005297b0  = (fn_005297b0_t)  resolve(exe_base, kFUN005297b0_addr);
    original_CheckFire = (fn_CheckFire_t) resolve(exe_base, kCheckFire_addr);
    original_TriggerUpdate = (fn_TriggerUpdate_t) resolve(exe_base, kTriggerUpdate_addr);
+   original_OrdRender = (fn_OrdRender_t) resolve(exe_base, kOrdRender_addr);
+   fn_SplineBuild     = (fn_SplineBuild_t) resolve(exe_base, kSplineBuild_addr);
+   fn_CableRender     = (fn_CableRender_t) resolve(exe_base, kCableRender_addr);
+   fn_VecScale        = (fn_VecScale_t) resolve(exe_base, kVecScale_addr);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -475,10 +565,11 @@ void grapple_fix_install(uintptr_t exe_base)
    LONG r3 = DetourAttach(&(PVOID&)original_005297b0, hooked_005297b0);
    LONG r4 = DetourAttach(&(PVOID&)original_CheckFire, hooked_CheckFire);
    LONG r5 = DetourAttach(&(PVOID&)original_TriggerUpdate, hooked_TriggerUpdate);
+   LONG r6 = DetourAttach(&(PVOID&)original_OrdRender, hooked_OrdRender);
    LONG rc = DetourTransactionCommit();
 
-   get_gamelog()("[Grapple] v4 Installed (Update=%ld Dtor=%ld 005297b0=%ld CheckFire=%ld TrigUp=%ld commit=%ld)\n",
-                 r1, r2, r3, r4, r5, rc);
+   get_gamelog()("[Grapple] v5 Installed (Update=%ld Dtor=%ld 005297b0=%ld CF=%ld TU=%ld Rnd=%ld commit=%ld)\n",
+                 r1, r2, r3, r4, r5, r6, rc);
 }
 
 void grapple_fix_uninstall()
@@ -490,5 +581,6 @@ void grapple_fix_uninstall()
    if (original_005297b0) DetourDetach(&(PVOID&)original_005297b0, hooked_005297b0);
    if (original_CheckFire) DetourDetach(&(PVOID&)original_CheckFire, hooked_CheckFire);
    if (original_TriggerUpdate) DetourDetach(&(PVOID&)original_TriggerUpdate, hooked_TriggerUpdate);
+   if (original_OrdRender) DetourDetach(&(PVOID&)original_OrdRender, hooked_OrdRender);
    DetourTransactionCommit();
 }
