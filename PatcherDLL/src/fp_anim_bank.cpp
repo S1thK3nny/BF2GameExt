@@ -185,11 +185,9 @@ static void loadBankCache(FPAnimCache* cache)
 {
    auto log = get_gamelog();
 
-   log("[FPAnimBank] Loading bank '%s'...\n", cache->bankName);
-
    uint32_t addResult = fn_AddBank(cache->bankName);
    if (!(addResult & 1)) {
-      log("[FPAnimBank]   AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
+      log("[FPAnimBank] AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
    }
 
    int bankNameLen = (int)strlen(cache->bankName);
@@ -225,8 +223,11 @@ static void loadBankCache(FPAnimCache* cache)
    for (int i = 0; i < kAnimCount; i++) {
       if (cache->anims[i]) count++;
    }
-   log("[FPAnimBank] Bank '%s' load complete: %d/%d animations resolved\n",
-       cache->bankName, count, kAnimCount);
+   // Only log if something went wrong (partial load)
+   if (count == 0) {
+      log("[FPAnimBank] Bank '%s': NO animations resolved (0/%d)\n",
+          cache->bankName, kAnimCount);
+   }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,8 +316,7 @@ void fp_anim_bank_install(uintptr_t exe_base)
    LONG r2 = DetourAttach(&(PVOID&)original_UpdateSoldier, hooked_UpdateSoldier);
    LONG rc = DetourTransactionCommit();
 
-   get_gamelog()("[FPAnimBank] Installed (SetProperty=%ld UpdateSoldier=%ld commit=%ld)\n",
-                 r1, r2, rc);
+   (void)r1; (void)r2; (void)rc;
 }
 
 void fp_anim_bank_uninstall()

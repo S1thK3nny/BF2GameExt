@@ -231,13 +231,7 @@ static void __fastcall hooked_SatisfyConstraints(void* ecx, void* edx,
       }
    }
 
-   if (fixedThisCall > 0 && !g_firstCorrectionLogged) {
-      g_firstCorrectionLogged = true;
-      auto fn_log = get_gamelog();
-      fn_log("[ClothCollisionFix] ACTIVE — final pass corrected %u particles "
-             "(total=%u, fixed=%u, movable=%u)\n",
-             fixedThisCall, totalCount, fixedCount, movableCount);
-   }
+   (void)fixedThisCall;
 
    if (snapshot != stackBuf)
       delete[] snapshot;
@@ -259,8 +253,7 @@ void cloth_collision_fix_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_EnforceCylinderCollision, hooked_EnforceCylinderCollision);
    LONG rc = DetourTransactionCommit();
 
-   auto fn_log = get_gamelog();
-   fn_log("[ClothCollisionFix] install: commit=%ld\n", rc);
+   (void)rc;
 }
 
 void cloth_collision_fix_uninstall()

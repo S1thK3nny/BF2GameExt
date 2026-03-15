@@ -5,15 +5,18 @@
 #include <cmath>
 
 // =============================================================================
-// Grappling Hook Fix — v3 (custom pull + slingshot momentum)
+// Grappling Hook Fix — v6
 //
-// The engine's FUN_005297b0 camera timer reset causes irreversible 3P model
-// invisibility. We block it and implement custom pull logic. The soldier
-// handle is redirected to a dummy buffer so the engine never touches the
-// real soldier.
+// The engine's original grapple arrival code writes to a soldier field that
+// causes irreversible 3P model invisibility. We redirect the soldier handle
+// to a dummy buffer so the engine never touches the real soldier, and
+// implement custom pull logic.
 //
-// Slingshot mechanic: switching weapon mid-pull cancels the grapple but
-// preserves momentum — the soldier launches with the pull velocity.
+// Features:
+//   - Custom pull with configurable speed (ODF: PullSpeed)
+//   - Slingshot mechanic: press jump mid-pull to launch with momentum
+//   - Rope cable rendering using OrdnanceTowCable's spline pipeline
+//   - Configurable max range (ODF: MaxRange on ordnance)
 // =============================================================================
 
 static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
@@ -43,16 +46,21 @@ static constexpr uintptr_t kFUN005297b0_addr  = 0x005297b0;
 
 static constexpr uintptr_t kCheckFire_addr    = 0x0062c760;
 static constexpr uintptr_t kTriggerUpdate_addr = 0x00562dd0; // Trigger::Update(this, dt, buttonDown)
-static constexpr uintptr_t kOrdRender_addr     = 0x0060fb80; // OrdnanceGrapplingHook RSO Render(this=ord+0x98, p2, p3, p4)
-static constexpr uintptr_t kSplineBuild_addr   = 0x0083e720; // Cubic Hermite spline coefficient builder
-static constexpr uintptr_t kCableRender_addr   = 0x006d2370; // Cable triangle strip renderer
-static constexpr uintptr_t kVecScale_addr      = 0x004294b0; // PblVector3 scale(out, scalar, in)
+static constexpr uintptr_t kOrdRender_addr     = 0x0060fb80; // OrdnanceGrapplingHook RSO Render
+static constexpr uintptr_t kSetProperty_addr   = 0x0060EC60; // OrdnanceGrapplingHookClass::SetProperty
+static constexpr uintptr_t kHashString_addr    = 0x007E1B70; // PblHash::PblHash(const char*)
+
+// Spline/cable rendering (same pipeline as OrdnanceTowCable)
+static constexpr uintptr_t kSplineBuild_addr   = 0x0083e720;
+static constexpr uintptr_t kCableRender_addr   = 0x006d2370;
+static constexpr uintptr_t kVecScale_addr      = 0x004294b0;
 
 // Ordnance offsets
 static constexpr int kOrd_SoldierPtr  = 0x54;
 static constexpr int kOrd_SoldierKey  = 0x58;
 static constexpr int kOrd_Position    = 0x48;   // PblVector3 (hook attachment point)
 static constexpr int kOrd_State       = 0x12C;
+static constexpr int kOrd_ClassPtr    = 0x30;   // OrdnanceClass* pointer
 
 // Soldier offsets (from struct_base)
 // The confirmed runtime offsets were found by hooking Trigger::Update
@@ -68,9 +76,12 @@ static constexpr int kSol_VelocityX   = 0x4EC;
 static constexpr int kSol_VelocityY   = 0x4F0;
 static constexpr int kSol_VelocityZ   = 0x4F4;
 
+// Defaults (overridable via ODF)
+static constexpr float kDefaultPullSpeed   = 15.0f;
+static constexpr float kDefaultMaxRange    = 0.0f;  // 0 = unlimited (LifeSpan controls)
+
 static constexpr int kState_Pulling   = 2;
 static constexpr float kArrivalDist   = 3.5f;
-static constexpr float kPullSpeed     = 15.0f;
 static constexpr float kMaxPullTime   = 10.0f;
 static constexpr int kMaxStuckFrames  = 30;
 
@@ -87,8 +98,10 @@ typedef void (__fastcall* fn_005297b0_t)(void* soldier, void* edx, int value);
 typedef unsigned int (__fastcall* fn_CheckFire_t)(void* weapon, void* edx);
 typedef void (__fastcall* fn_TriggerUpdate_t)(uint32_t* trigger, void* edx, uint32_t dt, char buttonDown);
 typedef void (__fastcall* fn_OrdRender_t)(void* rso, void* edx, uint32_t p2, uint32_t p3, uint32_t p4);
-// RET 0x14 = cleans 5 dwords. 1st param (coefs_out) is in ECX (__thiscall-like).
-// Remaining 5 stack params: start, end, tan_start, tan_end, length (float).
+typedef void (__fastcall* fn_SetProperty_t)(void* ecx, void* edx, uint32_t hash, const char* value);
+typedef uint32_t (__cdecl* fn_HashString_t)(const char*);
+
+// Spline builder: __thiscall — ECX = output, RET 0x14 cleans 5 stack params
 typedef void (__fastcall* fn_SplineBuild_t)(float* coefs_out, void* edx, float* start, float* end, float* tan_start, float* tan_end, float length);
 typedef void (__cdecl* fn_CableRender_t)(float* coefs, uint32_t param2, uint32_t param3, float cable_width);
 typedef float* (__cdecl* fn_VecScale_t)(float* out, float scalar, float* vec);
@@ -105,19 +118,54 @@ static fn_005297b0_t    original_005297b0  = nullptr;
 static fn_CheckFire_t   original_CheckFire = nullptr;
 static fn_TriggerUpdate_t original_TriggerUpdate = nullptr;
 static fn_OrdRender_t   original_OrdRender = nullptr;
+static fn_SetProperty_t original_SetProperty = nullptr;
+static fn_HashString_t  fn_HashString      = nullptr;
 static fn_SplineBuild_t fn_SplineBuild     = nullptr;
 static fn_CableRender_t fn_CableRender     = nullptr;
 static fn_VecScale_t    fn_VecScale        = nullptr;
 static uint32_t*        g_rttiHashPtr      = nullptr;
 
 // ---------------------------------------------------------------------------
-// FUN_005297b0 hook — blocks camera timer reset that causes 3P invisibility
+// ODF property hashes (computed at install time)
+// ---------------------------------------------------------------------------
+
+static uint32_t g_hashPullSpeed    = 0;
+static uint32_t g_hashGrappleRange = 0;
+
+// ODF-configurable values (stored per class, but only one grapple class exists)
+static float g_odfPullSpeed = kDefaultPullSpeed;
+static float g_odfMaxRange  = kDefaultMaxRange;
+
+// ---------------------------------------------------------------------------
+// Hook: OrdnanceGrapplingHookClass::SetProperty
+// ---------------------------------------------------------------------------
+
+static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
+                                          uint32_t hash, const char* value)
+{
+   if (hash == g_hashPullSpeed && g_hashPullSpeed != 0 && value && value[0]) {
+      g_odfPullSpeed = (float)atof(value);
+      if (g_odfPullSpeed < 0.1f) g_odfPullSpeed = kDefaultPullSpeed;
+      // Still pass to base class in case it uses a property with the same hash
+      original_SetProperty(ecx, nullptr, hash, value);
+      return;
+   }
+   if (hash == g_hashGrappleRange && g_hashGrappleRange != 0 && value && value[0]) {
+      g_odfMaxRange = (float)atof(value);
+      if (g_odfMaxRange < 0.0f) g_odfMaxRange = 0.0f;
+      original_SetProperty(ecx, nullptr, hash, value);
+      return;
+   }
+   original_SetProperty(ecx, nullptr, hash, value);
+}
+
+// ---------------------------------------------------------------------------
+// Hook: FUN_005297b0 — blocks soldier field write that causes 3P invisibility
 // ---------------------------------------------------------------------------
 
 static void __fastcall hooked_005297b0(void* soldier, void* /*edx*/, int value)
 {
    if (value != 0) {
-      // Block entirely — camera timer reset causes 3P invisibility
       return;
    }
    original_005297b0(soldier, nullptr, value);
@@ -128,7 +176,7 @@ static void __fastcall hooked_005297b0(void* soldier, void* /*edx*/, int value)
 // ---------------------------------------------------------------------------
 
 static bool    g_grappleActive  = false;
-static bool    g_wasPulling     = false;   // was in state 2 before destruction
+static bool    g_wasPulling     = false;
 static void*   g_soldierPtr     = nullptr;
 static int     g_soldierKey     = 0;
 static float   g_pullTimer      = 0.0f;
@@ -137,7 +185,6 @@ static int     g_stuckFrames    = 0;
 static uint8_t g_savedFlagByte  = 0;
 static bool    g_arrivedClean   = false;
 static bool    g_slingshotRequested = false;
-static bool    g_jumpWasPressed    = false;   // previous frame's jump state
 
 // Current pull direction (normalized) — used for slingshot momentum
 static float g_pullDirX = 0.0f;
@@ -149,15 +196,16 @@ static float g_hookPosX = 0.0f;
 static float g_hookPosY = 0.0f;
 static float g_hookPosZ = 0.0f;
 
+// Fire origin — cached when grapple first fires, for max range check
+static float g_fireOriginX = 0.0f;
+static float g_fireOriginY = 0.0f;
+static float g_fireOriginZ = 0.0f;
+
 // Dummy soldier buffer
 static uint8_t g_dummySoldier[0x500] = {};
 
 // ---------------------------------------------------------------------------
 // Hook: Trigger::Update — intercepts jump button input at the source.
-//
-// PlayerController::Update calls Trigger::Update for each Controllable trigger.
-// We check if the trigger pointer matches our soldier's mControlJump and
-// capture the raw buttonDown state before it gets consumed.
 // ---------------------------------------------------------------------------
 
 static void __fastcall hooked_TriggerUpdate(uint32_t* trigger, void* /*edx*/, uint32_t dt, char buttonDown)
@@ -173,19 +221,12 @@ static void __fastcall hooked_TriggerUpdate(uint32_t* trigger, void* /*edx*/, ui
 
 // ---------------------------------------------------------------------------
 // Hook: OrdnanceGrapplingHook RSO Render — draws hook model + rope cable.
-//
-// this (ECX) = ordnance + 0x98 (RedSceneObject part).
-// Called by the scene system with proper D3D render state.
-// Uses the same cubic Hermite spline + billboard strip renderer as
-// OrdnanceTowCable (FUN_0083e720 + FUN_006d2370).
 // ---------------------------------------------------------------------------
 
 static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, uint32_t p3, uint32_t p4)
 {
-   // Call original render (draws hook head model)
    original_OrdRender(rso, nullptr, p2, p3, p4);
 
-   // Draw rope whenever grapple is active (flight + pull)
    if (!g_grappleActive || !g_soldierPtr)
       return;
    if (g_hookPosX == 0.0f && g_hookPosY == 0.0f && g_hookPosZ == 0.0f)
@@ -197,8 +238,6 @@ static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, u
       // Same approach as SetBarrelFireOrigin: weapon+0x50 = mFirePointMatrix.trans
       float startPos[3] = { solPos[0], solPos[1] + 1.5f, solPos[2] };  // fallback
       {
-         // entity+0x4F0 = Weapon*[8], entity+0x512 = active slot index
-         // entity = struct_base + 0x240
          uint8_t slotIdx = *(uint8_t*)((char*)g_soldierPtr + 0x752);
          if (slotIdx < 8) {
             void* weapon = *(void**)((char*)g_soldierPtr + 0x730 + slotIdx * 4);
@@ -215,7 +254,6 @@ static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, u
       }
       float hookPos[3] = { g_hookPosX, g_hookPosY, g_hookPosZ };
 
-      // Build cubic Hermite spline between soldier and hook
       float startTangent[3] = { 0.0f, 0.0f, 0.0f };
       float upDir[3] = { 0.0f, 1.0f, 0.0f };
       float endTangent[3];
@@ -223,9 +261,6 @@ static void __fastcall hooked_OrdRender(void* rso, void* /*edx*/, uint32_t p2, u
 
       float coefs[12];
       fn_SplineBuild(coefs, nullptr, startPos, hookPos, startTangent, endTangent, 1.0f);
-
-      // Render cable strip — pass RSO render params for D3D context
-      // CableRender(coefs, unused, unused, cable_width) — 4 cdecl params
       fn_CableRender(coefs, p2, p3, 0.3f);
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -264,12 +299,11 @@ static void move_soldier_toward(void* soldierPtr, float* hookPos, float dt)
    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
    if (dist < 0.01f) return;
 
-   // Store normalized pull direction for slingshot
    g_pullDirX = dx / dist;
    g_pullDirY = dy / dist;
    g_pullDirZ = dz / dist;
 
-   float move = kPullSpeed * dt;
+   float move = g_odfPullSpeed * dt;
    if (move > dist) move = dist;
 
    float factor = move / dist;
@@ -277,44 +311,34 @@ static void move_soldier_toward(void* soldierPtr, float* hookPos, float dt)
    solPos[1] += dy * factor;
    solPos[2] += dz * factor;
 
-   // Sync collision body positions for render culling
    float* sphereCenter = (float*)((char*)soldierPtr + 0xC4);
-   sphereCenter[0] = solPos[0];
-   sphereCenter[1] = solPos[1];
-   sphereCenter[2] = solPos[2];
+   sphereCenter[0] = solPos[0]; sphereCenter[1] = solPos[1]; sphereCenter[2] = solPos[2];
 
    float* collPos = (float*)((char*)soldierPtr + 0x7C);
-   collPos[0] = solPos[0];
-   collPos[1] = solPos[1];
-   collPos[2] = solPos[2];
+   collPos[0] = solPos[0]; collPos[1] = solPos[1]; collPos[2] = solPos[2];
 
-   // Zero velocity to counteract gravity
    *(float*)((char*)soldierPtr + kSol_VelocityX) = 0.0f;
    *(float*)((char*)soldierPtr + kSol_VelocityY) = 0.0f;
    *(float*)((char*)soldierPtr + kSol_VelocityZ) = 0.0f;
 }
 
-// Apply slingshot momentum via the entity's SetVelocity vtable call.
-// This uses the same mechanism as the engine's own velocity system.
 static constexpr float kSlingshotMultiplier = 1.8f;
 
 static void apply_slingshot(void* soldierPtr)
 {
-   float speed = kPullSpeed * kSlingshotMultiplier;
+   float speed = g_odfPullSpeed * kSlingshotMultiplier;
    float vel[3] = {
       g_pullDirX * speed,
       g_pullDirY * speed,
       g_pullDirZ * speed
    };
 
-   // Use vtable[0x12] = SetVelocity(PblVector3*) — same as engine uses
    __try {
       void** vtable = *(void***)soldierPtr;
       typedef void (__fastcall* SetVel_t)(void* ecx, void* edx, float* v);
       SetVel_t fnSetVel = (SetVel_t)vtable[0x48 / 4];
       fnSetVel(soldierPtr, nullptr, vel);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      // Fallback: direct write
       *(float*)((char*)soldierPtr + kSol_VelocityX) = vel[0];
       *(float*)((char*)soldierPtr + kSol_VelocityY) = vel[1];
       *(float*)((char*)soldierPtr + kSol_VelocityZ) = vel[2];
@@ -329,7 +353,6 @@ static void __fastcall hooked_Dtor(void* ecx, void* /*edx*/)
 {
    char* ord = (char*)ecx;
 
-   // Redirect to dummy
    void* savedHandle = *(void**)(ord + kOrd_SoldierPtr);
    int   savedKey    = *(int*)(ord + kOrd_SoldierKey);
 
@@ -360,23 +383,14 @@ static void __fastcall hooked_Dtor(void* ecx, void* /*edx*/)
       bool isSoldier = ((fn_IsRtti_t)vtable[0])(soldierPtr, nullptr, *g_rttiHashPtr);
       if (!isSoldier) goto done;
 
-      // Restore animation flag byte
       *(uint8_t*)((char*)soldierPtr + kSol_FlagByte) = g_savedFlagByte;
 
-      // Restore collision
       void* collBody = (char*)soldierPtr + kSol_CollBody;
       fn_RemoveBody(collBody);
       fn_AddItemBody(collBody);
 
-      // Slingshot: if destroyed during pull WITHOUT proper arrival
-      // (weapon switch / cancel), give momentum in pull direction
       if (!g_arrivedClean && (g_pullDirX != 0 || g_pullDirY != 0 || g_pullDirZ != 0)) {
          apply_slingshot(soldierPtr);
-         float speed = kPullSpeed * kSlingshotMultiplier;
-         get_gamelog()("[Grapple] Slingshot! vel=(%.1f, %.1f, %.1f)\n",
-             g_pullDirX * speed, g_pullDirY * speed, g_pullDirZ * speed);
-      } else {
-         get_gamelog()("[Grapple] Cleanup complete (arrival)\n");
       }
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -411,7 +425,6 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_wasPulling = false;
       g_arrivedClean = false;
       g_slingshotRequested = false;
-      g_jumpWasPressed = true;  // assume pressed to ignore initial state
       g_pullTimer = 0.0f;
       g_lastDist = 999999.0f;
       g_stuckFrames = 0;
@@ -419,6 +432,11 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_hookPosX = g_hookPosY = g_hookPosZ = 0.0f;
       __try {
          g_savedFlagByte = *(uint8_t*)((char*)soldierPtr + kSol_FlagByte);
+         // Cache fire origin for max range check
+         float* solPos = (float*)((char*)soldierPtr + kSol_Position);
+         g_fireOriginX = solPos[0];
+         g_fireOriginY = solPos[1];
+         g_fireOriginZ = solPos[2];
       } __except (EXCEPTION_EXECUTE_HANDLER) {}
    }
 
@@ -473,31 +491,32 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_hookPosZ = hookPos[2];
    }
 
-   // --- Safety checks (prevent crashes) ---
+   // --- Safety checks ---
 
-   // Check if soldier died or handle went invalid
    if (g_grappleActive && g_soldierPtr) {
       __try {
-         if (*(int*)((char*)g_soldierPtr + kSol_HandleKey) != g_soldierKey) {
-            get_gamelog()("[Grapple] Soldier handle invalid — killing ordnance\n");
+         if (*(int*)((char*)g_soldierPtr + kSol_HandleKey) != g_soldierKey)
             return 0;
-         }
-         // Check soldier state — DEAD is typically >= 10
          int solState = *(int*)((char*)g_soldierPtr + 0x754);
-         if (solState >= 10) {
-            get_gamelog()("[Grapple] Soldier dead (state=%d) — killing ordnance\n", solState);
+         if (solState >= 10)
             return 0;
-         }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
-         return 0;  // can't read soldier, kill ordnance
+         return 0;
       }
    }
 
-   // State 4 (failure/retraction): kill immediately since the retraction
-   // goes toward the dummy soldier at (0,0,0) and would never arrive.
-   if (stateAfter == 4) {
-      get_gamelog()("[Grapple] HookFailure retraction — killing ordnance\n");
+   // State 4 (failure/retraction): kill immediately
+   if (stateAfter == 4)
       return 0;
+
+   // Max range check during flight (before pull)
+   if (g_odfMaxRange > 0.0f && stateAfter != kState_Pulling && g_grappleActive) {
+      float dx = g_hookPosX - g_fireOriginX;
+      float dy = g_hookPosY - g_fireOriginY;
+      float dz = g_hookPosZ - g_fireOriginZ;
+      float rangeSq = dx*dx + dy*dy + dz*dz;
+      if (rangeSq > g_odfMaxRange * g_odfMaxRange)
+         return 0;
    }
 
    // Track if we're in pull state (for slingshot detection in destructor)
@@ -510,45 +529,42 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
       g_pullTimer += dt;
 
       __try {
-         if (g_pullTimer < dt * 1.5f)
-            get_gamelog()("[Grapple] Pull started\n");
-
          float* hookPos = (float*)(ord + kOrd_Position);
          float dist = distance_to_hook(g_soldierPtr, hookPos);
 
-         // NOTE: Do NOT set 0x1C on flag byte — it suppresses input processing
-         // including jump detection. Landing animation will trigger but jump works.
          uint8_t* flagPtr = (uint8_t*)((char*)g_soldierPtr + kSol_FlagByte);
 
-         // Slingshot: g_slingshotRequested is set by the Trigger::Update hook
-         // when jump button is pressed (captures raw input before consumption).
+         // Slingshot: jump during pull
          if (g_slingshotRequested && g_pullTimer > 0.2f) {
             *flagPtr = g_savedFlagByte;
-            get_gamelog()("[Grapple] Jump during pull — slingshot!\n");
-            return 0;  // kill ordnance → destructor applies slingshot
+            return 0;
          }
 
-         // Move soldier toward hook
          move_soldier_toward(g_soldierPtr, hookPos, dt);
 
-         // Stuck detection
-         if (dist >= g_lastDist - 0.1f) {
+         // Stuck detection — tolerance scales with pull speed to avoid
+         // false positives at low speeds (at 1 m/s, per-frame movement
+         // is ~0.017m which would always fail a fixed 0.1m check)
+         float stuckTolerance = g_odfPullSpeed * dt * 0.5f;
+         if (stuckTolerance < 0.01f) stuckTolerance = 0.01f;
+         if (dist >= g_lastDist - stuckTolerance)
             g_stuckFrames++;
-         } else {
+         else
             g_stuckFrames = 0;
-         }
          g_lastDist = dist;
 
-         // Check arrival / stuck / timeout
-         if (dist < kArrivalDist || g_stuckFrames > kMaxStuckFrames || g_pullTimer > kMaxPullTime) {
+         // Arrival / stuck / timeout (timeout scales so slow pulls aren't cut short)
+         float maxTime = (g_odfMaxRange > 0.0f)
+            ? (g_odfMaxRange / g_odfPullSpeed) + 2.0f
+            : kMaxPullTime;
+         if (dist < kArrivalDist || g_stuckFrames > kMaxStuckFrames || g_pullTimer > maxTime) {
             *flagPtr = g_savedFlagByte;
-            g_arrivedClean = true;  // proper arrival, not weapon switch
-            get_gamelog()("[Grapple] Arrival! dist=%.1f stuck=%d\n", dist, g_stuckFrames);
+            g_arrivedClean = true;
             return 0;
          }
       }
       __except (EXCEPTION_EXECUTE_HANDLER) {
-         get_gamelog()("[Grapple] EXCEPTION in pull logic!\n");
+         get_gamelog()("[Grapple] EXCEPTION in pull logic\n");
          return 0;
       }
    }
@@ -571,33 +587,38 @@ void grapple_fix_install(uintptr_t exe_base)
    original_CheckFire = (fn_CheckFire_t) resolve(exe_base, kCheckFire_addr);
    original_TriggerUpdate = (fn_TriggerUpdate_t) resolve(exe_base, kTriggerUpdate_addr);
    original_OrdRender = (fn_OrdRender_t) resolve(exe_base, kOrdRender_addr);
-   fn_SplineBuild     = (fn_SplineBuild_t) resolve(exe_base, kSplineBuild_addr);
-   fn_CableRender     = (fn_CableRender_t) resolve(exe_base, kCableRender_addr);
-   fn_VecScale        = (fn_VecScale_t) resolve(exe_base, kVecScale_addr);
+   original_SetProperty = (fn_SetProperty_t) resolve(exe_base, kSetProperty_addr);
+   fn_HashString    = (fn_HashString_t)  resolve(exe_base, kHashString_addr);
+   fn_SplineBuild   = (fn_SplineBuild_t) resolve(exe_base, kSplineBuild_addr);
+   fn_CableRender   = (fn_CableRender_t) resolve(exe_base, kCableRender_addr);
+   fn_VecScale      = (fn_VecScale_t)    resolve(exe_base, kVecScale_addr);
+
+   // Compute property hashes
+   g_hashPullSpeed    = fn_HashString("PullSpeed");
+   g_hashGrappleRange = fn_HashString("GrappleRange");
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   LONG r1 = DetourAttach(&(PVOID&)original_Update,   hooked_Update);
-   LONG r2 = DetourAttach(&(PVOID&)original_Dtor,     hooked_Dtor);
-   LONG r3 = DetourAttach(&(PVOID&)original_005297b0, hooked_005297b0);
-   LONG r4 = DetourAttach(&(PVOID&)original_CheckFire, hooked_CheckFire);
-   LONG r5 = DetourAttach(&(PVOID&)original_TriggerUpdate, hooked_TriggerUpdate);
-   LONG r6 = DetourAttach(&(PVOID&)original_OrdRender, hooked_OrdRender);
-   LONG rc = DetourTransactionCommit();
-
-   get_gamelog()("[Grapple] v5 Installed (Update=%ld Dtor=%ld 005297b0=%ld CF=%ld TU=%ld Rnd=%ld commit=%ld)\n",
-                 r1, r2, r3, r4, r5, r6, rc);
+   DetourAttach(&(PVOID&)original_Update,        hooked_Update);
+   DetourAttach(&(PVOID&)original_Dtor,          hooked_Dtor);
+   DetourAttach(&(PVOID&)original_005297b0,      hooked_005297b0);
+   DetourAttach(&(PVOID&)original_CheckFire,     hooked_CheckFire);
+   DetourAttach(&(PVOID&)original_TriggerUpdate, hooked_TriggerUpdate);
+   DetourAttach(&(PVOID&)original_OrdRender,     hooked_OrdRender);
+   DetourAttach(&(PVOID&)original_SetProperty,   hooked_SetProperty);
+   DetourTransactionCommit();
 }
 
 void grapple_fix_uninstall()
 {
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   if (original_Update)   DetourDetach(&(PVOID&)original_Update,   hooked_Update);
-   if (original_Dtor)     DetourDetach(&(PVOID&)original_Dtor,     hooked_Dtor);
-   if (original_005297b0) DetourDetach(&(PVOID&)original_005297b0, hooked_005297b0);
-   if (original_CheckFire) DetourDetach(&(PVOID&)original_CheckFire, hooked_CheckFire);
+   if (original_Update)        DetourDetach(&(PVOID&)original_Update,        hooked_Update);
+   if (original_Dtor)          DetourDetach(&(PVOID&)original_Dtor,          hooked_Dtor);
+   if (original_005297b0)      DetourDetach(&(PVOID&)original_005297b0,      hooked_005297b0);
+   if (original_CheckFire)     DetourDetach(&(PVOID&)original_CheckFire,     hooked_CheckFire);
    if (original_TriggerUpdate) DetourDetach(&(PVOID&)original_TriggerUpdate, hooked_TriggerUpdate);
-   if (original_OrdRender) DetourDetach(&(PVOID&)original_OrdRender, hooked_OrdRender);
+   if (original_OrdRender)     DetourDetach(&(PVOID&)original_OrdRender,     hooked_OrdRender);
+   if (original_SetProperty)   DetourDetach(&(PVOID&)original_SetProperty,   hooked_SetProperty);
    DetourTransactionCommit();
 }
