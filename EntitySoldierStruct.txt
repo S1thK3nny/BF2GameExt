@@ -1,0 +1,387 @@
+0x0	0x4	EntitySoldier_vftable0 *	EntitySoldier_vftable0 *	EntityEx_vftablePtr	
+0x4	0x8	EntityEx_data	/ClassDataTypes/EntityEx/EntityEx_data
+pack()
+Structure EntityEx_data {
+   0   uint   4   mId   ""
+   4   EntityClass *   4   mEntityClass   ""
+}
+Length: 8 Alignment: 4
+	EntityEx_data	
+0xc	0x4	EntitySoldier_vftable1 *	EntitySoldier_vftable1 *	CollisionObject_vftablePtr	
+0x10	0x84	CollisionObject_data	/ClassDataTypes/CollisionObject/CollisionObject_data
+pack(disabled)
+Structure CollisionObject_data {
+   0   TreeGridObject   36   TreeGridObject   ""
+   36   FoleyFXCollider   12   FoleyFXCollider   ""
+   48   FoleyFXCollidee   4   FoleyFXCollidee   ""
+   52   Node   16   mCollisionObjectNode   ""
+   68   CollisionModel *   4   mCollisionModel   ""
+   72   CollisionObject *   4   mParent   ""
+   76   float   4   mMass   ""
+   80   PblBox   24   mAABB   ""
+   104   bool:1(0)   1   mProcedurallyAnimated   ""
+   104   bool:1(1)   1   mLastCollidedWithNonTerrain   ""
+   108   PblVector3   12   mLastPosition   ""
+   120   CollisionObject *[3]   12   mLastCollidedObjs   ""
+}
+Length: 132 Alignment: 1
+	CollisionObject_data	
+0x94	0x4	EntitySoldier_vftable2 *	EntitySoldier_vftable2 *	RedSceneObject_vftablePtr	
+0x98	0x20	DynDisplayable_data	/ClassDataTypes/pvs/DynDisplayable/DynDisplayable_data
+pack()
+Structure DynDisplayable_data {
+   0   Sector *   4   sector_   ""
+   4   uint   4   flags_   ""
+   8   int   4   aframe_   ""
+   12   int   4   pframe_   ""
+   16   float   4   nextCheckDist_   ""
+   20   PblVector3   12   lastCheckPos_   ""
+}
+Length: 32 Alignment: 4
+	DynDisplayable_data	
+0xb8	0x34	RedSceneObject_data	/ClassDataTypes/RedSceneObject/RedSceneObject_data
+pack()
+Structure RedSceneObject_data {
+   0   RedSceneObject *   4   mNextSceneObject   ""
+   4   RedSceneObject *   4   mPrevSceneObject   ""
+   8   RedSceneAABox *   4   mSceneAABox   ""
+   12   PblSphere   16   _Sphere   ""
+   28   RedLodData *   4   _pLodData   ""
+   32   uint   4   _uiRenderFlags   ""
+   36   bool   1   _bActive   ""
+   40   float   4   _fPriorityMod   ""
+   44   int[1]   4   _iFrameNum   ""
+   48   uint[1]   4   _uiOcclusionIndex   ""
+}
+Length: 52 Alignment: 4
+	RedSceneObject_data	
+0xec	0x1	??	undefined		
+0xed	0x1	??	undefined		
+0xee	0x1	??	undefined		
+0xef	0x1	??	undefined		
+0xf0	0x40	PblMatrix	/Battlefront2.pdb/PblMatrix
+pack(disabled)
+Structure PblMatrix {
+   0   PblVector4   16   right   ""
+   16   PblVector4   16   up   ""
+   32   PblVector4   16   forward   ""
+   48   PblVector4   16   trans   ""
+}
+Length: 64 Alignment: 1
+	mMatrix	
+0x130	0x4	GameModel *	GameModel *	mModel	
+0x134	0x4	float	float	mSmallestCollisionDim	
+0x138	0x4	AttachedEffects *	AttachedEffects *	m_pAttachedEffects	
+0x13c	0x1	??	undefined		
+0x13d	0x1	??	undefined		
+0x13e	0x1	??	undefined		
+0x13f	0x1	??	undefined		
+0x140	0x4	EntitySoldier_vftable3 *	EntitySoldier_vftable3 *	Damageable_vftablePtr	
+0x144	0xbc	Damageable_data	/ClassDataTypes/Damageable/Damageable_data
+pack(disabled)
+Structure Damageable_data {
+   0   float   4   mCurHealth   ""
+   4   float   4   mMaxHealth   ""
+   8   float   4   mAddHealth   ""
+   12   float   4   mCurShield   ""
+   16   float   4   mMaxShield   ""
+   20   float   4   mAddShield   ""
+   24   float   4   mDisableTime   ""
+   28   float   4   mAIDamageThreshold   ""
+   32   DamageOwner   28   mDamageOwner   ""
+   60   PblHandle<FLEffectObject>[10]   80   mDamageEffect   ""
+   140   GameSoundControllable[10]   40   mDamageEffectSound   ""
+   180   float   4   mDamageRegionTime   ""
+   184   uint:3(0)   1   mHealthType   ""
+   184   uint:1(3)   1   mIsAlive   ""
+   184   uint:1(4)   1   mVanishing   ""
+   184   uint:1(5)   1   mIsShielded   ""
+}
+Length: 188 Alignment: 1
+	Damageable_data	
+0x200	0x4	EntitySoldier_vftable4 *	EntitySoldier_vftable4 *	PblHandled_vftablePtr	
+0x204	0x4	PblHandled_data	/ClassDataTypes/PblHandled/PblHandled_data
+pack()
+Structure PblHandled_data {
+   0   int   4   mHandleId   ""
+}
+Length: 4 Alignment: 4
+	PblHandled_data	
+0x208	0x14	PblList<Controllable>	/Battlefront2.pdb/PblList<Controllable>
+pack()
+Structure PblList<Controllable> {
+   0   Node   16   _head   ""
+   16   int   4   _iCount   ""
+}
+Length: 20 Alignment: 4
+	mControllableList	
+0x21c	0x4	int	int	mNetUniqueId	
+0x220	0x4	void *	void *	mPrevFoliageObj	
+0x224	0x4	GameSoundControllable	/Battlefront2.pdb/GameSoundControllable
+pack()
+Structure GameSoundControllable {
+   0   ushort   2   mVoiceVirtualHandle   ""
+   2   uchar   1   mFlags   ""
+}
+Length: 4 Alignment: 2
+	mGameObjectAttachedSound	
+0x228	0x8	PblHandle<FLEffectObject>	/Battlefront2.pdb/PblHandle<FLEffectObject>
+pack()
+Structure PblHandle<FLEffectObject> {
+   0   FLEffectObject *   4   mObject   ""
+   4   uint   4   mSavedHandleId   ""
+}
+Length: 8 Alignment: 4
+	mDisabledEffectHandle	
+0x230	0x4	float	float	mCreatedTime	
+0x234	0x1	int:4	int:4(storage:1,bitOffset:0)	mTeam	
+0x234	0x1	int:4	int:4(storage:1,bitOffset:4)	mPerceivedTeam	
+0x235	0x1	int:4	int:4(storage:1,bitOffset:0)	mOwningTeam	
+0x235	0x1	int:4	int:4(storage:1,bitOffset:4)	mHealthTypeForLockon	
+0x236	0x1	??	undefined		
+0x237	0x1	??	undefined		
+0x238	0x1	bool:1	bool:1(storage:1,bitOffset:0)	mIsTargetable	
+0x239	0x1	??	undefined		
+0x23a	0x1	??	undefined		
+0x23b	0x1	??	undefined		
+0x23c	0x1	??	undefined		
+0x23d	0x1	??	undefined		
+0x23e	0x1	??	undefined		
+0x23f	0x1	??	undefined		
+0x240	0x4	EntitySoldier_vftable5 *	EntitySoldier_vftable5 *	Controllable_vftablePtr0	
+0x244	0x14	Thread_data	/ClassDataTypes/Thread/Thread_data
+pack()
+Structure Thread_data {
+   0   Node   20   mThreadListNode   ""
+}
+Length: 20 Alignment: 1
+	Thread_data	
+0x258	0x4	EntitySoldier_vftable6 *	EntitySoldier_vftable6 *	Controllable_vftablePtr1	
+0x25c	0x20	Trackable_data	/ClassDataTypes/Trackable/Trackable_data
+pack(disabled)
+Structure Trackable_data {
+   0   int   4   whichCornerToCastForCamera   ""
+   4   float[5]   20   minCameraCastDist   ""
+   24   Tracker *   4   mTracker   ""
+}
+Length: 32 Alignment: 1
+	Trackable_data	
+0x27c	0x150	Controllable_data	/ClassDataTypes/Controllable/Controllable_data
+pack(disabled)
+Structure Controllable_data {
+   0   Trigger   4   mControlFire0   "Trigger[0] — mControlFire"
+   4   Trigger   4   mControlFire1   "Trigger[1] — mControlFire"
+   8   Trigger   4   mControlReload   "Trigger"
+   12   Trigger   4   mControlJump   "Trigger"
+   16   Trigger   4   mControlCrouch   "Trigger"
+   20   Trigger   4   mControlSprint   "Trigger"
+   24   Trigger   4   mControlUse   "Trigger"
+   28   Trigger   4   mControlZoom   "Trigger"
+   32   Trigger   4   mControlView   "Trigger"
+   36   Trigger   4   mControlLockTarget   "Trigger"
+   40   Trigger   4   mControlSquadCommand   "Trigger"
+   44   Trigger   4   mControlThrustFwd   "Trigger"
+   48   Trigger   4   mControlThrustBack   "Trigger"
+   52   Trigger   4   mControlStrafeLeft   "Trigger"
+   56   Trigger   4   mControlStrafeRight   "Trigger"
+   60   Trigger[2]   8   mTriggerControlSwitch0   ""
+   68   float   4   mControlMove   ""
+   72   float   4   mControlStrafe   ""
+   76   float   4   mControlTurn   ""
+   80   float   4   mControlPitch   ""
+   84   float[2]   8   mControlSwitch   ""
+   92   int   4   mWpnChannel   ""
+   96   AIThread   24   mAIThread   ""
+   120   Node   16      ""
+   140   Controller *   4   mCtrl   "Controller*"
+   144   Character *   4   mCharacter   "Character*"
+   148   Controllable *   4   mPilot   "Controllable*"
+   152   int   4   mPlayerId   ""
+   156   int   4   mInitialPlayerId   ""
+   160   PblVector3   12   mEyePoint   ""
+   172   PblVector3   12   mEyeDir   ""
+   184   float   4   mTurnBuildup   ""
+   188   float   4   mPitchBuildup   ""
+   192   bool   1   mIndirectControlFlag   "bool"
+   193   bool   1   mUsingTurnAdjusted   "bool"
+   194   bool   1   mPlayAnim   "bool"
+   196   uint   4   mAnimNameId   "uint"
+   200   float   4   mWpnDistFactor   ""
+   204   PblHandle<GameObject>   8   mCollisionObj   ""
+   212   float   4   mEnemyLockedOnMeState   ""
+   216   float   4   mEnemyLockedOnMeTimestamp   ""
+   220   OrdnanceMissile *   4   mEnemyLockedOnMeMissile   ""
+   224   float   4   mEnemyLockedOnMeDistance   ""
+   228   float   4   mTurnAdjusted   ""
+   232   float   4   mPitchAdjusted   ""
+   236   float   4   mTurnAuto   ""
+   240   float   4   mPitchAuto   ""
+   244   float   4   mLockBreakTimer   ""
+   248   float   4   mInCaptureRegionTimestamp   ""
+   252   PblHandle<GameObject>   8   mTargetLockedObj   ""
+   260   int   4   mAllowedLockTypes   ""
+   264   PilotType   4   mPilotType   ""
+   268   TargetInfo   28   mTargetInfo   ""
+   296   PblHandle<GameObject_const_>[2]   16   mReticuleTarget   ""
+   312   PblHandle<GameObject_const_>[2]   16   mAIReticuleTarget   ""
+   328   int[2]   8   mReticuleAffiliation   ""
+}
+Length: 336 Alignment: 1
+	Controllable_data	
+0x3cc	0x4	EntitySoldier_vftable7 *	EntitySoldier_vftable7 *	PlayableEntitySounds_vftablePtr	
+0x3d0	0x4	PlayableEntitySounds_data	/ClassDataTypes/PlayableEntitySounds/PlayableEntitySounds_data
+pack()
+Structure PlayableEntitySounds_data {
+   0   PlayableEntitySoundsClass *   4   mPESClass   ""
+}
+Length: 4 Alignment: 4
+	PlayableEntitySounds_data	
+0x3d4	0x50	VehicleEngine	/ClassDataTypes/VehicleEngine/VehicleEngine
+pack(disabled)
+Structure VehicleEngine {
+   4   SoundParameterized   40   mEngine   ""
+   44   GameSoundControllable   4   mAttached   ""
+   48   GameSound   8   mAttachedProps   ""
+   56   GameSoundControllable   4   mBoostController   ""
+   60   GameSound   8   mBoostProps   ""
+   68   float   4   mPrevSpeed   ""
+   72   float   4   mTimer   ""
+   76   ushort   2   mParams   ""
+   78   bool:1(0)   1   mFlags   ""
+}
+Length: 80 Alignment: 1
+	VehicleEngine	
+0x424	0xba4	EntitySoldier_data	/ClassDataTypes/EntitySoldier/EntitySoldier_data
+pack(disabled)
+Structure EntitySoldier_data {
+   0   PblHandle<GameObject>   8   mStandingOnObj   ""
+   8   int   4   mStandingOnBody   ""
+   12   PblVector3   12   mStandingOnObjLastVelocity   ""
+   24   AcklayData *   4   mAcklayData   ""
+   28   EntitySoldierClass *   4   mClass   ""
+   32   TentacleSimulator *   4   mTentacles   ""
+   36   OrdnanceGrapplingHook *   4   mHook   ""
+   40   PblVector3   12   mGroundNormal   ""
+   52   PblVector3   12   mAILastCollisionNormal   ""
+   64   PblVector3   12   mAvgFlyGroundCollisionNormal   ""
+   76   uchar   1   mNumFlyGroundCollisions   ""
+   77   char:2(0)   1   mAILastCollisionDirection   ""
+   77   uint:3(2)   1   m_uiInputLockMask   ""
+   77   uint:1(5)   1   m_bSlide   ""
+   77   uint:1(6)   1   mAttachedToProp   ""
+   77   uint:1(7)   1   mFlyingInFirstPerson   ""
+   78   uint:1(0)   1   m_bPrimaryWeaponIsMelee   ""
+   78   uint:1(1)   1   mCanChangeClass   ""
+   78   char:2(2)   1   mLastRenderedLod   ""
+   78   uint:1(4)   1   mMarkedForDeath   ""
+   78   uint:1(5)   1   z_uiReserved0   ""
+   78   uint:1(6)   1   mSkip   ""
+   78   uint:1(7)   1   mDoProneRotation   ""
+   79   uchar   1   mTotalProneCollisions   ""
+   80   float   4   mInputLockTime   ""
+   92   PblMatrix   64   mLastVehicleMatrix   ""
+   156   PostCollision   24   mPostCollision   ""
+   184   PblVector3   12   mVelocity   ""
+   196   float   4   mPitchValue   ""
+   200   float   4   mPitchOffset   ""
+   204   float   4   mPitchVelocity   ""
+   208   float   4   mKickScale   ""
+   212   float   4   mKickBuild   ""
+   216   float   4   mTurnAngle   ""
+   220   Aimer   532   mAimer   ""
+   764   Weapon *[8]   32   mWeapon   ""
+   796   char[2]   2   mWeaponIndex   ""
+   798   char:4(0)   1   mActiveIndex   ""
+   798   char:2(4)   1   mActiveChannel   ""
+   798   uint:2(6)   1   mStanceIndex   ""
+   799   uchar   1   m_uiInvisibilityAlpha   ""
+   800   SoldierState   4   mState   ""
+   804   SoldierState   4   mOldState   ""
+   808   float   4   mStateTimer   ""
+   812   SoldierAnimator *   4   mSoldierAnimator   ""
+   816   PblVector3   12   m_vChokeDir   ""
+   828   float   4   mAlertTimer   ""
+   832   PblVector3   12   m_vLastPosition   ""
+   844   float   4   mLegAngle   ""
+   860   CollisionBodyPrimitive   100   mCollisionBodyHead   ""
+   988   CollisionBodyPrimitive   100   mCollisionBodyTorso   ""
+   1116   CollisionModel   332   mDynamicCollisionModel   ""
+   1448   GameModel *   4   mModelLowRes   ""
+   1452   SoldierAnimatorLowRes *   4   mSoldierAnimatorLowRes   ""
+   1456   uchar   1   mFlags   ""
+   1457   uint:3(0)   1   z_uiReserved1   ""
+   1457   uint:1(3)   1   mLegAngleForward   ""
+   1457   uint:2(4)   1   mMoveAnim   ""
+   1457   uint:2(6)   1   m_uiLastDamageDir   ""
+   1458   ushort   2   mSoundState   ""
+   1460   float   4   mSkipTime   ""
+   1464   float   4   mSkipIndirectTime   ""
+   1468   float   4   mPrevZoom   ""
+   1472   float   4   mSquadCommandClearTimer   ""
+   1476   ANIMATION   4   m_ePilotAnimation   ""
+   1480   MAP   4   m_eSoldierAnimationMap   ""
+   1484   uchar   1   m_uiWeaponAnimIndex   ""
+   1488   float   4   m_fWeaponAnimTimer   ""
+   1492   uint   4   mAnimationHash   ""
+   1496   float   4   mForceFrameNum1   ""
+   1500   float   4   mForceFrameNum2   ""
+   1504   float   4   mForceFrameBlend   ""
+   1508   float   4   mLeftFootElevation   ""
+   1512   float   4   mRightFootElevation   ""
+   1516   EnergyBar   12   mEnergyBar   ""
+   1528   int   4   mCameraSettingPrev   ""
+   1532   float   4   mCameraSettingTimer   ""
+   1536   float   4   mDrownTime   ""
+   1540   float   4   mFoliageCollisionTime   ""
+   1544   GameSoundControllable   4   mLowHealthSound   ""
+   1548   GameSoundControllable   4   mLongFoleySound   ""
+   1552   GameSoundControllable   4   mAmbientSound   ""
+   1556   GameSoundControllable   4   mChokeSound   ""
+   1560   GameSound   8   mCurFoleySound   ""
+   1568   float   4   mSpeedPrev   ""
+   1572   float   4   mDistanceMoved   ""
+   1576   PblHandle<FLEffectObject>   8   mJetEffectHandle   ""
+   1584   PblHandle<FLEffectObject>   8   mJetIdleEffectHandle   ""
+   1592   PblHandle<FLEffectObject>   8   mHealthGainEffectHandle   ""
+   1600   PblHandle<FLEffectObject>   8   mAmmoGainEffectHandle   ""
+   1608   PblHandle<FLEffectObject>   8   mEnergyGainEffectHandle   ""
+   1616   PblHandle<FLEffectObject>   8   mBuffHealthEffectHandle   ""
+   1624   PblHandle<FLEffectObject>   8   mBuffOffenseEffectHandle   ""
+   1632   PblHandle<FLEffectObject>   8   mBuffDefenseEffectHandle   ""
+   1640   PblHandle<FLEffectObject>   8   mDebuffEffectHandle   ""
+   1648   PblHandle<FLEffectObject>   8   mInvincibleEffectHandle   ""
+   1656   PblHandle<FLEffectObject>[5]   40   mSmolderEffectHandle   ""
+   1696   int[5]   20   mSmolderEffectBone   ""
+   1716   int[5]   20   mSmolderEffect   ""
+   1736   uint   4   mLastPilotInfoFrame   ""
+   1740   float   4   mJetFuel   ""
+   1744   PblVector3   12   m_vPosFootRight   ""
+   1756   PblVector3   12   m_vPosFootLeft   ""
+   1768   PblHandle<FLEffectObject>   8   mFootSlideEffectRightHandle   ""
+   1776   PblHandle<FLEffectObject>   8   mFootSlideEffectLeftHandle   ""
+   1784   PblHandle<FLEffectObject>   8   mChokeEffectHandle   ""
+   1792   PblMatrix   64   mSafeMatrix   ""
+   1856   CollisionState   4   mCollisionState   ""
+   1860   CollisionMeshCache[3]   948   mCollisionMeshCache   ""
+   2808   float   4   mBuffOffenseTimer   ""
+   2812   float   4   mBuffOffenseMult   ""
+   2816   float   4   mBuffDefenseTimer   ""
+   2820   float   4   mBuffDefenseMult   ""
+   2824   float   4   mBuffHealthTimer   ""
+   2828   float   4   mBuffHealthRate   ""
+   2832   float   4   mDebuffDamageTimer   ""
+   2836   float   4   mDebuffDamageRate   ""
+   2840   DamageOwner   28   mDebuffDamageOwner   ""
+   2868   float   4   mSmolderTimer   ""
+   2872   uchar   1   mSmolderVanishDeath   ""
+   2876   float   4   mSmolderDamageRate   ""
+   2880   DamageOwner   28   mSmolderDamageOwner   ""
+   2908   Controllable *   4   mPrevRemoteControllable   ""
+   2912   PblHandle<GameObject>   8   mPrevRemoteGameObj   ""
+   2920   GameMusic   12   mSoldierMusic   ""
+   2932   GameMusic   12   mAISoldierMusic   ""
+   2944   uchar   1   mNetJustChangedState   ""
+   2948   EntityCloth *[8]   32   mClothPiece   ""
+}
+Length: 2980 Alignment: 1
+	EntitySoldier_data	

@@ -110,6 +110,7 @@
 <ClInclude Include="src\fp_anim_bank.hpp" />
 <ClInclude Include="src\cloth_collision_fix.hpp" />
 <ClInclude Include="src\disguise_ext.hpp" />
+<ClInclude Include="src\grapple_fix.hpp" />
     <ClInclude Include="src\apply_patches.hpp" />
     <ClInclude Include="src\cfile.hpp" />
     <ClInclude Include="src\lua_hooks.hpp" />
@@ -126,6 +127,7 @@
 <ClCompile Include="src\fp_anim_bank.cpp" />
 <ClCompile Include="src\cloth_collision_fix.cpp" />
 <ClCompile Include="src\disguise_ext.cpp" />
+<ClCompile Include="src\grapple_fix.cpp" />
     <ClCompile Include="src\apply_patches.cpp" />
     <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
