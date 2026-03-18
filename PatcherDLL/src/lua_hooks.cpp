@@ -8,6 +8,7 @@
 #include "cloth_collision_fix.hpp"
 #include "disguise_ext.hpp"
 #include "grapple_fix.hpp"
+#include "debug_command_registry.hpp"
 
 #include <detours.h>
 
@@ -243,6 +244,9 @@ static void __cdecl hooked_init_state()
    fp_anim_bank_reset();
    disguise_ext_reset();
 
+   // Register debug console commands (engine is fully initialized now)
+   DebugCommandRegistry::lateInit();
+
    if (g_L) {
       register_lua_functions(g_L);
    }
@@ -312,6 +316,7 @@ void lua_hooks_install(uintptr_t exe_base)
    cloth_collision_fix_install(exe_base);
    disguise_ext_install(exe_base);
    grapple_fix_install(exe_base);
+   DebugCommandRegistry::install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -337,6 +342,7 @@ void lua_hooks_uninstall()
    cloth_collision_fix_uninstall();
    disguise_ext_uninstall();
    grapple_fix_uninstall();
+   DebugCommandRegistry::uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
