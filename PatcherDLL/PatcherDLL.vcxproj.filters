@@ -45,6 +45,9 @@
     <ClInclude Include="src\grapple_fix.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\commands\debug_weapon_ranges.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\dllmain.cpp">
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\grapple_fix.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\commands\debug_weapon_ranges.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

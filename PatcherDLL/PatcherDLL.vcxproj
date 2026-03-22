@@ -113,6 +113,7 @@
 <ClInclude Include="src\grapple_fix.hpp" />
 <ClInclude Include="src\debug_command_registry.hpp" />
 <ClInclude Include="src\commands\debug_hover_springs.hpp" />
+<ClInclude Include="src\commands\debug_weapon_ranges.hpp" />
     <ClInclude Include="src\apply_patches.hpp" />
     <ClInclude Include="src\cfile.hpp" />
     <ClInclude Include="src\lua_hooks.hpp" />
@@ -132,6 +133,7 @@
 <ClCompile Include="src\grapple_fix.cpp" />
 <ClCompile Include="src\debug_command_registry.cpp" />
 <ClCompile Include="src\commands\debug_hover_springs.cpp" />
+<ClCompile Include="src\commands\debug_weapon_ranges.cpp" />
     <ClCompile Include="src\apply_patches.cpp" />
     <ClCompile Include="src\cfile.cpp" />
     <ClCompile Include="src\dllmain.cpp" />

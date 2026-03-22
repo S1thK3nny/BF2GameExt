@@ -1236,6 +1236,44 @@ static int lua_SetLoadDisplayLevel(lua_State* L)
    return 0;
 }
 
+// SetFogRange(near, far) - sets the fog start/end distances.
+// Both the D3D render state and the engine's internal copy are updated.
+// Example: SetFogRange(0, 5) -- fog starts at 0m, fully opaque at 5m
+static int lua_SetFogRange(lua_State* L)
+{
+   float fogNear = (float)g_lua.tonumber(L, 1);
+   float fogFar  = (float)g_lua.tonumber(L, 2);
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+
+   // RedRenderer::SetFogRange(float, float) — cdecl, sets D3DRS_FOGSTART/FOGEND
+   typedef void(__cdecl* SetFogRange_t)(float, float);
+   auto RedRenderer_SetFogRange = (SetFogRange_t)(base + 0x0080b920 - 0x400000);
+   RedRenderer_SetFogRange(fogNear, fogFar);
+
+   // FLRenderer::SetFogRange(float, float) — cdecl, stores in globals for persistence
+   auto FLRenderer_SetFogRange = (SetFogRange_t)(base + 0x0081afe0 - 0x400000);
+   FLRenderer_SetFogRange(fogNear, fogFar);
+
+   return 0;
+}
+
+// SetFogEnable(enable) - enables or disables fog rendering.
+// Example: SetFogEnable(1) -- enable fog, SetFogEnable(0) -- disable
+static int lua_SetFogEnable(lua_State* L)
+{
+   bool enable = g_lua.tonumber(L, 1) != 0;
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+
+   // RedRenderer::SetFogEnable(bool) — cdecl, sets D3DRS_FOGENABLE
+   typedef void(__cdecl* SetFogEnable_t)(bool);
+   auto fn = (SetFogEnable_t)(base + 0x0080b900 - 0x400000);
+   fn(enable);
+
+   return 0;
+}
+
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -1263,6 +1301,8 @@ static const lua_func_entry custom_functions[] = {
    { "SetBarrelFireOrigin",      lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",            lua_DumpAimerInfo },
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
+   { "SetFogRange",              lua_SetFogRange },
+   { "SetFogEnable",             lua_SetFogEnable },
    { nullptr, nullptr }
 };
 

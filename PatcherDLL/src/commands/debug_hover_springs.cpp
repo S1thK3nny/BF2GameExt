@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "debug_hover_springs.hpp"
+#include "debug_weapon_ranges.hpp"
 #include "../debug_command_registry.hpp"
 
 #include <detours.h>
@@ -259,6 +260,9 @@ static void __fastcall hooked_FreeCamUpdate(void* ecx, void* edx, float dt)
          draw_all_cached();
       } __except (EXCEPTION_EXECUTE_HANDLER) {}
    }
+
+   // Other commands that need freecam drawing
+   debug_weapon_ranges_freecam_tick();
 }
 
 // ---------------------------------------------------------------------------
