@@ -32,3 +32,7 @@
 
 void prone_system_install(uintptr_t exe_base);
 void prone_system_uninstall();
+
+// Lua-toggled enable flag — hooks are always installed but pass through
+// to vanilla behavior when this is false.  Set via EnableProne() from Lua.
+extern bool g_proneEnabled;

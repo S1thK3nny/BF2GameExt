@@ -35,6 +35,8 @@
 //      the function's SSE stack-alignment prologue (AND ESP, 0xFFFFFFF0).
 // =============================================================================
 
+bool g_proneEnabled = false;
+
 static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
 
 static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
@@ -50,7 +52,7 @@ static constexpr uintptr_t kStandUpInner    = 0x005435D0; // EntitySoldier::Stan
 static constexpr uintptr_t kSetState        = 0x00406C62; // SetState thunk (__thiscall, ECX=struct_base, int state)
 static constexpr uintptr_t kGetFoleyFX      = 0x0040E1DD; // GetFoleyFX thunk (__thiscall, ECX=struct_base) -> FoleyFXSoldier*
 static constexpr uintptr_t kGameSoundPlay   = 0x00415451; // GameSound::Play thunk (__thiscall, ECX=GameSound*)
-static constexpr uintptr_t kWeaponPlayFoley = 0x0040948F; // Weapon::PlayFoleyFX thunk (__thiscall, ECX=weapon, int type)
+
 static constexpr uintptr_t kProneVtableSlot = 0x00A40718; // Controllable vtable Prone slot (offset 0xA0)
 static constexpr uintptr_t kAnimAccessor    = 0x005701F0; // Animation accessor — lacks null param check
 static constexpr uintptr_t kSetAction       = 0x00575D50; // SoldierAnimator::SetAction (__thiscall)
@@ -101,7 +103,7 @@ typedef bool (__fastcall* fn_Stance_t)(void* ecx, void* edx);
 typedef bool (__thiscall* fn_SetState_t)(void* adjusted, int state);
 typedef void* (__thiscall* fn_GetFoleyFX_t)(void* adjusted);
 typedef void (__thiscall* fn_GameSoundPlay_t)(void* gs, void* pos1, void* pos2, int a, int b);
-typedef void (__thiscall* fn_WeaponPlayFoley_t)(void* weapon, int type);
+
 
 // Animation accessor at 0x005701F0: reads (*param)->field_8, returns ushort.
 // Crashes when param (ECX) is null — happens when PRONE animation data is missing.
@@ -120,7 +122,7 @@ static fn_Stance_t           original_StandUp   = nullptr;
 static fn_SetState_t         fn_setState        = nullptr;
 static fn_GetFoleyFX_t       fn_getFoleyFX      = nullptr;
 static fn_GameSoundPlay_t    fn_gameSoundPlay   = nullptr;
-static fn_WeaponPlayFoley_t  fn_weaponPlayFoley = nullptr;
+
 static fn_AnimAccessor_t     original_animAccessor = nullptr;
 static fn_SetAction_t        original_SetAction    = nullptr;
 
@@ -192,6 +194,8 @@ static bool is_melee_weapon(void* entity)
 // ---------------------------------------------------------------------------
 static bool do_prone_transition(void* entity)
 {
+    if (!g_proneEnabled) return false;
+
     // Melee weapons don't have prone animations — block entry
     if (is_melee_weapon(entity)) return false;
 
@@ -311,6 +315,11 @@ static unsigned short __fastcall hooked_animAccessor(void* ecx, void* /*edx*/)
 // ---------------------------------------------------------------------------
 static void __fastcall hooked_SetAction(void* ecx, void* edx, int param_2, void* param_3, unsigned int param_4)
 {
+    if (!g_proneEnabled) {
+        original_SetAction(ecx, edx, param_2, param_3, param_4);
+        return;
+    }
+
     // Per-frame melee guard (uses entity ptr, not struct_base)
     if (param_2 == STATE_PRONE) {
         void* owner = *(void**)((char*)ecx + kSAOwner);
@@ -362,7 +371,7 @@ void prone_system_install(uintptr_t exe_base)
     fn_setState        = (fn_SetState_t)resolve(exe_base, kSetState);
     fn_getFoleyFX      = (fn_GetFoleyFX_t)resolve(exe_base, kGetFoleyFX);
     fn_gameSoundPlay   = (fn_GameSoundPlay_t)resolve(exe_base, kGameSoundPlay);
-    fn_weaponPlayFoley = (fn_WeaponPlayFoley_t)resolve(exe_base, kWeaponPlayFoley);
+
     original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, kAnimAccessor);
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, kSetAction);
 
