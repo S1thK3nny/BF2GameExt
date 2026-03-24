@@ -213,14 +213,10 @@ static bool do_prone_transition(void* entity)
             }
         }
 
-        // Weapon foley on stance change
-        if (fn_weaponPlayFoley) {
-            int8_t slot = *(int8_t*)((char*)entity + kWeaponSlot);
-            if (slot >= 0) {
-                void* weapon = *(void**)((char*)entity + kWeaponArray + slot * 4);
-                if (weapon) fn_weaponPlayFoley(weapon, 8);
-            }
-        }
+        // Weapon foley skipped for prone transitions — the weapon slot can
+        // hold a stale pointer after SetState(PRONE), and any dereference
+        // faults under the debug heap (x32dbg).  The body sound
+        // (FoleyFXSoldier::mProne above) is the audible stance cue anyway.
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 
