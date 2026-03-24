@@ -25,6 +25,14 @@
 //         calls Prone() instead of Crouch().
 //      b. Patches GetRandomPrimaryStance to extract 3 bits (& 7) instead
 //         of 2 (& 3), allowing the Prone stance bit to be read from hints.
+//
+//   5. Acklay terrain alignment fix: patches the gate condition in
+//      PostCollisionUpdate (0x0052C0F0) so the prone-specific terrain
+//      alignment block never runs.  That block raycasts front/back of the
+//      soldier to build a surface-aligned orientation matrix, but its yaw
+//      computation causes continuous rotation on slopes.  Using an inline
+//      patch (JNZ -> JMP) instead of a Detours hook avoids crashing on
+//      the function's SSE stack-alignment prologue (AND ESP, 0xFFFFFFF0).
 // =============================================================================
 
 static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
@@ -38,9 +46,9 @@ static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
 // Addresses (unrelocated, BF2_modtools.exe)
 // ---------------------------------------------------------------------------
 static constexpr uintptr_t kCrouchInner     = 0x00543B60; // EntitySoldier::Crouch (__thiscall, ECX=entity)
-static constexpr uintptr_t kStandUpInner    = 0x005435D0; // EntitySoldier::StandUp (__thiscall, ECX=entity)
+static constexpr uintptr_t kStandUpInner    = 0x005435D0; // EntitySoldier::Stand   (__thiscall, ECX=entity)
 static constexpr uintptr_t kSetState        = 0x00406C62; // SetState thunk (__thiscall, ECX=struct_base, int state)
-static constexpr uintptr_t kGetFoleyFX      = 0x0040E1DD; // GetFoleyFX thunk (__thiscall, ECX=struct_base) -> FoleyFX*
+static constexpr uintptr_t kGetFoleyFX      = 0x0040E1DD; // GetFoleyFX thunk (__thiscall, ECX=struct_base) -> FoleyFXSoldier*
 static constexpr uintptr_t kGameSoundPlay   = 0x00415451; // GameSound::Play thunk (__thiscall, ECX=GameSound*)
 static constexpr uintptr_t kWeaponPlayFoley = 0x0040948F; // Weapon::PlayFoleyFX thunk (__thiscall, ECX=weapon, int type)
 static constexpr uintptr_t kProneVtableSlot = 0x00A40718; // Controllable vtable Prone slot (offset 0xA0)
@@ -50,24 +58,28 @@ static constexpr uintptr_t kProneGuardJnz   = 0x00545BA6; // JNZ in EntitySoldie
 static constexpr uintptr_t kHeightJumpTable = 0x0053C000; // Jump table for AI height dispatch (5 entries)
 static constexpr uintptr_t kHeightSwitchEnd = 0x0053BD67; // End-of-switch target for the height dispatch
 static constexpr uintptr_t kPrimaryStanceAnd = 0x005C4506; // AND immediate byte in GetRandomPrimaryStance (0x03 -> 0x07)
-static constexpr uintptr_t kPostCollisionUpdate = 0x00530B20; // EntitySoldier::PostCollisionUpdate (camera/springs)
-static constexpr uintptr_t kTerrainAlign        = 0x0052C0F0; // EntitySoldier::PostCollisionUpdate (terrain alignment, Acklay)
-static constexpr uintptr_t kGameLog         = 0x007E3D50; // GameLog(const char* fmt, ...)
+static constexpr uintptr_t kAcklayGateJnz  = 0x0052C28E; // JNZ in PostCollisionUpdate Acklay block gate (6 bytes)
 
 // SoldierState enum values
 static constexpr int STATE_STAND  = 0;
 static constexpr int STATE_CROUCH = 1;
 static constexpr int STATE_PRONE  = 2;
 
-// Entity struct offsets (from entity ptr = struct_base + 0x240)
-static constexpr int kMState      = 0x514; // int mState (SoldierState)
-static constexpr int kWeaponSlot  = 0x512; // int8_t active weapon slot index
-static constexpr int kWeaponArray = 0x4F0; // Weapon*[8]
+// EntitySoldier offsets (from entity ptr = struct_base + 0x240)
+// Ghidra struct: EntitySoldier (4080 bytes).
+//   entity+0x4F0 = struct+0x730  Weapon*[8]  mWeapon
+//   entity+0x512 = struct+0x752  char[2]     mWeaponIndex  (low nibble = slot)
+//   entity+0x514 = struct+0x754  SoldierState mState
+//   entity+0x520 = struct+0x760  SoldierAnimator*
+//   entity+0x21C = struct+0x45C  EntitySoldierClass*
+static constexpr int kMState      = 0x514; // SoldierState mState
+static constexpr int kWeaponSlot  = 0x512; // mWeaponIndex byte (low nibble = slot)
+static constexpr int kWeaponArray = 0x4F0; // Weapon*[8] mWeapon
 
-// SoldierAnimator struct offsets
+// SoldierAnimator offsets (Ghidra struct: SoldierAnimator, 8240 bytes)
 // NOTE: mOwner (+0x50) stores struct_base, NOT entity (struct_base + 0x240).
 // Use owner_to_entity() to convert.
-static constexpr int kSAOwner       = 0x50;   // struct_base* mOwner
+static constexpr int kSAOwner       = 0x50;   // EntitySoldier* mOwner (== struct_base)
 static constexpr int kSoldierAction = 0x70;   // SoldierState mSoldierAction
 static constexpr int kMAction       = 0x1FEC; // ActionAnimation mAction
 static constexpr int kMPosture      = 0x1FE8; // Posture mPosture
@@ -99,17 +111,6 @@ typedef unsigned short (__fastcall* fn_AnimAccessor_t)(void* ecx, void* edx);
 // Sets mPosture, mAction, mSoldierAction based on the entity's current SoldierState.
 typedef void (__fastcall* fn_SetAction_t)(void* ecx, void* edx, int param_2, void* param_3, unsigned int param_4);
 
-// EntitySoldier::PostCollisionUpdate — builds the character's world orientation matrix.
-// ECX = entity (struct_base + 0x240), param_2 = output 4x4 matrix, param_3 = deltaTime.
-typedef void (__fastcall* fn_PostCollisionUpdate_t)(void* ecx, void* edx, float* param_2, float param_3);
-
-// Terrain alignment PostCollisionUpdate (0x0052C0F0, Acklay system).
-// ECX = struct_base, param = deltaTime.
-typedef void (__fastcall* fn_TerrainAlign_t)(void* ecx, void* edx, float deltaTime);
-
-// GameLog — printf-style logging to the game console.
-typedef void (__cdecl* fn_GameLog_t)(const char* fmt, ...);
-
 
 // ---------------------------------------------------------------------------
 // Resolved pointers (set during install)
@@ -122,11 +123,6 @@ static fn_GameSoundPlay_t    fn_gameSoundPlay   = nullptr;
 static fn_WeaponPlayFoley_t  fn_weaponPlayFoley = nullptr;
 static fn_AnimAccessor_t     original_animAccessor = nullptr;
 static fn_SetAction_t        original_SetAction    = nullptr;
-static fn_PostCollisionUpdate_t original_PostCollisionUpdate = nullptr;
-static fn_TerrainAlign_t        original_TerrainAlign = nullptr;
-static fn_GameLog_t             fn_gameLog = nullptr;
-
-
 
 // Vtable patch state
 static void** g_proneVtableSlotPtr  = nullptr;
@@ -136,6 +132,10 @@ static void*  g_proneVtableSlotOrig = nullptr;
 static uint8_t* g_proneDispatchStub     = nullptr;
 static uint32_t g_heightJumpTableOrig   = 0;
 static uint32_t* g_heightJumpTableEntry = nullptr;
+
+// Acklay terrain alignment gate patch (6 bytes at kAcklayGateJnz)
+static uint8_t* g_acklayGatePtr        = nullptr;
+static uint8_t  g_acklayGateOrig[6]    = {};
 
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
@@ -202,13 +202,11 @@ static bool do_prone_transition(void* entity)
     if (!ok) return false;
 
     __try {
-        // Soldier foley: FoleyFX has embedded GameSound structs at 0x10 stride.
-        // Crouch-down sound = foley+0xC8.  Prone sound = foley+0xD8 (next slot).
-        // If the offset is wrong, GameSound::Play on an empty/null slot is harmless.
+        // FoleyFXSoldier::mProne (GameSound at +0xD8, confirmed in Ghidra struct)
         if (fn_getFoleyFX && fn_gameSoundPlay) {
             void* foley = fn_getFoleyFX(struct_base);
             if (foley) {
-                void* sound = (char*)foley + 0xD8;
+                void* sound = (char*)foley + 0xD8; // FoleyFXSoldier::mProne
                 void* pos1  = struct_base + 0x120; // world pos
                 void* pos2  = (char*)entity + 0x2AC;
                 fn_gameSoundPlay(sound, pos1, pos2, 0, 1);
@@ -230,53 +228,33 @@ static bool do_prone_transition(void* entity)
 }
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// hooked_PostCollisionUpdate — passthrough (kept for original_PostCollisionUpdate ptr)
-// ---------------------------------------------------------------------------
-static void __fastcall hooked_PostCollisionUpdate(void* ecx, void* edx, float* mat, float dt)
-{
-    original_PostCollisionUpdate(ecx, edx, mat, dt);
-}
-
-// ---------------------------------------------------------------------------
-// hooked_TerrainAlign — skip TA for prone soldiers to prevent yaw rotation.
-//
-// BF2's TA function processes the collision accumulator and stores a surface
-// normal with lateral components on slopes.  Some downstream system reads
-// this and rotates the world matrix, causing continuous yaw drift.
-//
-// BF1 avoids this by running per-frame prone terrain alignment (raycasts +
-// SetWorldMatrix) that corrects any drift.  BF2's equivalent (Acklay block)
-// is gated behind posture bits that aren't set for soldiers.
-//
-// Fix: skip TA entirely for prone, and zero the collision accumulator so
-// it doesn't build up.  The position sync (handled by the collision system
-// independently) keeps the character on the terrain.
-// ---------------------------------------------------------------------------
-static void __fastcall hooked_TerrainAlign(void* ecx, void* edx, float deltaTime)
-{
-    char* base = (char*)ecx;
-    int state = *(int*)(base + 0x754);
-
-    if (state == STATE_PRONE)
-        return;
-
-    original_TerrainAlign(ecx, edx, deltaTime);
-}
-
-// ---------------------------------------------------------------------------
 // hooked_Crouch — cycles STAND -> CROUCH -> PRONE -> STAND.
 //
 // The game's toggle logic: if state != CROUCH -> Crouch(), else StandUp().
 // So Crouch() fires for STAND->CROUCH and PRONE->??? (since PRONE != CROUCH).
+//
+// Reentrance guard: EntitySoldier::Stand does a headroom check for PRONE.
+// If headroom is blocked (e.g. under low ceiling), Stand falls back to
+// vtable[0x9C] (Crouch) which re-enters this hook.  The guard detects the
+// re-entry and lets original_Crouch run — doing SetState(CROUCH), which is
+// the correct fallback (lower headroom requirement than STAND).
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 {
     int state = *(int*)((char*)ecx + kMState);
 
     if (state == STATE_PRONE) {
-        // PRONE -> STAND
-        return original_StandUp(ecx, nullptr);
+        // PRONE -> STAND (with headroom-blocked fallback to CROUCH)
+        static bool s_inStandFromProne = false;
+        if (s_inStandFromProne) {
+            // Re-entered via Stand->headroom fail->Crouch(vtable):
+            // headroom too low to stand, fall back to CROUCH
+            return original_Crouch(ecx, nullptr);
+        }
+        s_inStandFromProne = true;
+        bool result = original_StandUp(ecx, nullptr);
+        s_inStandFromProne = false;
+        return result;
     }
 
     // STAND -> CROUCH (vanilla behavior)
@@ -326,11 +304,11 @@ static unsigned short __fastcall hooked_animAccessor(void* ecx, void* /*edx*/)
 // Called once per frame from EntitySoldier::Render.  Two responsibilities:
 //
 //   1. Pandemic defined ActionAnimation values for prone transitions
-//      (CROUCH_TO_PRONE, PRONE_TO_STAND, PRONE_TO_CROUCH) and wired up the
-//      playback side in SetupPose, but SetAction never writes them — it uses
-//      MOVE or LAND_HARD instead.  This post-hook overrides mAction with the
-//      correct transition value so the animation system plays the real
-//      transition animations.
+//      (CROUCH_TO_PRONE=28, PRONE_TO_STAND=27, PRONE_TO_CROUCH=29) and
+//      wired up the playback side in SetupPose, but SetAction never writes
+//      them.  The vanilla code uses MOVE+IDLE for entering prone and
+//      LAND_HARD for leaving prone.  This post-hook overrides mAction with
+//      the correct transition value.
 //
 //   2. Per-frame melee guard: if the soldier is in PRONE and the active
 //      weapon is melee, force the state to STAND.
@@ -391,18 +369,14 @@ void prone_system_install(uintptr_t exe_base)
     fn_weaponPlayFoley = (fn_WeaponPlayFoley_t)resolve(exe_base, kWeaponPlayFoley);
     original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, kAnimAccessor);
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, kSetAction);
-    original_PostCollisionUpdate = (fn_PostCollisionUpdate_t)resolve(exe_base, kPostCollisionUpdate);
-    original_TerrainAlign = (fn_TerrainAlign_t)resolve(exe_base, kTerrainAlign);
-    fn_gameLog = (fn_GameLog_t)resolve(exe_base, kGameLog);
-    // Detour Crouch, StandUp, animation accessor, SetAction, PostCollisionUpdate
+
+    // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
     DetourAttach(&(PVOID&)original_Crouch, hooked_Crouch);
     DetourAttach(&(PVOID&)original_StandUp, hooked_StandUp);
     DetourAttach(&(PVOID&)original_animAccessor, hooked_animAccessor);
     DetourAttach(&(PVOID&)original_SetAction, hooked_SetAction);
-    DetourAttach(&(PVOID&)original_PostCollisionUpdate, hooked_PostCollisionUpdate);
-    DetourAttach(&(PVOID&)original_TerrainAlign, hooked_TerrainAlign);
     DetourTransactionCommit();
 
     // Patch out the PRONE guard in EntitySoldier::Update.
@@ -412,6 +386,42 @@ void prone_system_install(uintptr_t exe_base)
         uint8_t* pJnz = (uint8_t*)resolve(exe_base, kProneGuardJnz);
         if (*pJnz == 0x75)
             *pJnz = 0xEB;
+    }
+
+    // -----------------------------------------------------------------------
+    // Acklay terrain alignment fix: patch the gate in PostCollisionUpdate.
+    //
+    // PostCollisionUpdate (0x0052C0F0) has an SSE stack-alignment prologue
+    // (AND ESP, 0xFFFFFFF0) that makes Detours crash — inline patch instead.
+    //
+    // The Acklay block (dual raycasts + SetWorldMatrix) only runs when
+    // mStanceIndex == 2 (PRONE), gated at 0x0052C285:
+    //
+    //   AND DL, 0xC0          ; isolate mStanceIndex (top 2 bits of +0x752)
+    //   CMP DL, 0x80          ; == PRONE (2 << 6)?
+    //   JNZ 0x0052C653        ; skip if not prone
+    //
+    // Pandemic's prone terrain alignment causes continuous yaw rotation on
+    // slopes.  Patch the JNZ to an unconditional JMP so the Acklay block
+    // never runs.  Collision accumulator normalization and network sync
+    // (both earlier/later in the same function) are preserved.
+    // -----------------------------------------------------------------------
+    {
+        uint8_t* p = (uint8_t*)resolve(exe_base, kAcklayGateJnz);
+        if (p[0] == 0x0F && p[1] == 0x85) {
+            memcpy(g_acklayGateOrig, p, 6);
+            g_acklayGatePtr = p;
+
+            // JNZ rel32 (6 bytes: 0F 85 xx xx xx xx) -> JMP rel32 (5 bytes) + NOP
+            // JMP next_ip is 1 byte earlier than JNZ, so rel offset += 1
+            int32_t jnzRel;
+            memcpy(&jnzRel, p + 2, 4);
+            int32_t jmpRel = jnzRel + 1;
+
+            p[0] = 0xE9;
+            memcpy(p + 1, &jmpRel, 4);
+            p[5] = 0x90;
+        }
     }
 
     // Patch Controllable vtable: Prone slot (offset 0xA0)
@@ -499,6 +509,12 @@ void prone_system_uninstall()
         g_proneDispatchStub = nullptr;
     }
 
+    // Restore Acklay gate patch
+    if (g_acklayGatePtr) {
+        memcpy(g_acklayGatePtr, g_acklayGateOrig, 6);
+        g_acklayGatePtr = nullptr;
+    }
+
     // Detach hooks
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
@@ -506,7 +522,5 @@ void prone_system_uninstall()
     if (original_StandUp)      DetourDetach(&(PVOID&)original_StandUp, hooked_StandUp);
     if (original_animAccessor) DetourDetach(&(PVOID&)original_animAccessor, hooked_animAccessor);
     if (original_SetAction)    DetourDetach(&(PVOID&)original_SetAction, hooked_SetAction);
-    if (original_PostCollisionUpdate) DetourDetach(&(PVOID&)original_PostCollisionUpdate, hooked_PostCollisionUpdate);
-    if (original_TerrainAlign) DetourDetach(&(PVOID&)original_TerrainAlign, hooked_TerrainAlign);
     DetourTransactionCommit();
 }

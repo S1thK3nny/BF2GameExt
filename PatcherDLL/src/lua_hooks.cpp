@@ -310,8 +310,7 @@ void lua_hooks_install(uintptr_t exe_base)
 
    bf1_load_ext_install(exe_base);
    entity_carrier_fixes_install(exe_base);
-   // TODO: Prone system disabled — crashes, probably due to terrain alignment hook
-   // prone_system_install(exe_base);
+   prone_system_install(exe_base);
    fp_anim_bank_install(exe_base);
    cloth_collision_fix_install(exe_base);
    disguise_ext_install(exe_base);
@@ -337,7 +336,7 @@ void lua_hooks_uninstall()
 {
    bf1_load_ext_uninstall();
    entity_carrier_fixes_uninstall();
-   // prone_system_uninstall();
+   prone_system_uninstall();
    fp_anim_bank_uninstall();
    cloth_collision_fix_uninstall();
    disguise_ext_uninstall();

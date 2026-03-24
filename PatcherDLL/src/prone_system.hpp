@@ -21,6 +21,10 @@
 //   3. Melee weapon guard: blocks prone entry when holding a melee weapon,
 //      and forces out of prone if the soldier switches to one mid-prone.
 //
+//   4. Acklay terrain alignment fix: inline-patches the prone-specific
+//      terrain alignment gate in PostCollisionUpdate to prevent the yaw
+//      rotation bug on slopes (JNZ -> JMP at 0x0052C28E).
+//
 // IMPORTANT: Prone animations must be loaded into the soldier's animation
 // bank (simpprone) for the visual result to work.  This module only handles
 // state transitions, sounds, and input cycling.
