@@ -74,9 +74,10 @@ static constexpr int STATE_PRONE  = 2;
 //   entity+0x514 = struct+0x754  SoldierState mState
 //   entity+0x520 = struct+0x760  SoldierAnimator*
 //   entity+0x21C = struct+0x45C  EntitySoldierClass*
-static constexpr int kMState      = 0x514; // SoldierState mState
-static constexpr int kWeaponSlot  = 0x512; // mWeaponIndex byte (low nibble = slot)
-static constexpr int kWeaponArray = 0x4F0; // Weapon*[8] mWeapon
+static constexpr int kMState        = 0x514; // SoldierState mState
+static constexpr int kWeaponSlot    = 0x512; // mWeaponIndex byte (low nibble = slot)
+static constexpr int kWeaponArray   = 0x4F0; // Weapon*[8] mWeapon
+static constexpr int kCrouchTrigger = 0x48;  // Controllable::mControlCrouch (Controllable base == entity)
 
 // SoldierAnimator offsets (Ghidra struct: SoldierAnimator, 8240 bytes)
 // NOTE: mOwner (+0x50) stores struct_base, NOT entity (struct_base + 0x240).
@@ -228,10 +229,11 @@ static bool do_prone_transition(void* entity)
 }
 
 // ---------------------------------------------------------------------------
-// hooked_Crouch — cycles STAND -> CROUCH -> PRONE -> STAND.
+// hooked_Crouch — handles PRONE -> STAND exit.
 //
 // The game's toggle logic: if state != CROUCH -> Crouch(), else StandUp().
 // So Crouch() fires for STAND->CROUCH and PRONE->??? (since PRONE != CROUCH).
+// We only intervene for PRONE; STAND->CROUCH is vanilla.
 //
 // Reentrance guard: EntitySoldier::Stand does a headroom check for PRONE.
 // If headroom is blocked (e.g. under low ceiling), Stand falls back to
@@ -247,8 +249,6 @@ static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
         // PRONE -> STAND (with headroom-blocked fallback to CROUCH)
         static bool s_inStandFromProne = false;
         if (s_inStandFromProne) {
-            // Re-entered via Stand->headroom fail->Crouch(vtable):
-            // headroom too low to stand, fall back to CROUCH
             return original_Crouch(ecx, nullptr);
         }
         s_inStandFromProne = true;
@@ -262,24 +262,33 @@ static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 }
 
 // ---------------------------------------------------------------------------
-// hooked_StandUp — intercepts CROUCH -> STAND to redirect to PRONE.
+// hooked_StandUp — double-tap crouch enters PRONE.
 //
 // The game calls StandUp() when state == CROUCH and the crouch key is pressed.
-// We redirect that to CROUCH -> PRONE.  PlayerController also calls StandUp()
-// before Jump when state is STAND/SPRINT — we let those through unchanged.
-// If prone is blocked (melee weapon), fall through to vanilla STAND.
+// The Trigger state machine at entity+0x60 (mControlCrouch) tracks press
+// timing: bit 4 (0x10) is set on a quick press→release→press sequence.
+//
+// Flow: first tap STAND→CROUCH (vanilla, via hooked_Crouch passthrough).
+// Second tap within the double-press window → StandUp called → we check
+// bit 4 → enter PRONE.  Single tap from CROUCH → vanilla STAND.
+//
+// PlayerController also calls StandUp() before Jump when state is
+// STAND/SPRINT — no trigger check needed, those pass through unchanged.
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_StandUp(void* ecx, void* /*edx*/)
 {
     int state = *(int*)((char*)ecx + kMState);
 
     if (state == STATE_CROUCH) {
-        // CROUCH -> PRONE; if blocked (melee weapon), fall through to STAND
-        if (do_prone_transition(ecx))
-            return true;
+        // Check the crouch Trigger for double-tap (bit 4)
+        uint32_t trigger = *(uint32_t*)((char*)ecx + kCrouchTrigger);
+        if (trigger & 0x10) {
+            if (do_prone_transition(ecx))
+                return true;
+        }
     }
 
-    // STAND/SPRINT -> STAND (jump path or melee fallback)
+    // Single tap CROUCH -> STAND, or STAND/SPRINT -> STAND (jump path)
     return original_StandUp(ecx, nullptr);
 }
 
