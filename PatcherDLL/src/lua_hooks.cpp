@@ -38,10 +38,18 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 {
    if (!g_useBarrelFireOrigin) return false;
 
-   // Zoom detection: revert to vanilla aimer only during first-person zoom.
+   // Zoom detection: revert to vanilla aimer when zoomed with a scope weapon.
    // mIsAiming (owner+0x160): runtime zoomed state.
    // mIsFirstPersonView: Controllable+0x34 (mTracker ptr) → Tracker+0x14.
-   // Only skip barrel fire when both zoomed AND in first-person view.
+   //
+   // Two zoom modes exist:
+   //   1. "Closer in" — just FOV tightening, barrel fire origin is fine.
+   //   2. Scope texture — high magnification, barrel-to-camera parallax
+   //      makes shots miss the crosshair badly in third person.
+   //
+   // Scope weapons are identified by WeaponClass+0x2B0 bit 3 (mZoomFirstPerson).
+   // In FP zoom, always bail (original behavior).
+   // In TP zoom, bail only for scope weapons.
    void* owner = *(void**)((char*)weapon + 0x6C);
    if (owner) {
       bool isZoomed = *(bool*)((char*)owner + 0x160);
@@ -51,6 +59,10 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
             bool isFirstPerson = *(bool*)((char*)tracker + 0x14);
             if (isFirstPerson) return false;
          }
+         // TP zoom: bail for scope weapons (high magnification = large parallax)
+         void* weaponClass = *(void**)((char*)weapon + 0x64); // Weapon::mClass
+         if (weaponClass && (*(uint8_t*)((char*)weaponClass + 0x2B0) & 0x08))
+            return false;
       }
    }
 
