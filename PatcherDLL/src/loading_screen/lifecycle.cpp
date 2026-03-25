@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "shared.hpp"
-#include "lua/lua_hooks.hpp"
+#include "core/game_addrs.hpp"
 
 #include <detours.h>
 
@@ -253,7 +253,7 @@ static void* resolve_va(uintptr_t exe_base, uintptr_t va) {
 
 void bf1_load_ext_install(uintptr_t exe_base)
 {
-    using namespace lua_addrs::modtools;
+    using namespace game_addrs::modtools;
 
     g_pbl_ctor       = (fn_pbl_ctor_t)      resolve_va(exe_base, pbl_config_ctor);
     g_pbl_copy_ctor  = (fn_pbl_copy_ctor_t) resolve_va(exe_base, pbl_config_copy_ctor);

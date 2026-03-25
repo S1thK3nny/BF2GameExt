@@ -43,6 +43,9 @@
     <ClInclude Include="src\core\patch_table.hpp">
       <Filter>core</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\game_addrs.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\entity_carrier_fixes.hpp">
       <Filter>entity</Filter>
     </ClInclude>

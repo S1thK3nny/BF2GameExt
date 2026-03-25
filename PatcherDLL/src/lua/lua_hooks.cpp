@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
+#include "core/game_addrs.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/entity_carrier_fixes.hpp"
 #include "entity/prone_system.hpp"
@@ -246,7 +247,7 @@ static void __cdecl hooked_init_state()
    // RESET the path to vanilla every time a new mission/state starts
    strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), "Load\\load", _TRUNCATE);
 
-   g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), lua_addrs::modtools::g_lua_state_ptr);
+   g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), game_addrs::modtools::g_lua_state_ptr);
 
    // Reset callback storage for the new Lua state.
    memset(g_cevCallbacks, 0, sizeof(g_cevCallbacks));
@@ -275,7 +276,7 @@ void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
 
 void lua_hooks_install(uintptr_t exe_base)
 {
-   using namespace lua_addrs::modtools;
+   using namespace game_addrs::modtools;
 
    g_lua.pushcclosure = (fn_lua_pushcclosure)resolve(exe_base, lua_pushcclosure);
    g_lua.pushlstring  = (fn_lua_pushlstring) resolve(exe_base, lua_pushlstring);

@@ -108,6 +108,7 @@
     <ClInclude Include="src\core\framework.h" />
     <ClInclude Include="src\core\apply_patches.hpp" />
     <ClInclude Include="src\core\patch_table.hpp" />
+    <ClInclude Include="src\core\game_addrs.hpp" />
     <ClInclude Include="src\entity\entity_carrier_fixes.hpp" />
     <ClInclude Include="src\entity\prone_system.hpp" />
     <ClInclude Include="src\entity\fp_anim_bank.hpp" />
