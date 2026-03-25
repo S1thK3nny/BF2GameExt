@@ -321,7 +321,7 @@ void lua_hooks_install(uintptr_t exe_base)
    // Resolve Weapon::ZoomFirstPerson for the barrel fire origin hook
    fn_ZoomFirstPerson = (ZoomFirstPerson_t)resolve(exe_base, weapon_zoom_first_person);
 
-   bf1_load_ext_install(exe_base);
+   loading_screen_install(exe_base);
    entity_carrier_fixes_install(exe_base);
    prone_system_install(exe_base);
    fp_anim_bank_install(exe_base);
@@ -347,7 +347,7 @@ void lua_hooks_install(uintptr_t exe_base)
 
 void lua_hooks_uninstall()
 {
-   bf1_load_ext_uninstall();
+   loading_screen_uninstall();
    entity_carrier_fixes_uninstall();
    prone_system_uninstall();
    fp_anim_bank_uninstall();

@@ -55,7 +55,7 @@ inline GameLog_t get_gamelog() {
 }
 
 // =============================================================================
-// Resolved function pointers (set by bf1_load_ext_install)
+// Resolved function pointers (set by loading_screen_install)
 // =============================================================================
 
 inline fn_pbl_ctor_t       g_pbl_ctor        = nullptr;
@@ -164,6 +164,8 @@ inline uint32_t kHash_XBOX = 0;
 // Extension-only hashes (computed at runtime in install())
 inline uint32_t kHash_ZoomSelectorTileSize = 0;
 inline uint32_t kHash_LoadSoundLVL         = 0;
+inline uint32_t kHash_RemoveToolTips       = 0;
+inline uint32_t kHash_RemoveLoadingBar     = 0;
 
 // =============================================================================
 // PblConfig helpers
@@ -201,7 +203,7 @@ inline uint32_t hash_name(const char* name) {
 // Sound function declarations (defined in lifecycle.cpp)
 // =============================================================================
 
-void bf1_play_sound(uint32_t sound_hash);
+void loading_screen_play_sound(uint32_t sound_hash);
 void tracking_sound_start(uint32_t hash);
 void tracking_sound_stop();
 

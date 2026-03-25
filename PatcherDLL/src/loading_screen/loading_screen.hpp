@@ -9,7 +9,7 @@
 // BF1-only DATA chunks after BF2's original parse completes).
 // Consumed by the RenderScreen hook and any Lua accessors.
 
-struct Bf1LoadExt {
+struct LoadScreenConfig {
     // EnableBF1(1/0) — master switch; if false, BF1 sequence is skipped entirely.
     // Default false so omitting the param keeps vanilla BF2 behaviour.
     bool bf1Enabled;
@@ -64,11 +64,15 @@ struct Bf1LoadExt {
     PlanetEntry planets[kMaxPlanets];
     int         planetCount;
 
+    // UI suppression flags
+    bool removeToolTips;
+    bool removeLoadingBar;
+
     void reset() { memset(this, 0, sizeof(*this)); }
 };
 
-inline Bf1LoadExt g_bf1Ext = {};
+inline LoadScreenConfig g_loadScreenCfg = {};
 
 // Call from lua_hooks_install() / lua_hooks_uninstall()
-void bf1_load_ext_install(uintptr_t exe_base);
-void bf1_load_ext_uninstall();
+void loading_screen_install(uintptr_t exe_base);
+void loading_screen_uninstall();

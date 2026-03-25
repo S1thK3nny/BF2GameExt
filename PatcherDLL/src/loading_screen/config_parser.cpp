@@ -20,13 +20,13 @@ static void pbl_skip_next_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
 
 static void parse_bf1_entry(const uint32_t* data_buf);
 
-// Parse a PlanetLevel DATA entry and append to g_bf1Ext.planets[].
+// Parse a PlanetLevel DATA entry and append to g_loadScreenCfg.planets[].
 static void parse_planet_level(const uint32_t* data_buf)
 {
     const uint32_t argc = data_buf[1];
-    if (argc < 2 || g_bf1Ext.planetCount >= Bf1LoadExt::kMaxPlanets) return;
+    if (argc < 2 || g_loadScreenCfg.planetCount >= LoadScreenConfig::kMaxPlanets) return;
 
-    Bf1LoadExt::PlanetEntry& e = g_bf1Ext.planets[g_bf1Ext.planetCount++];
+    LoadScreenConfig::PlanetEntry& e = g_loadScreenCfg.planets[g_loadScreenCfg.planetCount++];
     e.levelIndex = pbl_get_int(data_buf, 0);
     const char* s = pbl_get_str(data_buf, 1);
     e.texHash = hash_name(s);
@@ -63,7 +63,7 @@ static void pbl_parse_bf1_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
     }
 }
 
-// Parse one DATA entry as a known BF1 param and update g_bf1Ext.
+// Parse one DATA entry as a known BF1 param and update g_loadScreenCfg.
 // Called from both the LoadDisplay and Map loops so BF1 params work in either scope.
 // PlanetLevel is NOT handled here — it has position args and is Map-only.
 static void parse_bf1_entry(const uint32_t* data_buf)
@@ -72,31 +72,31 @@ static void parse_bf1_entry(const uint32_t* data_buf)
     const uint32_t argc = data_buf[1];
 
     if (hash == kHash_EnableBF1 && argc >= 1) {
-        g_bf1Ext.bf1Enabled = (pbl_get_int(data_buf, 0) != 0);
+        g_loadScreenCfg.bf1Enabled = (pbl_get_int(data_buf, 0) != 0);
     }
     else if (hash == kHash_ScanLineTexture && argc >= 1) {
         const char* s = pbl_get_str(data_buf, 0);
-        g_bf1Ext.scanLineTexHash = hash_name(s);
-        if (!g_bf1Ext.scanLineTexHash) {
+        g_loadScreenCfg.scanLineTexHash = hash_name(s);
+        if (!g_loadScreenCfg.scanLineTexHash) {
             auto fn_log = get_gamelog();
             fn_log("[BF1Ext] ERROR: ScanLineTexture name '%s' could not be hashed\n", s ? s : "(null)");
         }
-        if (argc >= 2) g_bf1Ext.scanLineParams[0] = pbl_get_float(data_buf, 1);
-        if (argc >= 3) g_bf1Ext.scanLineParams[1] = pbl_get_float(data_buf, 2);
-        if (argc >= 4) g_bf1Ext.scanLineParams[2] = pbl_get_float(data_buf, 3);
+        if (argc >= 2) g_loadScreenCfg.scanLineParams[0] = pbl_get_float(data_buf, 1);
+        if (argc >= 3) g_loadScreenCfg.scanLineParams[1] = pbl_get_float(data_buf, 2);
+        if (argc >= 4) g_loadScreenCfg.scanLineParams[2] = pbl_get_float(data_buf, 3);
     }
     else if (hash == kHash_ZoomSelectorTextures && argc >= 1) {
-        const int n = (int)argc < Bf1LoadExt::kMaxZoomSel
-                    ? (int)argc : Bf1LoadExt::kMaxZoomSel;
+        const int n = (int)argc < LoadScreenConfig::kMaxZoomSel
+                    ? (int)argc : LoadScreenConfig::kMaxZoomSel;
         for (int i = 0; i < n; ++i) {
             const char* s = pbl_get_str(data_buf, i);
-            g_bf1Ext.zoomSelHashes[i] = hash_name(s);
-            if (!g_bf1Ext.zoomSelHashes[i]) {
+            g_loadScreenCfg.zoomSelHashes[i] = hash_name(s);
+            if (!g_loadScreenCfg.zoomSelHashes[i]) {
                 auto fn_log = get_gamelog();
                 fn_log("[BF1Ext] ERROR: ZoomSelectorTextures[%d] name '%s' could not be hashed\n", i, s ? s : "(null)");
             }
         }
-        g_bf1Ext.zoomSelCount = n;
+        g_loadScreenCfg.zoomSelCount = n;
     }
     else if (hash == kHash_AnimatedTextures && argc >= 2) {
         const char* base = pbl_get_str(data_buf, 0);
@@ -107,50 +107,56 @@ static void parse_bf1_entry(const uint32_t* data_buf)
         const float aw = (argc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
         const float ah = (argc >= 7) ? pbl_get_float(data_buf, 6) : 0.0f;
         if (base && cnt > 0) {
-            if (cnt > Bf1LoadExt::kMaxAnimFrames) cnt = Bf1LoadExt::kMaxAnimFrames;
+            if (cnt > LoadScreenConfig::kMaxAnimFrames) cnt = LoadScreenConfig::kMaxAnimFrames;
             for (int i = 0; i < cnt; ++i) {
                 char nm[256];
                 snprintf(nm, sizeof(nm), "%s%d", base, i);
-                g_bf1Ext.animHashes[i] = hash_name(nm);
+                g_loadScreenCfg.animHashes[i] = hash_name(nm);
             }
-            g_bf1Ext.animCount = cnt;
-            g_bf1Ext.animFPS   = fps;
-            g_bf1Ext.animX = ax; g_bf1Ext.animY = ay;
-            g_bf1Ext.animW = aw; g_bf1Ext.animH = ah;
+            g_loadScreenCfg.animCount = cnt;
+            g_loadScreenCfg.animFPS   = fps;
+            g_loadScreenCfg.animX = ax; g_loadScreenCfg.animY = ay;
+            g_loadScreenCfg.animW = aw; g_loadScreenCfg.animH = ah;
         } else if (!base) {
             auto fn_log = get_gamelog();
             fn_log("[BF1Ext] ERROR: AnimatedTextures base name is null\n");
         }
     }
     else if (hash == kHash_XTrackingSound && argc >= 1) {
-        g_bf1Ext.xTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
+        g_loadScreenCfg.xTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_YTrackingSound && argc >= 1) {
-        g_bf1Ext.yTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
+        g_loadScreenCfg.yTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_ZoomSound && argc >= 1) {
-        g_bf1Ext.zoomSoundHash = hash_name(pbl_get_str(data_buf, 0));
+        g_loadScreenCfg.zoomSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_TransitionSound && argc >= 1) {
-        g_bf1Ext.transitionSoundHash = hash_name(pbl_get_str(data_buf, 0));
+        g_loadScreenCfg.transitionSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_BarSound && argc >= 1) {
-        g_bf1Ext.barSoundHash = hash_name(pbl_get_str(data_buf, 0));
+        g_loadScreenCfg.barSoundHash = hash_name(pbl_get_str(data_buf, 0));
     }
     else if (hash == kHash_BarSoundInterval && argc >= 1) {
-        g_bf1Ext.barSoundInterval = pbl_get_int(data_buf, 0);
+        g_loadScreenCfg.barSoundInterval = pbl_get_int(data_buf, 0);
     }
     else if (kHash_LoadSoundLVL && hash == kHash_LoadSoundLVL && argc >= 1) {
         const char* s = pbl_get_str(data_buf, 0);
         if (s) {
-            strncpy_s(g_bf1Ext.loadSoundLvl, sizeof(g_bf1Ext.loadSoundLvl), s,
-                      sizeof(g_bf1Ext.loadSoundLvl) - 1);
+            strncpy_s(g_loadScreenCfg.loadSoundLvl, sizeof(g_loadScreenCfg.loadSoundLvl), s,
+                      sizeof(g_loadScreenCfg.loadSoundLvl) - 1);
         }
     }
     else if (kHash_ZoomSelectorTileSize && hash == kHash_ZoomSelectorTileSize && argc >= 1) {
-        g_bf1Ext.zoomTileHalfW = pbl_get_float(data_buf, 0);
-        g_bf1Ext.zoomTileHalfH = (argc >= 2) ? pbl_get_float(data_buf, 1)
-                                              : g_bf1Ext.zoomTileHalfW;
+        g_loadScreenCfg.zoomTileHalfW = pbl_get_float(data_buf, 0);
+        g_loadScreenCfg.zoomTileHalfH = (argc >= 2) ? pbl_get_float(data_buf, 1)
+                                              : g_loadScreenCfg.zoomTileHalfW;
+    }
+    else if (kHash_RemoveToolTips && hash == kHash_RemoveToolTips) {
+        g_loadScreenCfg.removeToolTips = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
+    }
+    else if (kHash_RemoveLoadingBar && hash == kHash_RemoveLoadingBar) {
+        g_loadScreenCfg.removeLoadingBar = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
     }
     // Known-but-unimplemented / BF2-native params — silently ignored.
     else if (hash == kHash_TeamModel
@@ -187,7 +193,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     // Restore so our second PblConfig ctor starts reading from the beginning.
     memcpy(fh, fh_saved, sizeof(fh_saved));
 
-    g_bf1Ext.reset();
+    g_loadScreenCfg.reset();
     g_animStartMs    = GetTickCount(); // restart animation from PlanetLevel 0 on each new match
     g_lastRenderMs   = 0;              // reset so first injected render fires immediately
     g_lastSndUpdateMs = GetTickCount(); // reset audio-tick timer so first deltaTime is ~0
@@ -281,7 +287,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
 
                 if (data_buf[0] == kHash_PlanetLevel) {
                     if (!mapClearedPlanets) {
-                        g_bf1Ext.planetCount = 0;
+                        g_loadScreenCfg.planetCount = 0;
                         mapClearedPlanets = true;
                     }
                     parse_planet_level(data_buf);
@@ -297,14 +303,14 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     }
 
     // Post-parse gate: clear BF1-only params when not enabled.
-    if (!g_bf1Ext.bf1Enabled) {
-        g_bf1Ext.xTrackSoundHash     = 0;
-        g_bf1Ext.yTrackSoundHash     = 0;
-        g_bf1Ext.zoomSoundHash       = 0;
-        g_bf1Ext.transitionSoundHash = 0;
-        g_bf1Ext.barSoundHash        = 0;
-        g_bf1Ext.barSoundInterval    = 0;
-        g_bf1Ext.zoomSelCount        = 0;
-        g_bf1Ext.planetCount         = 0;
+    if (!g_loadScreenCfg.bf1Enabled) {
+        g_loadScreenCfg.xTrackSoundHash     = 0;
+        g_loadScreenCfg.yTrackSoundHash     = 0;
+        g_loadScreenCfg.zoomSoundHash       = 0;
+        g_loadScreenCfg.transitionSoundHash = 0;
+        g_loadScreenCfg.barSoundHash        = 0;
+        g_loadScreenCfg.barSoundInterval    = 0;
+        g_loadScreenCfg.zoomSelCount        = 0;
+        g_loadScreenCfg.planetCount         = 0;
     }
 }

@@ -84,13 +84,13 @@ void tracking_sound_start(uint32_t hash)
 }
 
 // Play a one-shot sound by its hash.
-void bf1_play_sound(uint32_t sound_hash)
+void loading_screen_play_sound(uint32_t sound_hash)
 {
     if (!g_find_by_hash || !g_snd_play || !sound_hash) return;
     void* props = g_find_by_hash(sound_hash);
     if (!props) {
         auto fn_log = get_gamelog();
-        fn_log("[BF1Ext] ERROR: bf1_play_sound — sound hash %08x not found\n", sound_hash);
+        fn_log("[BF1Ext] ERROR: loading_screen_play_sound — sound hash %08x not found\n", sound_hash);
         return;
     }
     *(float*)((uint8_t*)props + 0x68) = 0.0f;
@@ -106,9 +106,9 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
     g_orig_load_data_file(ecx, edx, lvlPath);
 
     // Load the BF1-ext sound LVL once per loading screen.
-    if (g_bf1Ext.bf1Enabled && g_bf1Ext.loadSoundLvl[0] && !s_sndLvlLoaded) {
+    if (g_loadScreenCfg.bf1Enabled && g_loadScreenCfg.loadSoundLvl[0] && !s_sndLvlLoaded) {
         s_sndLvlLoaded = true;
-        g_orig_load_data_file(ecx, edx, g_bf1Ext.loadSoundLvl);
+        g_orig_load_data_file(ecx, edx, g_loadScreenCfg.loadSoundLvl);
         s_lastAnimPhase = -1;
         s_lastAnimCycle = -1;
     }
@@ -126,7 +126,7 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
 
     // BF1 mode: redirect s_loadHeap -> RunTimeHeap for the entire Update call.
     int saved_load_heap = -1;
-    if (g_bf1Ext.bf1Enabled && g_s_load_heap_ptr && g_runtime_heap_idx) {
+    if (g_loadScreenCfg.bf1Enabled && g_s_load_heap_ptr && g_runtime_heap_idx) {
         saved_load_heap      = *g_s_load_heap_ptr;
         *g_s_load_heap_ptr   = *g_runtime_heap_idx;
     }
@@ -138,7 +138,7 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
         *g_s_load_heap_ptr = saved_load_heap;
 
     // Tick the audio engine so queued voices are mixed to hardware.
-    if (g_bf1Ext.bf1Enabled && g_snd_update) {
+    if (g_loadScreenCfg.bf1Enabled && g_snd_update) {
         const DWORD now = GetTickCount();
         const DWORD ms  = now - g_lastSndUpdateMs;
         if (ms > 0 && ms < 1000u) {
@@ -147,7 +147,7 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
         g_lastSndUpdateMs = now;
     }
 
-    if (!g_bf1Ext.bf1Enabled || !g_orig_load_render) return;
+    if (!g_loadScreenCfg.bf1Enabled || !g_orig_load_render) return;
 
     if (g_qpc_stamp && *g_qpc_stamp != qpc_before) {
         g_lastRenderMs = GetTickCount();
@@ -173,10 +173,10 @@ void __fastcall hooked_load_end(void* ecx, void* edx)
 {
     if (g_endProcessed) return;
 
-    if (g_bf1Ext.bf1Enabled && g_animStartMs != 0 && g_orig_load_update) {
+    if (g_loadScreenCfg.bf1Enabled && g_animStartMs != 0 && g_orig_load_update) {
         int nTrans = 0;
-        for (int i = 0; i < g_bf1Ext.planetCount; ++i) {
-            const auto& e = g_bf1Ext.planets[i];
+        for (int i = 0; i < g_loadScreenCfg.planetCount; ++i) {
+            const auto& e = g_loadScreenCfg.planets[i];
             if (e.w > 0.0f && e.h > 0.0f) nTrans++;
             else break;
         }
@@ -251,7 +251,7 @@ static void* resolve_va(uintptr_t exe_base, uintptr_t va) {
     return (void*)((va - kUnrelocBase) + exe_base);
 }
 
-void bf1_load_ext_install(uintptr_t exe_base)
+void loading_screen_install(uintptr_t exe_base)
 {
     using namespace game_addrs::modtools;
 
@@ -279,9 +279,11 @@ void bf1_load_ext_install(uintptr_t exe_base)
     if (g_hash_string) {
         kHash_ZoomSelectorTileSize = g_hash_string("ZoomSelectorTileSize");
         kHash_LoadSoundLVL         = g_hash_string("LoadSoundLVL");
-        kHash_PC   = g_hash_string("PC");
-        kHash_PS2  = g_hash_string("PS2");
-        kHash_XBOX = g_hash_string("XBOX");
+        kHash_PC               = g_hash_string("PC");
+        kHash_PS2              = g_hash_string("PS2");
+        kHash_XBOX             = g_hash_string("XBOX");
+        kHash_RemoveToolTips   = g_hash_string("RemoveToolTips");
+        kHash_RemoveLoadingBar = g_hash_string("RemoveLoadingBar");
     }
 
     g_orig_load_data_file = (fn_load_data_file_t)resolve_va(exe_base, load_data_file_real);
@@ -303,7 +305,7 @@ void bf1_load_ext_install(uintptr_t exe_base)
     DetourTransactionCommit();
 }
 
-void bf1_load_ext_uninstall()
+void loading_screen_uninstall()
 {
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
