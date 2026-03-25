@@ -180,7 +180,7 @@ are shifted by +4 bytes in the modtools binary compared to the PDB.
 
 ## Current Code State
 
-### lua_hooks.cpp — hooked_cannon_OverrideAimer
+### lua/lua_hooks.cpp — hooked_cannon_OverrideAimer
 
 ```cpp
 static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
@@ -239,12 +239,12 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 }
 ```
 
-### lua_funcs.cpp — SetBarrelFireOrigin
+### lua/lua_funcs.cpp — SetBarrelFireOrigin
 
 Uses `isnumber`/`tonumber` to handle Lua 5.0 truthiness (`0` is truthy in Lua).
 Swaps WeaponCannon vtable entry between hook and vanilla via VirtualProtect.
 
-### lua_funcs.cpp — DumpAimerInfo
+### lua/lua_funcs.cpp — DumpAimerInfo
 
 Diagnostic function. Dumps aimer and weapon data to `Bfront2.log`, including
 a wide byte range at `owner+0x100..+0x300` for struct exploration.
@@ -331,9 +331,9 @@ Output includes: `Weapon::mZoom`, owner byte dump (0x100-0x300),
 
 | File | Purpose |
 |------|---------|
-| `PatcherDLL/src/lua_hooks.hpp` | Address constants, extern declarations |
-| `PatcherDLL/src/lua_hooks.cpp` | OverrideAimer vtable hook, install/uninstall |
-| `PatcherDLL/src/lua_funcs.cpp` | SetBarrelFireOrigin, DumpAimerInfo Lua functions |
+| `PatcherDLL/src/lua/lua_hooks.hpp` | Address constants, extern declarations |
+| `PatcherDLL/src/lua/lua_hooks.cpp` | OverrideAimer vtable hook, install/uninstall |
+| `PatcherDLL/src/lua/lua_funcs.cpp` | SetBarrelFireOrigin, DumpAimerInfo Lua functions |
 | `docs/barrel-fire-origin.md` | This file |
 
 ---

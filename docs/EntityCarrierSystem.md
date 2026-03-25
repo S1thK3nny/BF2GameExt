@@ -319,7 +319,7 @@ DWORD-stepping write loop. Then initialises the two sound description members
 
 ## Bugs Found and Fixed
 
-All fixes live in `PatcherDLL/src/entity_carrier_fixes.cpp`, installed via
+All fixes live in `PatcherDLL/src/entity/flyer_carrier_fixes.cpp`, installed via
 Detours in `lua_hooks_install()`.
 
 ### Bug 1 — `SetProperty`: `mCargoCount` buffer overflow (critical)
@@ -382,7 +382,7 @@ SoundCargoDropoff = <sound_file> ...    // sound descriptor args
 ```
 
 Up to **4 cargo nodes** are supported (`mCargoInfo[4]`).  Additional nodes beyond
-the first 4 are silently dropped (enforced by `entity_carrier_fixes`).
+the first 4 are silently dropped (enforced by `flyer_carrier_fixes`).
 
 ---
 

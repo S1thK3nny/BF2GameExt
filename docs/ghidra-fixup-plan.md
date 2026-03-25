@@ -573,7 +573,7 @@ Once the Ghidra struct is fixed and the weapon gating instruction is located:
    - `mPitchAdjusted == 0` (LANDED) AND
    - `mInLandingRegionFlag` (EntityFlyer + 0x5F4, bit 5) is set
 3. **Expose via Lua**: `SetFlyerLandingFire(enable)` — similar pattern to SetBarrelFireOrigin
-4. **Add to lua_hooks.cpp/lua_funcs.cpp** following existing patterns
+4. **Add to lua/lua_hooks.cpp and lua/lua_funcs.cpp** following existing patterns
 
 ---
 

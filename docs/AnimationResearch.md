@@ -191,7 +191,7 @@ disassembly around `0x0053be5c`. The full per-frame animation update path, confi
 `SetCharacterWeapon` only wrote `wpn+0x060/064/068` (WeaponClass*) and `wpn+0x088` (factory),
 so `UpdateIndirect` kept re-applying the old weapon's MAP every frame.
 
-**Fix implemented in `lua_funcs.cpp`:**
+**Fix implemented in `lua/lua_funcs.cpp`:**
 - Copy `newMap = *(sourceWpn + 0xC8)` from the source weapon (same type on another character)
 - Write `*(wpn + 0xC8) = newMap` — keeps all future frames correct
 - Get `entity = *(ctrl + 0x290)`, `soldierAnimator = *(entity + 0x520)`

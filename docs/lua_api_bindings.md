@@ -28,10 +28,10 @@ All functions are resolved at DLL injection time from known in-exe addresses (mo
 
 | File | Role |
 |------|------|
-| `lua_hooks.hpp` | Function pointer types, addresses, `lua_api` struct, Lua 5.0 constants |
-| `lua_hooks.cpp` | Address resolution, InitState hook, WeaponCannon vtable patch |
-| `lua_funcs.hpp` | Custom function registration interface |
-| `lua_funcs.cpp` | Custom Lua-callable C functions and registration table |
+| `lua/lua_hooks.hpp` | Function pointer types, addresses, `lua_api` struct, Lua 5.0 constants |
+| `lua/lua_hooks.cpp` | Address resolution, InitState hook, WeaponCannon vtable patch |
+| `lua/lua_funcs.hpp` | Custom function registration interface |
+| `lua/lua_funcs.cpp` | Custom Lua-callable C functions and registration table |
 
 ### Usage
 
