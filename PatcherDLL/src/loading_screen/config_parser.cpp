@@ -5,7 +5,7 @@
 // Config file parsing — PblConfig helpers and LoadConfig hook
 // =============================================================================
 
-// Enter a sub-scope and drain all its DATA entries (used for LoadingTextColorPallete).
+// Enter a sub-scope and drain all its DATA entries.
 static void pbl_skip_next_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
 {
     memset(tmp, 0, 0x300);
@@ -16,6 +16,51 @@ static void pbl_skip_next_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
     g_pbl_copy_ctor(child, nullptr, sr, 1);
     while (pbl_has_more(child))
         g_pbl_read_data(child, nullptr, scratch);
+}
+
+static void parse_bf1_entry(const uint32_t* data_buf);
+
+// Parse a PlanetLevel DATA entry and append to g_bf1Ext.planets[].
+static void parse_planet_level(const uint32_t* data_buf)
+{
+    const uint32_t argc = data_buf[1];
+    if (argc < 2 || g_bf1Ext.planetCount >= Bf1LoadExt::kMaxPlanets) return;
+
+    Bf1LoadExt::PlanetEntry& e = g_bf1Ext.planets[g_bf1Ext.planetCount++];
+    e.levelIndex = pbl_get_int(data_buf, 0);
+    const char* s = pbl_get_str(data_buf, 1);
+    e.texHash = hash_name(s);
+    if (!e.texHash) {
+        auto fn_log = get_gamelog();
+        fn_log("[BF1Ext] ERROR: PlanetLevel[%d] texture name '%s' could not be hashed\n",
+               e.levelIndex, s ? s : "(null)");
+    }
+    e.x = (argc >= 3) ? pbl_get_float(data_buf, 2) : 0.0f;
+    e.y = (argc >= 4) ? pbl_get_float(data_buf, 3) : 0.0f;
+    e.w = (argc >= 5) ? pbl_get_float(data_buf, 4) : 0.0f;
+    e.h = (argc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
+}
+
+// Enter a sub-scope and parse its entries as BF1 params + PlanetLevel.
+// Used for PC() inside LoadDisplay and for Map/World scopes.
+static void pbl_parse_bf1_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
+{
+    memset(tmp, 0, 0x300);
+    void* sr = g_pbl_read_scope(parent, nullptr, tmp);
+    if (!sr) return;
+    uint8_t child[0x300];
+    memset(child, 0, sizeof(child));
+    g_pbl_copy_ctor(child, nullptr, sr, 1);
+
+    while (pbl_has_more(child)) {
+        memset(scratch, 0, 0x80 * sizeof(uint32_t));
+        g_pbl_read_data(child, nullptr, scratch);
+
+        if (scratch[0] == kHash_PlanetLevel)
+            parse_planet_level(scratch);
+        else
+            parse_bf1_entry(scratch);
+    }
 }
 
 // Parse one DATA entry as a known BF1 param and update g_bf1Ext.
@@ -76,19 +121,6 @@ static void parse_bf1_entry(const uint32_t* data_buf)
             auto fn_log = get_gamelog();
             fn_log("[BF1Ext] ERROR: AnimatedTextures base name is null\n");
         }
-    }
-    else if (hash == kHash_PlanetBackdrops && argc >= 1) {
-        const int n = (int)argc < Bf1LoadExt::kMaxBackdrops
-                    ? (int)argc : Bf1LoadExt::kMaxBackdrops;
-        for (int i = 0; i < n; ++i) {
-            const char* s = pbl_get_str(data_buf, i);
-            g_bf1Ext.backdropHashes[i] = hash_name(s);
-            if (!g_bf1Ext.backdropHashes[i]) {
-                auto fn_log = get_gamelog();
-                fn_log("[BF1Ext] ERROR: PlanetBackdrops[%d] name '%s' could not be hashed\n", i, s ? s : "(null)");
-            }
-        }
-        g_bf1Ext.backdropCount = n;
     }
     else if (hash == kHash_XTrackingSound && argc >= 1) {
         g_bf1Ext.xTrackSoundHash = hash_name(pbl_get_str(data_buf, 0));
@@ -191,7 +223,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
         const uint32_t root_hash = root_data[0];
         const uint32_t root_argc = root_data[1];
 
-        // LoadDisplay scope — BF1 texture / sound params
+        // LoadDisplay scope — BF1 texture / sound params (defaults for all maps)
         if (root_hash == kHash_LoadDisplay) {
             memset(temp_buf, 0, sizeof(temp_buf));
             void* sr = g_pbl_read_scope(outer_buf, nullptr, temp_buf);
@@ -203,8 +235,23 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
 
                 const uint32_t hash = data_buf[0];
 
-                if (hash == kHash_LoadingTextColorPallete) {
+                // PC() sub-scope — enter and parse BF1 params + PlanetLevel
+                if (kHash_PC && hash == kHash_PC) {
+                    pbl_parse_bf1_scope(scope_buf, temp_buf, data_buf);
+                    continue;
+                }
+
+                // Other platform / known sub-scopes — drain to keep reader in sync
+                if (hash == kHash_LoadingTextColorPallete
+                    || (kHash_PS2  && hash == kHash_PS2)
+                    || (kHash_XBOX && hash == kHash_XBOX)) {
                     pbl_skip_next_scope(scope_buf, temp_buf, data_buf);
+                    continue;
+                }
+
+                // PlanetLevel at LoadDisplay top level (outside any platform scope)
+                if (hash == kHash_PlanetLevel) {
+                    parse_planet_level(data_buf);
                     continue;
                 }
 
@@ -212,7 +259,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
             }
         }
 
-        // Map / World scope — per-map master switch
+        // Map / World scope — per-map overrides (replaces LoadDisplay defaults where specified)
         else if (root_hash == kHash_Map || root_hash == kHash_World) {
             const char*    lvlName = (root_argc >= 1) ? pbl_get_str(root_data, 0) : nullptr;
             const uint32_t mHash   = lvlName ? hash_name(lvlName) : 0;
@@ -222,30 +269,22 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
             void* mr = g_pbl_read_scope(outer_buf, nullptr, temp_buf);
             g_pbl_copy_ctor(map_buf, nullptr, mr, 1);
 
+            // If this Map block has its own PlanetLevel entries, they replace
+            // LoadDisplay's defaults entirely (not append).
+            bool mapClearedPlanets = false;
+
             while (pbl_has_more(map_buf)) {
                 memset(data_buf, 0, sizeof(data_buf));
                 g_pbl_read_data(map_buf, nullptr, data_buf);
 
-                const uint32_t mhash = data_buf[0];
-                const uint32_t mArgc = data_buf[1];
-
                 if (!match) continue;
 
-                if (mhash == kHash_PlanetLevel && mArgc >= 2
-                    && g_bf1Ext.planetCount < Bf1LoadExt::kMaxPlanets) {
-                    Bf1LoadExt::PlanetEntry& e = g_bf1Ext.planets[g_bf1Ext.planetCount++];
-                    e.levelIndex = pbl_get_int(data_buf, 0);
-                    const char* s = pbl_get_str(data_buf, 1);
-                    e.texHash = hash_name(s);
-                    if (!e.texHash) {
-                        auto fn_log = get_gamelog();
-                        fn_log("[BF1Ext] ERROR: PlanetLevel[%d] texture name '%s' could not be hashed\n",
-                               e.levelIndex, s ? s : "(null)");
+                if (data_buf[0] == kHash_PlanetLevel) {
+                    if (!mapClearedPlanets) {
+                        g_bf1Ext.planetCount = 0;
+                        mapClearedPlanets = true;
                     }
-                    e.x = (mArgc >= 3) ? pbl_get_float(data_buf, 2) : 0.0f;
-                    e.y = (mArgc >= 4) ? pbl_get_float(data_buf, 3) : 0.0f;
-                    e.w = (mArgc >= 5) ? pbl_get_float(data_buf, 4) : 0.0f;
-                    e.h = (mArgc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
+                    parse_planet_level(data_buf);
                 }
                 else {
                     parse_bf1_entry(data_buf);

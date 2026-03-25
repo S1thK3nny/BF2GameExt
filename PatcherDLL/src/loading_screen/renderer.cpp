@@ -37,8 +37,6 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
             if (hash && !g_pbl_find(g_tex_table, 0x2000, hash))
                 fn_log("[BF1Ext] ERROR: %s texture hash %08x not found in texture table\n", label, hash);
         };
-        for (int i = 0; i < g_bf1Ext.backdropCount; ++i)
-            check("PlanetBackdrops", g_bf1Ext.backdropHashes[i]);
         check("ScanLineTexture", g_bf1Ext.scanLineTexHash);
         for (int i = 0; i < g_bf1Ext.zoomSelCount; ++i)
             check("ZoomSelectorTextures", g_bf1Ext.zoomSelHashes[i]);
@@ -54,17 +52,6 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
     int prevHeap = -1;
     if (g_set_current_heap && g_runtime_heap_idx)
         prevHeap = g_set_current_heap(*g_runtime_heap_idx);
-
-    // --- PlanetBackdrops: drawn first, full-screen, opaque ---
-    if (g_bf1Ext.backdropCount > 0) {
-        const int bi = (g_bf1Ext.backdropCount > 1)
-                     ? (int)((GetTickCount() / 5000u) % (DWORD)g_bf1Ext.backdropCount)
-                     : 0;
-        const uint32_t bHash = g_bf1Ext.backdropHashes[bi];
-        if (bHash && g_pbl_find && g_pbl_find(g_tex_table, 0x2000, bHash))
-            g_prt(bHash, 0, 0, kW, kH, g_color_ptr, 0,
-                  0,0,1,1,  1,1,0,0);
-    }
 
     // --- AnimatedTextures: cycle frames at animFPS ---
     if (g_bf1Ext.animCount > 0 && g_bf1Ext.animFPS > 0.0f) {

@@ -137,7 +137,6 @@ inline constexpr uint32_t kHash_LoadDisplay          = 0x8689C861;
 inline constexpr uint32_t kHash_ScanLineTexture      = 0xe3dd2365;
 inline constexpr uint32_t kHash_ZoomSelectorTextures = 0x6ae7b95f;
 inline constexpr uint32_t kHash_AnimatedTextures     = 0xe83d35ac;
-inline constexpr uint32_t kHash_PlanetBackdrops      = 0x3e13d8fe;
 inline constexpr uint32_t kHash_XTrackingSound       = 0x853656d1;
 inline constexpr uint32_t kHash_YTrackingSound       = 0x149267cc;
 inline constexpr uint32_t kHash_ZoomSound            = 0x8b73a019;
@@ -156,6 +155,11 @@ inline constexpr uint32_t kHash_ProgressBarTotalTime   = 0x31a6bc76;
 
 // Sub-scope hashes
 inline constexpr uint32_t kHash_LoadingTextColorPallete = 0xa6fb2870;
+
+// Platform sub-scope hashes (computed at runtime in install())
+inline uint32_t kHash_PC   = 0;
+inline uint32_t kHash_PS2  = 0;
+inline uint32_t kHash_XBOX = 0;
 
 // Extension-only hashes (computed at runtime in install())
 inline uint32_t kHash_ZoomSelectorTileSize = 0;

@@ -279,6 +279,9 @@ void bf1_load_ext_install(uintptr_t exe_base)
     if (g_hash_string) {
         kHash_ZoomSelectorTileSize = g_hash_string("ZoomSelectorTileSize");
         kHash_LoadSoundLVL         = g_hash_string("LoadSoundLVL");
+        kHash_PC   = g_hash_string("PC");
+        kHash_PS2  = g_hash_string("PS2");
+        kHash_XBOX = g_hash_string("XBOX");
     }
 
     g_orig_load_data_file = (fn_load_data_file_t)resolve_va(exe_base, load_data_file_real);

@@ -38,11 +38,6 @@ struct Bf1LoadExt {
     float    animFPS;
     float    animX, animY, animW, animH; // optional rect; w==0 means full-screen
 
-    // PlanetBackdrops: up to 2 texture names
-    static constexpr int kMaxBackdrops = 2;
-    uint32_t backdropHashes[kMaxBackdrops];
-    int      backdropCount;
-
     // Sound hashes (play on specific loading screen events)
     uint32_t xTrackSoundHash;
     uint32_t yTrackSoundHash;
