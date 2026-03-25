@@ -3,13 +3,13 @@
 #include "lua_funcs.hpp"
 #include "core/game_addrs.hpp"
 #include "loading_screen/loading_screen.hpp"
-#include "entity/entity_carrier_fixes.hpp"
-#include "entity/prone_system.hpp"
-#include "entity/fp_anim_bank.hpp"
+#include "entity/flyer_carrier_fixes.hpp"
+#include "entity/soldier_prone.hpp"
+#include "entity/soldier_fp_animation_override.hpp"
 #include "entity/cloth_collision_fix.hpp"
-#include "weapon/disguise_ext.hpp"
-#include "weapon/grapple_fix.hpp"
-#include "commands/debug_command_registry.hpp"
+#include "weapon/disguise_model_override.hpp"
+#include "weapon/grappling_hook.hpp"
+#include "debug_commands/command_registry.hpp"
 
 #include <detours.h>
 

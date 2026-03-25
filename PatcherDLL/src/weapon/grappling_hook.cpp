@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "grapple_fix.hpp"
+#include "grappling_hook.hpp"
 
 #include <detours.h>
 #include <cmath>

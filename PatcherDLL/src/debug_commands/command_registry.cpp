@@ -1,11 +1,11 @@
 #include "pch.h"
-#include "debug_command_registry.hpp"
+#include "command_registry.hpp"
 
 #include <detours.h>
 
 // -- Commands -----------------------------------------------------------------
-#include "debug_hover_springs.hpp"
-#include "debug_weapon_ranges.hpp"
+#include "hover_springs.hpp"
+#include "weapon_ranges.hpp"
 // Add new command headers here
 // -----------------------------------------------------------------------------
 

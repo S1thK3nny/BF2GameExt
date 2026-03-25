@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "fp_anim_bank.hpp"
+#include "soldier_fp_animation_override.hpp"
 
 #include <cstring>
 #include <detours.h>

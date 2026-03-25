@@ -13,7 +13,7 @@
     <Filter Include="lua">
       <UniqueIdentifier>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</UniqueIdentifier>
     </Filter>
-    <Filter Include="commands">
+    <Filter Include="debug_commands">
       <UniqueIdentifier>{C3D4E5F6-A7B8-9012-CDEF-123456789012}</UniqueIdentifier>
     </Filter>
     <Filter Include="util">
@@ -46,22 +46,22 @@
     <ClInclude Include="src\core\game_addrs.hpp">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\entity\entity_carrier_fixes.hpp">
+    <ClInclude Include="src\entity\flyer_carrier_fixes.hpp">
       <Filter>entity</Filter>
     </ClInclude>
-    <ClInclude Include="src\entity\prone_system.hpp">
+    <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
-    <ClInclude Include="src\entity\fp_anim_bank.hpp">
+    <ClInclude Include="src\entity\soldier_fp_animation_override.hpp">
       <Filter>entity</Filter>
     </ClInclude>
     <ClInclude Include="src\entity\cloth_collision_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
-    <ClInclude Include="src\weapon\disguise_ext.hpp">
+    <ClInclude Include="src\weapon\disguise_model_override.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
-    <ClInclude Include="src\weapon\grapple_fix.hpp">
+    <ClInclude Include="src\weapon\grappling_hook.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
     <ClInclude Include="src\lua\lua_hooks.hpp">
@@ -70,14 +70,14 @@
     <ClInclude Include="src\lua\lua_funcs.hpp">
       <Filter>lua</Filter>
     </ClInclude>
-    <ClInclude Include="src\commands\debug_command_registry.hpp">
-      <Filter>commands</Filter>
+    <ClInclude Include="src\debug_commands\command_registry.hpp">
+      <Filter>debug_commands</Filter>
     </ClInclude>
-    <ClInclude Include="src\commands\debug_hover_springs.hpp">
-      <Filter>commands</Filter>
+    <ClInclude Include="src\debug_commands\hover_springs.hpp">
+      <Filter>debug_commands</Filter>
     </ClInclude>
-    <ClInclude Include="src\commands\debug_weapon_ranges.hpp">
-      <Filter>commands</Filter>
+    <ClInclude Include="src\debug_commands\weapon_ranges.hpp">
+      <Filter>debug_commands</Filter>
     </ClInclude>
     <ClInclude Include="src\util\cfile.hpp">
       <Filter>util</Filter>
@@ -105,22 +105,22 @@
     <ClCompile Include="src\core\patch_table.cpp">
       <Filter>core</Filter>
     </ClCompile>
-    <ClCompile Include="src\entity\entity_carrier_fixes.cpp">
+    <ClCompile Include="src\entity\flyer_carrier_fixes.cpp">
       <Filter>entity</Filter>
     </ClCompile>
-    <ClCompile Include="src\entity\prone_system.cpp">
+    <ClCompile Include="src\entity\soldier_prone.cpp">
       <Filter>entity</Filter>
     </ClCompile>
-    <ClCompile Include="src\entity\fp_anim_bank.cpp">
+    <ClCompile Include="src\entity\soldier_fp_animation_override.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\cloth_collision_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
-    <ClCompile Include="src\weapon\disguise_ext.cpp">
+    <ClCompile Include="src\weapon\disguise_model_override.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
-    <ClCompile Include="src\weapon\grapple_fix.cpp">
+    <ClCompile Include="src\weapon\grappling_hook.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\lua\lua_hooks.cpp">
@@ -129,14 +129,14 @@
     <ClCompile Include="src\lua\lua_funcs.cpp">
       <Filter>lua</Filter>
     </ClCompile>
-    <ClCompile Include="src\commands\debug_command_registry.cpp">
-      <Filter>commands</Filter>
+    <ClCompile Include="src\debug_commands\command_registry.cpp">
+      <Filter>debug_commands</Filter>
     </ClCompile>
-    <ClCompile Include="src\commands\debug_hover_springs.cpp">
-      <Filter>commands</Filter>
+    <ClCompile Include="src\debug_commands\hover_springs.cpp">
+      <Filter>debug_commands</Filter>
     </ClCompile>
-    <ClCompile Include="src\commands\debug_weapon_ranges.cpp">
-      <Filter>commands</Filter>
+    <ClCompile Include="src\debug_commands\weapon_ranges.cpp">
+      <Filter>debug_commands</Filter>
     </ClCompile>
     <ClCompile Include="src\util\cfile.cpp">
       <Filter>util</Filter>
