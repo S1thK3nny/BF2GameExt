@@ -72,7 +72,7 @@ struct Bf1LoadExt {
     void reset() { memset(this, 0, sizeof(*this)); }
 };
 
-extern Bf1LoadExt g_bf1Ext;
+inline Bf1LoadExt g_bf1Ext = {};
 
 // Call from lua_hooks_install() / lua_hooks_uninstall()
 void bf1_load_ext_install(uintptr_t exe_base);

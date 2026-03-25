@@ -121,7 +121,8 @@
     <ClInclude Include="src\commands\debug_weapon_ranges.hpp" />
     <ClInclude Include="src\util\cfile.hpp" />
     <ClInclude Include="src\util\slim_vector.hpp" />
-    <ClInclude Include="src\util\bf1_load_ext.hpp" />
+    <ClInclude Include="src\loading_screen\loading_screen.hpp" />
+    <ClInclude Include="src\loading_screen\shared.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -143,7 +144,9 @@
     <ClCompile Include="src\commands\debug_hover_springs.cpp" />
     <ClCompile Include="src\commands\debug_weapon_ranges.cpp" />
     <ClCompile Include="src\util\cfile.cpp" />
-    <ClCompile Include="src\util\bf1_load_ext.cpp" />
+    <ClCompile Include="src\loading_screen\config_parser.cpp" />
+    <ClCompile Include="src\loading_screen\renderer.cpp" />
+    <ClCompile Include="src\loading_screen\lifecycle.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

@@ -19,6 +19,9 @@
     <Filter Include="util">
       <UniqueIdentifier>{D4E5F6A7-B8C9-0123-DEFA-234567890123}</UniqueIdentifier>
     </Filter>
+    <Filter Include="loading_screen">
+      <UniqueIdentifier>{E5F6A7B8-C9D0-1234-EFAB-345678901234}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Resource Files">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
@@ -79,8 +82,11 @@
     <ClInclude Include="src\util\slim_vector.hpp">
       <Filter>util</Filter>
     </ClInclude>
-    <ClInclude Include="src\util\bf1_load_ext.hpp">
-      <Filter>util</Filter>
+    <ClInclude Include="src\loading_screen\loading_screen.hpp">
+      <Filter>loading_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="src\loading_screen\shared.hpp">
+      <Filter>loading_screen</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -132,8 +138,14 @@
     <ClCompile Include="src\util\cfile.cpp">
       <Filter>util</Filter>
     </ClCompile>
-    <ClCompile Include="src\util\bf1_load_ext.cpp">
-      <Filter>util</Filter>
+    <ClCompile Include="src\loading_screen\config_parser.cpp">
+      <Filter>loading_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\loading_screen\renderer.cpp">
+      <Filter>loading_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\loading_screen\lifecycle.cpp">
+      <Filter>loading_screen</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

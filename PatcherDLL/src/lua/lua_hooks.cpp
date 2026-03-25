@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
-#include "util/bf1_load_ext.hpp"
+#include "loading_screen/loading_screen.hpp"
 #include "entity/entity_carrier_fixes.hpp"
 #include "entity/prone_system.hpp"
 #include "entity/fp_anim_bank.hpp"
