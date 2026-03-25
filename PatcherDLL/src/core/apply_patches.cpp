@@ -1,7 +1,7 @@
 #include "pch.h"
 
 #include "apply_patches.hpp"
-#include "cfile.hpp"
+#include "util/cfile.hpp"
 #include "patch_table.hpp"
 
 static const uintptr_t unrelocated_executable_base = 0x400000;

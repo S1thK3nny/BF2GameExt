@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "bf1_load_ext.hpp"
-#include "lua_hooks.hpp"
+#include "lua/lua_hooks.hpp"
 
 #include <detours.h>
 

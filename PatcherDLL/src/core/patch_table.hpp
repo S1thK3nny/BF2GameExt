@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "slim_vector.hpp"
+#include "util/slim_vector.hpp"
 
 #define PATCH_COUNT 3
 #define EXE_COUNT 3

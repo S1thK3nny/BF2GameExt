@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
-#include "entity_carrier_fixes.hpp"
-#include "prone_system.hpp"
+#include "entity/entity_carrier_fixes.hpp"
+#include "entity/prone_system.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 

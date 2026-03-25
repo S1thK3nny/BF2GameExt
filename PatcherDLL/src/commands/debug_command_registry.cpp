@@ -4,8 +4,8 @@
 #include <detours.h>
 
 // -- Commands -----------------------------------------------------------------
-#include "commands/debug_hover_springs.hpp"
-#include "commands/debug_weapon_ranges.hpp"
+#include "debug_hover_springs.hpp"
+#include "debug_weapon_ranges.hpp"
 // Add new command headers here
 // -----------------------------------------------------------------------------
 

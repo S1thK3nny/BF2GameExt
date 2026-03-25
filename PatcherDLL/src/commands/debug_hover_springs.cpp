@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "debug_hover_springs.hpp"
 #include "debug_weapon_ranges.hpp"
-#include "../debug_command_registry.hpp"
+#include "debug_command_registry.hpp"
 
 #include <detours.h>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "slim_vector.hpp"
+#include "util/slim_vector.hpp"
 
 #include <stdint.h>
 

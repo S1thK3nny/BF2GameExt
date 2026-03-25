@@ -2,8 +2,8 @@
 #include "pch.h"
 
 #include "apply_patches.hpp"
-#include "lua_hooks.hpp"
-#include "slim_vector.hpp"
+#include "lua/lua_hooks.hpp"
+#include "util/slim_vector.hpp"
 
 void install_patches();
 

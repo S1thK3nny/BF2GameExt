@@ -1,14 +1,14 @@
 #include "pch.h"
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
-#include "bf1_load_ext.hpp"
-#include "entity_carrier_fixes.hpp"
-#include "prone_system.hpp"
-#include "fp_anim_bank.hpp"
-#include "cloth_collision_fix.hpp"
-#include "disguise_ext.hpp"
-#include "grapple_fix.hpp"
-#include "debug_command_registry.hpp"
+#include "util/bf1_load_ext.hpp"
+#include "entity/entity_carrier_fixes.hpp"
+#include "entity/prone_system.hpp"
+#include "entity/fp_anim_bank.hpp"
+#include "entity/cloth_collision_fix.hpp"
+#include "weapon/disguise_ext.hpp"
+#include "weapon/grapple_fix.hpp"
+#include "commands/debug_command_registry.hpp"
 
 #include <detours.h>
 
