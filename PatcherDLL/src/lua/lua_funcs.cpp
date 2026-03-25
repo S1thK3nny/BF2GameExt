@@ -9,31 +9,13 @@
 // Game's printf-style debug logger — FUN_007e3d50, __cdecl, (const char* fmt, ...)
 typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
 
-// PrintToLog(msg) - writes a string to Bfront2.log
-static int lua_PrintToLog(lua_State* L)
-{
-   const char* msg = g_lua.tolstring(L, 1, nullptr);
-   if (msg) {
-      FILE* f = nullptr;
-      if (fopen_s(&f, "Bfront2.log", "a") == 0 && f) {
-         fputs(msg, f);
-         fputs("\n", f);
-         fclose(f);
-      }
-   }
-   return 0;
-}
-
-// GetSystemTickCount() - returns Windows tick count in milliseconds
-static int lua_GetSystemTickCount(lua_State* L)
-{
-   g_lua.pushnumber(L, (float)GetTickCount());
-   return 1;
-}
-
 // ReadTextFile(path) - reads any file on disk, returns its contents as a string.
 // Accepts absolute or relative paths. Returns nil if the file cannot be opened.
 // Example: local cfg = ReadTextFile("C:\\Users\\me\\Desktop\\config.txt")
+//
+// WARNING: This allows reading arbitrary files from the filesystem with no
+// sandboxing or path restrictions. Disabled until a safe path policy is in place.
+#if 0
 static int lua_ReadTextFile(lua_State* L)
 {
    const char* path = g_lua.tolstring(L, 1, nullptr);
@@ -57,6 +39,7 @@ static int lua_ReadTextFile(lua_State* L)
    free(buf);
    return 1;
 }
+#endif
 
 // HttpGet(url) - performs a synchronous HTTP GET, returns response body as a string.
 // Returns nil on failure. Supports http and https.
@@ -1296,9 +1279,6 @@ struct lua_func_entry {
 };
 
 static const lua_func_entry custom_functions[] = {
-   { "PrintToLog",            lua_PrintToLog },
-   { "GetSystemTickCount",    lua_GetSystemTickCount },
-   { "ReadTextFile",          lua_ReadTextFile },
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
