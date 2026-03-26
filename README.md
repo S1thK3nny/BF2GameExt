@@ -34,6 +34,7 @@ Automatic binary patches applied on load:
 - **Heap Memory Extension** - Increases RedMemory heap from 64MB to 256MB, drastically reducing out-of-memory crashes
 - **DLC Mission Limit** - Increases from 500 to 4096, allowing more mods installed simultaneously
 - **Sound Layer Limit** - Prevents crashes on maps with many flyers/entities using EngineSound
+- **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256, particle icons from 128 to 512. Fixes pathways and fleet/planet icons silently disappearing on modded GC maps with many planets
 
 ### Loading Screen System
 The vanilla game reads a loading screen configuration from a munged `load.cfg`, but it cannot be overridden without replacing the base game file. BF2GameExt hooks into the `LoadDisplay` config parser and renderer to add new parameters that work alongside vanilla ones. Modders can also redirect the entire loading screen to a custom `load.cfg` via `SetLoadDisplayLevel(path)` in Lua.

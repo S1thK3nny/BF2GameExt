@@ -10,6 +10,7 @@
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/grappling_hook.hpp"
 #include "debug_commands/command_registry.hpp"
+#include "shell/gc_visual_limits.hpp"
 
 #include <detours.h>
 
@@ -329,6 +330,7 @@ void lua_hooks_install(uintptr_t exe_base)
    disguise_ext_install(exe_base);
    grapple_fix_install(exe_base);
    DebugCommandRegistry::install(exe_base);
+   gc_visual_limits_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -355,6 +357,7 @@ void lua_hooks_uninstall()
    disguise_ext_uninstall();
    grapple_fix_uninstall();
    DebugCommandRegistry::uninstall();
+   gc_visual_limits_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

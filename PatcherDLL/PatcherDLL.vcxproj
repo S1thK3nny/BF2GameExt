@@ -124,6 +124,7 @@
     <ClInclude Include="src\util\slim_vector.hpp" />
     <ClInclude Include="src\loading_screen\loading_screen.hpp" />
     <ClInclude Include="src\loading_screen\shared.hpp" />
+    <ClInclude Include="src\shell\gc_visual_limits.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -148,6 +149,7 @@
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
     <ClCompile Include="src\loading_screen\renderer.cpp" />
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />
+    <ClCompile Include="src\shell\gc_visual_limits.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />
