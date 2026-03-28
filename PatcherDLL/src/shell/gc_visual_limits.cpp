@@ -60,7 +60,6 @@ static constexpr uint32_t kNewParticleAllocSize = kNewParticleCountOff + 4;
 static constexpr uintptr_t kBeamAdd     = 0x0045A920;
 static constexpr uintptr_t kParticleAdd = 0x0045A9E0;
 static constexpr uintptr_t kPblHashCtor = 0x007E1BD0;
-static constexpr uintptr_t kGameLog     = 0x007E3D50;
 
 // Beam count displacement patch points
 static constexpr uintptr_t kBeamCountDisps[] = {
@@ -228,7 +227,7 @@ static void patch_u32(uintptr_t exe_base, uintptr_t unrelocated_addr, uint32_t e
 
 void gc_visual_limits_install(uintptr_t exe_base)
 {
-    g_log = reinterpret_cast<GameLog_t>(resolve(exe_base, kGameLog));
+    g_log = reinterpret_cast<GameLog_t>(resolve(exe_base, game_addrs::modtools::game_log));
     g_pblHash = reinterpret_cast<fn_PblHash_t>(resolve(exe_base, kPblHashCtor));
 
     // Append to the install log alongside the other patch sets
