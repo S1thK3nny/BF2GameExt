@@ -35,8 +35,6 @@
 //      the function's SSE stack-alignment prologue (AND ESP, 0xFFFFFFF0).
 // =============================================================================
 
-// TODO: Prone was cut early, thus no lowrez animation in the SoldierAnimatorLowrez. Falls back to Crouch anims, which looks weird.  Needs to be fixed.
-
 bool g_proneEnabled = false;
 
 static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
