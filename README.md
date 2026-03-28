@@ -130,11 +130,12 @@ Open `BF2GameExt.sln` and build the `PatcherDLL` project. Output goes to `bin\De
 
 ```
 PatcherDLL/src/
-  core/               Entry point, patching, address registry
-  entity/             EntitySoldier, EntityFlyer fixes
+  core/               Entry point, patching, address registry, resolve helpers
+  entity/             EntitySoldier, EntityFlyer, cloth collision fixes
   weapon/             Grappling hook, disguise model override
   lua/                Lua API hooks and custom function registration
   loading_screen/     Loading screen system (config, renderer, lifecycle)
+  shell/              Galactic Conquest visual limit extensions
   debug_commands/     Console debug visualization commands
   util/               File helpers, slim_vector, class limit patch
 ```

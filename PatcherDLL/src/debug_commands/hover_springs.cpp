@@ -13,9 +13,6 @@
 // mode and freecam via separate hooks.
 // =============================================================================
 
-// Hook target addresses (modtools-specific)
-static constexpr uintptr_t kPostCollUpdate  = 0x00514490;
-static constexpr uintptr_t kFreeCamUpdate   = 0x004ae1b0; // FreeCamera::Update
 
 // EntityHover struct offsets (this = ECX in PostCollisionUpdate)
 static constexpr int kOff_CollModel   = 0x54;
@@ -229,8 +226,8 @@ static void __fastcall hooked_FreeCamUpdate(void* ecx, void* edx, float dt)
 
 void HoverSprings::install(uintptr_t exe_base)
 {
-   s_origPostCollUpdate = (PostCollUpdate_t)resolve(exe_base, kPostCollUpdate);
-   s_origFreeCamUpdate  = (FreeCamUpdate_t) resolve(exe_base, kFreeCamUpdate);
+   s_origPostCollUpdate = (PostCollUpdate_t)resolve(exe_base, game_addrs::modtools::hover_post_coll_update);
+   s_origFreeCamUpdate  = (FreeCamUpdate_t) resolve(exe_base, game_addrs::modtools::freecam_update);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

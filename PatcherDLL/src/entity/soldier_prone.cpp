@@ -38,24 +38,6 @@
 
 bool g_proneEnabled = false;
 
-// ---------------------------------------------------------------------------
-// Addresses (unrelocated, BF2_modtools.exe)
-// ---------------------------------------------------------------------------
-static constexpr uintptr_t kCrouchInner     = 0x00543B60; // EntitySoldier::Crouch (__thiscall, ECX=entity)
-static constexpr uintptr_t kStandUpInner    = 0x005435D0; // EntitySoldier::Stand   (__thiscall, ECX=entity)
-static constexpr uintptr_t kSetState        = 0x00406C62; // SetState thunk (__thiscall, ECX=struct_base, int state)
-static constexpr uintptr_t kGetFoleyFX      = 0x0040E1DD; // GetFoleyFX thunk (__thiscall, ECX=struct_base) -> FoleyFXSoldier*
-static constexpr uintptr_t kGameSoundPlay   = 0x00415451; // GameSound::Play thunk (__thiscall, ECX=GameSound*)
-
-static constexpr uintptr_t kProneVtableSlot = 0x00A40718; // Controllable vtable Prone slot (offset 0xA0)
-static constexpr uintptr_t kAnimAccessor    = 0x005701F0; // Animation accessor — lacks null param check
-static constexpr uintptr_t kSetAction       = 0x00575D50; // SoldierAnimator::SetAction (__thiscall)
-static constexpr uintptr_t kProneGuardJnz   = 0x00545BA6; // JNZ in EntitySoldier::Update that kicks out of PRONE
-static constexpr uintptr_t kHeightJumpTable = 0x0053C000; // Jump table for AI height dispatch (5 entries)
-static constexpr uintptr_t kHeightSwitchEnd = 0x0053BD67; // End-of-switch target for the height dispatch
-static constexpr uintptr_t kPrimaryStanceAnd = 0x005C4506; // AND immediate byte in GetRandomPrimaryStance (0x03 -> 0x07)
-static constexpr uintptr_t kAcklayGateJnz  = 0x0052C28E; // JNZ in PostCollisionUpdate Acklay block gate (6 bytes)
-
 // SoldierState enum values
 static constexpr int STATE_STAND  = 0;
 static constexpr int STATE_CROUCH = 1;
@@ -368,15 +350,17 @@ static bool __fastcall vtable_Prone(void* ecx, void* /*edx*/)
 // ---------------------------------------------------------------------------
 void prone_system_install(uintptr_t exe_base)
 {
-    // Resolve function pointers
-    original_Crouch    = (fn_Stance_t)resolve(exe_base, kCrouchInner);
-    original_StandUp   = (fn_Stance_t)resolve(exe_base, kStandUpInner);
-    fn_setState        = (fn_SetState_t)resolve(exe_base, kSetState);
-    fn_getFoleyFX      = (fn_GetFoleyFX_t)resolve(exe_base, kGetFoleyFX);
-    fn_gameSoundPlay   = (fn_GameSoundPlay_t)resolve(exe_base, kGameSoundPlay);
+    using namespace game_addrs::modtools;
 
-    original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, kAnimAccessor);
-    original_SetAction    = (fn_SetAction_t)resolve(exe_base, kSetAction);
+    // Resolve function pointers
+    original_Crouch    = (fn_Stance_t)resolve(exe_base, prone_crouch_inner);
+    original_StandUp   = (fn_Stance_t)resolve(exe_base, prone_standup_inner);
+    fn_setState        = (fn_SetState_t)resolve(exe_base, prone_set_state);
+    fn_getFoleyFX      = (fn_GetFoleyFX_t)resolve(exe_base, prone_get_foley_fx);
+    fn_gameSoundPlay   = (fn_GameSoundPlay_t)resolve(exe_base, prone_game_sound_play);
+
+    original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, prone_anim_accessor);
+    original_SetAction    = (fn_SetAction_t)resolve(exe_base, prone_set_action);
 
     // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
@@ -391,7 +375,7 @@ void prone_system_install(uintptr_t exe_base)
     // Pandemic left a hardcoded check: if (mState == PRONE) Crouch();
     // Change the JNZ (0x75) to JMP (0xEB) so the Crouch() call is always skipped.
     {
-        uint8_t* pJnz = (uint8_t*)resolve(exe_base, kProneGuardJnz);
+        uint8_t* pJnz = (uint8_t*)resolve(exe_base, prone_guard_jnz);
         if (*pJnz == 0x75)
             *pJnz = 0xEB;
     }
@@ -415,7 +399,7 @@ void prone_system_install(uintptr_t exe_base)
     // (both earlier/later in the same function) are preserved.
     // -----------------------------------------------------------------------
     {
-        uint8_t* p = (uint8_t*)resolve(exe_base, kAcklayGateJnz);
+        uint8_t* p = (uint8_t*)resolve(exe_base, prone_acklay_gate_jnz);
         if (p[0] == 0x0F && p[1] == 0x85) {
             memcpy(g_acklayGateOrig, p, 6);
             g_acklayGatePtr = p;
@@ -433,7 +417,7 @@ void prone_system_install(uintptr_t exe_base)
     }
 
     // Patch Controllable vtable: Prone slot (offset 0xA0)
-    g_proneVtableSlotPtr = (void**)resolve(exe_base, kProneVtableSlot);
+    g_proneVtableSlotPtr = (void**)resolve(exe_base, prone_vtable_slot);
     g_proneVtableSlotOrig = *g_proneVtableSlotPtr;
     *g_proneVtableSlotPtr = (void*)&vtable_Prone;
 
@@ -455,7 +439,7 @@ void prone_system_install(uintptr_t exe_base)
     // Our stub does the same but calls [EDX + 0xA0] (Prone).
     // -----------------------------------------------------------------------
     {
-        uintptr_t switchEnd = (uintptr_t)resolve(exe_base, kHeightSwitchEnd);
+        uintptr_t switchEnd = (uintptr_t)resolve(exe_base, prone_height_switch_end);
 
         g_proneDispatchStub = (uint8_t*)VirtualAlloc(
             nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -474,7 +458,7 @@ void prone_system_install(uintptr_t exe_base)
             memcpy(p, &rel, 4);
 
             // Patch jump table entry [2] to point to our stub
-            g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, kHeightJumpTable + 8);
+            g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, prone_height_jump_table + 8);
             g_heightJumpTableOrig = *g_heightJumpTableEntry;
             *g_heightJumpTableEntry = (uint32_t)(uintptr_t)g_proneDispatchStub;
         }
@@ -488,7 +472,7 @@ void prone_system_install(uintptr_t exe_base)
     // 0x03 to 0x07 so all three stance bits (Stand, Crouch, Prone) are kept.
     // -----------------------------------------------------------------------
     {
-        uint8_t* pAnd = (uint8_t*)resolve(exe_base, kPrimaryStanceAnd);
+        uint8_t* pAnd = (uint8_t*)resolve(exe_base, prone_primary_stance_and);
         if (*pAnd == 0x03)
             *pAnd = 0x07;
     }

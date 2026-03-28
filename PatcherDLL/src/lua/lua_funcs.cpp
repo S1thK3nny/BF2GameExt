@@ -272,10 +272,10 @@ static int lua_GetCharacterWeapon(lua_State* L)
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(0xB939F4);
+   const int maxChars  = *(int*)res(game_addrs::modtools::max_chars);
    if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
@@ -346,7 +346,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
-   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
 
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
@@ -358,10 +358,10 @@ static int lua_SetCharacterWeapon(lua_State* L)
                        ? g_lua.tointeger(L, 3) : 0;
    if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
 
-   const int maxChars = *(int*)res(0xB939F4);
+   const int maxChars = *(int*)res(game_addrs::modtools::max_chars);
    if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
    __try {
@@ -438,7 +438,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       uintptr_t sourceWpn = 0;
       int32_t newMapFromEntity = -1;  // entity-side MAP from source char (set by UpdateIndirect each frame)
       int scanMax = 0;
-      __try { scanMax = *(int*)res(0xB939F4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { scanMax = *(int*)res(game_addrs::modtools::max_chars); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       const int scanLimit = (scanMax < 512) ? 512 : scanMax;
       __try {
          for (int ci = 0; ci < scanLimit && !sourceWpn; ci++) {
@@ -561,7 +561,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
                __try {
                   uint32_t wSA = *(uint32_t*)((uintptr_t)foundWc + 0x020);
                   typedef int32_t (__cdecl* FN570760_t)(uintptr_t, uint32_t);
-                  correctMAP = ((FN570760_t)res(0x570760))(targetBank, wSA);
+                  correctMAP = ((FN570760_t)res(game_addrs::modtools::get_weapon_anim_map))(targetBank, wSA);
                } __except(EXCEPTION_EXECUTE_HANDLER) {}
             }
          }
@@ -588,7 +588,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
             if (soldierAnimator) {
                // Immediate visual switch.
                typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
-               __try { ((SetWeaponAnimMap_t)res(0x4170D5))((void*)soldierAnimator, correctMAP); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+               __try { ((SetWeaponAnimMap_t)res(game_addrs::modtools::set_weapon_anim_map))((void*)soldierAnimator, correctMAP); } __except(EXCEPTION_EXECUTE_HANDLER) {}
             }
          }
 
@@ -626,7 +626,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t addr) -> uintptr_t { return addr - kUnrelocatedBase + base; };
-   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
 
    if (!g_lua.isnumber(L, 1)) return 0;
 
@@ -643,7 +643,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 
    // Get team pointer from g_ppTeams[teamIndex].
    // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
-   const uintptr_t teamArrayBase = *(uintptr_t*)res(0xAD5D64);
+   const uintptr_t teamArrayBase = *(uintptr_t*)res(game_addrs::modtools::team_array_base);
    void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
    if (!teamPtr) {
       fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
@@ -672,12 +672,12 @@ static int lua_RemoveUnitClass(lua_State* L)
       // HashString: __thiscall, ECX = 8-byte stack buffer, stack arg = name string.
       // buf[0] is the resulting integer hash.
       typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
-      const auto fn_HashString = (HashString_t)res(0x7E1BD0);
+      const auto fn_HashString = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
       alignas(4) int hashBuf[2] = {};
       fn_HashString(hashBuf, unitClass);
       const int targetHash = hashBuf[0];
 
-      uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+      uintptr_t node = *(uintptr_t*)res(game_addrs::modtools::class_def_list);
       void* classDef = nullptr;
       for (int guard = 0; guard < 1024; ++guard) {
          void* element = *(void**)(node + 0x0c);
@@ -899,8 +899,8 @@ static int lua_ReapplyAnimations(lua_State* L)
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
    typedef void (__fastcall* AssignAnimations_t)(void*);
-   const auto fn_assign = (AssignAnimations_t)res(0x581AF0);
-   void* animInst = *(void**)res(0xB8D3C4);
+   const auto fn_assign = (AssignAnimations_t)res(game_addrs::modtools::assign_animations);
+   void* animInst = *(void**)res(game_addrs::modtools::anim_instance);
    if (!animInst) { g_lua.pushnil(L); return 1; }
 
    __try { fn_assign(animInst); } __except(EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
@@ -969,7 +969,7 @@ static int lua_OnCEVName(lua_State* L)
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(0x7E1BD0);
+   const auto fn_Hash = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
    alignas(4) int hashBuf[2] = {};
    fn_Hash(hashBuf, name);
    const uint32_t nameHash = (uint32_t)hashBuf[0];
@@ -1019,8 +1019,8 @@ static int lua_OnCEVClass(lua_State* L)
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(0x7E1BD0);
-   const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
+   const auto fn_Hash = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
+   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
 
    // Hash the class name and walk the EntityClass global registry to resolve it
    // to a live EntityClass pointer. Registration fails if the class isn't loaded.
@@ -1029,7 +1029,7 @@ static int lua_OnCEVClass(lua_State* L)
    const uint32_t targetHash = (uint32_t)hashBuf[0];
 
    void* classPtr = nullptr;
-   uintptr_t node = *(uintptr_t*)res(0xACD2C8);
+   uintptr_t node = *(uintptr_t*)res(game_addrs::modtools::class_def_list);
    for (int guard = 0; guard < 4096; ++guard) {
       void* ec = *(void**)(node + 0x0C);
       if (!ec) break;
@@ -1111,10 +1111,10 @@ static int lua_DumpAimerInfo(lua_State* L)
    if (!g_lua.isnumber(L, 1)) return 0;
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(0xB939F4);
+   const int maxChars  = *(int*)res(game_addrs::modtools::max_chars);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
+   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
    if (!arrayBase) return 0;
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))

@@ -30,14 +30,6 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Addresses (unrelocated, BF2_modtools)
-// ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kSatisfyConstraints_addr       = 0x004cae40;
-static constexpr uintptr_t kEnforceCollisions_addr         = 0x004cabd0;
-static constexpr uintptr_t kEnforceCylinderCollision_addr  = 0x004c8660;
-
-// ---------------------------------------------------------------------------
 // EntityCloth struct offsets (from this pointer)
 // ---------------------------------------------------------------------------
 
@@ -230,9 +222,10 @@ static void __fastcall hooked_SatisfyConstraints(void* ecx, void* edx,
 
 void cloth_collision_fix_install(uintptr_t exe_base)
 {
-   original_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, kSatisfyConstraints_addr);
-   fn_EnforceCollisions = (fn_EnforceCollisions_t)resolve(exe_base, kEnforceCollisions_addr);
-   original_EnforceCylinderCollision = (fn_EnforceCylinderCollision_t)resolve(exe_base, kEnforceCylinderCollision_addr);
+   using namespace game_addrs::modtools;
+   original_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, cloth_satisfy_constraints);
+   fn_EnforceCollisions = (fn_EnforceCollisions_t)resolve(exe_base, cloth_enforce_collisions);
+   original_EnforceCylinderCollision = (fn_EnforceCylinderCollision_t)resolve(exe_base, cloth_enforce_cylinder_coll);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

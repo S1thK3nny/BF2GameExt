@@ -42,17 +42,6 @@ using fn_DisguiseFunc_t = void(__fastcall*)(void* ecx, void* edx);
 using fn_HashTableFind_t = void(__cdecl*)(uint32_t* table, int tableParam,
                                           uint32_t hash);
 
-// ---------------------------------------------------------------------------
-// Addresses (BF2_modtools, imagebase 0x400000)
-// ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kSetProperty_addr     = 0x0062A320;
-static constexpr uintptr_t kDisguiseRaise_addr   = 0x0062AAD0;
-static constexpr uintptr_t kDisguiseDrop_addr    = 0x0062A180;
-static constexpr uintptr_t kHashString_addr      = 0x007E1B70;
-static constexpr uintptr_t kHashTableFind_addr   = 0x007E1A40;
-static constexpr uintptr_t kGameModelTable_addr  = 0x00B76CC4;
-
 // PDB: EntityGeometry+0x0130 = GameModel* mModel
 static constexpr int kEntityGeom_mModel_offset = 0x130;
 
@@ -260,15 +249,16 @@ static void __fastcall hooked_DisguiseDrop(void* ecx, void* edx)
 
 void disguise_ext_install(uintptr_t exe_base)
 {
-    fn_hash_string    = (fn_hash_string_t)resolve(exe_base, kHashString_addr);
-    fn_hashtable_find = (fn_HashTableFind_t)resolve(exe_base, kHashTableFind_addr);
-    g_gameModelTable  = (uint32_t*)resolve(exe_base, kGameModelTable_addr);
+    using namespace game_addrs::modtools;
+    fn_hash_string    = (fn_hash_string_t)resolve(exe_base, hash_string);
+    fn_hashtable_find = (fn_HashTableFind_t)resolve(exe_base, pbl_hash_table_find);
+    g_gameModelTable  = (uint32_t*)resolve(exe_base, game_model_table);
 
     g_disguiseModelPropHash = fn_hash_string("DisguiseModel");
 
-    original_SetProperty    = (fn_SetProperty_t)resolve(exe_base, kSetProperty_addr);
-    original_DisguiseRaise  = (fn_DisguiseFunc_t)resolve(exe_base, kDisguiseRaise_addr);
-    original_DisguiseDrop   = (fn_DisguiseFunc_t)resolve(exe_base, kDisguiseDrop_addr);
+    original_SetProperty    = (fn_SetProperty_t)resolve(exe_base, disguise_set_property);
+    original_DisguiseRaise  = (fn_DisguiseFunc_t)resolve(exe_base, disguise_raise);
+    original_DisguiseDrop   = (fn_DisguiseFunc_t)resolve(exe_base, disguise_drop);
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

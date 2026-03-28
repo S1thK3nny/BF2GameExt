@@ -245,36 +245,30 @@ void __fastcall hooked_load_end(void* ecx, void* edx)
 // Install / Uninstall
 // =============================================================================
 
-static const uintptr_t kUnrelocBase = 0x400000u;
-
-static void* resolve_va(uintptr_t exe_base, uintptr_t va) {
-    return (void*)((va - kUnrelocBase) + exe_base);
-}
-
 void loading_screen_install(uintptr_t exe_base)
 {
     using namespace game_addrs::modtools;
 
-    g_pbl_ctor       = (fn_pbl_ctor_t)      resolve_va(exe_base, pbl_config_ctor);
-    g_pbl_copy_ctor  = (fn_pbl_copy_ctor_t) resolve_va(exe_base, pbl_config_copy_ctor);
-    g_pbl_read_data  = (fn_pbl_read_data_t) resolve_va(exe_base, pbl_read_next_data);
-    g_pbl_read_scope = (fn_pbl_read_scope_t)resolve_va(exe_base, pbl_read_next_scope);
-    g_find_by_hash   = (fn_find_by_hash_t)  resolve_va(exe_base, snd_find_by_hash_id);
-    g_snd_play        = (fn_snd_play_t)        resolve_va(exe_base, snd_sound_play);
-    g_snd_play_ex     = (fn_snd_play_ex_t)     resolve_va(exe_base, snd_sound_play);
-    g_voice_to_handle = (fn_voice_to_handle_t) resolve_va(exe_base, voice_to_handle);
-    g_vvrelease       = (fn_vvrelease_t)       resolve_va(exe_base, voice_virtual_release);
-    g_snd_update      = (fn_snd_eng_update_t)  resolve_va(exe_base, snd_engine_update);
+    g_pbl_ctor       = (fn_pbl_ctor_t)      resolve(exe_base, pbl_config_ctor);
+    g_pbl_copy_ctor  = (fn_pbl_copy_ctor_t) resolve(exe_base, pbl_config_copy_ctor);
+    g_pbl_read_data  = (fn_pbl_read_data_t) resolve(exe_base, pbl_read_next_data);
+    g_pbl_read_scope = (fn_pbl_read_scope_t)resolve(exe_base, pbl_read_next_scope);
+    g_find_by_hash   = (fn_find_by_hash_t)  resolve(exe_base, snd_find_by_hash_id);
+    g_snd_play        = (fn_snd_play_t)        resolve(exe_base, snd_sound_play);
+    g_snd_play_ex     = (fn_snd_play_ex_t)     resolve(exe_base, snd_sound_play);
+    g_voice_to_handle = (fn_voice_to_handle_t) resolve(exe_base, voice_to_handle);
+    g_vvrelease       = (fn_vvrelease_t)       resolve(exe_base, voice_virtual_release);
+    g_snd_update      = (fn_snd_eng_update_t)  resolve(exe_base, snd_engine_update);
     g_lastSndUpdateMs = GetTickCount();
-    g_prt            = (fn_prt_t)           resolve_va(exe_base, platform_render_texture);
-    g_color_ptr      = resolve_va(exe_base, color_ptr_global);
-    g_set_current_heap = (fn_set_current_heap_t) resolve_va(exe_base, red_set_current_heap);
-    g_runtime_heap_idx = (int*)                  resolve_va(exe_base, runtime_heap_global);
-    g_s_load_heap_ptr  = (int*)                  resolve_va(exe_base, s_loadheap_global);
+    g_prt            = (fn_prt_t)           resolve(exe_base, platform_render_texture);
+    g_color_ptr      = resolve(exe_base, color_ptr_global);
+    g_set_current_heap = (fn_set_current_heap_t) resolve(exe_base, red_set_current_heap);
+    g_runtime_heap_idx = (int*)                  resolve(exe_base, runtime_heap_global);
+    g_s_load_heap_ptr  = (int*)                  resolve(exe_base, s_loadheap_global);
 
-    g_hash_string = (fn_hash_string_t)resolve_va(exe_base, hash_string);
-    g_pbl_find    = (fn_pbl_find_t)   resolve_va(exe_base, pbl_hash_table_find);
-    g_tex_table   =                   resolve_va(exe_base, tex_hash_table);
+    g_hash_string = (fn_hash_string_t)resolve(exe_base, hash_string);
+    g_pbl_find    = (fn_pbl_find_t)   resolve(exe_base, pbl_hash_table_find);
+    g_tex_table   =                   resolve(exe_base, tex_hash_table);
 
     if (g_hash_string) {
         kHash_ZoomSelectorTileSize = g_hash_string("ZoomSelectorTileSize");
@@ -286,14 +280,14 @@ void loading_screen_install(uintptr_t exe_base)
         kHash_RemoveLoadingBar = g_hash_string("RemoveLoadingBar");
     }
 
-    g_orig_load_data_file = (fn_load_data_file_t)resolve_va(exe_base, load_data_file_real);
-    g_orig_load_config    = (fn_load_config_t)   resolve_va(exe_base, load_config_real);
-    g_orig_render_screen  = (fn_render_screen_t) resolve_va(exe_base, render_screen_real);
-    g_orig_load_end       = (fn_load_end_t)      resolve_va(exe_base, load_end_real);
-    g_orig_set_all_on     = (fn_set_all_on_t)    resolve_va(exe_base, progress_set_all_on);
-    g_orig_load_update    = (fn_load_update_t)   resolve_va(exe_base, load_update_real);
-    g_orig_load_render    = (fn_load_render_t)   resolve_va(exe_base, load_render_real);
-    g_qpc_stamp           = (DWORD*)             resolve_va(exe_base, load_update_qpc_stamp);
+    g_orig_load_data_file = (fn_load_data_file_t)resolve(exe_base, load_data_file_real);
+    g_orig_load_config    = (fn_load_config_t)   resolve(exe_base, load_config_real);
+    g_orig_render_screen  = (fn_render_screen_t) resolve(exe_base, render_screen_real);
+    g_orig_load_end       = (fn_load_end_t)      resolve(exe_base, load_end_real);
+    g_orig_set_all_on     = (fn_set_all_on_t)    resolve(exe_base, progress_set_all_on);
+    g_orig_load_update    = (fn_load_update_t)   resolve(exe_base, load_update_real);
+    g_orig_load_render    = (fn_load_render_t)   resolve(exe_base, load_render_real);
+    g_qpc_stamp           = (DWORD*)             resolve(exe_base, load_update_qpc_stamp);
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

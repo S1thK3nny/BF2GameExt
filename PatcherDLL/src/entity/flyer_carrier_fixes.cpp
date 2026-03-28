@@ -210,12 +210,10 @@ static constexpr uintptr_t kClassTakeoffSpeed_off  = 0x8E8;  // float: TakeoffSp
 static constexpr uintptr_t kClassLandingTime_off   = 0x8EC;  // float: LandingTime (descent duration)
 
 // EntityFlyer::InitiateLanding — thiscall(struct_base), sets state=3
-static constexpr uintptr_t kInitiateLanding_addr   = 0x004f1380;
 using fn_InitiateLanding_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_InitiateLanding_t original_InitiateLanding = nullptr;
 
 // EntityCarrier::Kill — thiscall(struct_base), destroys carrier
-static constexpr uintptr_t kCarrierKill_addr       = 0x004D8400;
 using fn_CarrierKill_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_CarrierKill_t g_CarrierKill = nullptr;
 
@@ -285,12 +283,10 @@ static constexpr uintptr_t kVS_Team         = 0xF8;    // int: current vehicle t
 static constexpr uintptr_t kVS_PadTransform = 0x30;    // PblMatrix (16 floats)
 
 // MemoryPool::Allocate — thiscall(MemoryPool*, uint size) → void*
-static constexpr uintptr_t kMemPoolAlloc_addr       = 0x00802300;
 typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
 static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
 
 // VehicleTracker::sMemoryPool global
-static constexpr uintptr_t kVehicleTrackerPool_addr = 0x00B9A758;
 static void* g_VehicleTrackerPool = nullptr;
 
 // Per-carrier animation progress override (used by render hook)
@@ -310,7 +306,6 @@ static CarrierAnimOverride g_animOverride[kMaxTrackedCarriers] = {};
 //   Ghidra VA: 0x004D7210
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kSetProperty_addr = 0x004D7210;
 
 using fn_SetProperty_t = void(__fastcall*)(void* ecx, void* edx,
                                            unsigned int hash, const char* value);
@@ -332,7 +327,6 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
 //   Ghidra VA: 0x004D81F0
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kAttachCargo_addr = 0x004D81F0;
 
 using fn_AttachCargo_t = void(__fastcall*)(void* ecx, void* edx,
                                            int slotIdx, void* cargo);
@@ -374,7 +368,6 @@ static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
 //   Ghidra VA: 0x004D8350
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kDetachCargo_addr = 0x004D8350;
 
 using fn_DetachCargo_t = void(__fastcall*)(void* ecx, void* edx, int slotIdx);
 static fn_DetachCargo_t original_DetachCargo = nullptr;
@@ -458,7 +451,6 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 // animation frame: frame = (nFrames - 1) * progress.
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kFlyerRender_addr = 0x004f6970;
 static constexpr uintptr_t kRender_thisToBase = 0x94;
 
 using fn_FlyerRender_t = void(__fastcall*)(void* ecx, void* edx,
@@ -568,9 +560,6 @@ static void* g_carrierVtable = nullptr;
 //   7526           JNZ short 0x565c83
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kTurretFireCheck_addr = 0x00565c4c; // patch site
-static constexpr uintptr_t kTurretFireAllow_addr = 0x00565c5d; // continue → fire
-static constexpr uintptr_t kTurretFireBlock_addr = 0x00565c83; // skip → no fire
 static constexpr size_t    kTurretFirePatch_len  = 17;
 
 static unsigned char* s_turretFirePatchAddr = nullptr;
@@ -610,9 +599,9 @@ static __declspec(naked) void turretFire_cave()
 static void turretFireInit()
 {
    uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   s_turretFirePatchAddr = (unsigned char*)((kTurretFireCheck_addr - kUnrelocatedBase) + base);
-   s_turretFireAllowJmp  = (kTurretFireAllow_addr - kUnrelocatedBase) + base;
-   s_turretFireBlockJmp  = (kTurretFireBlock_addr - kUnrelocatedBase) + base;
+   s_turretFirePatchAddr = (unsigned char*)((game_addrs::modtools::turret_fire_check - kUnrelocatedBase) + base);
+   s_turretFireAllowJmp  = (game_addrs::modtools::turret_fire_allow - kUnrelocatedBase) + base;
+   s_turretFireBlockJmp  = (game_addrs::modtools::turret_fire_block - kUnrelocatedBase) + base;
 }
 
 static void turretFireInstall()
@@ -660,9 +649,6 @@ static void turretFireUninstall()
 // AddController check at 0x0055b359 also skips) and jump past the init.
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kCreateCtrlPatch_addr  = 0x0055b2e8; // patch site
-static constexpr uintptr_t kCreateCtrlResume_addr  = 0x0055b359; // TEST EDI,EDI (after JMP)
-static constexpr uintptr_t kPlayerCtrlCtor_addr    = 0x0040d1e8; // PlayerController::PlayerController_
 static constexpr size_t    kCreateCtrlPatch_len    = 23;         // 0x0055b2e8..0x0055b2fe
 
 static unsigned char* s_createCtrlPatchAddr = nullptr;
@@ -694,9 +680,9 @@ static __declspec(naked) void createCtrl_cave()
 static void createCtrlNullCheckInit()
 {
    uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   s_createCtrlPatchAddr = (unsigned char*)((kCreateCtrlPatch_addr - kUnrelocatedBase) + base);
-   s_createCtrlResumeJmp = (kCreateCtrlResume_addr - kUnrelocatedBase) + base;
-   s_playerCtrlCtorAddr  = (kPlayerCtrlCtor_addr - kUnrelocatedBase) + base;
+   s_createCtrlPatchAddr = (unsigned char*)((game_addrs::modtools::create_ctrl_patch - kUnrelocatedBase) + base);
+   s_createCtrlResumeJmp = (game_addrs::modtools::create_ctrl_resume - kUnrelocatedBase) + base;
+   s_playerCtrlCtorAddr  = (game_addrs::modtools::player_ctrl_ctor - kUnrelocatedBase) + base;
 }
 
 static void createCtrlNullCheckInstall()
@@ -745,8 +731,6 @@ static void createCtrlNullCheckUninstall()
 // no weapons so those writes are harmless.  We never read them.
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kTurretUpdateIndirect_addr = 0x005673a0;
-static constexpr uintptr_t kFireStateMachine_addr     = 0x00562dd0; // thunk 0x00405376
 
 using fn_TurretUpdateIndirect_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
 // FUN_00562dd0: __thiscall(uint32_t* fireTrigger, float dt, char fire)
@@ -987,8 +971,6 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
 // Fix: if entity is already in state 3 (LANDING), return early.
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kTakeOff_addr = 0x004F8B70;
-static constexpr uintptr_t kEntityCarrier_vtable = 0x00A3A670;
 
 // ---------------------------------------------------------------------------
 // EntityCarrier turret fix — ActivatePhysics vtable patch
@@ -1005,11 +987,8 @@ static constexpr uintptr_t kEntityCarrier_vtable = 0x00A3A670;
 static constexpr uintptr_t kActivatePhysics_vtableOffset = 41 * 4; // byte offset in vtable
 
 // Turret activation: FUN_00563a90 — __fastcall(MountedTurret* this)
-static constexpr uintptr_t kTurretActivate_addr    = 0x00563a90;
 // Aimer activation: FUN_005ef020 — __fastcall(Aimer* this)  (actually thiscall)
-static constexpr uintptr_t kAimerActivate_addr     = 0x005ef020;
 // PassengerSlot activation: FUN_00568540 — __fastcall(PassengerSlot* this)
-static constexpr uintptr_t kPassengerActivate_addr = 0x00568540;
 
 using fn_ActivateChild_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_ActivateChild_t g_TurretActivate    = nullptr;
@@ -1162,7 +1141,6 @@ static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
 //   Ghidra VA: 0x004D7FE0
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kCarrierUpdate_addr = 0x004D7FE0;
 
 using fn_CarrierUpdate_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
 static fn_CarrierUpdate_t original_CarrierUpdate = nullptr;
@@ -1451,7 +1429,6 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 //   Ghidra VA: 0x004D8130      (thunk at 0x004126DE)
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kUpdateLandedHeight_addr = 0x004D8130;
 
 using fn_UpdateLandedHeight_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_UpdateLandedHeight_t original_UpdateLandedHeight = nullptr;
@@ -1471,7 +1448,6 @@ static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
 // for each.  This fills carrier cargo slots based on SpawnCount.
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kUpdateSpawn_addr = 0x00665A50;
 
 using fn_UpdateSpawn_t = void(__fastcall*)(void* ecx, void* edx, float dt);
 static fn_UpdateSpawn_t original_UpdateSpawn = nullptr;
@@ -1769,27 +1745,27 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 
 void entity_carrier_fixes_install(uintptr_t exe_base)
 {
-   original_SetProperty    = (fn_SetProperty_t)  resolve(exe_base, kSetProperty_addr);
-   original_AttachCargo    = (fn_AttachCargo_t)   resolve(exe_base, kAttachCargo_addr);
-   original_DetachCargo    = (fn_DetachCargo_t)   resolve(exe_base, kDetachCargo_addr);
-   original_TakeOff        = (fn_TakeOff_t)       resolve(exe_base, kTakeOff_addr);
-   g_carrierVtable         = resolve(exe_base, kEntityCarrier_vtable);
-   original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, kCarrierUpdate_addr);
-   original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, kUpdateLandedHeight_addr);
-   original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, kFlyerRender_addr);
+   original_SetProperty    = (fn_SetProperty_t)  resolve(exe_base, game_addrs::modtools::carrier_set_property);
+   original_AttachCargo    = (fn_AttachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_attach_cargo);
+   original_DetachCargo    = (fn_DetachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_detach_cargo);
+   original_TakeOff        = (fn_TakeOff_t)       resolve(exe_base, game_addrs::modtools::carrier_take_off);
+   g_carrierVtable         = resolve(exe_base, game_addrs::modtools::carrier_vtable);
+   original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, game_addrs::modtools::carrier_update);
+   original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, game_addrs::modtools::carrier_update_landed_ht);
+   original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, game_addrs::modtools::flyer_render);
    visJzInit();
    rayHitInit();
-   original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, kUpdateSpawn_addr);
+   original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, game_addrs::modtools::carrier_update_spawn);
 
-   g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, kMemPoolAlloc_addr);
-   g_VehicleTrackerPool    = resolve(exe_base, kVehicleTrackerPool_addr);
-   original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, kInitiateLanding_addr);
-   g_CarrierKill           = (fn_CarrierKill_t)   resolve(exe_base, kCarrierKill_addr);
+   g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, game_addrs::modtools::mem_pool_alloc);
+   g_VehicleTrackerPool    = resolve(exe_base, game_addrs::modtools::vehicle_tracker_pool);
+   original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, game_addrs::modtools::carrier_initiate_landing);
+   g_CarrierKill           = (fn_CarrierKill_t)   resolve(exe_base, game_addrs::modtools::carrier_kill);
 
    // Turret/aimer/passenger activation functions
-   g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, kTurretActivate_addr);
-   g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, kAimerActivate_addr);
-   g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, kPassengerActivate_addr);
+   g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::turret_activate);
+   g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::aimer_activate);
+   g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::passenger_activate);
 
    // Carrier turret fire patch — must be after g_carrierVtable is resolved
    turretFireInit();
@@ -1800,8 +1776,8 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    createCtrlNullCheckInstall();
 
    // PILOT_SELF turret AI hook
-   original_TurretUpdateIndirect = (fn_TurretUpdateIndirect_t)resolve(exe_base, kTurretUpdateIndirect_addr);
-   g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, kFireStateMachine_addr);
+   original_TurretUpdateIndirect = (fn_TurretUpdateIndirect_t)resolve(exe_base, game_addrs::modtools::turret_update_indirect);
+   g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, game_addrs::modtools::trigger_update);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

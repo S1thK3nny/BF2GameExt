@@ -54,31 +54,6 @@ static constexpr uint32_t kNewBeamAllocSize     = kNewBeamCountOff     + 4;
 static constexpr uint32_t kNewParticleAllocSize = kNewParticleCountOff + 4;
 
 // ---------------------------------------------------------------------------
-// Addresses (unrelocated, BF2_modtools.exe)
-// ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kBeamAdd     = 0x0045A920;
-static constexpr uintptr_t kParticleAdd = 0x0045A9E0;
-static constexpr uintptr_t kPblHashCtor = 0x007E1BD0;
-
-// Beam count displacement patch points
-static constexpr uintptr_t kBeamCountDisps[] = {
-    0x0045A922, 0x0045A938,                         // Add
-    0x0045ADC8, 0x0045B28D, 0x0045B2A8, 0x0045B2BC, // Render
-    0x0045B924,                                      // PostLoadHack
-};
-
-// Particle count displacement patch points
-static constexpr uintptr_t kParticleCountDisps[] = {
-    0x0045A9E2, 0x0045A9FE,                         // Add
-    0x0045B629, 0x0045B6C0, 0x0045B6D7, 0x0045B6E9, // Render
-    0x0045B8E5,                                      // PostLoadHack
-};
-
-static constexpr uintptr_t kParticleAllocSizeOp = 0x0045B8BD;
-static constexpr uintptr_t kBeamAllocSizeOp     = 0x0045B8FD;
-
-// ---------------------------------------------------------------------------
 // Function pointer types
 // ---------------------------------------------------------------------------
 
@@ -227,8 +202,9 @@ static void patch_u32(uintptr_t exe_base, uintptr_t unrelocated_addr, uint32_t e
 
 void gc_visual_limits_install(uintptr_t exe_base)
 {
-    g_log = reinterpret_cast<GameLog_t>(resolve(exe_base, game_addrs::modtools::game_log));
-    g_pblHash = reinterpret_cast<fn_PblHash_t>(resolve(exe_base, kPblHashCtor));
+    using namespace game_addrs::modtools;
+    g_log = reinterpret_cast<GameLog_t>(resolve(exe_base, game_log));
+    g_pblHash = reinterpret_cast<fn_PblHash_t>(resolve(exe_base, hash_string_thiscall));
 
     // Append to the install log alongside the other patch sets
     FILE* f = nullptr;
@@ -238,22 +214,22 @@ void gc_visual_limits_install(uintptr_t exe_base)
     }
 
     // --- Patch all beam count displacement values ---
-    for (uintptr_t addr : kBeamCountDisps)
+    for (uintptr_t addr : gc_beam_count_patches)
         patch_u32(exe_base, addr, kVanillaBeamCountOff, kNewBeamCountOff);
 
     // --- Patch all particle count displacement values ---
-    for (uintptr_t addr : kParticleCountDisps)
+    for (uintptr_t addr : gc_particle_count_patches)
         patch_u32(exe_base, addr, kVanillaParticleCountOff, kNewParticleCountOff);
 
     // --- Patch allocation sizes in PostLoadHack ---
-    patch_u32(exe_base, kBeamAllocSizeOp,     0x00000B20, kNewBeamAllocSize);
-    patch_u32(exe_base, kParticleAllocSizeOp, 0x00000E20, kNewParticleAllocSize);
+    patch_u32(exe_base, gc_beam_alloc_size_op,     0x00000B20, kNewBeamAllocSize);
+    patch_u32(exe_base, gc_particle_alloc_size_op, 0x00000E20, kNewParticleAllocSize);
 
     log("[GC_VIS] Patches applied: %d ok, %d failed", g_patchOk, g_patchFail);
 
     // --- Detour the Add functions ---
-    g_origBeamAdd     = reinterpret_cast<fn_BeamAdd_t>(resolve(exe_base, kBeamAdd));
-    g_origParticleAdd = reinterpret_cast<fn_ParticleAdd_t>(resolve(exe_base, kParticleAdd));
+    g_origBeamAdd     = reinterpret_cast<fn_BeamAdd_t>(resolve(exe_base, gc_beam_add));
+    g_origParticleAdd = reinterpret_cast<fn_ParticleAdd_t>(resolve(exe_base, gc_particle_add));
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

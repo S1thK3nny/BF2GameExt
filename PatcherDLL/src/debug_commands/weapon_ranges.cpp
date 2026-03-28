@@ -13,8 +13,6 @@
 // draws in both play mode and freecam.
 // =============================================================================
 
-// Hook targets
-static constexpr uintptr_t kSoldierPCU = 0x00530B20;  // EntitySoldier::PostCollisionUpdate
 
 // ---------------------------------------------------------------------------
 // EntitySoldier struct offsets (from PCU's ECX = struct_base + 0x258)
@@ -320,7 +318,7 @@ void WeaponRanges::install(uintptr_t exe_base)
 {
    s_exeBase = exe_base;
 
-   s_origSoldierPCU = (SoldierPCU_t)resolve(exe_base, kSoldierPCU);
+   s_origSoldierPCU = (SoldierPCU_t)resolve(exe_base, game_addrs::modtools::soldier_pcu);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

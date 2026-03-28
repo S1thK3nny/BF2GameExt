@@ -137,7 +137,6 @@ int g_cevNextKey = -1000;
 using fn_char_exit_vehicle = void(__fastcall*)(void* ecx, void* edx_unused, int arg1, int arg2);
 static fn_char_exit_vehicle original_char_exit_vehicle = nullptr;
 
-static constexpr uintptr_t exit_vehicle_func = 0x0052FC70;
 
 
 static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, int arg1, int arg2)
@@ -154,8 +153,8 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + exe_base; };
 
    __try {
-      const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);
-      const int       maxChars  = *(int*)      res(0xB939F4);
+      const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+      const int       maxChars  = *(int*)      res(game_addrs::modtools::max_chars);
       if (arrayBase && maxChars > 0) {
          for (int i = 0; i < maxChars; i++) {
             const uintptr_t slot = arrayBase + (uintptr_t)i * 0x1B0;
@@ -220,8 +219,6 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
 // load screen fires.
 // ---------------------------------------------------------------------------
 
-// VA 0x0067e388 — the 4-byte imm32 operand of the PUSH instruction at 0x0067e387
-static constexpr uintptr_t enter_state_path_op = 0x0067e388;
 
 // Saved so we can restore on uninstall.
 static uint32_t* g_enter_state_path_op_ptr  = nullptr;
@@ -288,7 +285,7 @@ void lua_hooks_install(uintptr_t exe_base)
    g_lua.insert       = (fn_lua_insert)       resolve(exe_base, lua_insert);
    original_init_state = (fn_init_state)resolve(exe_base, init_state);
 
-   original_char_exit_vehicle = (fn_char_exit_vehicle)resolve(exe_base, exit_vehicle_func);
+   original_char_exit_vehicle = (fn_char_exit_vehicle)resolve(exe_base, char_exit_vehicle);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -302,7 +299,7 @@ void lua_hooks_install(uintptr_t exe_base)
    // Patch the PUSH imm32 operand inside LoadDisplay::EnterState so the
    // hardcoded "Load\\load" pointer is replaced by &g_loadDisplayPath.
    // dllmain.cpp has already made all sections PAGE_READWRITE at this point.
-   g_enter_state_path_op_ptr  = (uint32_t*)resolve(exe_base, enter_state_path_op);
+   g_enter_state_path_op_ptr  = (uint32_t*)resolve(exe_base, game_addrs::modtools::enter_state_path_op);
    g_enter_state_path_op_orig = *g_enter_state_path_op_ptr;
    *g_enter_state_path_op_ptr = (uint32_t)(uintptr_t)g_loadDisplayPath;
    fn_log("[LoadDisplay] patched path operand 0x%08x -> 0x%08x (\"%s\")\n",

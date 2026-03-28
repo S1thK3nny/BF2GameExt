@@ -20,28 +20,6 @@
 //   - Configurable max range (ODF: MaxRange on ordnance)
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// Addresses
-// ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kUpdate_addr       = 0x0060f380;
-static constexpr uintptr_t kDtor_addr         = 0x0060ef90;
-static constexpr uintptr_t kRemoveBody_addr   = 0x0042ac60;
-static constexpr uintptr_t kAddItemBody_addr  = 0x0042dd00;
-static constexpr uintptr_t kRttiHash_addr     = 0x00b7e098;
-static constexpr uintptr_t kFUN005297b0_addr  = 0x005297b0;
-
-static constexpr uintptr_t kCheckFire_addr    = 0x0062c760;
-static constexpr uintptr_t kTriggerUpdate_addr = 0x00562dd0; // Trigger::Update(this, dt, buttonDown)
-static constexpr uintptr_t kOrdRender_addr     = 0x0060fb80; // OrdnanceGrapplingHook RSO Render
-static constexpr uintptr_t kSetProperty_addr   = 0x0060EC60; // OrdnanceGrapplingHookClass::SetProperty
-static constexpr uintptr_t kHashString_addr    = 0x007E1B70; // PblHash::PblHash(const char*)
-
-// Spline/cable rendering (same pipeline as OrdnanceTowCable)
-static constexpr uintptr_t kSplineBuild_addr   = 0x0083e720;
-static constexpr uintptr_t kCableRender_addr   = 0x006d2370;
-static constexpr uintptr_t kVecScale_addr      = 0x004294b0;
-
 // Ordnance offsets
 static constexpr int kOrd_SoldierPtr  = 0x54;
 static constexpr int kOrd_SoldierKey  = 0x58;
@@ -433,7 +411,7 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
    {
       void** rsoVtable = *(void***)(ord + 0x98);
       uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-      void* correctVtable = (void*)((0x00A50E98 - kUnrelocatedBase) + base);
+      void* correctVtable = resolve(base, game_addrs::modtools::grapple_rso_vtable);
       if (rsoVtable != (void**)correctVtable) {
          *(void**)(ord + 0x98) = correctVtable;
       }
@@ -565,20 +543,21 @@ static unsigned int __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
 
 void grapple_fix_install(uintptr_t exe_base)
 {
-   fn_RemoveBody    = (fn_RemoveBody_t) resolve(exe_base, kRemoveBody_addr);
-   fn_AddItemBody   = (fn_AddItemBody_t)resolve(exe_base, kAddItemBody_addr);
-   g_rttiHashPtr    = (uint32_t*)       resolve(exe_base, kRttiHash_addr);
-   original_Update  = (fn_Update_t)     resolve(exe_base, kUpdate_addr);
-   original_Dtor    = (fn_Dtor_t)       resolve(exe_base, kDtor_addr);
-   original_005297b0  = (fn_005297b0_t)  resolve(exe_base, kFUN005297b0_addr);
-   original_CheckFire = (fn_CheckFire_t) resolve(exe_base, kCheckFire_addr);
-   original_TriggerUpdate = (fn_TriggerUpdate_t) resolve(exe_base, kTriggerUpdate_addr);
-   original_OrdRender = (fn_OrdRender_t) resolve(exe_base, kOrdRender_addr);
-   original_SetProperty = (fn_SetProperty_t) resolve(exe_base, kSetProperty_addr);
-   fn_HashString    = (fn_HashString_t)  resolve(exe_base, kHashString_addr);
-   fn_SplineBuild   = (fn_SplineBuild_t) resolve(exe_base, kSplineBuild_addr);
-   fn_CableRender   = (fn_CableRender_t) resolve(exe_base, kCableRender_addr);
-   fn_VecScale      = (fn_VecScale_t)    resolve(exe_base, kVecScale_addr);
+   using namespace game_addrs::modtools;
+   fn_RemoveBody    = (fn_RemoveBody_t) resolve(exe_base, remove_body);
+   fn_AddItemBody   = (fn_AddItemBody_t)resolve(exe_base, add_item_body);
+   g_rttiHashPtr    = (uint32_t*)       resolve(exe_base, grapple_rtti_hash);
+   original_Update  = (fn_Update_t)     resolve(exe_base, grapple_update);
+   original_Dtor    = (fn_Dtor_t)       resolve(exe_base, grapple_dtor);
+   original_005297b0  = (fn_005297b0_t)  resolve(exe_base, grapple_set_visibility);
+   original_CheckFire = (fn_CheckFire_t) resolve(exe_base, grapple_check_fire);
+   original_TriggerUpdate = (fn_TriggerUpdate_t) resolve(exe_base, trigger_update);
+   original_OrdRender = (fn_OrdRender_t) resolve(exe_base, grapple_ord_render);
+   original_SetProperty = (fn_SetProperty_t) resolve(exe_base, grapple_set_property);
+   fn_HashString    = (fn_HashString_t)  resolve(exe_base, hash_string);
+   fn_SplineBuild   = (fn_SplineBuild_t) resolve(exe_base, spline_build);
+   fn_CableRender   = (fn_CableRender_t) resolve(exe_base, cable_render);
+   fn_VecScale      = (fn_VecScale_t)    resolve(exe_base, vec_scale);
 
    // Compute property hashes
    g_hashPullSpeed    = fn_HashString("PullSpeed");

@@ -116,6 +116,150 @@ namespace modtools {
    constexpr uintptr_t get_world_xform             = 0x00428a20;
    constexpr uintptr_t get_radius                  = 0x00428260;
 
+   // ---- Entity / Soldier Prone --------------------------------------------------
+
+   constexpr uintptr_t prone_crouch_inner          = 0x00543B60;
+   constexpr uintptr_t prone_standup_inner         = 0x005435D0;
+   constexpr uintptr_t prone_set_state             = 0x00406C62;
+   constexpr uintptr_t prone_get_foley_fx          = 0x0040E1DD;
+   constexpr uintptr_t prone_game_sound_play       = 0x00415451;
+   constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
+   constexpr uintptr_t prone_set_action            = 0x00575D50;
+   constexpr uintptr_t prone_vtable_slot           = 0x00A40718;
+   constexpr uintptr_t prone_guard_jnz             = 0x00545BA6;
+   constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
+   constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
+   constexpr uintptr_t prone_height_switch_end     = 0x0053BD67;
+   constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
+
+   // ---- Entity / Cloth ---------------------------------------------------------
+
+   constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
+   constexpr uintptr_t cloth_enforce_collisions     = 0x004cabd0;
+   constexpr uintptr_t cloth_enforce_cylinder_coll  = 0x004c8660;
+
+   // ---- Animation ---------------------------------------------------------------
+
+   constexpr uintptr_t fp_anim_set_property        = 0x0053FA20;
+   constexpr uintptr_t fp_update_soldier            = 0x004A9BE0;
+   constexpr uintptr_t anim_add_bank               = 0x004A8FC0;
+   constexpr uintptr_t anim_find_animation         = 0x004A7900;
+   constexpr uintptr_t fp_anim_array               = 0x00B70E30;  // ZephyrAnim*[48]
+   constexpr uintptr_t anim_name_table             = 0x00A36C88;  // const char*[48]
+
+   // ---- Weapon / Disguise ------------------------------------------------------
+
+   constexpr uintptr_t disguise_set_property       = 0x0062A320;
+   constexpr uintptr_t disguise_raise              = 0x0062AAD0;
+   constexpr uintptr_t disguise_drop               = 0x0062A180;
+   constexpr uintptr_t game_model_table            = 0x00B76CC4;
+
+   // ---- Character System --------------------------------------------------------
+
+   constexpr uintptr_t char_array_base              = 0xB93A08;
+   constexpr uintptr_t max_chars                    = 0xB939F4;
+   constexpr uintptr_t team_array_base              = 0xAD5D64;
+   constexpr uintptr_t class_def_list               = 0xACD2C8;
+
+   // ---- Animation (weapon/soldier) ---------------------------------------------
+
+   constexpr uintptr_t get_weapon_anim_map          = 0x00570760;
+   constexpr uintptr_t set_weapon_anim_map          = 0x004170D5;
+   constexpr uintptr_t assign_animations            = 0x00581AF0;
+   constexpr uintptr_t anim_instance                = 0x00B8D3C4;
+
+   // ---- Entity / Vehicle -------------------------------------------------------
+
+   constexpr uintptr_t char_exit_vehicle            = 0x0052FC70;
+
+   // ---- Entity / Vehicle (Carrier/Flyer) ---------------------------------------
+
+   constexpr uintptr_t carrier_set_property         = 0x004D7210;
+   constexpr uintptr_t carrier_attach_cargo         = 0x004D81F0;
+   constexpr uintptr_t carrier_detach_cargo         = 0x004D8350;
+   constexpr uintptr_t carrier_initiate_landing     = 0x004f1380;
+   constexpr uintptr_t carrier_kill                 = 0x004D8400;
+   constexpr uintptr_t carrier_update               = 0x004D7FE0;
+   constexpr uintptr_t carrier_update_landed_ht     = 0x004D8130;
+   constexpr uintptr_t carrier_update_spawn         = 0x00665A50;
+   constexpr uintptr_t carrier_take_off             = 0x004F8B70;
+   constexpr uintptr_t carrier_vtable               = 0x00A3A670;
+   constexpr uintptr_t flyer_render                 = 0x004f6970;
+   constexpr uintptr_t turret_update_indirect       = 0x005673a0;
+   constexpr uintptr_t turret_activate              = 0x00563a90;
+   constexpr uintptr_t aimer_activate               = 0x005ef020;
+   constexpr uintptr_t passenger_activate           = 0x00568540;
+   constexpr uintptr_t mem_pool_alloc               = 0x00802300;
+   constexpr uintptr_t vehicle_tracker_pool         = 0x00B9A758;
+
+   // Carrier inline patch sites
+   constexpr uintptr_t turret_fire_check            = 0x00565c4c;
+   constexpr uintptr_t turret_fire_allow            = 0x00565c5d;
+   constexpr uintptr_t turret_fire_block            = 0x00565c83;
+   constexpr uintptr_t create_ctrl_patch            = 0x0055b2e8;
+   constexpr uintptr_t create_ctrl_resume           = 0x0055b359;
+   constexpr uintptr_t player_ctrl_ctor             = 0x0040d1e8;
+
+   // ---- Loading Screen (extended) ----------------------------------------------
+
+   constexpr uintptr_t enter_state_path_op          = 0x0067e388;
+
+   // ---- Hashing (thiscall wrapper) ---------------------------------------------
+
+   constexpr uintptr_t hash_string_thiscall         = 0x007E1BD0;
+
+   // ---- Shell / GC Visual Limits -----------------------------------------------
+
+   constexpr uintptr_t gc_beam_add                  = 0x0045A920;
+   constexpr uintptr_t gc_particle_add              = 0x0045A9E0;
+
+   constexpr uintptr_t gc_beam_count_patches[]      = {
+       0x0045A922, 0x0045A938,
+       0x0045ADC8, 0x0045B28D, 0x0045B2A8, 0x0045B2BC,
+       0x0045B924,
+   };
+
+   constexpr uintptr_t gc_particle_count_patches[]  = {
+       0x0045A9E2, 0x0045A9FE,
+       0x0045B629, 0x0045B6C0, 0x0045B6D7, 0x0045B6E9,
+       0x0045B8E5,
+   };
+
+   constexpr uintptr_t gc_particle_alloc_size_op    = 0x0045B8BD;
+   constexpr uintptr_t gc_beam_alloc_size_op        = 0x0045B8FD;
+
+   // ---- State Machine / Triggers -----------------------------------------------
+
+   constexpr uintptr_t trigger_update              = 0x00562dd0;
+
+   // ---- Physics / Body Management (extended) ---------------------------------
+
+   constexpr uintptr_t remove_body                 = 0x0042ac60;
+   constexpr uintptr_t add_item_body               = 0x0042dd00;
+   constexpr uintptr_t vec_scale                   = 0x004294b0;
+
+   // ---- Weapon / Grappling Hook -----------------------------------------------
+
+   constexpr uintptr_t grapple_update              = 0x0060f380;
+   constexpr uintptr_t grapple_dtor                = 0x0060ef90;
+   constexpr uintptr_t grapple_check_fire          = 0x0062c760;
+   constexpr uintptr_t grapple_ord_render          = 0x0060fb80;
+   constexpr uintptr_t grapple_set_property        = 0x0060EC60;
+   constexpr uintptr_t grapple_set_visibility      = 0x005297b0;
+   constexpr uintptr_t grapple_rtti_hash           = 0x00b7e098;
+   constexpr uintptr_t grapple_rso_vtable          = 0x00A50E98;
+
+   // ---- Spline / Cable Rendering ----------------------------------------------
+
+   constexpr uintptr_t spline_build                = 0x0083e720;
+   constexpr uintptr_t cable_render                = 0x006d2370;
+
+   // ---- Debug / Visualization --------------------------------------------------
+
+   constexpr uintptr_t hover_post_coll_update       = 0x00514490;
+   constexpr uintptr_t freecam_update               = 0x004ae1b0;
+   constexpr uintptr_t soldier_pcu                   = 0x00530B20;
+
    // ---- Debug Console (RedCommandConsole) ------------------------------------
 
    constexpr uintptr_t console_add_variable        = 0x007ed530;

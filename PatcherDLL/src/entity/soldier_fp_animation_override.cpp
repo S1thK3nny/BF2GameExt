@@ -37,17 +37,6 @@ using fn_SetProperty_t = void(__fastcall*)(void* ecx, void* edx,
 using fn_UpdateSoldier_t = void(__fastcall*)(void* ecx, void* edx,
                                              void* model, void* ctrl, void* aimer);
 
-// ---------------------------------------------------------------------------
-// Addresses (BF2_modtools, imagebase 0x400000)
-// ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kSetProperty_addr   = 0x0053FA20;
-static constexpr uintptr_t kUpdateSoldier_addr = 0x004A9BE0;
-static constexpr uintptr_t kAddBank_addr       = 0x004A8FC0;
-static constexpr uintptr_t kFindAnimation_addr = 0x004A7900;
-static constexpr uintptr_t kHashString_addr    = 0x007E1B70;
-static constexpr uintptr_t kMAnim_addr         = 0x00B70E30;  // ZephyrAnim*[48]
-static constexpr uintptr_t kAnimNameTable_addr = 0x00A36C88;  // const char*[48]
 
 static constexpr int kAnimCount           = 48;
 static constexpr int kHumanFPPrefixLen    = 7;   // strlen("humanfp")
@@ -285,17 +274,18 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
 
 void fp_anim_bank_install(uintptr_t exe_base)
 {
-   fn_hash_string   = (fn_hash_string_t)  resolve(exe_base, kHashString_addr);
-   fn_AddBank       = (fn_AddBank_t)      resolve(exe_base, kAddBank_addr);
-   fn_FindAnimation = (fn_FindAnimation_t)resolve(exe_base, kFindAnimation_addr);
+   using namespace game_addrs::modtools;
+   fn_hash_string   = (fn_hash_string_t)  resolve(exe_base, hash_string);
+   fn_AddBank       = (fn_AddBank_t)      resolve(exe_base, anim_add_bank);
+   fn_FindAnimation = (fn_FindAnimation_t)resolve(exe_base, anim_find_animation);
 
-   g_mAnim         = (void**)       resolve(exe_base, kMAnim_addr);
-   g_animNameTable = (const char**) resolve(exe_base, kAnimNameTable_addr);
+   g_mAnim         = (void**)       resolve(exe_base, fp_anim_array);
+   g_animNameTable = (const char**) resolve(exe_base, anim_name_table);
 
    g_fpBankPropHash = fn_hash_string("FirstPersonAnimationBank");
 
-   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, kSetProperty_addr);
-   original_UpdateSoldier = (fn_UpdateSoldier_t) resolve(exe_base, kUpdateSoldier_addr);
+   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, fp_anim_set_property);
+   original_UpdateSoldier = (fn_UpdateSoldier_t) resolve(exe_base, fp_update_soldier);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
