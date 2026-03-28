@@ -275,34 +275,48 @@ namespace steam {
 
    // ---- Lua VM ---------------------------------------------------------------
 
-   constexpr uintptr_t init_state        = 0xDEAD0000; // TODO
-   constexpr uintptr_t g_lua_state_ptr   = 0xDEAD0000; // TODO
+   constexpr uintptr_t init_state        = 0x5a0ce0;
+   constexpr uintptr_t g_lua_state_ptr   = 0x1e579a0;
 
-   constexpr uintptr_t lua_pushcclosure  = 0xDEAD0002; // TODO
-   constexpr uintptr_t lua_pushlstring   = 0xDEAD0005; // TODO
-   constexpr uintptr_t lua_settable      = 0xDEAD0003; // TODO
-   constexpr uintptr_t lua_tolstring     = 0xDEAD0004; // TODO
-   constexpr uintptr_t lua_pushnumber    = 0xDEAD0006; // TODO
-   constexpr uintptr_t lua_tonumber      = 0xDEAD0007; // TODO
-   constexpr uintptr_t lua_gettop        = 0xDEAD0008; // TODO
-   constexpr uintptr_t lua_pushnil       = 0xDEAD0009; // TODO
-   constexpr uintptr_t lua_pushboolean   = 0xDEAD000A; // TODO
-   constexpr uintptr_t lua_toboolean     = 0xDEAD000B; // TODO
-   constexpr uintptr_t lua_touserdata    = 0xDEAD000C; // TODO
-   constexpr uintptr_t lua_pushlightuserdata = 0xDEAD0013; // TODO
-   constexpr uintptr_t lua_isnumber      = 0xDEAD000D; // TODO
-   constexpr uintptr_t lua_gettable      = 0xDEAD000E; // TODO
-   constexpr uintptr_t lua_pcall         = 0xDEAD000F; // TODO
-   constexpr uintptr_t lua_rawgeti       = 0xDEAD0010; // TODO
-   constexpr uintptr_t lua_settop        = 0xDEAD0011; // TODO
-   constexpr uintptr_t lua_insert        = 0xDEAD0012; // TODO
+   constexpr uintptr_t lua_pushcclosure  = 0x69bf30;
+   constexpr uintptr_t lua_pushlstring   = 0x69c000;
+   constexpr uintptr_t lua_settable      = 0x69c3d0;
+   constexpr uintptr_t lua_tolstring     = 0x69c5b0;
+   constexpr uintptr_t lua_pushnumber    = 0x69c060;
+   constexpr uintptr_t lua_tonumber      = 0x69c510;
+   constexpr uintptr_t lua_gettop        = 0x69bba0;
+   constexpr uintptr_t lua_pushnil       = 0x69c040;
+   constexpr uintptr_t lua_pushboolean   = 0x69bf10;
+   constexpr uintptr_t lua_toboolean     = 0x69c4d0;
+   constexpr uintptr_t lua_touserdata    = 0x69c640;
+   constexpr uintptr_t lua_pushlightuserdata = 0x69bfe0;
+   constexpr uintptr_t lua_isnumber      = 0x69bc80;
+   constexpr uintptr_t lua_gettable      = 0x69bb60;
+   constexpr uintptr_t lua_pcall         = 0x69beb0;
+   constexpr uintptr_t lua_rawgeti       = 0x69c1a0;
+   constexpr uintptr_t lua_settop        = 0x69c400;
+   constexpr uintptr_t lua_insert        = 0x69bc00;
 
    // ---- Aimer / Weapon -------------------------------------------------------
 
-   constexpr uintptr_t aimer_set_soldier_info = 0xDEAD0014;                // TODO
+   constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD0015;  // TODO
    constexpr uintptr_t weapon_override_aimer_impl  = 0xDEAD0016;           // TODO
    constexpr uintptr_t weapon_override_aimer_thunk = 0xDEAD0017;           // TODO
+   constexpr uintptr_t weapon_zoom_first_person = 0x00677d40;
+
+   // ---- Hashing / Texture lookup ---------------------------------------------
+
+   constexpr uintptr_t hash_string               = 0x00726e50;  // PblHash::calcHash (__cdecl)
+
+   // ---- Animation (weapon/soldier) -------------------------------------------
+
+   constexpr uintptr_t set_weapon_anim_map       = 0x0063f7b0;  // SetWeaponAnimationMap
+   constexpr uintptr_t anim_add_bank             = 0x0063c460;  // SoldierAnimationBank::AddBank
+
+   // ---- Hashing (thiscall wrapper) -------------------------------------------
+
+   constexpr uintptr_t hash_string_thiscall      = 0x00726d20;  // PblHash::PblHash
 
    // ---- Debug / Logging ------------------------------------------------------
 
