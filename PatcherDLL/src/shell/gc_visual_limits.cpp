@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "gc_visual_limits.hpp"
+#include "core/resolve.hpp"
 
 #include <detours.h>
 #include <cstring>
@@ -12,17 +13,9 @@
 // from 64/128 to 256/512.
 // =============================================================================
 
-static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
-
-static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
-{
-    return (void*)((unrelocated_addr - kUnrelocatedBase) + exe_base);
-}
-
 // ---------------------------------------------------------------------------
 // GameLog for diagnostics
 // ---------------------------------------------------------------------------
-typedef void (__cdecl* GameLog_t)(const char*, ...);
 static GameLog_t g_log = nullptr;
 
 static void log(const char* fmt, ...)

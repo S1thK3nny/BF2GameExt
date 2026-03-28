@@ -3,6 +3,7 @@
 // Internal shared header for loading_screen — not for external inclusion.
 
 #include "loading_screen.hpp"
+#include "core/resolve.hpp"
 
 #include <cstring>
 
@@ -43,16 +44,6 @@ typedef void (__fastcall* fn_set_all_on_t)   (void* ecx, void* edx);
 typedef void (__fastcall* fn_load_update_t)  (void* ecx, void* edx);
 typedef void (__fastcall* fn_load_render_t)  (void* ecx, void* edx);
 
-// =============================================================================
-// GameLog
-// =============================================================================
-
-typedef void (__cdecl* GameLog_t)(const char*, ...);
-
-inline GameLog_t get_gamelog() {
-    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-    return (GameLog_t)((0x7E3D50 - 0x400000u) + base);
-}
 
 // =============================================================================
 // Resolved function pointers (set by loading_screen_install)

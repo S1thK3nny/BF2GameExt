@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "disguise_model_override.hpp"
+#include "core/resolve.hpp"
 
 #include <cstring>
 #include <detours.h>
@@ -23,20 +24,6 @@
 // Implementing runtime animation bank switching would require deep hooks into
 // the ZephyrSkeleton/Pose system. See git history for the attempted approaches.
 // =============================================================================
-
-static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
-
-static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
-{
-    return (void*)((unrelocated_addr - kUnrelocatedBase) + exe_base);
-}
-
-typedef void(__cdecl* GameLog_t)(const char* fmt, ...);
-static GameLog_t get_gamelog()
-{
-    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-    return (GameLog_t)((0x7E3D50 - kUnrelocatedBase) + base);
-}
 
 // ---------------------------------------------------------------------------
 // Game function types
@@ -191,13 +178,10 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
             cfg->suppressModel = true;
             cfg->modelName[0] = '\0';
             cfg->modelNameHash = 0;
-            get_gamelog()("[DisguiseExt] Class %p: DisguiseModel = (suppress)\n", ecx);
         } else {
             cfg->suppressModel = false;
             strncpy_s(cfg->modelName, sizeof(cfg->modelName), value, _TRUNCATE);
             cfg->modelNameHash = fn_hash_string(value);
-            get_gamelog()("[DisguiseExt] Class %p: DisguiseModel = '%s' (0x%08x)\n",
-                          ecx, value, cfg->modelNameHash);
         }
         return;
     }
@@ -245,14 +229,12 @@ static void __fastcall hooked_DisguiseRaise(void* ecx, void* edx)
         if (cfg->suppressModel) {
             if (savedModel) {
                 *(void**)((uintptr_t)entityBase + kEntityGeom_mModel_offset) = savedModel;
-                log("[DisguiseExt] Model suppressed, restored original\n");
             }
         }
         else if (cfg->modelName[0] != '\0') {
             void* customModel = findGameModel(cfg->modelNameHash);
             if (customModel) {
                 *(void**)((uintptr_t)entityBase + kEntityGeom_mModel_offset) = customModel;
-                log("[DisguiseExt] Model overridden: '%s'\n", cfg->modelName);
             } else {
                 log("[DisguiseExt] GameModel '%s' not found\n", cfg->modelName);
             }
@@ -294,9 +276,7 @@ void disguise_ext_install(uintptr_t exe_base)
     LONG r2 = DetourAttach(&(PVOID&)original_DisguiseRaise,  hooked_DisguiseRaise);
     LONG r3 = DetourAttach(&(PVOID&)original_DisguiseDrop,   hooked_DisguiseDrop);
     LONG rc = DetourTransactionCommit();
-
-    get_gamelog()("[DisguiseExt] Installed (SetProp=%ld Raise=%ld Drop=%ld commit=%ld)\n",
-                  r1, r2, r3, rc);
+    (void)r1; (void)r2; (void)r3; (void)rc;
 }
 
 void disguise_ext_uninstall()

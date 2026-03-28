@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "soldier_prone.hpp"
+#include "core/resolve.hpp"
 
 #include <cmath>
 #include <detours.h>
@@ -36,13 +37,6 @@
 // =============================================================================
 
 bool g_proneEnabled = false;
-
-static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
-
-static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
-{
-    return (void*)((unrelocated_addr - kUnrelocatedBase) + exe_base);
-}
 
 // ---------------------------------------------------------------------------
 // Addresses (unrelocated, BF2_modtools.exe)

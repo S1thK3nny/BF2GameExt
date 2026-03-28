@@ -99,6 +99,11 @@ namespace modtools {
    constexpr uintptr_t voice_to_handle             = 0x0088b5d0;
    constexpr uintptr_t snd_engine_update           = 0x008827b0;
 
+   // ---- Debug / Logging ------------------------------------------------------
+
+   // GameLog(fmt, ...) — printf-style debug logger, __cdecl
+   constexpr uintptr_t game_log                    = 0x007E3D50;
+
 } // namespace modtools
 
 // =============================================================================
@@ -136,6 +141,10 @@ namespace steam {
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD0015;  // TODO
    constexpr uintptr_t weapon_override_aimer_impl  = 0xDEAD0016;           // TODO
    constexpr uintptr_t weapon_override_aimer_thunk = 0xDEAD0017;           // TODO
+
+   // ---- Debug / Logging ------------------------------------------------------
+
+   constexpr uintptr_t game_log                    = 0xDEAD0018; // TODO
 
 } // namespace steam
 

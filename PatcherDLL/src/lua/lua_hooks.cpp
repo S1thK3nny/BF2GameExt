@@ -2,6 +2,7 @@
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
 #include "core/game_addrs.hpp"
+#include "core/resolve.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/soldier_prone.hpp"
@@ -111,13 +112,6 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    }
 }
 
-static const uintptr_t unrelocated_base = 0x400000;
-
-static void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
-{
-   return (void*)((unrelocated_addr - unrelocated_base) + exe_base);
-}
-
 // ---------------------------------------------------------------------------
 // OnCharacterExitVehicle event system
 //
@@ -145,11 +139,6 @@ static fn_char_exit_vehicle original_char_exit_vehicle = nullptr;
 
 static constexpr uintptr_t exit_vehicle_func = 0x0052FC70;
 
-static auto get_gamelog() {
-   typedef void(__cdecl* GameLog_t)(const char*, ...);
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   return (GameLog_t)((0x7E3D50 - 0x400000u) + base);
-}
 
 static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, int arg1, int arg2)
 {
@@ -162,7 +151,7 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
    void*     entityClassPtr = nullptr;
 
    const uintptr_t exe_base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - unrelocated_base + exe_base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + exe_base; };
 
    __try {
       const uintptr_t arrayBase = *(uintptr_t*)res(0xB93A08);

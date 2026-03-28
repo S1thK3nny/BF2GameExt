@@ -1,13 +1,11 @@
 #include "pch.h"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
+#include "core/resolve.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/soldier_prone.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
-
-// Game's printf-style debug logger — FUN_007e3d50, __cdecl, (const char* fmt, ...)
-typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
 
 // ReadTextFile(path) - reads any file on disk, returns its contents as a string.
 // Accepts absolute or relative paths. Returns nil if the file cannot be opened.
@@ -269,7 +267,7 @@ static int lua_HttpPost(lua_State* L)
 static int lua_GetCharacterWeapon(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
@@ -347,7 +345,7 @@ static int lua_GetCharacterWeapon(lua_State* L)
 static int lua_SetCharacterWeapon(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
    const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
 
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
@@ -594,11 +592,6 @@ static int lua_SetCharacterWeapon(lua_State* L)
             }
          }
 
-         fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' "
-                    "(wc=0x%08x src=%s bank=0x%08x cMAP=%d sa=0x%08x)\n",
-                    charIndex, channel, slotIdx, targetOdf,
-                    (unsigned)foundWc, sourceWpn ? "found" : "none",
-                    (unsigned)targetBank, correctMAP, (unsigned)soldierAnimator);
       }
 
       g_lua.pushnumber(L, 1);
@@ -632,7 +625,7 @@ typedef void (__thiscall* SetUnitClassMinMax_t)(void* team, int slot, int min, i
 static int lua_RemoveUnitClass(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t addr) -> uintptr_t { return addr - 0x400000u + base; };
+   auto res = [=](uintptr_t addr) -> uintptr_t { return addr - kUnrelocatedBase + base; };
    const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
 
    if (!g_lua.isnumber(L, 1)) return 0;
@@ -903,7 +896,7 @@ static int lua_HttpPostAsync(lua_State* L)
 static int lua_ReapplyAnimations(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
    typedef void (__fastcall* AssignAnimations_t)(void*);
    const auto fn_assign = (AssignAnimations_t)res(0x581AF0);
@@ -974,7 +967,7 @@ static int lua_OnCEVName(lua_State* L)
    if (!name) { g_lua.pushnil(L); return 1; }
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
    const auto fn_Hash = (HashString_t)res(0x7E1BD0);
    alignas(4) int hashBuf[2] = {};
@@ -1024,7 +1017,7 @@ static int lua_OnCEVClass(lua_State* L)
    if (!cls) { g_lua.pushnil(L); return 1; }
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
    const auto fn_Hash = (HashString_t)res(0x7E1BD0);
    const auto fn_GameLog = (GameLog_t)res(0x7E3D50);
@@ -1113,7 +1106,7 @@ static int lua_SetBarrelFireOrigin(lua_State* L)
 static int lua_DumpAimerInfo(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
    if (!g_lua.isnumber(L, 1)) return 0;
 

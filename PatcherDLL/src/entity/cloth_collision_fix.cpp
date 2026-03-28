@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "cloth_collision_fix.hpp"
+#include "core/resolve.hpp"
 
 #include <cstring>
 #include <cmath>
@@ -27,20 +28,6 @@
 //   Hook SatisfyConstraints for a final collision pass + old_pos correction
 //   after all constraint iterations (bug 3).
 // =============================================================================
-
-static constexpr uintptr_t kUnrelocatedBase = 0x400000u;
-
-static inline void* resolve(uintptr_t exe_base, uintptr_t unrelocated_addr)
-{
-   return (void*)((unrelocated_addr - kUnrelocatedBase) + exe_base);
-}
-
-typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
-static GameLog_t get_gamelog()
-{
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   return (GameLog_t)((0x7E3D50 - kUnrelocatedBase) + base);
-}
 
 // ---------------------------------------------------------------------------
 // Addresses (unrelocated, BF2_modtools)
