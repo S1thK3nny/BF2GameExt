@@ -517,9 +517,9 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // FUN_00570760(BANK, WEAPON_type) scans this table and returns the matching index.
       //
       // Strategy: compute correctMAP for the TARGET character's own animation bank.
-      //   entity+0x21C  -> EntitySoldierClass* (mClass)
+      //   entity+0x218  -> EntitySoldierClass* (mClass)
       //                    [EntitySoldier struct base = entity-0x240;
-      //                     mClass at struct+0x45C → entity+0x21C]
+      //                     mClass at struct+0x458 → entity+0x218]
       //   entityClass+0x1378 -> BANK (EntitySoldierClass::mAnimationBank)
       //   FUN_00570760(BANK, foundWc->mSoldierAnimationWeapon) -> correctMAP
       //
@@ -527,7 +527,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       //   ctrl+0x290        -> entity  (EntitySoldier* = struct_base+0x240)
       //   entity+0x4F0[N]   -> Weapon* (rendering-side array; struct mWeapon @ +0x730)
       //   entity+0x520      -> SoldierAnimator* (struct mSoldierAnimator @ +0x760)
-      //   entity+0x21C      -> EntitySoldierClass* (struct mClass @ +0x45C)
+      //   entity+0x218      -> EntitySoldierClass* (struct mClass @ +0x458)
       //   EntitySoldierClass+0x1378 -> BANK (mAnimationBank)
       //   WeaponClass+0x020 -> WEAPON (mSoldierAnimationWeapon)
       //   weapon+0xC8       -> int MAP
@@ -552,7 +552,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
          // This is the BANK that was used when registering all this soldier's weapon MAPs.
          if (entity) {
             __try {
-               uintptr_t entityClass = *(uintptr_t*)(entity + 0x21C);
+               uintptr_t entityClass = *(uintptr_t*)(entity + 0x218);
                if (entityClass && entityClass != 0xCDCDCDCDu)
                   targetBank = *(uintptr_t*)(entityClass + 0x1378);
             } __except(EXCEPTION_EXECUTE_HANDLER) {}

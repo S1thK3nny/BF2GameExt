@@ -49,7 +49,7 @@ static constexpr int STATE_PRONE  = 2;
 //   entity+0x512 = struct+0x752  char[2]     mWeaponIndex  (low nibble = slot)
 //   entity+0x514 = struct+0x754  SoldierState mState
 //   entity+0x520 = struct+0x760  SoldierAnimator*
-//   entity+0x21C = struct+0x45C  EntitySoldierClass*
+//   entity+0x218 = struct+0x458  EntitySoldierClass*
 static constexpr int kMState        = 0x514; // SoldierState mState
 static constexpr int kWeaponSlot    = 0x512; // mWeaponIndex byte (low nibble = slot)
 static constexpr int kWeaponArray   = 0x4F0; // Weapon*[8] mWeapon

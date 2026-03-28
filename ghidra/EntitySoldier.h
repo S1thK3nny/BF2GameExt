@@ -522,17 +522,24 @@ struct EntitySoldier {
     /* ---- VehicleEngine ---- */
     VehicleEngine mVehicleEngine;                    /* +0x3D4, 80 bytes */
 
-    /* ==== EntitySoldier-specific data (base at +0x424) ==== */
+    /* ==== EntitySoldier-specific data ==== */
+    /* WARNING: Offsets in this section are WRONG. The entire block needs re-basing.
+       Confirmed offsets from disassembly (from struct_base):
+         mClass           = +0x458 (entity+0x218)  — UpdateIndirect 0x0053bbe7
+         mWeapon[8]       = +0x730 (entity+0x4F0)
+         mSoldierAnimator = +0x760 (entity+0x520)
+         mState           = +0x754 (entity+0x514)
+       The offsets below are ~0x18-0x20 too low across the board. */
 
-    PblHandle_GameObject mStandingOnObj;             /* +0x424, 8 bytes */
-    int mStandingOnBody;                             /* +0x42C */
-    PblVector3 mStandingOnObjLastVelocity;           /* +0x430, 12 bytes */
-    AcklayData *mAcklayData;                         /* +0x43C */
-    EntitySoldierClass *mClass;                      /* +0x440 (= mEntityClass cast) */
-    TentacleSimulator *mTentacles;                   /* +0x444 */
-    OrdnanceGrapplingHook *mHook;                    /* +0x448 */
-    PblVector3 mGroundNormal;                        /* +0x44C, 12 bytes */
-    PblVector3 mAILastCollisionNormal;               /* +0x458, 12 bytes */
+    PblHandle_GameObject mStandingOnObj;             /* +0x424, 8 bytes — OFFSET UNVERIFIED */
+    int mStandingOnBody;                             /* +0x42C — OFFSET UNVERIFIED */
+    PblVector3 mStandingOnObjLastVelocity;           /* +0x430, 12 bytes — OFFSET UNVERIFIED */
+    AcklayData *mAcklayData;                         /* +0x43C — OFFSET UNVERIFIED */
+    EntitySoldierClass *mClass;                      /* +0x458 CONFIRMED (was +0x440, wrong) */
+    TentacleSimulator *mTentacles;                   /* +0x444 — OFFSET UNVERIFIED */
+    OrdnanceGrapplingHook *mHook;                    /* +0x448 — OFFSET UNVERIFIED */
+    PblVector3 mGroundNormal;                        /* +0x44C, 12 bytes — OFFSET UNVERIFIED */
+    PblVector3 mAILastCollisionNormal;               /* +0x458, 12 bytes — OFFSET UNVERIFIED */
     PblVector3 mAvgFlyGroundCollisionNormal;         /* +0x464, 12 bytes */
     uchar mNumFlyGroundCollisions;                   /* +0x470 */
     uchar mInputFlags0;                              /* +0x471, bitfield: mAILastCollisionDirection:2, m_uiInputLockMask:3, m_bSlide:1, mAttachedToProp:1, mFlyingInFirstPerson:1 */
