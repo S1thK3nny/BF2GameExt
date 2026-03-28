@@ -129,6 +129,9 @@
     <ClCompile Include="src\lua\lua_funcs.cpp">
       <Filter>lua</Filter>
     </ClCompile>
+    <ClCompile Include="src\debug_commands\debug_command.cpp">
+      <Filter>debug_commands</Filter>
+    </ClCompile>
     <ClCompile Include="src\debug_commands\command_registry.cpp">
       <Filter>debug_commands</Filter>
     </ClCompile>

@@ -6,49 +6,16 @@
 #include <detours.h>
 
 // =============================================================================
-// RenderHoverSprings
+// HoverSprings
 //
 // Per-spring-body debug visualization for EntityHover vehicles.
 // Caches spring data during PostCollisionUpdate, draws in both play
 // mode and freecam via separate hooks.
 // =============================================================================
 
-static constexpr uintptr_t kBase = 0x400000u;
-static inline void* res(uintptr_t exe_base, uintptr_t addr) {
-   return (void*)((addr - kBase) + exe_base);
-}
-
-// ---------------------------------------------------------------------------
-// Engine function types
-// ---------------------------------------------------------------------------
-
-typedef void(__cdecl* DrawLine3D_t)(float, float, float, float, float, float, uint32_t);
-typedef void(__cdecl* DrawSphere_t)(float, float, float, float, uint32_t);
-typedef void(__cdecl* Printf3D_t)(const float*, const char*, ...);
-typedef int(__fastcall* FindBody_t)(int collModel, void* edx, int bodyId);
-typedef void(__fastcall* GetWorldXform_t)(int bodyPtr, void* edx, float* out, const float* entMat, int flags);
-typedef float(__fastcall* GetRadius_t)(int bodyPtr, void* edx);
-
-// ---------------------------------------------------------------------------
-// Resolved pointers
-// ---------------------------------------------------------------------------
-
-static DrawLine3D_t    s_drawLine3D   = nullptr;
-static DrawSphere_t    s_drawSphere   = nullptr;
-static Printf3D_t     s_printf3D     = nullptr;
-static FindBody_t      s_findBody     = nullptr;
-static GetWorldXform_t s_getWorldXform = nullptr;
-static GetRadius_t     s_getRadius    = nullptr;
-
-// Addresses (confirmed in Ghidra)
+// Hook target addresses (modtools-specific)
 static constexpr uintptr_t kPostCollUpdate  = 0x00514490;
 static constexpr uintptr_t kFreeCamUpdate   = 0x004ae1b0; // FreeCamera::Update
-static constexpr uintptr_t kDrawLine3D      = 0x007e96b0;
-static constexpr uintptr_t kDrawSphere      = 0x007ea240;
-static constexpr uintptr_t kPrintf3D        = 0x007e9fd0;
-static constexpr uintptr_t kFindBody        = 0x00435830;
-static constexpr uintptr_t kGetWorldXform   = 0x00428a20;
-static constexpr uintptr_t kGetRadius       = 0x00428260;
 
 // EntityHover struct offsets (this = ECX in PostCollisionUpdate)
 static constexpr int kOff_CollModel   = 0x54;
@@ -96,19 +63,10 @@ static CachedHover s_cache[kMaxHovers];
 static int s_cacheWrite = 0;       // next write slot (round-robin)
 static DWORD s_lastClearTick = 0;  // for per-frame cache clear
 
-// ---------------------------------------------------------------------------
-// Color helpers (RedColor: r | g<<8 | b<<16 | a<<24 on little-endian x86)
-// ---------------------------------------------------------------------------
-
-// RedColor is BGRA in memory (engine byte order)
-static uint32_t make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
-   return (uint32_t)b | ((uint32_t)g << 8) | ((uint32_t)r << 16) | ((uint32_t)a << 24);
-}
-
 static uint32_t compression_color(float c) {
    if (c < 0.f) c = 0.f;
    if (c > 1.f) c = 1.f;
-   return make_color((uint8_t)(c * 255.f), (uint8_t)((1.f - c) * 255.f), 0);
+   return DebugCommand::makeColor((uint8_t)(c * 255.f), (uint8_t)((1.f - c) * 255.f), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +114,7 @@ static void cache_hover(char* hover)
       cb.omZF        = *(float*)(bi + kBody_OmZF);
       cb.compression = *(float*)(hover + kOff_SpringBase + i * kSpringStride);
 
-      int bodyPtr = s_findBody(collModel, nullptr, bodyId);
+      int bodyPtr = DebugCommand::findBody(collModel, nullptr, bodyId);
       if (!bodyPtr) {
          cb.radius = 0.f;
          cb.pos[0] = cb.pos[1] = cb.pos[2] = 0.f;
@@ -164,11 +122,11 @@ static void cache_hover(char* hover)
       }
 
       float xform[16] = {};
-      s_getWorldXform(bodyPtr, nullptr, xform, entMat, 0);
+      DebugCommand::getWorldXform(bodyPtr, nullptr, xform, entMat, 0);
       cb.pos[0] = xform[12];
       cb.pos[1] = xform[13];
       cb.pos[2] = xform[14];
-      cb.radius = s_getRadius(bodyPtr, nullptr);
+      cb.radius = DebugCommand::getRadius(bodyPtr, nullptr);
       if (cb.radius < 0.05f) cb.radius = 0.1f;
    }
 }
@@ -179,7 +137,7 @@ static void cache_hover(char* hover)
 
 static void draw_all_cached()
 {
-   uint32_t colWhite = make_color(255, 255, 255);
+   uint32_t colWhite = DebugCommand::makeColor(255, 255, 255);
 
    for (int h = 0; h < kMaxHovers; ++h) {
       CachedHover& ch = s_cache[h];
@@ -194,15 +152,15 @@ static void draw_all_cached()
          uint32_t col = compression_color(cb.compression);
 
          // Sphere at body position
-         s_drawSphere(bx, by, bz, cb.radius, col);
+         DebugCommand::drawSphere(bx, by, bz, cb.radius, col);
 
          // White line = spring length (from sphere center)
-         s_drawLine3D(bx, by, bz, bx, by - cb.springLen, bz, colWhite);
+         DebugCommand::drawLine3D(bx, by, bz, bx, by - cb.springLen, bz, colWhite);
 
          // Colored fill line = compression
          if (cb.compression > 0.01f) {
             float fill = cb.springLen * cb.compression;
-            s_drawLine3D(bx + 0.05f, by, bz, bx + 0.05f, by - fill, bz, col);
+            DebugCommand::drawLine3D(bx + 0.05f, by, bz, bx + 0.05f, by - fill, bz, col);
          }
 
          // Labels (2 lines per body: 12 per hover, fits 5 hovers in the 64 limit)
@@ -212,8 +170,8 @@ static void draw_all_cached()
 
          float tp0[3] = { bx, by + cb.radius + 0.5f, bz };
          float tp1[3] = { bx, by + cb.radius + 0.3f, bz };
-         s_printf3D(tp0, "S%d Len=%d.%d", i, lenW, lenD);
-         s_printf3D(tp1, "V%d P%d R%d",
+         DebugCommand::printf3D(tp0, "S%d Len=%d.%d", i, lenW, lenD);
+         DebugCommand::printf3D(tp1, "V%d P%d R%d",
                     (int)cb.velF, (int)cb.omXF, (int)cb.omZF);
       }
    }
@@ -262,24 +220,17 @@ static void __fastcall hooked_FreeCamUpdate(void* ecx, void* edx, float dt)
    }
 
    // Other commands that need freecam drawing
-   debug_weapon_ranges_freecam_tick();
+   WeaponRanges::freecamTick();
 }
 
 // ---------------------------------------------------------------------------
 // Install / uninstall
 // ---------------------------------------------------------------------------
 
-void debug_hover_springs_install(uintptr_t exe_base)
+void HoverSprings::install(uintptr_t exe_base)
 {
-   s_drawLine3D    = (DrawLine3D_t)     res(exe_base, kDrawLine3D);
-   s_drawSphere    = (DrawSphere_t)     res(exe_base, kDrawSphere);
-   s_printf3D      = (Printf3D_t)      res(exe_base, kPrintf3D);
-   s_findBody      = (FindBody_t)       res(exe_base, kFindBody);
-   s_getWorldXform = (GetWorldXform_t)  res(exe_base, kGetWorldXform);
-   s_getRadius     = (GetRadius_t)      res(exe_base, kGetRadius);
-
-   s_origPostCollUpdate = (PostCollUpdate_t)res(exe_base, kPostCollUpdate);
-   s_origFreeCamUpdate  = (FreeCamUpdate_t) res(exe_base, kFreeCamUpdate);
+   s_origPostCollUpdate = (PostCollUpdate_t)resolve(exe_base, kPostCollUpdate);
+   s_origFreeCamUpdate  = (FreeCamUpdate_t) resolve(exe_base, kFreeCamUpdate);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -288,12 +239,12 @@ void debug_hover_springs_install(uintptr_t exe_base)
    DetourTransactionCommit();
 }
 
-void debug_hover_springs_late_init()
+void HoverSprings::lateInit()
 {
    DebugCommandRegistry::addBool("RenderHoverSprings", &s_enabled);
 }
 
-void debug_hover_springs_uninstall()
+void HoverSprings::uninstall()
 {
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

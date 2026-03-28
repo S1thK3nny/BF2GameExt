@@ -142,6 +142,7 @@
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />
     <ClCompile Include="src\lua\lua_funcs.cpp" />
+    <ClCompile Include="src\debug_commands\debug_command.cpp" />
     <ClCompile Include="src\debug_commands\command_registry.cpp" />
     <ClCompile Include="src\debug_commands\hover_springs.cpp" />
     <ClCompile Include="src\debug_commands\weapon_ranges.cpp" />

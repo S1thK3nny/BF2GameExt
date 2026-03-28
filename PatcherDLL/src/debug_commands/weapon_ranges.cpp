@@ -13,28 +13,6 @@
 // draws in both play mode and freecam.
 // =============================================================================
 
-static constexpr uintptr_t kBase = 0x400000u;
-static inline void* res(uintptr_t exe_base, uintptr_t addr) {
-   return (void*)((addr - kBase) + exe_base);
-}
-
-// ---------------------------------------------------------------------------
-// Engine function types
-// ---------------------------------------------------------------------------
-
-typedef void(__cdecl* DrawLine3D_t)(float, float, float, float, float, float, uint32_t);
-typedef void(__cdecl* Printf3D_t)(const float*, const char*, ...);
-
-// ---------------------------------------------------------------------------
-// Resolved pointers
-// ---------------------------------------------------------------------------
-
-static DrawLine3D_t s_drawLine3D = nullptr;
-static Printf3D_t  s_printf3D   = nullptr;
-
-static constexpr uintptr_t kDrawLine3D = 0x007e96b0;
-static constexpr uintptr_t kPrintf3D   = 0x007e9fd0;
-
 // Hook targets
 static constexpr uintptr_t kSoldierPCU = 0x00530B20;  // EntitySoldier::PostCollisionUpdate
 
@@ -83,14 +61,6 @@ static int   s_cacheCount    = 0;
 static DWORD s_lastClearTick = 0;
 
 // ---------------------------------------------------------------------------
-// Color helpers (RedColor: b | g<<8 | r<<16 | a<<24 on little-endian x86)
-// ---------------------------------------------------------------------------
-
-static uint32_t make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
-   return (uint32_t)b | ((uint32_t)g << 8) | ((uint32_t)r << 16) | ((uint32_t)a << 24);
-}
-
-// ---------------------------------------------------------------------------
 // Draw a flat circle on the XZ plane using line segments
 // ---------------------------------------------------------------------------
 
@@ -106,7 +76,7 @@ static void draw_circle_xz(float cx, float cy, float cz, float radius,
       float angle = step * (float)i;
       float nx = cx + radius * cosf(angle);
       float nz = cz + radius * sinf(angle);
-      s_drawLine3D(px, cy, pz, nx, cy, nz, color);
+      DebugCommand::drawLine3D(px, cy, pz, nx, cy, nz, color);
       px = nx;
       pz = nz;
    }
@@ -180,10 +150,10 @@ static void cache_soldier(char* ecx)
 
 static void draw_all_cached()
 {
-   uint32_t colRed    = make_color(255, 60,  60);   // MinRange
-   uint32_t colGreen  = make_color(60,  255, 60);   // OptimalRange
-   uint32_t colBlue   = make_color(60,  120, 255);  // MaxRange
-   uint32_t colYellow = make_color(255, 255, 60);   // AI band
+   uint32_t colRed    = DebugCommand::makeColor(255, 60,  60);   // MinRange
+   uint32_t colGreen  = DebugCommand::makeColor(60,  255, 60);   // OptimalRange
+   uint32_t colBlue   = DebugCommand::makeColor(60,  120, 255);  // MaxRange
+   uint32_t colYellow = DebugCommand::makeColor(255, 255, 60);   // AI band
 
    for (int i = 0; i < kMaxCached; ++i) {
       CachedRanges& cr = s_cache[i];
@@ -205,16 +175,16 @@ static void draw_all_cached()
       // Labels at cardinal directions on each ring
       float minLabelR = cr.minRange > 0.01f ? cr.minRange : 1.f;
       float lm[3] = { x + minLabelR, y + 1.f, z };
-      s_printf3D(lm, "Min %.0f", cr.minRange);
+      DebugCommand::printf3D(lm, "Min %.0f", cr.minRange);
 
       float lo[3] = { x, y + 1.f, z + cr.optimalRange };
-      s_printf3D(lo, "Optimal %.0f", cr.optimalRange);
+      DebugCommand::printf3D(lo, "Optimal %.0f", cr.optimalRange);
 
       float lx[3] = { x - cr.maxRange, y + 1.f, z };
-      s_printf3D(lx, "Max %.0f", cr.maxRange);
+      DebugCommand::printf3D(lx, "Max %.0f", cr.maxRange);
 
       float lb[3] = { x, y + 1.f, z - cr.outerBand };
-      s_printf3D(lb, "Band %.0f-%.0f", cr.innerBand, cr.outerBand);
+      DebugCommand::printf3D(lb, "Band %.0f-%.0f", cr.innerBand, cr.outerBand);
    }
 }
 
@@ -259,7 +229,7 @@ static void refresh_cache_from_char_array()
 {
    if (!s_exeBase) return;
 
-   auto addr = [](uintptr_t a) -> uintptr_t { return (a - kBase) + s_exeBase; };
+   auto addr = [](uintptr_t a) -> uintptr_t { return (a - kUnrelocatedBase) + s_exeBase; };
 
    uintptr_t arrayBase = *(uintptr_t*)addr(kCharArrayPtr);
    int maxChars = *(int*)addr(kMaxCharsPtr);
@@ -329,7 +299,7 @@ static void refresh_cache_from_char_array()
 //       Need to find the correct freecam-safe pointer path to the active weapon.
 // ---------------------------------------------------------------------------
 
-void debug_weapon_ranges_freecam_tick()
+void WeaponRanges::freecamTick()
 {
    if (!s_enabled) return;
 
@@ -346,13 +316,11 @@ void debug_weapon_ranges_freecam_tick()
 // Install / lateInit / uninstall
 // ---------------------------------------------------------------------------
 
-void debug_weapon_ranges_install(uintptr_t exe_base)
+void WeaponRanges::install(uintptr_t exe_base)
 {
-   s_exeBase    = exe_base;
-   s_drawLine3D = (DrawLine3D_t)res(exe_base, kDrawLine3D);
-   s_printf3D   = (Printf3D_t) res(exe_base, kPrintf3D);
+   s_exeBase = exe_base;
 
-   s_origSoldierPCU = (SoldierPCU_t)res(exe_base, kSoldierPCU);
+   s_origSoldierPCU = (SoldierPCU_t)resolve(exe_base, kSoldierPCU);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -360,12 +328,12 @@ void debug_weapon_ranges_install(uintptr_t exe_base)
    DetourTransactionCommit();
 }
 
-void debug_weapon_ranges_late_init()
+void WeaponRanges::lateInit()
 {
    DebugCommandRegistry::addBool("showweaponranges", &s_enabled);
 }
 
-void debug_weapon_ranges_uninstall()
+void WeaponRanges::uninstall()
 {
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

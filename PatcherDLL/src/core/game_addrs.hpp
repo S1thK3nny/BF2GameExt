@@ -104,6 +104,24 @@ namespace modtools {
    // GameLog(fmt, ...) — printf-style debug logger, __cdecl
    constexpr uintptr_t game_log                    = 0x007E3D50;
 
+   // ---- Debug Drawing (RedCommandConsole / 3D overlay) -----------------------
+
+   constexpr uintptr_t draw_line_3d               = 0x007e96b0;
+   constexpr uintptr_t draw_sphere                = 0x007ea240;
+   constexpr uintptr_t printf_3d                  = 0x007e9fd0;
+
+   // ---- Physics / Collision ----------------------------------------------------
+
+   constexpr uintptr_t find_body                   = 0x00435830;
+   constexpr uintptr_t get_world_xform             = 0x00428a20;
+   constexpr uintptr_t get_radius                  = 0x00428260;
+
+   // ---- Debug Console (RedCommandConsole) ------------------------------------
+
+   constexpr uintptr_t console_add_variable        = 0x007ed530;
+   constexpr uintptr_t console_add_command         = 0x007ed560;
+   constexpr uintptr_t engine_console_reg          = 0x00a145c0; // registers "render_soldier_colliding"
+
 } // namespace modtools
 
 // =============================================================================

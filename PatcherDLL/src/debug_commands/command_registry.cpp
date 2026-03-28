@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "command_registry.hpp"
+#include "debug_command.hpp"
+#include "core/game_addrs.hpp"
 
 #include <detours.h>
 
@@ -9,16 +11,11 @@
 // Add new command headers here
 // -----------------------------------------------------------------------------
 
-static constexpr uintptr_t kBase = 0x400000u;
-
 typedef int(__cdecl* AddVariable_t)(const char* name, const void* multivar);
 typedef int(__cdecl* AddCommand_t)(const char* name, DebugCommandRegistry::CommandCallback fn);
 
 static AddVariable_t s_addVariable = nullptr;
 static AddCommand_t  s_addCommand  = nullptr;
-
-static constexpr uintptr_t kAddVariable = 0x007ed530;
-static constexpr uintptr_t kAddCommand  = 0x007ed560;
 
 // ---------------------------------------------------------------------------
 // Piggyback hook: the engine registers its own console variables from static
@@ -26,8 +23,6 @@ static constexpr uintptr_t kAddCommand  = 0x007ed560;
 // "render_soldier_colliding") so our addBool/addCommand calls run at exactly
 // the same timing, on the same heap, with the console fully initialized.
 // ---------------------------------------------------------------------------
-
-static constexpr uintptr_t kEngineConsoleReg = 0x00a145c0; // registers "render_soldier_colliding"
 
 typedef void(__cdecl* EngineConsoleReg_t)();
 static EngineConsoleReg_t s_origEngineConsoleReg = nullptr;
@@ -42,22 +37,26 @@ static void __cdecl hooked_EngineConsoleReg()
    if (s_done) return;
    s_done = true;
 
-   debug_hover_springs_late_init();
-   debug_weapon_ranges_late_init();
+   HoverSprings::lateInit();
+   WeaponRanges::lateInit();
    // Add new command lateInits here
 }
 
 // Phase 1: resolve engine pointers, install Detour hooks (early, DLL_PROCESS_ATTACH)
 void DebugCommandRegistry::install(uintptr_t exe_base)
 {
-   s_addVariable = (AddVariable_t)((kAddVariable - kBase) + exe_base);
-   s_addCommand  = (AddCommand_t) ((kAddCommand  - kBase) + exe_base);
+   using namespace game_addrs::modtools;
 
-   s_origEngineConsoleReg = (EngineConsoleReg_t)((kEngineConsoleReg - kBase) + exe_base);
+   s_addVariable = (AddVariable_t)resolve(exe_base, console_add_variable);
+   s_addCommand  = (AddCommand_t) resolve(exe_base, console_add_command);
+
+   s_origEngineConsoleReg = (EngineConsoleReg_t)resolve(exe_base, engine_console_reg);
+
+   DebugCommand::initEngine(exe_base);
 
    // Install hooks for all commands
-   debug_hover_springs_install(exe_base);
-   debug_weapon_ranges_install(exe_base);
+   HoverSprings::install(exe_base);
+   WeaponRanges::install(exe_base);
    // Add new command installs here
 
    // Hook the engine's console registration to piggyback our commands
@@ -74,8 +73,8 @@ void DebugCommandRegistry::lateInit()
 
 void DebugCommandRegistry::uninstall()
 {
-   debug_hover_springs_uninstall();
-   debug_weapon_ranges_uninstall();
+   HoverSprings::uninstall();
+   WeaponRanges::uninstall();
    // Add new command uninstalls here
 
    DetourTransactionBegin();

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <stdint.h>
+#include "debug_command.hpp"
 
 // =============================================================================
-// ShowWeaponRanges — console debug command
+// WeaponRanges — console debug command
 //
 // Draws flat range circles around soldiers showing weapon AI ranges:
 //   Red    = MinRange
@@ -14,9 +14,12 @@
 // Usage: type "ShowWeaponRanges" in the ~ console to toggle.
 // =============================================================================
 
-void debug_weapon_ranges_install(uintptr_t exe_base);
-void debug_weapon_ranges_late_init();
-void debug_weapon_ranges_uninstall();
+class WeaponRanges : public DebugCommand {
+public:
+   static void install(uintptr_t exe_base);
+   static void lateInit();
+   static void uninstall();
 
-// Called from the shared FreeCamera::Update hook (owned by hover_springs)
-void debug_weapon_ranges_freecam_tick();
+   // Called from HoverSprings' shared FreeCamera::Update hook
+   static void freecamTick();
+};
