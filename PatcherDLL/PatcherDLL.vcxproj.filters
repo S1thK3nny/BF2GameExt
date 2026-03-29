@@ -55,6 +55,9 @@
     <ClInclude Include="src\entity\soldier_fp_animation_override.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\flyer_boost_animation.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\cloth_collision_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -112,6 +115,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\flyer_boost_animation.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\cloth_collision_fix.cpp">

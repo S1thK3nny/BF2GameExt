@@ -174,6 +174,22 @@ namespace modtools {
 
    // ---- Entity / Vehicle (Carrier/Flyer) ---------------------------------------
 
+   constexpr uintptr_t flyer_init_animations         = 0x004F6560;
+   constexpr uintptr_t zephyr_anim_bank_find        = 0x00803750;
+
+   // ---- Animation / ZephyrPose (skeletal animation evaluation) ---------------
+
+   constexpr uintptr_t zephyr_pose_dyn_set_anim     = 0x0082AAC0;
+   constexpr uintptr_t zephyr_pose_dyn_set_time     = 0x0082A9C0;
+   constexpr uintptr_t zephyr_pose_static_ctor      = 0x0082C9D0;
+   constexpr uintptr_t zephyr_pose_static_dtor      = 0x0082CA00;
+   constexpr uintptr_t zephyr_pose_static_open      = 0x0082CA10;
+   constexpr uintptr_t zephyr_pose_static_set       = 0x0082D370;
+   constexpr uintptr_t zephyr_pose_static_blend     = 0x0082D580;
+   constexpr uintptr_t zephyr_skeleton_open         = 0x0082B660;
+   constexpr uintptr_t zephyr_skeleton_finalize     = 0x0082C390;
+   constexpr uintptr_t red_pose_convert_skel32      = 0x0082DA80;
+   constexpr uintptr_t g_identity_matrix            = 0x00CF6830;
    constexpr uintptr_t carrier_set_property         = 0x004D7210;
    constexpr uintptr_t carrier_attach_cargo         = 0x004D81F0;
    constexpr uintptr_t carrier_detach_cargo         = 0x004D8350;

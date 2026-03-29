@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "flyer_carrier_fixes.hpp"
+#include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
 
 #include <cmath>
@@ -960,7 +961,10 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
       return;
    }
 
+   // Boost animation: swap class anim + progress if boosting
+   bool boostApplied = flyer_boost_anim_render_prepare(structBase);
    original_FlyerRender(ecx, nullptr, param2, param3, param4);
+   if (boostApplied) flyer_boost_anim_render_restore(structBase);
 }
 
 // ---------------------------------------------------------------------------

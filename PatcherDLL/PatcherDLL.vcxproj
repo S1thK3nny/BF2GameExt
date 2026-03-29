@@ -112,6 +112,7 @@
     <ClInclude Include="src\entity\flyer_carrier_fixes.hpp" />
     <ClInclude Include="src\entity\soldier_prone.hpp" />
     <ClInclude Include="src\entity\soldier_fp_animation_override.hpp" />
+    <ClInclude Include="src\entity\flyer_boost_animation.hpp" />
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\grappling_hook.hpp" />
@@ -137,6 +138,7 @@
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp" />
+    <ClCompile Include="src\entity\flyer_boost_animation.cpp" />
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
