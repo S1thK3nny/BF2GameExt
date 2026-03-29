@@ -290,6 +290,9 @@ static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
 // VehicleTracker::sMemoryPool global
 static void* g_VehicleTrackerPool = nullptr;
 
+// GameLoop::sPauseMode — true when game is ESC-paused
+static uint8_t* g_pauseMode = nullptr;
+
 // Per-carrier animation progress override (used by render hook)
 struct CarrierAnimOverride {
    void* structBase;    // carrier struct_base (inner), nullptr = unused
@@ -298,6 +301,8 @@ struct CarrierAnimOverride {
    float startProg;     // progress value at activation
    float endProg;       // progress value at end
    bool  active;
+   DWORD lastRenderMs;  // last render frame timestamp (for pause tracking)
+   DWORD pausedAccum;   // accumulated paused time in ms
 };
 static CarrierAnimOverride g_animOverride[kMaxTrackedCarriers] = {};
 
@@ -439,6 +444,8 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
       g_animOverride[slot].startProg = 0.0f;    // start at first frame
       g_animOverride[slot].endProg = 1.0f;      // end at last frame
       g_animOverride[slot].active = true;
+      g_animOverride[slot].lastRenderMs = g_animOverride[slot].startTick;
+      g_animOverride[slot].pausedAccum = 0;
    }
 }
 
@@ -873,7 +880,11 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
 
    if (overrideSlot >= 0) {
       CarrierAnimOverride& ov = g_animOverride[overrideSlot];
-      float elapsed = (float)(GetTickCount() - ov.startTick) / 1000.0f;
+      DWORD now = GetTickCount();
+      if (g_pauseMode && *g_pauseMode)
+         ov.pausedAccum += now - ov.lastRenderMs;
+      ov.lastRenderMs = now;
+      float elapsed = (float)(now - ov.startTick - ov.pausedAccum) / 1000.0f;
       float t = (ov.duration > 0.0f) ? elapsed / ov.duration : 1.0f;
       if (t > 1.0f) t = 1.0f;
 
@@ -1765,6 +1776,7 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    g_VehicleTrackerPool    = resolve(exe_base, game_addrs::modtools::vehicle_tracker_pool);
    original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, game_addrs::modtools::carrier_initiate_landing);
    g_CarrierKill           = (fn_CarrierKill_t)   resolve(exe_base, game_addrs::modtools::carrier_kill);
+   g_pauseMode             = (uint8_t*)           resolve(exe_base, game_addrs::modtools::gameloop_pause_mode);
 
    // Turret/aimer/passenger activation functions
    g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::turret_activate);

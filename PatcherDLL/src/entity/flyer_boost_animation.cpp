@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
+#include "core/game_addrs.hpp"
 
 #include <cstring>
 #include <detours.h>
@@ -41,6 +42,9 @@ static constexpr uintptr_t kRenderThisToBase = 0x94;
 
 // Global identity matrix used by Skeleton::Finalize
 static void* g_identityMatrix = nullptr;  // 0x00CF6830 relocated
+
+// GameLoop::sPauseMode — true when game is ESC-paused
+static uint8_t* g_pauseMode = nullptr;
 
 // ---------------------------------------------------------------------------
 // Engine function types (all from Render disassembly)
@@ -211,10 +215,13 @@ bool flyer_boost_anim_render_prepare(char* structBase)
       BoostInstance* inst = findOrCreateInst(structBase);
       if (!inst) return false;
 
-      // Update ratio
+      // Update ratio (freeze during pause)
       DWORD now = GetTickCount();
-      float dt = (float)(now - inst->lastTickMs) / 1000.0f;
-      if (dt > 0.5f) dt = 0.5f;
+      float dt = 0.0f;
+      if (!g_pauseMode || !*g_pauseMode) {
+         dt = (float)(now - inst->lastTickMs) / 1000.0f;
+         if (dt > 0.5f) dt = 0.5f;
+      }
       inst->lastTickMs = now;
 
       float target = isBoosting ? 1.0f : 0.0f;
@@ -322,6 +329,7 @@ void flyer_boost_anim_install(uintptr_t exe_base)
    fn_SkeletonFinalize = (fn_SkeletonFinalize_t)resolve(exe_base, zephyr_skeleton_finalize);
    fn_ConvertPose      = (fn_ConvertPose_t)     resolve(exe_base, red_pose_convert_skel32);
    g_identityMatrix    = (void*)                resolve(exe_base, g_identity_matrix);
+   g_pauseMode         = (uint8_t*)             resolve(exe_base, gameloop_pause_mode);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

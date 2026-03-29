@@ -244,6 +244,10 @@ namespace modtools {
    constexpr uintptr_t gc_particle_alloc_size_op    = 0x0045B8BD;
    constexpr uintptr_t gc_beam_alloc_size_op        = 0x0045B8FD;
 
+   // ---- GameLoop state ---------------------------------------------------------
+
+   constexpr uintptr_t gameloop_pause_mode          = 0x00c6aae8;  // bool, true when ESC paused
+
    // ---- State Machine / Triggers -----------------------------------------------
 
    constexpr uintptr_t trigger_update              = 0x00562dd0;
