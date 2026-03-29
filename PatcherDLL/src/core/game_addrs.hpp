@@ -166,6 +166,9 @@ namespace modtools {
    constexpr uintptr_t get_weapon_anim_map          = 0x00570760;
    constexpr uintptr_t set_weapon_anim_map          = 0x004170D5;
    constexpr uintptr_t assign_animations            = 0x00581AF0;
+   constexpr uintptr_t anim_finder_add_bank        = 0x00580860;  // AnimationFinder::_AddBank
+   constexpr uintptr_t anim_finder_add_entry       = 0x0057E220;  // AnimationFinder: add RedAnimation* to bank array
+   constexpr uintptr_t anim_hash_table             = 0x00D5B9E4;  // global PblHashTableCode for RedAnimation
    constexpr uintptr_t anim_instance                = 0x00B8D3C4;
 
    // ---- Entity / Vehicle -------------------------------------------------------

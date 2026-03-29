@@ -13,6 +13,7 @@
 #include "weapon/grappling_hook.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "entity/anim_bank_append.hpp"
 
 #include <detours.h>
 
@@ -320,6 +321,7 @@ void lua_hooks_install(uintptr_t exe_base)
    grapple_fix_install(exe_base);
    DebugCommandRegistry::install(exe_base);
    gc_visual_limits_install(exe_base);
+   anim_bank_append_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -348,6 +350,7 @@ void lua_hooks_uninstall()
    grapple_fix_uninstall();
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
+   anim_bank_append_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

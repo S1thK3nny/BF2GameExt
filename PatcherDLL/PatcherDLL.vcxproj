@@ -126,6 +126,7 @@
     <ClInclude Include="src\loading_screen\loading_screen.hpp" />
     <ClInclude Include="src\loading_screen\shared.hpp" />
     <ClInclude Include="src\shell\gc_visual_limits.hpp" />
+    <ClInclude Include="src\entity\anim_bank_append.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -140,6 +141,7 @@
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp" />
     <ClCompile Include="src\entity\flyer_boost_animation.cpp" />
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
+    <ClCompile Include="src\entity\anim_bank_append.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />
