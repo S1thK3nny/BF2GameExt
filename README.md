@@ -75,9 +75,9 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 - **Disguise Model Override** - Allows WeaponDisguise to swap the soldier's visual model to a specific GameModel instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Grappling Hook** *(experimental)* - Re-enables the cut grappling hook weapon with custom pull physics, slingshot mechanic (jump mid-pull to launch), and rope cable rendering. ODF properties: `PullSpeed`, `MaxRange`
 
-### Vehicle Fixes
-- **Carrier/Flyer Fixes** - Fixes landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier
+### Vehicle Additions and Fixes
 - **Flyer Boost Animation** - If a flyer's AnimationName bank contains an animation named `boost`, it will automatically play when boosting with a smooth blend transition. Frame 0 should be the normal flying pose and the final frame the full boost pose.
+- **Carrier Fixes** - Originally an unused class, the Carrier Fixes address landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier, making it viable for modders to use as a VehiclePad.
 
 ### Event Callbacks
 - **OnCharacterExitVehicle** - Register Lua callbacks that fire when soldiers dismount vehicles, with filtering by name, team, or class. Lua: `OnCEV(fn)`, `OnCEVName(name, fn)`, `OnCEVTeam(team, fn)`, `OnCEVClass(class, fn)`, `ReleaseCEV(handle)`

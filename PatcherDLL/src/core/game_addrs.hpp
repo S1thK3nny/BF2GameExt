@@ -248,6 +248,12 @@ namespace modtools {
 
    constexpr uintptr_t gameloop_pause_mode          = 0x00c6aae8;  // bool, true when ESC paused
 
+   // ---- Low-res animation table ------------------------------------------------
+
+   // Pointer entry in the lowres animation name table for prone (index 2).
+   // Points to "rifle_crouch_idle_takeknee" by default — patch to use prone anim.
+   constexpr uintptr_t lowres_prone_anim_name_ptr   = 0x00acfa68;
+
    // ---- State Machine / Triggers -----------------------------------------------
 
    constexpr uintptr_t trigger_update              = 0x00562dd0;

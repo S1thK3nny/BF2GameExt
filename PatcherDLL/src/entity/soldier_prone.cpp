@@ -116,6 +116,11 @@ static uint32_t* g_heightJumpTableEntry = nullptr;
 static uint8_t* g_acklayGatePtr        = nullptr;
 static uint8_t  g_acklayGateOrig[6]    = {};
 
+// Lowres prone animation name patch
+static const char* g_lowresProneAnimName = "rifle_prone_idle_emote";
+static const char** g_lowresProneNamePtr = nullptr;
+static const char*  g_lowresProneNameOrig = nullptr;
+
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
 static constexpr int kSoldierAnimWeapon = 0x020;  // WeaponClass -> WEAPON mSoldierAnimationWeapon enum
@@ -477,6 +482,20 @@ void prone_system_install(uintptr_t exe_base)
             *pAnd = 0x07;
     }
 
+    // -----------------------------------------------------------------------
+    // Lowres prone animation fix: patch the animation name table.
+    //
+    // SoldierAnimatorLowResClass::PostLoad looks up lowres animations by name.
+    // Index 2 (prone) uses "rifle_crouch_idle_takeknee" which doesn't exist
+    // in the shipped lowres banks, so it falls back to crouch.  Patch the
+    // table pointer to use "rifle_prone_idle_emote" instead.
+    // -----------------------------------------------------------------------
+    {
+        g_lowresProneNamePtr = (const char**)resolve(exe_base, lowres_prone_anim_name_ptr);
+        g_lowresProneNameOrig = *g_lowresProneNamePtr;
+        *g_lowresProneNamePtr = g_lowresProneAnimName;
+    }
+
 }
 
 void prone_system_uninstall()
@@ -505,6 +524,12 @@ void prone_system_uninstall()
     if (g_acklayGatePtr) {
         memcpy(g_acklayGatePtr, g_acklayGateOrig, 6);
         g_acklayGatePtr = nullptr;
+    }
+
+    // Restore lowres prone animation name
+    if (g_lowresProneNamePtr && g_lowresProneNameOrig) {
+        *g_lowresProneNamePtr = g_lowresProneNameOrig;
+        g_lowresProneNamePtr = nullptr;
     }
 
     // Detach hooks
