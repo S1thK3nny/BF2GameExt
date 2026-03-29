@@ -254,6 +254,11 @@ namespace modtools {
    // Points to "rifle_crouch_idle_takeknee" by default — patch to use prone anim.
    constexpr uintptr_t lowres_prone_anim_name_ptr   = 0x00acfa68;
 
+   // Jump table entry in GetAnimatorLocal_ for prone (case 2).
+   // Points to ESI=1 (crouch idle) — patch to point to ESI=2 (prone anim).
+   constexpr uintptr_t lowres_prone_jump_entry      = 0x005886a8;
+   constexpr uintptr_t lowres_prone_jump_target     = 0x00588575;  // MOV ESI,2
+
    // ---- State Machine / Triggers -----------------------------------------------
 
    constexpr uintptr_t trigger_update              = 0x00562dd0;

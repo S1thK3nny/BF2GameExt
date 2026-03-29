@@ -121,6 +121,10 @@ static const char* g_lowresProneAnimName = "rifle_prone_idle_emote";
 static const char** g_lowresProneNamePtr = nullptr;
 static const char*  g_lowresProneNameOrig = nullptr;
 
+// Lowres prone runtime dispatch patch (jump table entry)
+static uint32_t* g_lowresProneJumpEntry = nullptr;
+static uint32_t  g_lowresProneJumpOrig  = 0;
+
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
 static constexpr int kSoldierAnimWeapon = 0x020;  // WeaponClass -> WEAPON mSoldierAnimationWeapon enum
@@ -496,6 +500,20 @@ void prone_system_install(uintptr_t exe_base)
         *g_lowresProneNamePtr = g_lowresProneAnimName;
     }
 
+    // -----------------------------------------------------------------------
+    // Lowres prone runtime dispatch fix: patch the jump table.
+    //
+    // GetAnimatorLocal_ has a switch on mState.  The PRONE case (2) jumps
+    // to the CROUCH idle path (ESI=1).  Patch the jump table entry to point
+    // to the code that sets ESI=2 (the prone animation index).
+    // -----------------------------------------------------------------------
+    {
+        g_lowresProneJumpEntry = (uint32_t*)resolve(exe_base, lowres_prone_jump_entry);
+        g_lowresProneJumpOrig = *g_lowresProneJumpEntry;
+        uintptr_t target = (uintptr_t)resolve(exe_base, lowres_prone_jump_target);
+        *g_lowresProneJumpEntry = (uint32_t)target;
+    }
+
 }
 
 void prone_system_uninstall()
@@ -530,6 +548,12 @@ void prone_system_uninstall()
     if (g_lowresProneNamePtr && g_lowresProneNameOrig) {
         *g_lowresProneNamePtr = g_lowresProneNameOrig;
         g_lowresProneNamePtr = nullptr;
+    }
+
+    // Restore lowres prone runtime dispatch
+    if (g_lowresProneJumpEntry && g_lowresProneJumpOrig) {
+        *g_lowresProneJumpEntry = g_lowresProneJumpOrig;
+        g_lowresProneJumpEntry = nullptr;
     }
 
     // Detach hooks
