@@ -77,6 +77,7 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 
 ### Vehicle Fixes
 - **Carrier/Flyer Fixes** - Fixes landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier
+- **Flyer Boost Animation** - If a flyer's AnimationName bank contains an animation named `boost`, it will automatically play when boosting with a smooth blend transition. Frame 0 should be the normal flying pose and the final frame the full boost pose.
 
 ### Event Callbacks
 - **OnCharacterExitVehicle** - Register Lua callbacks that fire when soldiers dismount vehicles, with filtering by name, team, or class. Lua: `OnCEV(fn)`, `OnCEVName(name, fn)`, `OnCEVTeam(team, fn)`, `OnCEVClass(class, fn)`, `ReleaseCEV(handle)`
