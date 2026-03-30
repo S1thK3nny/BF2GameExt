@@ -14,6 +14,7 @@
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "entity/anim_bank_append.hpp"
+#include "weapon/shield_channel_fix.hpp"
 
 #include <detours.h>
 
@@ -322,6 +323,7 @@ void lua_hooks_install(uintptr_t exe_base)
    DebugCommandRegistry::install(exe_base);
    gc_visual_limits_install(exe_base);
    anim_bank_append_install(exe_base);
+   shield_channel_fix_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -351,6 +353,7 @@ void lua_hooks_uninstall()
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
    anim_bank_append_uninstall();
+   shield_channel_fix_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

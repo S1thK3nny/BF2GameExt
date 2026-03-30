@@ -116,6 +116,7 @@
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\grappling_hook.hpp" />
+    <ClInclude Include="src\weapon\shield_channel_fix.hpp" />
     <ClInclude Include="src\lua\lua_hooks.hpp" />
     <ClInclude Include="src\lua\lua_funcs.hpp" />
     <ClInclude Include="src\debug_commands\command_registry.hpp" />
@@ -144,6 +145,7 @@
     <ClCompile Include="src\entity\anim_bank_append.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
+    <ClCompile Include="src\weapon\shield_channel_fix.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />
     <ClCompile Include="src\lua\lua_funcs.cpp" />
     <ClCompile Include="src\debug_commands\debug_command.cpp" />

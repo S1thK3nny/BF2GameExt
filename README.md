@@ -68,12 +68,14 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 ### Soldier Systems
 - **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture system. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain rotation fix that prevented prone from working on slopes. Lua: `EnableProne(enable)`
 - **Multiple First-Person Animation Banks** - Allows each soldier class to use its own first-person animation bank instead of sharing one global set. Supports partial banks where missing animations fall through to defaults. ODF: `FirstPersonAnimationBank = bankname`
+- **Animation Bank Appending** - Allows animation banks to be extended with additional numbered sub-banks across multiple .lvl files. The engine's `AnimationFinder::_AddBank` only scans for sub-banks once during the first .lvl load, so late-loaded sub-banks (e.g. `human_5` from a modified `ingame.lvl` after a mod's `dc:ingame.lvl` already ran `_AddBank("human")`) are silently ignored. The fix hooks `_AddBank` to retroactively append any sub-banks that exist in the hash table but weren't picked up during the initial scan. Works for any bank, not just `human`
 - **Unit Class Removal** - Dynamically remove classes from a team's spawn menu at runtime. Lua: `RemoveUnitClass(team, class)`
 
 ### Weapon Systems
 - **Barrel Fire Origin Fix** - Fixes ordnances spawning from `bone_head` instead of `hp_fire` on WeaponCannon. Forces projectiles to originate from the actual barrel hardpoint. Lua: `SetBarrelFireOrigin(enable)`
 - **Disguise Model Override** - Allows WeaponDisguise to swap the soldier's visual model to a specific GameModel instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Grappling Hook** *(experimental)* - Re-enables the cut grappling hook weapon with custom pull physics, slingshot mechanic (jump mid-pull to launch), and rope cable rendering. ODF properties: `PullSpeed`, `MaxRange`
+- **Shield Channel Fix** - Fixes WeaponShield activating on any fire button press regardless of which weapon is selected. The shield's Update override reads the fire trigger directly without checking if it's the active weapon for its channel.
 
 ### Vehicle Additions and Fixes
 - **Flyer Boost Animation** - If a flyer's AnimationName bank contains an animation named `boost`, it will automatically play when boosting with a smooth blend transition. Frame 0 should be the normal flying pose and the final frame the full boost pose.

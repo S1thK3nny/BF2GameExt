@@ -283,6 +283,11 @@ namespace modtools {
    constexpr uintptr_t grapple_rtti_hash           = 0x00b7e098;
    constexpr uintptr_t grapple_rso_vtable          = 0x00A50E98;
 
+   // ---- Weapon / Shield ---------------------------------------------------------
+
+   constexpr uintptr_t weapon_update                = 0x0061D850;  // Weapon::Update
+   constexpr uintptr_t weapon_shield_update         = 0x0063F360;  // WeaponShield::Update
+
    // ---- Spline / Cable Rendering ----------------------------------------------
 
    constexpr uintptr_t spline_build                = 0x0083e720;

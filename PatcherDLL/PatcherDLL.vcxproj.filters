@@ -67,6 +67,9 @@
     <ClInclude Include="src\weapon\grappling_hook.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
+    <ClInclude Include="src\weapon\shield_channel_fix.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
     <ClInclude Include="src\lua\lua_hooks.hpp">
       <Filter>lua</Filter>
     </ClInclude>
@@ -127,6 +130,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\grappling_hook.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\shield_channel_fix.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\lua\lua_hooks.cpp">
