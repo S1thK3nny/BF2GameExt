@@ -66,6 +66,9 @@
     <ClInclude Include="src\bone_transform.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\directional_roll_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\lod_limit_patch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -75,11 +78,22 @@
     <ClInclude Include="src\flyer_sound_patch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-
     <ClInclude Include="src\door_limit_patch.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\hud_widescreen_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\aim_assist_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\spawn_screen_patch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game_types.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\jet_fall_fix.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -126,6 +140,9 @@
     <ClCompile Include="src\bone_transform.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\directional_roll_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\lod_limit_patch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -135,11 +152,19 @@
     <ClCompile Include="src\flyer_sound_patch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-
     <ClCompile Include="src\door_limit_patch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\hud_widescreen_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\aim_assist_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\spawn_screen_patch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\jet_fall_fix.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

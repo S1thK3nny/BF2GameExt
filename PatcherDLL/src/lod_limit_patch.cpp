@@ -3,6 +3,7 @@
 #include "lod_limit_patch.hpp"
 #include "cfile.hpp"
 #include "lua_hooks.hpp"
+#include "game/camera/RedSceneObject.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -68,6 +69,18 @@ struct lod_addrs {
    // RedLodData struct offsets
    uint32_t lod_class;           // _LodClass (int)
    uint32_t lod_lowRezFlags;     // mLowRezFlags (byte)
+
+   // --- nearScene.PushInfinite bool ---
+   // Setting this to true causes SetNearSceneRange to clamp nearFadeStart to a very large
+   // constant, so all objects stay in the near scene at normal game distances.
+   uintptr_t push_infinite_bool;  // RVA of the bool byte (writable .data, no VirtualProtect)
+
+   // --- Near/far crossfade cull patch ---
+   // 1-byte patch: change Jcc → JMP (0xEB) to prevent projected-distance cull from near scene.
+   // Modtools: JNZ (0x75) at RenderObject+0x359. Steam/GOG: JC (0x72) in FUN_006e31c0.
+   uintptr_t crossfade_cull_jcc;  // RVA of the Jcc byte
+   uint8_t   crossfade_cull_old;  // expected old opcode (0x75 modtools, 0x72 steam/gog)
+
 };
 
 // clang-format off
@@ -84,7 +97,7 @@ static const lod_addrs MODTOOLS = {
 
    .far_heap_alloc_size = 0x3f07bc,
    .far_heap_alloc_old  = 0x1008,
-   .far_heap_alloc_new  = 0x8008,
+   .far_heap_alloc_new  = 0x20008,   // 16384 * 8 + 8
    .far_heap_max_count  = 0x3f07cf,
 
    .fn_RenderFarObjects     = 0x3efa10,
@@ -110,6 +123,11 @@ static const lod_addrs MODTOOLS = {
 
    .lod_class       = 0x14,
    .lod_lowRezFlags = 0x18,
+
+   .push_infinite_bool = 0xa5bb75,
+
+   .crossfade_cull_jcc = 0x7f1147,
+   .crossfade_cull_old = 0x75,   // JNZ
 };
 
 static const lod_addrs STEAM = {
@@ -125,7 +143,7 @@ static const lod_addrs STEAM = {
 
    .far_heap_alloc_size = 0x2E4289,   // MOV EAX, 0x201 (count before *8)
    .far_heap_alloc_old  = 0x201,
-   .far_heap_alloc_new  = 0x1001,  // * 8 at runtime = 0x8008
+   .far_heap_alloc_new  = 0x4001,  // * 8 at runtime = 0x20008
    .far_heap_max_count  = 0x2E42AE,
 
    .fn_RenderFarObjects      = 0x2E2ED0,
@@ -151,6 +169,11 @@ static const lod_addrs STEAM = {
 
    .lod_class       = 0x14,
    .lod_lowRezFlags = 0x18,
+
+   .push_infinite_bool = 0x4f6ded,
+
+   .crossfade_cull_jcc = 0x2E3413,
+   .crossfade_cull_old = 0x72,   // JC
 };
 
 static const lod_addrs GOG = {
@@ -166,7 +189,7 @@ static const lod_addrs GOG = {
 
    .far_heap_alloc_size = 0x2E5329,   // MOV EAX, 0x201 (count before *8)
    .far_heap_alloc_old  = 0x201,
-   .far_heap_alloc_new  = 0x1001,     // * 8 at runtime = 0x8008
+   .far_heap_alloc_new  = 0x4001,     // * 8 at runtime = 0x20008
    .far_heap_max_count  = 0x2E534E,
 
    .fn_RenderFarObjects      = 0x2E3F70,
@@ -192,43 +215,48 @@ static const lod_addrs GOG = {
 
    .lod_class       = 0x14,
    .lod_lowRezFlags = 0x18,
+
+   .push_infinite_bool = 0x4f828d,
+
+   .crossfade_cull_jcc = 0x2E44B3,
+   .crossfade_cull_old = 0x72,   // JC
 };
 // clang-format on
 
 // ============================================================================
-// 2. New limits (8x vanilla)
+// 2. New limits (64x vanilla)
 // ============================================================================
 
 // Near-scene heap counts
-static constexpr uint32_t NEW_CLS0_COUNT       = 2048;    // 200 * ~10x
-static constexpr uint32_t NEW_CLS0_COST_LOD0   = 400000;  // 50000 * 8
-static constexpr uint32_t NEW_CLS0_COST_LOD1   = 24000;   // 3000 * 8
-static constexpr uint32_t NEW_CLS0_COST_LOD2   = 24000;   // 3000 * 8
-static constexpr uint32_t NEW_CLS0_COST_LOD3   = 320000;  // 40000 * 8
+static constexpr uint32_t NEW_CLS0_COUNT       = 12800;     // 200 * 64
+static constexpr uint32_t NEW_CLS0_COST_LOD0   = 3200000;   // 50000 * 64
+static constexpr uint32_t NEW_CLS0_COST_LOD1   = 192000;    // 3000 * 64
+static constexpr uint32_t NEW_CLS0_COST_LOD2   = 192000;    // 3000 * 64
+static constexpr uint32_t NEW_CLS0_COST_LOD3   = 2560000;   // 40000 * 64
 
-static constexpr uint32_t NEW_CLS1_COUNT       = 4096;    // 600 * ~7x
-static constexpr uint32_t NEW_CLS1_COST_LOD0   = 800000;  // 100000 * 8
-static constexpr uint32_t NEW_CLS1_COST_LOD1   = 176000;  // 22000 * 8
-static constexpr uint32_t NEW_CLS1_COST_LOD2   = 176000;  // 22000 * 8
-static constexpr uint32_t NEW_CLS1_COST_LOD3   = 320000;  // 40000 * 8
+static constexpr uint32_t NEW_CLS1_COUNT       = 38400;     // 600 * 64
+static constexpr uint32_t NEW_CLS1_COST_LOD0   = 6400000;   // 100000 * 64
+static constexpr uint32_t NEW_CLS1_COST_LOD1   = 1408000;   // 22000 * 64
+static constexpr uint32_t NEW_CLS1_COST_LOD2   = 1408000;   // 22000 * 64
+static constexpr uint32_t NEW_CLS1_COST_LOD3   = 2560000;   // 40000 * 64
 
-static constexpr uint32_t NEW_CLS2_COST_LOD0   = 144000;  // 18000 * 8
-static constexpr uint32_t NEW_CLS2_COST_LOD2   = 8000;    // 1000 * 8
-static constexpr uint32_t NEW_CLS2_COST_LOD3   = 320000;  // 40000 * 8
+static constexpr uint32_t NEW_CLS2_COST_LOD0   = 1152000;   // 18000 * 64
+static constexpr uint32_t NEW_CLS2_COST_LOD2   = 64000;     // 1000 * 64
+static constexpr uint32_t NEW_CLS2_COST_LOD3   = 2560000;   // 40000 * 64
 
-static constexpr uint32_t NEW_CLS3N_COUNT      = 2400;    // 300 * 8
-static constexpr uint32_t NEW_CLS3N_COST       = 8000;    // 1000 * 8
+static constexpr uint32_t NEW_CLS3N_COUNT      = 19200;     // 300 * 64
+static constexpr uint32_t NEW_CLS3N_COST       = 64000;     // 1000 * 64
 
-static constexpr uint32_t NEW_CLS3U_COUNT      = 8192;    // 1500 * ~5x
-static constexpr uint32_t NEW_CLS3U_COST       = 80000;   // 10000 * 8
+static constexpr uint32_t NEW_CLS3U_COUNT      = 96000;     // 1500 * 64
+static constexpr uint32_t NEW_CLS3U_COST       = 640000;    // 10000 * 64
 
-static constexpr uint32_t NEW_CLS3_COST_LOD3   = 320000;  // 40000 * 8
+static constexpr uint32_t NEW_CLS3_COST_LOD3   = 2560000;   // 40000 * 64
 
 // Far-scene
-static constexpr uint32_t NEW_FAR_HEAP_MAX     = 4096;
-static constexpr uint32_t NEW_FAR_HEAP_ALLOC   = NEW_FAR_HEAP_MAX * 8 + 8;  // 0x8008
-static constexpr int      NEW_FAR_MAX_OBJECTS  = 2048;
-static constexpr int      NEW_FAR_MAX_CLASS2   = 80;
+static constexpr uint32_t NEW_FAR_HEAP_MAX     = 16384;
+static constexpr uint32_t NEW_FAR_HEAP_ALLOC   = NEW_FAR_HEAP_MAX * 8 + 8;  // 0x20008
+static constexpr int      NEW_FAR_MAX_OBJECTS  = 16384;
+static constexpr int      NEW_FAR_MAX_CLASS2   = 1280;
 
 // ============================================================================
 // 3. Helper: patch a 4-byte immediate at a given offset
@@ -250,7 +278,45 @@ static int patch_imm32(uintptr_t exe_base, uintptr_t offset, uint32_t old_val, u
 }
 
 // ============================================================================
-// 4. Near-scene patches
+// 4. nearScene.PushInfinite — single byte write to .data (no VirtualProtect)
+// ============================================================================
+
+static void apply_push_infinite(uintptr_t exe_base, const lod_addrs& a, cfile& log)
+{
+   if (!a.push_infinite_bool) return;
+   *(uint8_t*)(a.push_infinite_bool + exe_base) = 1;
+   log.printf("  nearScene.PushInfinite set\n");
+}
+
+// ============================================================================
+// 5. Crossfade cull patch (.text — requires VirtualProtect)
+// ============================================================================
+
+static int apply_crossfade_cull_patch(uintptr_t exe_base, const lod_addrs& a, cfile& log)
+{
+   if (!a.crossfade_cull_jcc) return 0;
+
+   uint8_t* addr = (uint8_t*)(a.crossfade_cull_jcc + exe_base);
+   if (*addr != a.crossfade_cull_old) {
+      log.printf("  WARNING: crossfade_cull_jcc mismatch at %p (expected 0x%02X, got 0x%02X)\n",
+                 addr, (int)a.crossfade_cull_old, (int)*addr);
+      return 0;
+   }
+
+   DWORD old_prot;
+   if (!VirtualProtect(addr, 1, PAGE_EXECUTE_READWRITE, &old_prot)) {
+      log.printf("  ERROR: VirtualProtect failed for crossfade_cull_jcc (err %lu)\n", GetLastError());
+      return 0;
+   }
+   *addr = 0xEB;  // Jcc → JMP short (keep same rel8, jump to render path)
+   VirtualProtect(addr, 1, old_prot, &old_prot);
+
+   log.printf("  crossfade_cull_jcc: patched 0x%02X → 0xEB at %p\n", (int)a.crossfade_cull_old, addr);
+   return 1;
+}
+
+// ============================================================================
+// 5. Near-scene patches
 // ============================================================================
 
 static int apply_near_scene_patches(uintptr_t exe_base, const lod_addrs& a, cfile& log)
@@ -295,7 +361,7 @@ static int apply_near_scene_patches(uintptr_t exe_base, const lod_addrs& a, cfil
 }
 
 // ============================================================================
-// 5. Far-scene binary patches (SetupStaticWorld)
+// 7. Far-scene binary patches (SetupStaticWorld)
 // ============================================================================
 
 static int apply_far_scene_patches(uintptr_t exe_base, const lod_addrs& a, cfile& log)
@@ -311,7 +377,7 @@ static int apply_far_scene_patches(uintptr_t exe_base, const lod_addrs& a, cfile
 }
 
 // ============================================================================
-// 6. RenderFarObjects Detours hook
+// 8. RenderFarObjects Detours hook
 // ============================================================================
 
 // --- Resolved function pointers ---
@@ -323,8 +389,7 @@ using fn_GetNearFadeStart    = float(__cdecl*)();
 using fn_GetFarRange         = float(__cdecl*)();
 using fn_HeapPop             = void(__thiscall*)(void* heap);
 
-// Virtual render call: __thiscall(this, int mode, float opacity, uint flags)
-using fn_SceneObjectRender   = void(__thiscall*)(char* self, int mode, float opacity, uint32_t flags);
+// Virtual render call — vtable slot 19 (RedSceneObject_vftable::Render)
 
 static fn_RenderFarObjects  original_RenderFarObjects = nullptr;
 static fn_GetMinScreenSize  game_GetMinScreenSize     = nullptr;
@@ -377,18 +442,17 @@ static inline float cam_dot_dist(char* obj, float radius)
    float dx = obj_pos_x(obj) - g_camPos[0];
    float dy = obj_pos_y(obj) - g_camPos[1];
    float dz = obj_pos_z(obj) - g_camPos[2];
-   return dx * g_camFront[0] + dy * g_camFront[1] + dz * g_camFront[2] + radius;
+   return sqrtf(dx*dx + dy*dy + dz*dz) + radius;
 }
 
 static inline void render_object(char* obj, int mode, float opacity, uint32_t flags)
 {
-   auto vtable = *(uintptr_t**)obj;
-   auto renderFn = (fn_SceneObjectRender)vtable[0x4C / 4];
-   renderFn(obj, mode, opacity, flags);
+   auto* vt = *(game::RedSceneObject_vftable**)obj;
+   vt->Render(obj, mode, opacity, flags);
 }
 
 // ============================================================================
-// 7. Hooked RenderFarObjects
+// 9. Hooked RenderFarObjects
 // ============================================================================
 
 static void __cdecl hooked_RenderFarObjects()
@@ -520,7 +584,7 @@ static void __cdecl hooked_RenderFarObjects()
 }
 
 // ============================================================================
-// 8. Detours install / uninstall
+// 10. Detours install / uninstall
 // ============================================================================
 
 static bool g_hooks_installed = false;
@@ -557,7 +621,7 @@ static bool install_hook(uintptr_t exe_base, const lod_addrs& a, cfile& log)
    s_lodClass       = a.lod_class;
    s_lodLowRezFlags = a.lod_lowRezFlags;
 
-   // Install Detours hook
+   // Install Detours hooks
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_RenderFarObjects, hooked_RenderFarObjects);
@@ -587,7 +651,7 @@ static void uninstall_hook()
 }
 
 // ============================================================================
-// 9. Public API
+// 11. Public API
 // ============================================================================
 
 bool patch_lod_limits(uintptr_t exe_base)
@@ -606,14 +670,28 @@ bool patch_lod_limits(uintptr_t exe_base)
 
       log.printf("LodLimit: identified build\n");
 
+      apply_push_infinite(exe_base, *build, log);
+
       int nearCount = apply_near_scene_patches(exe_base, *build, log);
       log.printf("LodLimit: %d near-scene patches applied\n", nearCount);
 
+      // Far-scene patches and RenderFarObjects hook are disabled: with PushInfinite=true,
+      // nearFadeStart is clamped to ~3.4e38, so no objects ever enter the far heap at normal
+      // game distances.  The code is retained below for reference.
+#if 0
       int farCount = apply_far_scene_patches(exe_base, *build, log);
       log.printf("LodLimit: %d far-scene patches applied\n", farCount);
 
       if (!install_hook(exe_base, *build, log))
          return false;
+#endif
+
+      // Crossfade cull patch disabled: redundant with PushInfinite (nearFadeStart ~3.4e38,
+      // projected dist never exceeds it at normal game distances).
+#if 0
+      int cullCount = apply_crossfade_cull_patch(exe_base, *build, log);
+      log.printf("LodLimit: %d crossfade-cull patches applied\n", cullCount);
+#endif
 
       return true;
    }

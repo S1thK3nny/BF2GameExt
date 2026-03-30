@@ -3,6 +3,10 @@
 #include "lua_hooks.hpp"
 #include "game_events.hpp"
 #include "controller_support.hpp"
+#include "game/weapon/Weapon.hpp"
+#include "game/weapon/Aimer.hpp"
+#include "game/misc/Team.hpp"
+#include "game/controllable/Controllable.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -284,19 +288,11 @@ static int lua_HttpPost(lua_State* L)
 // @return #string          ODF name (e.g. "rep_weap_dc-15s_blaster_carbine"), or nil.
 //
 // Resolution chain:
-//   mCharacterStructArray + charIndex * 0x1B0  → charSlot
-//   *(charSlot + 0x148)                        → intermediate
-//   intermediate + 0x18                        → Controllable*
-//   *(Controllable + 0x4D8 + slotIdx*4)        → Weapon* (slot array, up to 8)
-//   *(Weapon + 0x060)                          → WeaponClass*
+//   Character[charIndex].mUnit                 → Controllable*
+//   Controllable::GetWeaponIndex(channel)      → slot index (vtable slot 15)
+//   Controllable::GetWeaponPtr(slotIdx)        → Weapon*    (vtable slot 16)
+//   Weapon::mStart                             → WeaponClass*
 //   WeaponClass + 0x30                         → char[] ODF name
-//
-// Weapon index tracking (confirmed via runtime testing):
-//   ctrl+0x4F8 is an array of bytes, one per weapon channel.
-//   Each byte is a direct index into the weapon slot array at ctrl+0x4D8.
-//     ctrl+0x4F8 byte[0] = selected slot index for channel 0 (primary)
-//     ctrl+0x4F9 byte[1] = selected slot index for channel 1 (secondary)
-//   General: *(uint8_t*)(ctrl + 0x4F8 + channel) = slot index for that channel.
 // ---------------------------------------------------------------------------
 static int lua_GetCharacterWeapon(lua_State* L)
 {
@@ -318,33 +314,28 @@ static int lua_GetCharacterWeapon(lua_State* L)
    if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) { g_lua.pushnil(L); return 1; }
+      auto* character = reinterpret_cast<game::Character*>((char*)arrayBase + charIndex * 0x1B0);
+      auto* ctrl = character->mUnit;
+      if (!ctrl) { g_lua.pushnil(L); return 1; }
 
-      char* ctrl = intermediate + 0x18;  // Controllable*
-
-      // Read the slot index for the requested channel
-      uint8_t slotIdx = 0;
-      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      int slotIdx = 0;
+      __try { slotIdx = ctrl->vtable0->GetWeaponIndex(ctrl, channel); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
+      if (slotIdx < 0 || slotIdx >= 8) { g_lua.pushnil(L); return 1; }
 
-      if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
-
-      // Read weapon pointer from slot array
-      uintptr_t wpn = 0;
-      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      game::Weapon* weapon = nullptr;
+      __try { weapon = ctrl->vtable0->GetWeaponPtr(ctrl, slotIdx); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+      if (!weapon) { g_lua.pushnil(L); return 1; }
 
       // Read WeaponClass pointer
-      uintptr_t wc = 0;
-      __try { wc = *(uintptr_t*)(wpn + 0x060); }
+      void* wc = nullptr;
+      __try { wc = weapon->mStart; }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!wc) { g_lua.pushnil(L); return 1; }
 
       // Read ODF name from WeaponClass
-      const char* odfName = (const char*)(wc + 0x30);
+      const char* odfName = (const char*)((uintptr_t)wc + 0x30);
       g_lua.pushlstring(L, odfName, strlen(odfName));
       return 1;
    }
@@ -395,14 +386,14 @@ static int lua_RemoveUnitClass(lua_State* L)
    // Get team pointer from g_ppTeams[teamIndex].
    if (!g_game.team_array_ptr) return 0;
    const uintptr_t teamArrayBase = *(uintptr_t*)res(g_game.team_array_ptr);
-   void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
-   if (!teamPtr) {
+   auto* team = *(game::Team**)(teamArrayBase + (uintptr_t)teamIndex * 4);
+   if (!team) {
       if (fn_GameLog) fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
       return 0;
    }
 
-   const int classCount = *(int*)((char*)teamPtr + 0x48);
-   void** classDefArr   = *(void***)((char*)teamPtr + 0x50);
+   const int classCount = team->mClassCount;
+   auto** classDefArr   = team->mClassArray;
 
    int foundSlot = -1;
 
@@ -462,8 +453,8 @@ static int lua_RemoveUnitClass(lua_State* L)
    // character is skipped for that spawn tick and respawns normally on the next
    // cycle. The warning is harmless and the alternative (tombstoning) prevents
    // slot reuse, breaking the add/remove cycle.
-   int* minArr = *(int**)((char*)teamPtr + 0x54);
-   int* maxArr = *(int**)((char*)teamPtr + 0x58);
+   int* minArr = team->mClassMinUnits;
+   int* maxArr = team->mClassMaxUnits;
    const int lastSlot = classCount - 1;
 
    for (int i = foundSlot; i < lastSlot; ++i) {
@@ -475,7 +466,7 @@ static int lua_RemoveUnitClass(lua_State* L)
    classDefArr[lastSlot] = nullptr;
    minArr[lastSlot]      = 0;
    maxArr[lastSlot]      = 0;
-   *(int*)((char*)teamPtr + 0x48) = lastSlot;
+   team->mClassCount = lastSlot;
 
    // Return the ODF name when called by name; nil when called by index
    // (classDef+0x18 is only a hash — the name string offset is unconfirmed).
@@ -746,38 +737,33 @@ static int lua_DumpAimerInfo(lua_State* L)
                        ? g_lua.tointeger(L, 2) : 0;
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) return 0;
-      char* ctrl = intermediate + 0x18;
+      auto* character = reinterpret_cast<game::Character*>((char*)arrayBase + charIndex * 0x1B0);
+      auto* ctrl = character->mUnit;
+      if (!ctrl) return 0;
 
       // Get weapon from channel
-      uint8_t slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel);
-      if (slotIdx >= 8) return 0;
-      uintptr_t wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4);
-      if (!wpn) return 0;
-
-      // Weapon::mAimer at weapon+0x70
-      void* aimer = *(void**)(wpn + 0x70);
+      int slotIdx = ctrl->vtable0->GetWeaponIndex(ctrl, channel);
+      if (slotIdx < 0 || slotIdx >= 8) return 0;
+      auto* weapon = ctrl->vtable0->GetWeaponPtr(ctrl, slotIdx);
+      if (!weapon) return 0;
+      auto* aimer = weapon->mAimer;
       if (!aimer) return 0;
 
       FILE* f = nullptr;
       if (fopen_s(&f, "Bfront2.log", "a") != 0 || !f) return 0;
 
-      float* firePos  = (float*)((char*)aimer + 0x88);
+      float* firePos  = &aimer->mFirePos.x;
       float* mountPos = (float*)((char*)aimer + 0x54);
-      float* rootPos  = (float*)((char*)aimer + 0x70);
+      float* rootPos  = &aimer->mRootPos.x;
       int barrel      = *(int*)((char*)aimer + 0x204);
 
-      // Weapon::mFirePointMatrix at weapon+0x20 (PblMatrix)
-      float* fpm = (float*)(wpn + 0x20);
-      // Weapon::mFirePos at weapon+0x7C (PblVector3)
-      float* wpnFirePos = (float*)(wpn + 0x7C);
+      float* fpm = &weapon->mFirePointMatrix.m[0][0];
+      float* wpnFirePos = &weapon->mFirePos.x;
 
-      float wpnZoom = *(float*)(wpn + 0xBC);
+      float wpnZoom = weapon->mZoom;
 
       // Dump bytes around where mIsAiming might be on the Controllable
-      uintptr_t owner = *(uintptr_t*)(wpn + 0x6C);
+      uintptr_t owner = (uintptr_t)weapon->mOwner;
 
       fprintf(f, "=== Aimer Dump (char %d, ch %d) ===\n", charIndex, channel);
       fprintf(f, "  Weapon::mZoom (+0xBC): %.6f\n", wpnZoom);
@@ -850,30 +836,30 @@ static int lua_DebugCharacterInfo(lua_State* L)
    }
 
    char buf[512];
-   char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+   auto* character = reinterpret_cast<game::Character*>((char*)arrayBase + charIndex * 0x1B0);
 
    __try {
-      int team = *(int*)(charSlot + 0x134);
-      char* intermediate = *(char**)(charSlot + 0x148);
+      int team = character->mTeamNumber;
+      auto* ctrl = character->mUnit;
 
-      if (!intermediate) {
-         snprintf(buf, sizeof(buf), "char %d: team=%d, intermediate=NULL", charIndex, team);
+      if (!ctrl) {
+         snprintf(buf, sizeof(buf), "char %d: team=%d, mUnit=NULL", charIndex, team);
          g_lua.pushstring(L, buf);
          return 1;
       }
 
-      char* entitySoldier = intermediate - 0x240;
-      void* vtable   = *(void**)entitySoldier;
-      unsigned int nameHash = *(unsigned int*)(entitySoldier + 4);
-      void* entClass = *(void**)(entitySoldier + 8);
+      auto* entity = game::ControllableToEntity(ctrl);
+      void* vtable   = entity->mEntityEx.vtable;
+      unsigned int nameHash = entity->mEntityEx.mId;
+      void* entClass = entity->mEntityEx.mEntityClass;
 
       const char* entityName = call_hash_to_name(nameHash);
 
       if (!entClass) {
          snprintf(buf, sizeof(buf),
-            "char %d: team=%d, intermediate=%p, entitySoldier=%p, vtable=%p, "
+            "char %d: team=%d, ctrl=%p, entity=%p, vtable=%p, "
             "nameHash=0x%08X (\"%s\"), entClass=NULL",
-            charIndex, team, intermediate, entitySoldier, vtable,
+            charIndex, team, ctrl, entity, vtable,
             nameHash, entityName ? entityName : "<null>");
          g_lua.pushstring(L, buf);
          return 1;
@@ -1051,11 +1037,10 @@ static int lua_GetEntityMovementSpeed(lua_State* L)
 // @return #bool              true on success, nil on failure.
 //
 // Resolution chain:
-//   mCharacterStructArray + charIndex * 0x1B0  -> charSlot
-//   *(charSlot + 0x148)                        -> intermediate
-//   intermediate + 0x18                        -> Controllable*
-//   *(Controllable + 0x4D8 + slotIdx*4)        -> Weapon* (slot array, up to 8)
-//   *(Weapon + 0x060)                          -> WeaponClass*
+//   Character[charIndex].mUnit                 -> Controllable*
+//   Controllable::GetWeaponIndex(channel)      -> slot index (vtable slot 15)
+//   Controllable::GetWeaponPtr(slotIdx)        -> Weapon*    (vtable slot 16)
+//   Weapon::mStart                             -> WeaponClass*
 //   WeaponClass + 0x30                         -> char[] ODF name
 //
 // Limitations:
@@ -1087,25 +1072,22 @@ static int lua_SetCharacterWeapon(lua_State* L)
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) { g_lua.pushnil(L); return 1; }
-
-      char* ctrl = intermediate + 0x18;  // Controllable*
+      auto* character = reinterpret_cast<game::Character*>((char*)arrayBase + charIndex * 0x1B0);
+      auto* ctrl = character->mUnit;
+      if (!ctrl) { g_lua.pushnil(L); return 1; }
 
       // Get active weapon slot for this channel.
-      uint8_t slotIdx = 0;
-      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      int slotIdx = 0;
+      __try { slotIdx = ctrl->vtable0->GetWeaponIndex(ctrl, channel); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
+      if (slotIdx < 0 || slotIdx >= 8) { g_lua.pushnil(L); return 1; }
 
-      uintptr_t wpn = 0;
-      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      game::Weapon* weapon = nullptr;
+      __try { weapon = ctrl->vtable0->GetWeaponPtr(ctrl, slotIdx); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
-
+      if (!weapon) { g_lua.pushnil(L); return 1; }
       uintptr_t startWc = 0;
-      __try { startWc = *(uintptr_t*)(wpn + 0x060); }
+      __try { startWc = (uintptr_t)weapon->mStart; }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!startWc || startWc == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
 
@@ -1165,22 +1147,22 @@ static int lua_SetCharacterWeapon(lua_State* L)
          for (int ci = 0; ci < scanLimit && !sourceWpn; ci++) {
             if (ci == charIndex) continue;
             __try {
-               char* cs2 = (char*)arrayBase + ci * 0x1B0;
-               char* im2 = *(char**)(cs2 + 0x148);
-               if (!im2 || im2 == (char*)0xCDCDCDCDu) continue;
-               char* ct2 = im2 + 0x18;
-               for (int si = 0; si < 8 && !sourceWpn; si++) {
+               auto* chr2 = reinterpret_cast<game::Character*>((char*)arrayBase + ci * 0x1B0);
+               auto* ctrl2 = chr2->mUnit;
+               if (!ctrl2) continue;
+               int wpnCount = ctrl2->vtable0->GetWeaponCount(ctrl2);
+               for (int si = 0; si < wpnCount && !sourceWpn; si++) {
                   __try {
-                     uintptr_t w = *(uintptr_t*)((uintptr_t)ct2 + 0x4D8 + si * 4);
-                     if (!w || w == 0xCDCDCDCDu) continue;
-                     uintptr_t wc = *(uintptr_t*)(w + 0x060);
+                     auto* scanWpn = ctrl2->vtable0->GetWeaponPtr(ctrl2, si);
+                     if (!scanWpn) continue;
+                     uintptr_t wc = (uintptr_t)scanWpn->mStart;
                      if (!wc || wc == 0xCDCDCDCDu) continue;
                      const char* wcName = (const char*)(wc + 0x30);
                      __try {
                         size_t wl = strlen(wcName), tl = strlen(targetOdf);
                         if ((_stricmp(wcName, targetOdf) == 0) ||
                             (wl > tl && _stricmp(wcName + wl - tl, targetOdf) == 0))
-                           sourceWpn = w;
+                           sourceWpn = (uintptr_t)scanWpn;
                      } __except(EXCEPTION_EXECUTE_HANDLER) {}
                   } __except(EXCEPTION_EXECUTE_HANDLER) {}
                }
@@ -1190,9 +1172,10 @@ static int lua_SetCharacterWeapon(lua_State* L)
 
       // Patch factory+0x18 (OrdnanceClass*) and factory+0x1c from the source weapon.
       if (sourceWpn) {
+         auto* srcWeapon = reinterpret_cast<game::Weapon*>(sourceWpn);
          uintptr_t srcFactory = 0, playerFactory = 0;
-         __try { srcFactory    = *(uintptr_t*)(sourceWpn + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         __try { playerFactory = *(uintptr_t*)(wpn        + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         __try { srcFactory    = (uintptr_t)srcWeapon->m_pAmmoCounter; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         __try { playerFactory = (uintptr_t)weapon->m_pAmmoCounter; } __except(EXCEPTION_EXECUTE_HANDLER) {}
          if (srcFactory && playerFactory) {
             uintptr_t ord18 = 0; uint32_t val1c = 0;
             __try { ord18 = *(uintptr_t*)(srcFactory + 0x018); } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -1202,16 +1185,16 @@ static int lua_SetCharacterWeapon(lua_State* L)
          }
 
          // Swap vtable so virtual dispatch matches the target weapon type.
-         uintptr_t srcVtable = 0;
-         __try { srcVtable = *(uintptr_t*)(sourceWpn); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         if (srcVtable && srcVtable != 0xCDCDCDCDu)
-            __try { *(uintptr_t*)(wpn) = srcVtable; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         game::Weapon_vftable* srcVtable = nullptr;
+         __try { srcVtable = srcWeapon->vtable; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         if (srcVtable && (uintptr_t)srcVtable != 0xCDCDCDCDu)
+            __try { weapon->vtable = srcVtable; } __except(EXCEPTION_EXECUTE_HANDLER) {}
       }
 
       // Write all three WC pointers in the Weapon instance.
-      __try { *(uintptr_t*)(wpn + 0x060) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      __try { *(uintptr_t*)(wpn + 0x064) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      __try { *(uintptr_t*)(wpn + 0x068) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { weapon->mStart       = (void*)foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { weapon->mClass       = (void*)foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { weapon->mRenderClass = (void*)foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
       if (fn_GameLog) fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] -> '%s' (newWc=0x%08x src=%s)\n",
                  charIndex, channel, slotIdx, targetOdf,

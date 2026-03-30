@@ -2,6 +2,9 @@
 #include "controller_rumble.hpp"
 #include "lua_hooks.hpp"
 
+#include "game/weapon/Weapon.hpp"
+#include "game/controllable/Controllable.hpp"
+
 #include <detours.h>
 #include <cmath>
 
@@ -88,20 +91,7 @@ struct WeaponRumbleOffsets {
    static constexpr unsigned timeAtMaxCharge          = 0xEC;
 };
 
-// Weapon instance offsets (from Ghidra PDB, all builds)
-static constexpr unsigned WEAPON_MCLASS_OFFSET   = 0x64;
-static constexpr unsigned WEAPON_MOWNER_OFFSET   = 0x6C;
-static constexpr unsigned WEAPON_MSTATE_OFFSET   = 0xB0;
-
-enum WeaponState : int {
-   WS_IDLE     = 0,
-   WS_FIRE     = 1,
-   WS_FIRE2    = 2,
-   WS_CHARGE   = 3,
-   WS_RELOAD   = 4,
-   WS_OVERHEAT = 5,
-   WS_EMPTY    = 6,
-};
+// WeaponState enum and field offsets now in game/weapon/Weapon.hpp
 
 // Xbox heavy motor scaling constant
 static constexpr float HEAVY_MOTOR_SCALE = 0.7f;
@@ -124,7 +114,7 @@ static LARGE_INTEGER s_recoilStart  = {};
 static bool  s_recoilActive         = false;
 
 // ---------------------------------------------------------------------------
-// Charge state — sustained per-frame accumulation during WS_CHARGE
+// Charge state — sustained per-frame accumulation during game::WPN_CHARGE
 // Matching Xbox Weapon_UpdateChargeRumble + Rumble_SetSustainedState
 // ---------------------------------------------------------------------------
 
@@ -154,8 +144,7 @@ static LARGE_INTEGER s_vanillaLastUpdate = {};
 // Offsets from Controllable* to Damageable health fields.
 // Entity layout: GameObject(+0) → Damageable(+0x140) → mCurHealth(+0x04)
 // Controllable is at +0x240 from entity base (verified: EntitySoldier, EntityFlyer).
-static constexpr int HEALTH_FROM_CONTROLLABLE    = 0x144 - 0x240;  // -0xFC
-static constexpr int MAXHEALTH_FROM_CONTROLLABLE = 0x148 - 0x240;  // -0xF8
+// Health reads use ControllableToEntity → GameObject.mDamageable
 
 static float s_damageLight       = 0.0f;   // light motor intensity (ratio * 2)
 static float s_damageHeavy       = 0.0f;   // heavy motor intensity (ratio * 0.7)
@@ -391,12 +380,12 @@ void rumble_on_signal_fire(void* weapon)
    if (!g_rumbleEnabled || !s_XInputSetState) return;
 
    __try {
-      void* owner = *(void**)((char*)weapon + WEAPON_MOWNER_OFFSET);
+      auto* wpn = static_cast<game::Weapon*>(weapon);
+      auto* owner = wpn->mOwner;
       if (!owner) return;
-      int playerId = *(int*)((char*)owner + g_game.controllable_mPlayerId_offset);
-      if (playerId != 0) return;
+      if (owner->mPlayerId != 0) return;
 
-      void* weaponClass = *(void**)((char*)weapon + WEAPON_MCLASS_OFFSET);
+      void* weaponClass = wpn->mClass;
       if (!weaponClass) return;
 
       using O = WeaponRumbleOffsets;
@@ -506,23 +495,21 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
    }
 
    // Only process rumble for local player's weapons
+   auto* wpn = static_cast<game::Weapon*>(weapon);
    __try {
-      void* owner = *(void**)((char*)weapon + WEAPON_MOWNER_OFFSET);
+      auto* owner = wpn->mOwner;
       if (!owner) return result;
-      int playerId = *(int*)((char*)owner + g_game.controllable_mPlayerId_offset);
-      if (playerId != 0) return result;
+      if (owner->mPlayerId != 0) return result;
    } __except (EXCEPTION_EXECUTE_HANDLER) { return result; }
 
    __try {
-      int state = *(int*)((char*)weapon + WEAPON_MSTATE_OFFSET);
-
       // --- CHARGE state: accumulate charge rumble (Xbox Weapon_UpdateChargeRumble) ---
-      if (state == WS_CHARGE) {
+      if (wpn->mState == game::WPN_CHARGE) {
          bool newChargeCycle = (s_chargingWeapon != weapon);
          s_chargingWeapon = weapon;
          QueryPerformanceCounter(&s_chargeLastSeen);
 
-         void* weaponClass = *(void**)((char*)weapon + WEAPON_MCLASS_OFFSET);
+         void* weaponClass = wpn->mClass;
          if (!weaponClass) { output_vibration(); return result; }
 
          using O = WeaponRumbleOffsets;
@@ -597,15 +584,17 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
          if (sincePoll >= 0.001f) {
             QueryPerformanceCounter(&s_lastHealthPoll);
 
-            void* owner = *(void**)((char*)weapon + WEAPON_MOWNER_OFFSET);
+            auto* owner = wpn->mOwner;
             if (owner) {
+               auto* entity = game::ControllableToEntity(owner);
+               auto& dmg = entity->mDamageable;
                // Owner changed (class switch, vehicle enter/exit) — reset tracking
                if (owner != s_lastHealthOwner) {
                   s_lastHealthOwner = owner;
-                  s_prevPlayerHealth = *(float*)((char*)owner + HEALTH_FROM_CONTROLLABLE);
+                  s_prevPlayerHealth = dmg.mCurHealth;
                } else {
-                  float curHealth = *(float*)((char*)owner + HEALTH_FROM_CONTROLLABLE);
-                  float maxHealth = *(float*)((char*)owner + MAXHEALTH_FROM_CONTROLLABLE);
+                  float curHealth = dmg.mCurHealth;
+                  float maxHealth = dmg.mMaxHealth;
 
                   // Sanity: maxHealth should be a reasonable positive float
                   if (maxHealth > 0.0f && maxHealth < 100000.0f &&

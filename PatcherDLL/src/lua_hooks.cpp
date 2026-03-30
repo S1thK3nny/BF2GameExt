@@ -5,6 +5,10 @@
 #include "controller_support.hpp"
 #include "controller_rumble.hpp"
 
+#include "game/controllable/Controllable.hpp"
+#include "game/weapon/Weapon.hpp"
+#include "game/weapon/Aimer.hpp"
+
 #include <detours.h>
 
 lua_api g_lua = {};
@@ -90,27 +94,27 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    // Two cases to handle:
    //   1. Weapon has ZoomFirstPerson — zooming transitions into first-person
    //   2. Player is already in first-person and zooms any weapon
-   void* owner = *(void**)((char*)weapon + 0x6C);
+   auto* wpn = static_cast<game::Weapon*>(weapon);
+   auto* owner = wpn->mOwner;
    if (owner) {
-      bool isZoomed = *(bool*)((char*)owner + g_game.controllable_mIsAiming_offset);
+      bool isZoomed = owner->mIsAiming;
       if (isZoomed) {
          // Case 1: weapon class forces first-person on zoom
          if (fn_ZoomFirstPerson && fn_ZoomFirstPerson(weapon))
             return false;
          // Case 2: already in first-person view
-         void* tracker = *(void**)((char*)owner + 0x34);
+         void* tracker = owner->mTrackableData.mTracker;
          if (tracker && *(bool*)((char*)tracker + 0x14))
             return false;
       }
    }
 
    __try {
-      void* aimer = *(void**)((char*)weapon + 0x70);   // Weapon::mAimer
+      auto* aimer = wpn->mAimer;
       if (!aimer) return false;
 
-      // Weapon::mFirePointMatrix at weapon+0x20 (PblMatrix, 0x40 bytes).
-      // PblMatrix::trans row is at offset 0x30 — the world-space fire position.
-      float* trans = (float*)((char*)weapon + 0x20 + 0x30);
+      // mFirePointMatrix trans row = world-space fire position.
+      float* trans = wpn->mFirePointMatrix.m[3];
 
       // Validate: check for uninitialized (0xCDCDCDCD) or zero
       const uint32_t raw = *(uint32_t*)&trans[0];
@@ -118,8 +122,8 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
           (trans[0] == 0.0f && trans[1] == 0.0f && trans[2] == 0.0f))
          return false;
 
-      float* aimerFirePos = (float*)((char*)aimer + 0x88);  // Aimer::mFirePos
-      float* rootPos      = (float*)((char*)aimer + 0x70);  // Aimer::mRootPos
+      float* aimerFirePos = &aimer->mFirePos.x;
+      float* rootPos      = &aimer->mRootPos.x;
 
       // Water reflection check: the rendering reflection pass can mirror
       // mFirePointMatrix Y across the water plane. Normal barrel-to-root
@@ -170,7 +174,6 @@ static int resolve_char_index_from_controllable(void* controllable)
 {
    if (!controllable) return -1;
    if (!g_game.char_array_base_ptr || !g_game.char_array_max_count) return -1;
-   if (!g_game.controllable_mCharacter_offset) return -1;
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - 0x400000u + base; };
@@ -180,7 +183,8 @@ static int resolve_char_index_from_controllable(void* controllable)
    const int maxChars = *(int*)res(g_game.char_array_max_count);
 
    // Read Controllable.mCharacter — back-pointer to the Character array slot
-   uintptr_t chrPtr = *(uintptr_t*)((char*)controllable + g_game.controllable_mCharacter_offset);
+   auto* ctrl = static_cast<game::Controllable*>(controllable);
+   uintptr_t chrPtr = (uintptr_t)ctrl->mCharacter;
    if (!chrPtr || chrPtr < arrayBase) return -1;
 
    int idx = (int)((chrPtr - arrayBase) / 0x1B0);
@@ -248,8 +252,8 @@ float get_entity_movement_speed(void* entity)
    if (!entity) return 0.0f;
 
    __try {
-      // EntityControllable: Controllable subobject at +0x240, velocity offset is build-specific
-      float* vel = (float*)((char*)entity + 0x240 + g_game.controllable_to_velocity_offset);
+      auto* ctrl = game::EntityToControllable(static_cast<game::GameObject*>(entity));
+      float* vel = game::Controllable_GetVelocity(ctrl);
       return sqrtf(vel[0] * vel[0] + vel[2] * vel[2]);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return 0.0f;
@@ -372,7 +376,8 @@ void clear_character_speed_factor(int charIndex)
 // Apply per-character velocity cap. Called from the velocity hook for each owner.
 static void apply_character_speed(void* owner, int charIdx, bool isPlayer, bool isAiming)
 {
-   int soldierState = *(int*)((char*)owner + g_game.controllable_to_soldierState_offset);
+   auto* ctrl = static_cast<game::Controllable*>(owner);
+   int soldierState = game::Controllable_GetSoldierState(ctrl);
    bool stateAllowed = (soldierState == 0 || soldierState == 1);
 
    float effectiveFactor = 1.0f;
@@ -492,7 +497,7 @@ static void apply_character_speed(void* owner, int charIdx, bool isPlayer, bool 
 
    // Cap velocity to maxSpeed * effectiveFactor (only clamps — no jitter)
    if (effectiveFactor < 1.0f) {
-      void* soldierClass = *(void**)((char*)owner + g_game.controllable_to_soldierClass_offset);
+      void* soldierClass = game::Controllable_GetSoldierClass(ctrl);
       if (soldierClass) {
          float maxSpeed  = *(float*)((char*)soldierClass + g_game.soldierClass_maxSpeed_offset);
          float maxStrafe = *(float*)((char*)soldierClass + g_game.soldierClass_maxStrafe_offset);
@@ -500,7 +505,7 @@ static void apply_character_speed(void* owner, int charIdx, bool isPlayer, bool 
          float capStrafe = maxStrafe * effectiveFactor;
          float cap = (capSpeed > capStrafe) ? capSpeed : capStrafe;
 
-         float* vel = (float*)((char*)owner + g_game.controllable_to_velocity_offset);
+         float* vel = game::Controllable_GetVelocity(ctrl);
          float hSpeedSq = vel[0] * vel[0] + vel[2] * vel[2];
          if (hSpeedSq > cap * cap) {
             float scale = cap / sqrtf(hSpeedSq);
@@ -517,13 +522,13 @@ static bool __fastcall hooked_override_soldier_velocity(void* thisPtr, void* /*e
 {
    bool result = original_override_soldier_velocity(thisPtr, p1, p2, p3, p4);
 
-   void* owner = *(void**)((char*)thisPtr + 0x6C);
+   auto* owner = static_cast<game::Weapon*>(thisPtr)->mOwner;
    if (!owner) return result;
 
    int charIdx = resolve_char_index_from_controllable(owner);
    if (charIdx < 0) return result;
 
-   bool isAiming = *(bool*)((char*)owner + g_game.controllable_mIsAiming_offset);
+   bool isAiming = owner->mIsAiming;
    bool isPlayer = false;
 
    // Track the player (only humans aim/zoom)
@@ -550,8 +555,9 @@ static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
 
    // Debounce: SignalFire can be called multiple times per trigger pull (salvo).
    // Read mLastFireTime before the original call. If unchanged after, skip.
+   auto* wpn = static_cast<game::Weapon*>(weapon);
    float prevFireTime = 0.0f;
-   __try { prevFireTime = *(float*)((char*)weapon + g_game.weapon_mLastFireTime_offset); }
+   __try { prevFireTime = game::Weapon_GetLastFireTime(wpn); }
    __except (EXCEPTION_EXECUTE_HANDLER) {}
 
    original_signal_fire(weapon);
@@ -559,8 +565,7 @@ static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
    if (!g_L) return;
 
    __try {
-      float newFireTime = *(float*)((char*)weapon + g_game.weapon_mLastFireTime_offset);
-      if (prevFireTime == newFireTime) return;
+      if (prevFireTime == game::Weapon_GetLastFireTime(wpn)) return;
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
    // Per-shot recoil rumble (Xbox-faithful, before Lua dispatch)
@@ -568,21 +573,21 @@ static void __fastcall hooked_signal_fire(void* weapon, void* /*edx*/)
       rumble_on_signal_fire(weapon);
 
    __try {
-      // Weapon ODF name: weapon+mClass -> WeaponClass*, +0x30 -> char[]
-      void* weaponClass = *(void**)((char*)weapon + g_game.weapon_mClass_offset);
+      // Weapon ODF name: WeaponClass* -> +0x30 -> char[]
+      void* weaponClass = wpn->mClass;
       if (!weaponClass) return;
       const char* odfName = (const char*)((char*)weaponClass + 0x30);
       if (!odfName || !odfName[0]) return;
 
       // Owner Controllable
-      void* owner = *(void**)((char*)weapon + 0x6C);
+      auto* owner = wpn->mOwner;
       if (!owner) return;
 
       // Vehicle hop: follow mPilot if owner is a vehicle
-      void* shooter = owner;
-      int pilotType = *(int*)((char*)owner + g_game.controllable_mPilotType_offset);
-      void* pilot   = *(void**)((char*)owner + g_game.controllable_mPilot_offset);
-      if (pilotType != 1 && !(pilotType == 4 && pilot == owner)) {
+      game::Controllable* shooter = owner;
+      auto* pilot = owner->mPilot;
+      if (owner->mPilotType != game::PILOT_DRIVER &&
+          !(owner->mPilotType == 4 && pilot == owner)) {
          if (pilot) shooter = pilot;
       }
 
@@ -635,21 +640,13 @@ static bool __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, bo
                int idx = (int)((chrPtr - arrayBase) / 0x1B0);
                if (idx >= 0 && idx < maxChars) {
                   charIndex = idx;
-                  // Character.mVehicle (+0x14C) is a Controllable*, but Lua
-                  // expects an EntityEx*/GameObject* (what GetEntityClass uses).
-                  // Use the virtual Trackable::GetGameObject() call — the same
-                  // method vanilla GetCharacterVehicle uses. This works for all
-                  // Controllable types (vehicles, turrets, etc.) because each
-                  // class implements GetGameObject() in its own vtable.
-                  // Trackable subobject is at Controllable+0x18, and
-                  // GetGameObject is vtable slot 8 (offset 0x20).
-                  void* vehCtrl = *(void**)((char*)chrPtr + 0x14C);
-                  if (vehCtrl) {
-                     uintptr_t trackable = (uintptr_t)vehCtrl + 0x18;
-                     uintptr_t vtable = *(uintptr_t*)trackable;
-                     typedef void* (__thiscall* fn_get_game_object)(void*);
-                     auto getGameObj = (fn_get_game_object)(*(uintptr_t*)(vtable + 0x20));
-                     vehicleEntity = getGameObj((void*)trackable);
+                  // Character.mVehicle is a Controllable*, but Lua expects
+                  // a GameObject*. Use Trackable::GetGameObject() virtual call
+                  // — same method vanilla GetCharacterVehicle uses.
+                  auto* chr = reinterpret_cast<game::Character*>(chrPtr);
+                  auto* ctrl = chr->mVehicle;
+                  if (ctrl) {
+                     vehicleEntity = ctrl->vtable1->GetGameObject(&ctrl->vtable1);
                   }
                }
             }

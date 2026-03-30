@@ -365,3 +365,4 @@ pipeline library.bin
 /.mcp.json
 /PLAN.md
 /ghidra_scripts
+/dist/BF2GameExt.ini.bak

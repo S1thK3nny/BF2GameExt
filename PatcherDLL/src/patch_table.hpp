@@ -4,7 +4,7 @@
 
 #include "slim_vector.hpp"
 
-#define PATCH_COUNT 9
+#define PATCH_COUNT 12
 #define EXE_COUNT 3
 
 struct patch_flags {
@@ -50,3 +50,9 @@ extern char g_sCaches_storage[];
 // Initialize the sentinel value at the end of the relocated EntityEx::mIdMap hash table.
 // The RTTI class name differs per build (different BSS layouts after mIdMap).
 void init_object_limit_sentinel(const char* rtti_class_name);
+
+// Relocated EntityEx::mIdMap buffer (N=2048).
+// Layout: [uint32 count] [uint32 keys[2048]] [uint32 values[2048]]
+// values[i] are EntityEx* pointers (0 = empty slot).
+extern char EntityEx_mIdMap_new[];
+static constexpr uint32_t ENTITY_MAP_BUCKETS_NEW = 2048;

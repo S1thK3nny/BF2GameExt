@@ -54,19 +54,26 @@ static bool apply_patch(const patch& patch, const uintptr_t relocated_executable
    return true;
 }
 
-// Map patch_set names to INI key names.
-// Returns the INI key for a given patch set name, or nullptr if unknown.
-static const char* patch_set_ini_key(const char* set_name)
+// Map patch_set names to INI section + key.
+struct patch_ini_info {
+   const char* section;
+   const char* key;
+};
+
+static patch_ini_info patch_set_ini_info(const char* set_name)
 {
-   if (strcmp(set_name, "RedMemory Heap Extensions") == 0) return "HeapExtension";
-   if (strcmp(set_name, "SoundParameterized Layer Limit Extension") == 0) return "SoundLayerLimit";
-   if (strcmp(set_name, "DLC Mission Limit Extension") == 0) return "DLCMissionLimit";
-   if (strcmp(set_name, "Sound Limit Extension") == 0) return "SoundLimit";
-   if (strcmp(set_name, "Particle Cache Increase") == 0) return "ParticleCacheIncrease";
-   if (strcmp(set_name, "Object Limit Increase") == 0) return "ObjectLimitIncrease";
-   if (strcmp(set_name, "Combo Anims Increase") == 0) return "ComboAnimIncrease";
-   if (strcmp(set_name, "High-Res Animation Limit") == 0) return "HighResAnimLimit";
-   return nullptr;
+   if (strcmp(set_name, "RedMemory Heap Extensions") == 0) return {"LimitIncreases", "HeapExtension"};
+   if (strcmp(set_name, "SoundParameterized Layer Limit Extension") == 0) return {"LimitIncreases", "SoundLayerLimit"};
+   if (strcmp(set_name, "DLC Mission Limit Extension") == 0) return {"LimitIncreases", "DLCMissionLimit"};
+   if (strcmp(set_name, "Sound Limit Extension") == 0) return {"LimitIncreases", "SoundLimit"};
+   if (strcmp(set_name, "Particle Cache Increase") == 0) return {"LimitIncreases", "ParticleCacheIncrease"};
+   if (strcmp(set_name, "Object Limit Increase") == 0) return {"LimitIncreases", "ObjectLimitIncrease"};
+   if (strcmp(set_name, "Combo Anims Increase") == 0) return {"LimitIncreases", "ComboAnimIncrease"};
+   if (strcmp(set_name, "High-Res Animation Limit") == 0) return {"LimitIncreases", "HighResAnimLimit"};
+   if (strcmp(set_name, "Network Timer Increase") == 0) return {"LimitIncreases", "NetworkTimerIncrease"};
+   if (strcmp(set_name, "Chunk Push Fix") == 0) return {"Fixes", "ChunkPushFix"};
+   if (strcmp(set_name, "Matrix/Item Pool Limit Extension") == 0) return {"LimitIncreases", "MatrixPoolIncrease"};
+   return {nullptr, nullptr};
 }
 
 bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<section_info>& sections,
@@ -100,8 +107,8 @@ bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<
 
       for (const patch_set& set : exe_list.patches) {
          // Check INI toggle for this patch set (defaults to enabled)
-         const char* ini_key = patch_set_ini_key(set.name);
-         if (ini_key && !cfg.get_bool("Patches", ini_key, true)) {
+         auto [ini_section, ini_key] = patch_set_ini_info(set.name);
+         if (ini_section && ini_key && !cfg.get_bool(ini_section, ini_key, true)) {
             log.printf("Skipping patch set (disabled in INI): %s\n", set.name);
             continue;
          }
@@ -128,7 +135,7 @@ bool apply_patches(const uintptr_t relocated_executable_base, const slim_vector<
       // Iterator functions read 1 past the values array and compare against an RTTI
       // hash global that sits right after the old table in BSS. The class name differs
       // per build due to different BSS layouts.
-      if (cfg.get_bool("Patches", "ObjectLimitIncrease", true)) {
+      if (cfg.get_bool("LimitIncreases", "ObjectLimitIncrease", true)) {
          const char* sentinel_class = "Entity"; // modtools default
          if (strcmp(exe_list.name, "BattlefrontII.exe Steam") == 0)
             sentinel_class = "EntityBuilding";

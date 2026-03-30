@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.h"
+#include "exe_type.hpp"
 #include <cstdarg>
 
 // =============================================================================
@@ -900,8 +901,6 @@ namespace lua_addrs {
 // Exe detection — identifies which build we're injected into
 // =============================================================================
 
-enum class ExeType { UNKNOWN, MODTOOLS, STEAM, GOG };
-
 // =============================================================================
 // Game-specific addresses — filled at startup from the correct namespace
 // =============================================================================
@@ -975,7 +974,6 @@ struct game_addrs {
 };
 
 extern game_addrs g_game;
-extern ExeType    g_exeType;
 extern int        g_debugLogLevel;  // 0=off, 1=normal, 2=verbose
 
 // Logging — defined in lua_hooks.cpp, usable from any TU

@@ -4,6 +4,8 @@
 #include "controller_support.hpp"
 #include "ini_config.hpp"
 
+#include "game/weapon/Weapon.hpp"
+
 #include <detours.h>
 #include <cmath>
 
@@ -103,7 +105,7 @@ static constexpr AimAssistAddrs STEAM_ADDRS = {
    .m_camera_global = 0x007f58e0,
    .wpn_class_vert_threshold = 0x1C0,
    .wpn_class_horiz_threshold = 0x1C4,
-   .team_get_objects_in_range = 0,  // TODO: find Steam address
+   .team_get_objects_in_range = 0x006552d0,
 };
 
 static constexpr AimAssistAddrs GOG_ADDRS = {
@@ -116,7 +118,7 @@ static constexpr AimAssistAddrs GOG_ADDRS = {
    .m_camera_global = 0x007f6d80,
    .wpn_class_vert_threshold = 0x1C0,
    .wpn_class_horiz_threshold = 0x1C4,
-   .team_get_objects_in_range = 0,  // TODO: find GOG address
+   .team_get_objects_in_range = 0x00656370,
 };
 
 // ---------------------------------------------------------------------------
@@ -139,10 +141,32 @@ static uintptr_t s_lockOnMgrArray = 0;  // LockOnManager* array base
 static uintptr_t s_cameraGlobal = 0;  // RedCamera** (dereference once for RedCamera*)
 
 // TeamManager::sGetObjectsInRange — returns validated GameObjects from team member lists
-// __cdecl(PblVector3* pos, float radius, GameObject** out, int maxCount, Team* team, int affiliationFlags, GameObject* exclude)
+// Modtools: __cdecl(PblVector3* pos, float radius, GameObject** out, int maxCount, Team* team, int affiliationFlags, GameObject* exclude)
+// Retail (LTCG): ECX=pos, EDX=out, XMM1=radius, stack: maxCount, team, flags, exclude
 // With team=NULL, affiliationFlags=0x02: returns ALL team-registered objects in range.
 using fn_TeamGetObjectsInRange = int(__cdecl*)(float* pos, float radius, uintptr_t* out, int maxCount, void* team, int flags, uintptr_t exclude);
 static fn_TeamGetObjectsInRange s_teamGetObjectsInRange = nullptr;
+
+// Retail LTCG shim — raw function address + naked wrapper to match __cdecl call convention
+static uintptr_t s_teamGetObjRaw = 0;
+
+__declspec(naked) static int __cdecl retail_GetObjectsInRange_shim()
+{
+    // Converts __cdecl(pos, radius, out, maxCount, team, flags, exclude) →
+    //   LTCG(ECX=pos, EDX=out, XMM1=radius, stack: maxCount, team, flags, exclude)
+    __asm {
+        mov ecx, [esp+0x04]         // ECX = pos
+        movss xmm1, [esp+0x08]     // XMM1 = radius
+        mov edx, [esp+0x0C]        // EDX = out
+        push [esp+0x1C]            // exclude
+        push [esp+0x1C]            // flags   (orig +0x18, shifted +4)
+        push [esp+0x1C]            // team    (orig +0x14, shifted +8)
+        push [esp+0x1C]            // maxCount (orig +0x10, shifted +12)
+        call [s_teamGetObjRaw]
+        add esp, 16
+        ret
+    }
+}
 
 // GetCurWpn — returns Weapon* from Controllable
 using fn_GetCurWpn = void* (__thiscall*)(void* ctrl);
@@ -191,9 +215,6 @@ static constexpr unsigned CONTROLLABLE_TO_ENTITY = 0x240;  // Entity* = Controll
 
 // DamageDesc.DamageOwner offsets (shooter info)
 static constexpr unsigned DD_SHOOTER_ENTITY = 0x04;   // DamageOwner.mGameObject.mObject (Entity*)
-
-// Weapon → WeaponClass*
-static constexpr unsigned WPN_TO_CLASS = 0x64;
 
 // GameObject team field — low 4 bits
 static constexpr unsigned ENT_TEAM_AND_TYPE = 0x234;
@@ -269,21 +290,7 @@ static float     s_lockBreakTimer = 0.0f;   // accumulates when pushing away nea
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Resolved WeaponMeleeClass vtable address (set during install)
-static uintptr_t s_weaponMeleeClassVtable = 0;
-
-// Per-build WeaponMeleeClass vtable VAs (from Ghidra)
-static constexpr uintptr_t MODTOOLS_WPN_MELEE_VTABLE = 0x00a5434c;
-static constexpr uintptr_t STEAM_WPN_MELEE_VTABLE    = 0x007b1534;
-static constexpr uintptr_t GOG_WPN_MELEE_VTABLE      = 0x007b24ac;
-
-// Check if a WeaponClass* is a WeaponMeleeClass by vtable pointer comparison.
-static bool isWeaponClassMelee(uintptr_t wpnClass)
-{
-    if (!wpnClass || !s_weaponMeleeClassVtable) return false;
-    uintptr_t vtable = *(uintptr_t*)wpnClass;
-    return vtable == s_weaponMeleeClassVtable;
-}
+// ---------------------------------------------------------------------------
 
 static void clear_lockon_mgr_state()
 {
@@ -438,8 +445,8 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     if (s_getCurWpn) {
         weapon = s_getCurWpn((void*)ctrl);
         if (weapon) {
-            uintptr_t wpnClass = *(uintptr_t*)((uintptr_t)weapon + WPN_TO_CLASS);
-            s_currentWpnIsMelee = wpnClass ? isWeaponClassMelee(wpnClass) : true;
+            auto* wpn = static_cast<game::Weapon*>(weapon);
+            s_currentWpnIsMelee = wpn->vtable->IsMelee(wpn);
             hasRangedWeapon = !s_currentWpnIsMelee;
         }
     }
@@ -645,10 +652,10 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     float wpnVertThreshold = 0.0f;
 
     if (weapon) {
-        uintptr_t wpnClass = *(uintptr_t*)((uintptr_t)weapon + WPN_TO_CLASS);
+        auto* wpnClass = static_cast<game::Weapon*>(weapon)->mClass;
         if (wpnClass) {
-            wpnHorizThreshold = *(float*)(wpnClass + s_wpnClassHorizThreshold);
-            wpnVertThreshold = *(float*)(wpnClass + s_wpnClassVertThreshold);
+            wpnHorizThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassHorizThreshold);
+            wpnVertThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassVertThreshold);
         }
     }
 
@@ -895,23 +902,21 @@ void aim_assist_install(uintptr_t exe_base)
     s_wpnClassVertThreshold = addrs->wpn_class_vert_threshold;
     s_wpnClassHorizThreshold = addrs->wpn_class_horiz_threshold;
 
-    // Resolve WeaponMeleeClass vtable for melee detection
-    {
-        uintptr_t meleeVtableVA = 0;
-        switch (g_exeType) {
-            case ExeType::MODTOOLS: meleeVtableVA = MODTOOLS_WPN_MELEE_VTABLE; break;
-            case ExeType::STEAM:    meleeVtableVA = STEAM_WPN_MELEE_VTABLE;    break;
-            case ExeType::GOG:      meleeVtableVA = GOG_WPN_MELEE_VTABLE;      break;
-            default: break;
-        }
-        s_weaponMeleeClassVtable = meleeVtableVA ? resolve(meleeVtableVA) : 0;
-    }
     s_setTargetLockedObj = addrs->set_target_locked_obj
         ? (fn_SetTargetLockedObj)resolve(addrs->set_target_locked_obj) : nullptr;
     s_getVehicleIfNotMe = addrs->get_vehicle_if_not_me
         ? (fn_GetVehicleIfNotMe)resolve(addrs->get_vehicle_if_not_me) : nullptr;
-    s_teamGetObjectsInRange = addrs->team_get_objects_in_range
-        ? (fn_TeamGetObjectsInRange)resolve(addrs->team_get_objects_in_range) : nullptr;
+    if (addrs->team_get_objects_in_range) {
+        if (g_exeType == ExeType::MODTOOLS) {
+            s_teamGetObjectsInRange = (fn_TeamGetObjectsInRange)resolve(addrs->team_get_objects_in_range);
+        } else {
+            // Retail LTCG: route through naked shim that sets up ECX/EDX/XMM1
+            s_teamGetObjRaw = resolve(addrs->team_get_objects_in_range);
+            s_teamGetObjectsInRange = (fn_TeamGetObjectsInRange)&retail_GetObjectsInRange_shim;
+        }
+    } else {
+        s_teamGetObjectsInRange = nullptr;
+    }
 
     original_PCUpdate = (fn_PlayerControllerUpdate)resolve(addrs->player_controller_update);
 
@@ -957,6 +962,7 @@ void aim_assist_uninstall()
     s_setTargetLockedObj = nullptr;
     s_getVehicleIfNotMe = nullptr;
     s_teamGetObjectsInRange = nullptr;
+    s_teamGetObjRaw = 0;
     s_playerEntity = 0;
     s_autoLockTarget = 0;
     s_autoLockHandleId = 0;

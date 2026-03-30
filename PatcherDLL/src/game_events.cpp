@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "game_events.hpp"
+#include "game/entity/Factory.hpp"
+#include "game/controllable/Controllable.hpp"
 
 // ===========================================================================
 // PblHash — game's string hashing function
@@ -25,23 +27,22 @@ static unsigned int pbl_hash_string(const char* str)
 // ===========================================================================
 // EntityClass registry lookup
 // ===========================================================================
-// Global linked list. Each node: +0x04 = next, +0x0C = EntityClass*.
-// EntityClass+0x18 = PblHash of the ODF name.
-// Returns the EntityClass* whose hash matches, or nullptr.
+// Walks the global PblList<Factory<Entity,EntityClass,EntityDesc>> linked list.
+// Returns the Factory* (EntityClass base) whose mId hash matches, or nullptr.
 
 static void* find_entity_class(unsigned int nameHash)
 {
    if (!g_game.entity_class_registry) return nullptr;
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   uintptr_t node = *(uintptr_t*)(g_game.entity_class_registry - 0x400000u + base);
+   auto node = *(game::PblListNode<game::Factory>**)(g_game.entity_class_registry - 0x400000u + base);
 
    __try {
       for (int guard = 0; guard < 4096; ++guard) {
-         void* entry = *(void**)(node + 0x0C);
+         game::Factory* entry = node->_pObject;
          if (!entry) break;
-         if (*(unsigned int*)((char*)entry + 0x18) == nameHash)
+         if (entry->mId == nameHash)
             return entry;
-         node = *(uintptr_t*)(node + 0x04);
+         node = reinterpret_cast<game::PblListNode<game::Factory>*>(node->_pNext);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -72,25 +73,25 @@ static bool resolve_character_info(int charIndex, bool needTeam, bool needName,
    const uintptr_t arrayBase = *(uintptr_t*)res(g_game.char_array_base_ptr);
    if (!arrayBase) return false;
 
-   char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+   auto* chr = reinterpret_cast<game::Character*>(arrayBase + charIndex * sizeof(game::Character));
 
    if (needTeam) {
       __try {
-         out.team = *(int*)(charSlot + 0x134);
+         out.team = chr->mTeamNumber;
       } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
    }
 
    if (needName || needClass) {
       __try {
-         char* intermediate = *(char**)(charSlot + 0x148);
-         if (intermediate) {
-            char* entitySoldier = intermediate - 0x240;
+         game::Controllable* unit = chr->mUnit;
+         if (unit) {
+            auto* entity = game::ControllableToEntity(unit);
 
             if (needName)
-               out.nameHash = *(unsigned int*)(entitySoldier + 4);
+               out.nameHash = entity->mEntityEx.mId;
 
             if (needClass)
-               out.entityClassPtr = *(void**)(entitySoldier + 8);
+               out.entityClassPtr = entity->mEntityEx.mEntityClass;
          }
       } __except (EXCEPTION_EXECUTE_HANDLER) { /* unavailable */ }
    }

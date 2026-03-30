@@ -21,6 +21,10 @@
 #include "flyer_sound_patch.hpp"
 #include "door_limit_patch.hpp"
 #include "aim_assist_patch.hpp"
+#include "spawn_screen_patch.hpp"
+#include "hud_widescreen_patch.hpp"
+#include "jet_fall_fix.hpp"
+#include "directional_roll_patch.hpp"
 
 
 static void install_patches(uintptr_t exe_base, const char* ini_path);
@@ -38,8 +42,12 @@ extern "C" __declspec(dllexport) BOOL WINAPI BF2GameExt_Init(uintptr_t exe_base,
 extern "C" __declspec(dllexport) void WINAPI BF2GameExt_Shutdown()
 {
    // flyer_sound_uninstall();  // DISABLED — see install_patches
+   unpatch_hud_widescreen();
+   // jet_fall_fix_uninstall();  // DISABLED — see install_patches
+   spawn_screen_uninstall();
    aim_assist_uninstall();
    unpatch_door_limit();
+   directional_roll_uninstall();
    bone_transform_uninstall();
    anim_textures_uninstall();
    land_on_arrival_uninstall();
@@ -116,12 +124,13 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
    // Read INI config for patch/hook toggles
    ini_config cfg{ini_path};
 
-   bool patches_enabled = cfg.get_bool("Patches", "HeapExtension", true)
-                        || cfg.get_bool("Patches", "SoundLayerLimit", true)
-                        || cfg.get_bool("Patches", "SoundLimit", true)
-                        || cfg.get_bool("Patches", "DLCMissionLimit", true)
-                        || cfg.get_bool("Patches", "ParticleCacheIncrease", true)
-                        || cfg.get_bool("Patches", "ObjectLimitIncrease", true);
+   bool patches_enabled = cfg.get_bool("LimitIncreases", "HeapExtension", true)
+                        || cfg.get_bool("LimitIncreases", "SoundLayerLimit", true)
+                        || cfg.get_bool("LimitIncreases", "SoundLimit", true)
+                        || cfg.get_bool("LimitIncreases", "DLCMissionLimit", true)
+                        || cfg.get_bool("LimitIncreases", "ParticleCacheIncrease", true)
+                        || cfg.get_bool("LimitIncreases", "ObjectLimitIncrease", true)
+                        || cfg.get_bool("LimitIncreases", "MatrixPoolIncrease", true);
 
    bool hooks_enabled = cfg.get_bool("Hooks", "LuaHooks", true);
 
@@ -137,26 +146,40 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
       }
    }
 
-   if (cfg.get_bool("Patches", "ParticleCacheIncrease", true)) {
+   if (cfg.get_bool("LimitIncreases", "ParticleCacheIncrease", true)) {
       patch_particle_renderer(exe_base);
    }
 
-   if (cfg.get_bool("Patches", "TentacleBoneLimit", true)) {
+   if (cfg.get_bool("LimitIncreases", "TentacleBoneLimit", true)) {
       patch_tentacle_limit(exe_base);
    }
 
-   if (cfg.get_bool("Patches", "LodLimitIncrease", true)) {
+   if (cfg.get_bool("LimitIncreases", "LodLimitIncrease", true)) {
       patch_lod_limits(exe_base);
    }
 
-   if (cfg.get_bool("Patches", "DoorLimitIncrease", true)) {
+   if (cfg.get_bool("LimitIncreases", "DoorLimitIncrease", true)) {
       patch_door_limit(exe_base);
    }
 
-   if (cfg.get_bool("Patches", "LandOnArrival", true)) {
+   if (cfg.get_bool("Fixes", "LandOnArrival", true)) {
       identify_land_on_arrival(exe_base);
       land_on_arrival_install();
    }
+
+   {
+      float reticle_str = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
+      if (reticle_str != 0.0f)
+         patch_hud_widescreen(exe_base, reticle_str);
+   }
+
+   // DISABLED — hook sets mOldState + mSoldierAction to JUMP but AI still
+   // plays walk/run during fall. Needs deeper investigation into how the
+   // animation system selects movement animations for AI vs player.
+#if 0
+   if (cfg.get_bool("Fixes", "JetFallAnimation", true))
+      jet_fall_fix_install(exe_base);
+#endif
 
    // DISABLED — causes erroneous sounds when entering vehicles.
    // Needs investigation: VehicleEngine::Update is shared by all vehicles,
@@ -178,6 +201,12 @@ static void install_patches(uintptr_t exe_base, const char* ini_path)
 
       aim_assist_load_config(ini_path);
       aim_assist_install(exe_base);
+
+      if (cfg.get_bool("Hooks", "DirectionalRoll", true))
+         directional_roll_install(exe_base);
+
+      if (cfg.get_bool("Hooks", "SpawnScreen", false))
+         spawn_screen_install(exe_base);
    }
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {

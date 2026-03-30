@@ -2,6 +2,13 @@
 
 #include "patch_table.hpp"
 
+// Matrix/Item Pool Limit Extension: redirect matrixPool to larger static buffer
+// Original pool: 0x2FD80 bytes (0xBF6 entries × 64-byte matrices)
+// New pool: 256× original capacity
+static const uint32_t matrixPool_size = 0x2fd80 * 0x100;
+static char matrixPool_storage[matrixPool_size] = {};
+static const uint32_t matrixPool_address = (uint32_t)&matrixPool_storage[0];
+
 const static uint32_t DLC_mission_size = 0x110;
 const static uint32_t DLC_mission_patch_limit = 0x1000;
 
@@ -22,7 +29,7 @@ static const uint32_t smSampleRAMBitmapNew_address = (uint32_t)&smSampleRAMBitma
 // Extra 4 bytes at [0x4004] hold the sentinel value (Entity::rttiHashEntity._uiValue).
 // The game's iterator reads 1 entry past the values array and compares against this
 // sentinel to detect end-of-iteration. Must be initialized at runtime before any iteration.
-static char EntityEx_mIdMap_new[0x4004 + 4] = {};
+char EntityEx_mIdMap_new[0x4004 + 4] = {};
 static const uint32_t EntityEx_mIdMap_header_addr  = (uint32_t)&EntityEx_mIdMap_new[0];
 static const uint32_t EntityEx_mIdMap_table_addr   = (uint32_t)&EntityEx_mIdMap_new[4];
 static const uint32_t EntityEx_mIdMap_mid_addr     = (uint32_t)&EntityEx_mIdMap_new[0x2004]; // values array start
@@ -388,6 +395,54 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x1840b3 + 0x1, 0x64970, 0x3200 * 0x2030 + 0x10, {.file_offset = true}},          // PUSH heap_alloc_size
                   },
             },
+
+            patch_set{
+               .name = "Network Timer Increase",
+               .patches =
+                  {
+                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // PUSH imm8 operand at 0x00449b5b (VA)
+                     patch{0x00449b5b, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
+                  },
+            },
+
+            patch_set{
+               .name = "Chunk Push Fix",
+               .patches =
+                  {
+                     // ApplyRadiusPush: remove early return when ChunkFrequency triggers.
+                     // Vanilla skips push entirely when chunk flag is set — replace
+                     // POP ESI; ADD ESP,0x30 with JMP +0x2C to push calculation.
+                     // Bytes: 5E 83 C4 30 -> EB 2C 90 90
+                     patch{0x0052bfa1, 0x30C4835E, 0x90902CEB},
+                  },
+            },
+
+            patch_set{
+               .name = "Matrix/Item Pool Limit Extension",
+               .patches =
+                  {
+                     // matrixPool address redirects
+                     patch{0x405c0f + 0x2, 0xd64090, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x405c83 + 0x2, 0xd64090, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x410747 + 0x1, 0xd64090, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     // matrixPool size
+                     patch{0x405c15 + 0x2, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     patch{0x405c89 + 0x2, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     // transparentItemsSize: 800 -> 204800
+                     patch{0x61f8b0 + 0x1, 0x320, 0x32000, {.file_offset = true}},
+                     // postTransparentItemSize: 512 -> 131072
+                     patch{0x61f8e0 + 0x1, 0x200, 0x20000, {.file_offset = true}},
+                     // preShadowTransparentItemSize code cave: PUSH 100 -> PUSH 25600
+                     patch{0x61f880,       0x6a, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP +0x21
+                     patch{0x61f880 + 0x1, 0x64, 0x21, {.file_offset = true, .values_are_8bit = true}},       // JMP offset
+                     patch{0x61f8a3,       0xcc, 0x68, {.file_offset = true, .values_are_8bit = true}},       // PUSH imm32 opcode
+                     patch{0x61f8a3 + 0x1, 0xcccccccc, 0x6400, {.file_offset = true}},                        // PUSH 0x6400
+                     patch{0x61f8a8,       0xcc, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP short back
+                     patch{0x61f8a8 + 0x1, 0xcc, 0xd8, {.file_offset = true, .values_are_8bit = true}},       // JMP offset (-0x28)
+                  },
+            },
+
          },
    },
 
@@ -679,6 +734,37 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x247850 + 0x1, 0x64650, 0x14f * 0x2020 + 0x10, {.file_offset = true}}, // PUSH heap_alloc_size
                   },
             },
+
+            patch_set{
+               .name = "Network Timer Increase",
+               .patches =
+                  {
+                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as Steam
+                     patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
+                  },
+            },
+
+            patch_set{
+               .name = "Chunk Push Fix",
+               .patches =
+                  {
+                     // ApplyRadiusPush: remove early return when ChunkFrequency triggers.
+                     // Vanilla skips push entirely when chunk flag is set — replace
+                     // POP ESI; MOV ESP,EBP with JMP +0x25 to push calculation.
+                     // Bytes: 5E 8B E5 5D -> EB 25 90 90
+                     patch{0x004e1a24, 0x5DE58B5E, 0x909025EB},
+                  },
+            },
+
+            patch_set{
+               .name = "Matrix/Item Pool Limit Extension",
+               .patches =
+                  {
+                     // GOG addresses not yet identified — empty patch set
+                  },
+            },
+
          },
    },
 
@@ -969,6 +1055,56 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x2467b0 + 0x1, 0x64650, 0x14f * 0x2020 + 0x10, {.file_offset = true}}, // PUSH heap_alloc_size
                   },
             },
+
+            patch_set{
+               .name = "Network Timer Increase",
+               .patches =
+                  {
+                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as GOG
+                     patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
+                  },
+            },
+
+            patch_set{
+               .name = "Chunk Push Fix",
+               .patches =
+                  {
+                     // ApplyRadiusPush: remove early return when ChunkFrequency triggers.
+                     // Vanilla skips push entirely when chunk flag is set — replace
+                     // POP ESI; MOV ESP,EBP with JMP +0x25 to push calculation.
+                     // Bytes: 5E 8B E5 5D -> EB 25 90 90  (same address as GOG)
+                     patch{0x004e1a24, 0x5DE58B5E, 0x909025EB},
+                  },
+            },
+
+            patch_set{
+               .name = "Matrix/Item Pool Limit Extension",
+               .patches =
+                  {
+                     // matrixPool address redirects
+                     patch{0x2af682 + 0x1, 0x8bef50, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x2af6ef + 0x2, 0x8bef50, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x2b7da7 + 0x2, 0x8bef50, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x6992 + 0x1,   0x8bef50, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     // matrixPool size
+                     patch{0x2af68a + 0x2, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     patch{0x2af6f8 + 0x1, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     patch{0x6997 + 0x1,   0xbf5, matrixPool_size - 1, {.file_offset = true}},
+                     // transparentItemsSize: 800 -> 204800
+                     patch{0x6b10 + 0x1, 0x320, 0x32000, {.file_offset = true}},
+                     // postTransparentItemSize: 512 -> 131072
+                     patch{0x6a80 + 0x1, 0x200, 0x20000, {.file_offset = true}},
+                     // preShadowTransparentItemSize code cave: PUSH 100 -> PUSH 25600
+                     patch{0x6ab0,       0x6a, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP +0x21
+                     patch{0x6ab0 + 0x1, 0x64, 0x21, {.file_offset = true, .values_are_8bit = true}},       // JMP offset
+                     patch{0x6ad3,       0xcc, 0x68, {.file_offset = true, .values_are_8bit = true}},       // PUSH imm32 opcode
+                     patch{0x6ad3 + 0x1, 0xcccccccc, 0x6400, {.file_offset = true}},                        // PUSH 0x6400
+                     patch{0x6ad8,       0xcc, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP short back
+                     patch{0x6ad8 + 0x1, 0xcc, 0xd8, {.file_offset = true, .values_are_8bit = true}},       // JMP offset (-0x28)
+                  },
+            },
+
          },
    },
 };
