@@ -92,6 +92,10 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       float* aimerFirePos = (float*)((char*)aimer + 0x88);  // Aimer::mFirePos
       float* rootPos      = (float*)((char*)aimer + 0x70);  // Aimer::mRootPos
 
+      // TODO: Environment reflections still cause the bolt to originate from the
+      //       reflected unit instead of the real one. The Y-clamping below only mitigates
+      //       vertical offset — the full reflected fire position needs to be discarded.
+
       // Water reflection check: the rendering reflection pass can mirror
       // mFirePointMatrix Y across the water plane. Normal barrel-to-root
       // Y delta is ~3 units; reflected can be 18+. If reflected, clamp Y

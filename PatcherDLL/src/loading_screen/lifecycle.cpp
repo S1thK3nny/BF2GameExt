@@ -19,6 +19,10 @@ static bool g_inRealEnd = false;
 // Sound helpers
 // =============================================================================
 
+// TODO: Sound cuts off abruptly — needs a short fade-out to avoid being harsh on the ears.
+// TODO: If the player alt-tabs at a specific moment, the sound
+//       doesn't get stopped (tracking_sound_stop is likely skipped or the voice handle is stale).
+
 // Stop the current tracking sound (if any is playing).
 //
 // Stop sequence:

@@ -6,7 +6,7 @@
 #include <detours.h>
 
 // =============================================================================
-// First-Person Animation Bank Override
+// First-Person Animation Bank Override + FP Sprint Animation
 //
 // Allows soldier classes to specify a custom FP animation bank via ODF:
 //   FirstPersonAnimationBank = sbdroidfp
@@ -16,9 +16,18 @@
 //      stores a class->bank mapping.
 //   2. FirstPersonRenderable::UpdateSoldier — swaps the global mAnim[48]
 //      array with the custom bank's animations for the duration of the call.
+//      Also detects sprint state and substitutes _sprint animations for _run.
 //
 // Animations not found in the custom bank fall through to the default
 // (humanfp / droidekafp).
+//
+// FP Sprint:
+//   The engine's FP state machine has no sprint state — it uses state 1 (run)
+//   for all forward movement and just scales playback rate. Sprint is detected
+//   by reading entity+0x514 (== 3 when sprinting, set by EntitySoldier::Sprint).
+//   When sprinting, the _run animation slot is temporarily swapped with a
+//   _sprint animation (e.g. humanfp_rifle_sprint) before calling UpdateSoldier.
+//   Sprint animations are optional — if absent, the engine falls back to _run.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -42,6 +51,21 @@ static constexpr int kAnimCount           = 48;
 static constexpr int kHumanFPPrefixLen    = 7;   // strlen("humanfp")
 static constexpr int kDroidekaFPPrefixLen = 10;  // strlen("droidekafp")
 static constexpr int kDroidekaFirstSlot   = 44;
+
+// FP sprint constants
+static constexpr int kStatesPerWeapon     = 11;
+static constexpr int kHumanWeaponClasses  = 4;
+static constexpr int kRunState            = 1;    // FP state index for run
+static constexpr uint32_t kSprintField    = 0x514; // entity + 0x514 = sprint state
+static constexpr uint32_t kSprintActive   = 3;     // value when sprinting
+
+// Suffixes appended to bank names to find sprint animations
+static const char* kSprintSuffixes[kHumanWeaponClasses] = {
+   "_rifle_sprint",
+   "_bazooka_sprint",
+   "_tool_sprint",    // weapon class 2 (tool)
+   "_tool_sprint",    // weapon class 3 (grenade — shares tool anims)
+};
 
 // ---------------------------------------------------------------------------
 // Resolved function pointers
@@ -78,7 +102,8 @@ struct FPBankEntry {
 
 struct FPAnimCache {
    char   bankName[64];
-   void*  anims[kAnimCount];  // ZephyrAnim*, nullptr = use default
+   void*  anims[kAnimCount];                    // ZephyrAnim*, nullptr = use default
+   void*  sprintAnims[kHumanWeaponClasses];     // per-weapon-class sprint overrides
    bool   loaded;
 };
 
@@ -87,6 +112,15 @@ static int          g_classBankCount = 0;
 
 static FPAnimCache  g_bankCaches[kMaxBankCaches] = {};
 static int          g_bankCacheCount = 0;
+
+// ---------------------------------------------------------------------------
+// Default (humanfp) sprint animations — loaded lazily
+// ---------------------------------------------------------------------------
+
+static void*  g_defaultSprintAnims[kHumanWeaponClasses] = {};
+static bool   g_defaultSprintLoaded = false;
+static bool   g_sprintLogOnce = false;
+static bool   g_wasSprinting = false;
 
 // ---------------------------------------------------------------------------
 // Resolved global pointers
@@ -116,8 +150,31 @@ static int findOrCreateBankCache(const char* bankName)
    strncpy_s(g_bankCaches[idx].bankName, sizeof(g_bankCaches[idx].bankName),
              bankName, _TRUNCATE);
    memset(g_bankCaches[idx].anims, 0, sizeof(g_bankCaches[idx].anims));
+   memset(g_bankCaches[idx].sprintAnims, 0, sizeof(g_bankCaches[idx].sprintAnims));
    g_bankCaches[idx].loaded = false;
    return idx;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: load sprint animations for a given bank name
+// ---------------------------------------------------------------------------
+
+static void loadSprintAnims(const char* bankName, void* out[kHumanWeaponClasses])
+{
+   auto log = get_gamelog();
+   int bankNameLen = (int)strlen(bankName);
+   char name[128];
+
+   for (int wc = 0; wc < kHumanWeaponClasses; wc++) {
+      int suffixLen = (int)strlen(kSprintSuffixes[wc]);
+      if (bankNameLen + suffixLen >= (int)sizeof(name)) continue;
+
+      memcpy(name, bankName, bankNameLen);
+      memcpy(name + bankNameLen, kSprintSuffixes[wc], suffixLen + 1);
+
+      out[wc] = fn_FindAnimation(name);
+      log("[FPSprint] FindAnimation('%s') = %p\n", name, out[wc]);
+   }
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +250,9 @@ static void loadBankCache(FPAnimCache* cache)
       }
    }
 
+   // Also load sprint animations for this bank
+   loadSprintAnims(cache->bankName, cache->sprintAnims);
+
    cache->loaded = true;
 
    int count = 0;
@@ -213,53 +273,89 @@ static void loadBankCache(FPAnimCache* cache)
 static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
                                             void* model, void* ctrl, void* aimer)
 {
-   if (!ctrl || g_classBankCount == 0) {
+   if (!ctrl) {
       original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
       return;
    }
 
    FPAnimCache* cache = nullptr;
+   bool isSprinting = false;
 
    __try {
-      // The param is the 'intermediate' pointer (charSlot+0x148).
-      // EntitySoldierClass* is at intermediate + 0x218.
-      void* entityClass = *(void**)((uintptr_t)ctrl + 0x218);
-      if (!entityClass || entityClass == (void*)0xFFFFFFFF) {
-         original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
-         return;
-      }
+      // Detect sprint: entity+0x514 == 3
+      uint32_t sprintState = *(uint32_t*)((uintptr_t)ctrl + kSprintField);
+      isSprinting = (sprintState == kSprintActive);
 
-      for (int i = 0; i < g_classBankCount; i++) {
-         if (g_classBanks[i].classPtr == entityClass) {
-            int bankIdx = g_classBanks[i].bankIndex;
-            if (bankIdx >= 0 && bankIdx < g_bankCacheCount) {
-               cache = &g_bankCaches[bankIdx];
+      // Look up custom bank override
+      if (g_classBankCount > 0) {
+         void* entityClass = *(void**)((uintptr_t)ctrl + 0x218);
+         if (entityClass && entityClass != (void*)0xFFFFFFFF) {
+            for (int i = 0; i < g_classBankCount; i++) {
+               if (g_classBanks[i].classPtr == entityClass) {
+                  int bankIdx = g_classBanks[i].bankIndex;
+                  if (bankIdx >= 0 && bankIdx < g_bankCacheCount)
+                     cache = &g_bankCaches[bankIdx];
+                  break;
+               }
             }
-            break;
          }
       }
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
    }
 
-   if (!cache) {
+   // Fast path: no bank override and not sprinting
+   if (!cache && !isSprinting) {
       original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
       return;
    }
 
-   // Lazy load on first use
-   if (!cache->loaded) {
+   // Lazy-load bank if needed
+   if (cache && !cache->loaded) {
       loadBankCache(cache);
    }
 
-   // Swap: save global mAnim[], overlay custom anims (non-null only)
+   // Lazy-load default sprint anims on first sprint
+   if (isSprinting && !cache && !g_defaultSprintLoaded) {
+      loadSprintAnims("humanfp", g_defaultSprintAnims);
+      g_defaultSprintLoaded = true;
+   }
+
+   // Save global mAnim[], apply overrides, call original, restore
    void* saved[kAnimCount];
    memcpy(saved, g_mAnim, sizeof(saved));
 
-   for (int i = 0; i < kAnimCount; i++) {
-      if (cache->anims[i]) {
-         g_mAnim[i] = cache->anims[i];
+   // Bank override: overlay custom anims (non-null only)
+   if (cache) {
+      for (int i = 0; i < kAnimCount; i++) {
+         if (cache->anims[i])
+            g_mAnim[i] = cache->anims[i];
       }
+   }
+
+   // Sprint override: swap _run slots with _sprint animations
+   if (isSprinting) {
+      void** sprintAnims = cache ? cache->sprintAnims : g_defaultSprintAnims;
+      if (!g_sprintLogOnce) {
+         auto log = get_gamelog();
+         for (int wc = 0; wc < kHumanWeaponClasses; wc++)
+            log("[FPSprint] wc%d: sprint=%p, run=%p\n", wc, sprintAnims[wc],
+                g_mAnim[wc * kStatesPerWeapon + kRunState]);
+         g_sprintLogOnce = true;
+      }
+      for (int wc = 0; wc < kHumanWeaponClasses; wc++) {
+         if (sprintAnims[wc])
+            g_mAnim[wc * kStatesPerWeapon + kRunState] = sprintAnims[wc];
+      }
+   }
+
+   // The FP state machine only calls SetAnimation when the state changes.
+   // Both running and sprinting map to state 1 (run), so transitioning between
+   // them doesn't trigger a new SetAnimation call. Invalidate the cached FP
+   // state (ecx+0x1608) when sprint status changes to force re-evaluation.
+   if (isSprinting != g_wasSprinting) {
+      *(int*)((uintptr_t)ecx + 0x1608) = -1;
+      g_wasSprinting = isSprinting;
    }
 
    original_UpdateSoldier(ecx, nullptr, model, ctrl, aimer);
@@ -311,4 +407,8 @@ void fp_anim_bank_reset()
    g_classBankCount = 0;
    memset(g_bankCaches, 0, sizeof(g_bankCaches));
    g_bankCacheCount = 0;
+   memset(g_defaultSprintAnims, 0, sizeof(g_defaultSprintAnims));
+   g_defaultSprintLoaded = false;
+   g_sprintLogOnce = false;
+   g_wasSprinting = false;
 }
