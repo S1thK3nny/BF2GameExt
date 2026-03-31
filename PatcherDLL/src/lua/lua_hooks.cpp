@@ -17,6 +17,7 @@
 #include "weapon/shield_channel_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "controller/aim_assist.hpp"
 
 #include <detours.h>
 
@@ -332,6 +333,7 @@ void lua_hooks_install(uintptr_t exe_base)
    gc_visual_limits_install(exe_base);
    anim_bank_append_install(exe_base);
    shield_channel_fix_install(exe_base);
+   aim_assist_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.
@@ -362,6 +364,7 @@ void lua_hooks_uninstall()
    gc_visual_limits_uninstall();
    anim_bank_append_uninstall();
    shield_channel_fix_uninstall();
+   aim_assist_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

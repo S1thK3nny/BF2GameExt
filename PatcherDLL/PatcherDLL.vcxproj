@@ -133,6 +133,8 @@
     <ClInclude Include="src\entity\anim_bank_append.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
+    <ClInclude Include="src\controller\aim_assist.hpp" />
+    <ClInclude Include="src\util\ini_registry.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -164,6 +166,7 @@
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
     <ClCompile Include="src\controller\controller_support.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
+    <ClCompile Include="src\controller\aim_assist.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

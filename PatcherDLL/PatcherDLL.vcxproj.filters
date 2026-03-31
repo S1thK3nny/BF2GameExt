@@ -118,6 +118,12 @@
     <ClInclude Include="src\controller\controller_rumble.hpp">
       <Filter>controller</Filter>
     </ClInclude>
+    <ClInclude Include="src\controller\aim_assist.hpp">
+      <Filter>controller</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\ini_registry.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -196,6 +202,9 @@
       <Filter>controller</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_rumble.cpp">
+      <Filter>controller</Filter>
+    </ClCompile>
+    <ClCompile Include="src\controller\aim_assist.cpp">
       <Filter>controller</Filter>
     </ClCompile>
   </ItemGroup>

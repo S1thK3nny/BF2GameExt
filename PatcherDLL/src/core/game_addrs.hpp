@@ -326,6 +326,23 @@ namespace modtools {
    constexpr uintptr_t s_game_over              = 0x00C6AAE0;
    constexpr uintptr_t weapon_signal_fire       = 0x0061C870;
 
+   // ---- Aim Assist ---------------------------------------------------------------
+
+   constexpr uintptr_t player_controller_update       = 0x0059B460;
+   constexpr uintptr_t apply_damage                   = 0x004CF900;
+   constexpr uintptr_t lockon_mgr_array               = 0x00B30698;
+   constexpr uintptr_t get_cur_wpn                    = 0x00413782;
+   constexpr uintptr_t set_target_locked_obj          = 0x00411013;  // thunk -> 0x005e0d30
+   constexpr uintptr_t m_camera_global                = 0x00d61ddc;
+   constexpr uintptr_t team_get_objects_in_range      = 0x0048f210;
+
+   // ---- Networking state (multiplayer detection) ---------------------------------
+
+   constexpr uintptr_t net_in_shell                   = 0x00ADABC2;
+   constexpr uintptr_t net_enabled                    = 0x00BE14F0;
+   constexpr uintptr_t net_enabled_next               = 0x00BE14F1;
+   constexpr uintptr_t net_on_client                  = 0x00BE14FD;
+
 } // namespace modtools
 
 // =============================================================================
@@ -402,6 +419,16 @@ namespace steam {
    constexpr uintptr_t rumble_dispatch          = 0x00630D60;
    constexpr uintptr_t s_game_over              = 0x01E5600A;
 
+   // ---- Aim Assist ---------------------------------------------------------------
+
+   constexpr uintptr_t player_controller_update       = 0x0061A2B0;
+   constexpr uintptr_t apply_damage                   = 0x00489340;
+   constexpr uintptr_t lockon_mgr_array               = 0x01E57400;
+   constexpr uintptr_t get_cur_wpn                    = 0x00484310;
+   constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
+   constexpr uintptr_t m_camera_global                = 0x007f58e0;
+   constexpr uintptr_t team_get_objects_in_range      = 0x006552d0;
+
 } // namespace steam
 
 // =============================================================================
@@ -428,6 +455,16 @@ namespace gog {
    constexpr uintptr_t rumble_heavy_output      = 0x006C65D0;
    constexpr uintptr_t rumble_dispatch          = 0x00631E00;
    constexpr uintptr_t s_game_over              = 0x01E574B6;
+
+   // ---- Aim Assist ---------------------------------------------------------------
+
+   constexpr uintptr_t player_controller_update       = 0x0061B320;
+   constexpr uintptr_t apply_damage                   = 0x00489340;
+   constexpr uintptr_t lockon_mgr_array               = 0x01E588B0;
+   constexpr uintptr_t get_cur_wpn                    = 0x00484310;
+   constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
+   constexpr uintptr_t m_camera_global                = 0x007f6d80;
+   constexpr uintptr_t team_get_objects_in_range      = 0x00656370;
 
 } // namespace gog
 

@@ -5,6 +5,7 @@
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "controller/aim_assist.hpp"
 #include "entity/soldier_prone.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
@@ -114,22 +115,22 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       FatalAppExitA(0, "Failed to apply patches! Check \"BF2GameExt.log\" for more info.");
    }
 
-   // Resolve Lua API addresses and register our custom functions into the live Lua state.
-   lua_hooks_install(exe_base);
-
-   // Controller config — read INI toggles now, actual init deferred to
-   // hooked_init_state (needs game input system + CRT FP ready).
+   // Read INI toggles before installing hooks (some hooks check config at install time).
    if (ini_path) {
       ini_config cfg{ini_path};
-      g_proneEnabled = cfg.get_bool("Features", "Prone", false);
+      g_proneEnabled = cfg.get_bool("Features", "Prone", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       controller_set_ini_path(ini_path);
+      aim_assist_load_config(ini_path);
    } else {
-      g_proneEnabled = false;
+      g_proneEnabled = true;
       g_controllerEnabled = true;
       g_rumbleEnabled = true;
    }
+
+   // Resolve Lua API addresses and register our custom functions into the live Lua state.
+   lua_hooks_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

@@ -53,11 +53,24 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Fix chunk push crash", "Chunk Push Fix"),
 
    // [Features] — optional gameplay features (may require additional assets)
-   INI_ENTRY("Features", "Prone", "0", "Enable prone stance (requires prone animations in soldier banks)"),
+   INI_ENTRY("Features", "Prone", "1", "Enable prone stance (requires prone animations in soldier banks)"),
 
    // [Controller] — gamepad support
    INI_ENTRY("Controller", "Enabled", "1", "Enable gamepad / controller support"),
    INI_ENTRY("Controller", "Rumble",  "1", "Enable controller rumble / vibration"),
+
+   // [AimAssist] — controller aim assist (Xbox-style, singleplayer only)
+   INI_ENTRY("AimAssist", "Enabled",                 "1",   "Enable controller aim assist"),
+   INI_ENTRY("AimAssist", "ConeAngle",               "30",  "Fallback cone angle in degrees when weapon has no AutoAimSize"),
+   INI_ENTRY("AimAssist", "TrackingDeadZone",         "0.5", "Dead zone multiplier for weapon AutoAimSize"),
+   INI_ENTRY("AimAssist", "FrictionStrength",          "3.0", "Directional friction scale when aiming away from lock"),
+   INI_ENTRY("AimAssist", "PullStrength",              "5.0", "Auto-tracking ramp rate per second toward locked target"),
+   INI_ENTRY("AimAssist", "LockBreakTime",             "0.1", "Seconds of pushing away to break target lock"),
+   INI_ENTRY("AimAssist", "AutoLockOnHit",             "1",   "Automatically lock onto first enemy you damage"),
+   INI_ENTRY("AimAssist", "SnapStrength",              "1.0", "Instant correction on first lock frame (0 = ramp only)"),
+   INI_ENTRY("AimAssist", "ProximityFriction",         "1",   "Slow stick when crosshair is near any enemy"),
+   INI_ENTRY("AimAssist", "ProximityFrictionRadius",   "0.5", "Screen-space radius for proximity slowdown"),
+   INI_ENTRY("AimAssist", "ProximityFrictionScale",    "0.4", "Min friction at dead center (0 = full stop, 1 = none)"),
 };
 // END_REGISTRY
 
