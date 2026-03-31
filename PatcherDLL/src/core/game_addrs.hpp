@@ -305,6 +305,11 @@ namespace modtools {
    constexpr uintptr_t console_add_command         = 0x007ed560;
    constexpr uintptr_t engine_console_reg          = 0x00a145c0; // registers "render_soldier_colliding"
 
+   // ---- Particle / Renderer Cache (BSS globals) --------------------------------
+
+   constexpr uintptr_t s_cached_particles            = 0x00B9DB78;  // sCachedParticles[300]
+   constexpr uintptr_t s_caches                      = 0x00E5F650;  // RedParticleRenderer s_caches[15]
+
 } // namespace modtools
 
 // =============================================================================
@@ -361,6 +366,23 @@ namespace steam {
 
    constexpr uintptr_t game_log                    = 0xDEAD0018; // TODO
 
+   // ---- Particle / Renderer Cache (BSS globals) --------------------------------
+
+   constexpr uintptr_t s_cached_particles            = 0x01EF5120;
+   constexpr uintptr_t s_caches                      = 0x009661E0;
+
 } // namespace steam
+
+// =============================================================================
+// BattlefrontII.exe GOG
+// =============================================================================
+namespace gog {
+
+   // ---- Particle / Renderer Cache (BSS globals) --------------------------------
+
+   constexpr uintptr_t s_cached_particles            = 0x01EF6640;
+   constexpr uintptr_t s_caches                      = 0x00967680;
+
+} // namespace gog
 
 } // namespace game_addrs

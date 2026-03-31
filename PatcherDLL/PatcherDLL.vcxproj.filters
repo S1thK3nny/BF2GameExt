@@ -88,6 +88,9 @@
     <ClInclude Include="src\util\cfile.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\ini_config.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\slim_vector.hpp">
       <Filter>util</Filter>
     </ClInclude>

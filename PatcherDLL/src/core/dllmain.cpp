@@ -5,19 +5,55 @@
 #include "lua/lua_hooks.hpp"
 #include "util/slim_vector.hpp"
 
-void install_patches();
+static bool g_initialized = false;
+
+static void install_patches_impl(uintptr_t exe_base, const char* ini_path);
+
+// ---------------------------------------------------------------------------
+// Proxy path: BF2GameExt_Init / BF2GameExt_Shutdown
+// Called by DInput8Proxy after LoadLibrary. The proxy sets the
+// BF2GAMEEXT_PROXY env var before loading us, so DllMain skips auto-init.
+// ---------------------------------------------------------------------------
+
+extern "C" __declspec(dllexport) BOOL WINAPI BF2GameExt_Init(uintptr_t exe_base, const char* ini_path)
+{
+   if (g_initialized) return TRUE;
+   install_patches_impl(exe_base, ini_path);
+   return TRUE;
+}
+
+extern "C" __declspec(dllexport) void WINAPI BF2GameExt_Shutdown()
+{
+   if (!g_initialized) return;
+   lua_hooks_uninstall();
+   g_initialized = false;
+}
+
+// ---------------------------------------------------------------------------
+// Exe patcher path: DllMain auto-init (no INI, no proxy)
+// ---------------------------------------------------------------------------
 
 BOOL __declspec(dllexport) APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
    switch (ul_reason_for_call) {
    case DLL_PROCESS_ATTACH: {
-      install_patches();
+      // If the proxy loaded us, it will call BF2GameExt_Init explicitly.
+      // Skip auto-init so the INI config is respected.
+      char buf[2];
+      if (GetEnvironmentVariableA("BF2GAMEEXT_PROXY", buf, sizeof(buf)) > 0)
+         break;
+
+      uintptr_t exe_base = (uintptr_t)GetModuleHandleW(nullptr);
+      install_patches_impl(exe_base, nullptr);
    } break;
    case DLL_THREAD_ATTACH:
    case DLL_THREAD_DETACH:
       break;
    case DLL_PROCESS_DETACH:
-      lua_hooks_uninstall();
+      if (g_initialized) {
+         lua_hooks_uninstall();
+         g_initialized = false;
+      }
       break;
    }
    return TRUE;
@@ -25,9 +61,13 @@ BOOL __declspec(dllexport) APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for
 
 void __declspec(dllexport) ExportFunction() {}
 
-void install_patches()
+// ---------------------------------------------------------------------------
+// Shared init logic
+// ---------------------------------------------------------------------------
+
+static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 {
-   char* const game_address = (char*)GetModuleHandleW(nullptr);
+   char* const game_address = (char*)exe_base;
 
    IMAGE_DOS_HEADER& dos_header = *(IMAGE_DOS_HEADER*)game_address;
    IMAGE_NT_HEADERS32& nt_headers = *(IMAGE_NT_HEADERS32*)(game_address + dos_header.e_lfanew);
@@ -66,12 +106,12 @@ void install_patches()
       };
    }
 
-   if (not apply_patches((uintptr_t)game_address, sections)) {
+   if (not apply_patches(exe_base, sections, ini_path)) {
       FatalAppExitA(0, "Failed to apply patches! Check \"BF2GameExt.log\" for more info.");
    }
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
-   lua_hooks_install((uintptr_t)game_address);
+   lua_hooks_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
@@ -80,4 +120,6 @@ void install_patches()
          FatalAppExitA(0, "Failed to restore normal executable sections virtual protect!");
       }
    }
+
+   g_initialized = true;
 }

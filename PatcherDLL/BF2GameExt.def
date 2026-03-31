@@ -1,0 +1,4 @@
+LIBRARY BF2GameExt
+EXPORTS
+    BF2GameExt_Init
+    BF2GameExt_Shutdown

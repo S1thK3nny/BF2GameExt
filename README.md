@@ -34,6 +34,13 @@ Automatic binary patches applied on load:
 - **Heap Memory Extension** - Increases RedMemory heap from 64MB to 256MB, drastically reducing out-of-memory crashes
 - **DLC Mission Limit** - Increases from 500 to 4096, allowing more mods installed simultaneously
 - **Sound Layer Limit** - Prevents crashes on maps with many flyers/entities using EngineSound
+- **Sound Memory Limit** - Increases sound RAM from 32MB to 256MB
+- **Particle Cache** - Increases cached particle limit from 300 to 1200
+- **Object Limit** - Doubles EntityEx hash table from 1024 to 2048 buckets, raising the active object cap
+- **Combo Animation Limit** - Increases from 30 to 90 entries, with expanded animation index range
+- **High-Res Animation Limit** - Increases from 50 to 12,800 entries
+- **Matrix/Item Pool** - Extends matrix pool to 256x original capacity
+- **Renderer Cache** - Increases particle renderer cache from 15 to 120 entries
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256, particle icons from 128 to 512. Fixes pathways and fleet/planet icons silently disappearing on modded GC maps with many planets
 
 ### Loading Screen System
@@ -106,15 +113,26 @@ Lua extensions and hooks currently target BF2_modtools only. GoG/Steam support f
 
 ## Installation
 
+### Method 1 — DInput8 Proxy (recommended)
+No exe patching required. Drop these files next to your game executable (inside `GameData`):
+
+- `dinput8.dll` (DInput8Proxy project)
+- `BF2GameExt.dll` (PatcherDLL project)
+- `BF2GameExt.ini` (from `dist/`, optional - all features enabled by default)
+
+Works with Steam, GOG, and modtools builds. Compatible with other dinput8 proxy DLLs (e.g. ReShade) via automatic chain-loading.
+
+### Method 2 — Exe Patcher
 1. Build `BF2GameExt.dll` (PatcherDLL project) and `BF2GameExt.exe` (BF2GameExt project)
 2. Place both in your `Star Wars Battlefront II Classic` folder (outside of `GameData`)
 3. Run `BF2GameExt.exe` and patch a **copy** of BF2_modtools.exe
 4. The patcher places the DLL into `GameData` automatically
-5. Done! Run the game through the patched executable and have fun :)
 
 ## Configuration
 
-Features are configured through `load.cfg` parameters, ODF properties, and Lua functions. See the [Examples](Examples/) folder for ready-to-use configurations with inline documentation.
+Engine limit extensions can be individually toggled via `BF2GameExt.ini` (only used with the DInput8 Proxy method). If the INI file is absent, all features are enabled by default.
+
+Gameplay features are configured through `load.cfg` parameters, ODF properties, and Lua functions. See the [Examples](Examples/) folder for ready-to-use configurations with inline documentation.
 
 ## Building from Source
 
@@ -127,11 +145,12 @@ Requirements:
 git clone https://github.com/S1thK3nny/BF2GameExt.git
 ```
 
-Open `BF2GameExt.sln` and build the `PatcherDLL` project. Output goes to `bin\Debug\` or `bin\Release\`.
+Open `BF2GameExt.sln` and build the solution. Output goes to `bin\Debug\` or `bin\Release\`.
 
 ## Project Structure
 
 ```
+DInput8Proxy/src/    DInput8 proxy loader (dinput8.dll)
 PatcherDLL/src/
   core/               Entry point, patching, address registry, resolve helpers
   entity/             EntitySoldier, EntityFlyer, cloth collision fixes
@@ -140,7 +159,8 @@ PatcherDLL/src/
   loading_screen/     Loading screen system (config, renderer, lifecycle)
   shell/              Galactic Conquest visual limit extensions
   debug_commands/     Console debug visualization commands
-  util/               File helpers, slim_vector, class limit patch
+  util/               File helpers, slim_vector, class limit patch, INI config
+dist/                 Default BF2GameExt.ini configuration
 ```
 
 ## Contributors

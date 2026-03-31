@@ -73,6 +73,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <ModuleDefinitionFile>$(ProjectDir)BF2GameExt.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -100,6 +101,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <ModuleDefinitionFile>$(ProjectDir)BF2GameExt.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -123,6 +125,7 @@
     <ClInclude Include="src\debug_commands\hover_springs.hpp" />
     <ClInclude Include="src\debug_commands\weapon_ranges.hpp" />
     <ClInclude Include="src\util\cfile.hpp" />
+    <ClInclude Include="src\util\ini_config.hpp" />
     <ClInclude Include="src\util\slim_vector.hpp" />
     <ClInclude Include="src\loading_screen\loading_screen.hpp" />
     <ClInclude Include="src\loading_screen\shared.hpp" />
