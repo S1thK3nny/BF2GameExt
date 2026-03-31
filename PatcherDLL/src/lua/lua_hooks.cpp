@@ -23,7 +23,7 @@
 
 lua_api g_lua = {};
 lua_State* g_L = nullptr;
-bool g_useBarrelFireOrigin = false;
+bool g_useBarrelFireOrigin = true;
 char g_loadDisplayPath[260] = "Load\\load";
 
 // ---------------------------------------------------------------------------

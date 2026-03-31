@@ -40,6 +40,7 @@ Automatic binary patches applied on load:
 - **Object Limit** - Doubles EntityEx hash table from 1024 to 2048 buckets, raising the active object cap
 - **Combo Animation Limit** - Increases from 30 to 90 entries, with expanded animation index range
 - **High-Res Animation Limit** - Increases from 50 to 12,800 entries
+- **String Pool** - Increases string pool from 32KB to 128KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends matrix pool to 256x original capacity
 - **Renderer Cache** - Increases particle renderer cache from 15 to 120 entries
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256, particle icons from 128 to 512. Fixes pathways and fleet/planet icons silently disappearing on modded GC maps with many planets
@@ -80,7 +81,7 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 - **Unit Class Removal** - Dynamically remove classes from a team's spawn menu at runtime. Lua: `RemoveUnitClass(team, class)`
 
 ### Weapon Systems
-- **Barrel Fire Origin Fix** - Fixes ordnances spawning from `bone_head` instead of `hp_fire` on WeaponCannon. Forces projectiles to originate from the actual barrel hardpoint. Lua: `SetBarrelFireOrigin(enable)`
+- **Barrel Fire Origin Fix** - Fixes ordnances spawning from `bone_head` instead of `hp_fire` on WeaponCannon. Forces projectiles to originate from the actual barrel hardpoint. INI: `[Fixes] BarrelFireOriginFix=1`
 - **Disguise Model Override** - Allows WeaponDisguise to swap the soldier's visual model to a specific GameModel instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Grappling Hook** *(experimental)* - Re-enables the cut grappling hook weapon with custom pull physics, slingshot mechanic (jump mid-pull to launch), and rope cable rendering. ODF properties: `PullSpeed`, `MaxRange`
 - **Shield Channel Fix** - Fixes WeaponShield activating on any fire button press regardless of which weapon is selected. The shield's Update override reads the fire trigger directly without checking if it's the active weapon for its channel.

@@ -444,6 +444,14 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "String Pool Increase",
+               .patches =
+                  {
+                     patch{0x4ef77 + 0x1, 0x8000, 0x20000, {.file_offset = true}}, // 32KB -> 128KB
+                  },
+            },
+
          },
    },
 
@@ -763,6 +771,14 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .patches =
                   {
                      // GOG addresses not yet identified — empty patch set
+                  },
+            },
+
+            patch_set{
+               .name = "String Pool Increase",
+               .patches =
+                  {
+                     patch{0x13b293 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
                   },
             },
 
@@ -1103,6 +1119,14 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x6ad3 + 0x1, 0xcccccccc, 0x6400, {.file_offset = true}},                        // PUSH 0x6400
                      patch{0x6ad8,       0xcc, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP short back
                      patch{0x6ad8 + 0x1, 0xcc, 0xd8, {.file_offset = true, .values_are_8bit = true}},       // JMP offset (-0x28)
+                  },
+            },
+
+            patch_set{
+               .name = "String Pool Increase",
+               .patches =
+                  {
+                     patch{0x13a543 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
                   },
             },
 

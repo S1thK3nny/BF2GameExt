@@ -118,12 +118,14 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Read INI toggles before installing hooks (some hooks check config at install time).
    if (ini_path) {
       ini_config cfg{ini_path};
+      g_useBarrelFireOrigin = cfg.get_bool("Fixes", "BarrelFireOriginFix", true);
       g_proneEnabled = cfg.get_bool("Features", "Prone", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       controller_set_ini_path(ini_path);
       aim_assist_load_config(ini_path);
    } else {
+      g_useBarrelFireOrigin = true;
       g_proneEnabled = true;
       g_controllerEnabled = true;
       g_rumbleEnabled = true;

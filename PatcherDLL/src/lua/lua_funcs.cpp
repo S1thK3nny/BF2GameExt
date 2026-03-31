@@ -1071,35 +1071,6 @@ static int lua_ReleaseCEV(lua_State* L)
    return 0;
 }
 
-// SetBarrelFireOrigin(enable) - toggle barrel-origin fire position.
-// When true, projectiles originate from the weapon's barrel hardpoint
-// (mFirePointMatrix) instead of the default aimer position.
-// Swaps the WeaponCannon vtable entry between our hook and vanilla.
-// Accepts both number (0/1) and boolean (true/false) — in Lua 5.0
-// the number 0 is truthy, so we check isnumber first.
-extern void** g_cannonOverrideAimerSlot;
-extern void*  g_cannonOverrideAimerOrig;
-extern void*  g_cannonOverrideAimerHook;
-
-static int lua_SetBarrelFireOrigin(lua_State* L)
-{
-   if (g_lua.isnumber(L, 1))
-      g_useBarrelFireOrigin = g_lua.tonumber(L, 1) != 0.0f;
-   else
-      g_useBarrelFireOrigin = g_lua.toboolean(L, 1) != 0;
-
-   if (g_cannonOverrideAimerSlot) {
-      DWORD oldProt;
-      if (VirtualProtect(g_cannonOverrideAimerSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
-         *g_cannonOverrideAimerSlot = g_useBarrelFireOrigin
-            ? g_cannonOverrideAimerHook
-            : g_cannonOverrideAimerOrig;
-         VirtualProtect(g_cannonOverrideAimerSlot, sizeof(void*), oldProt, &oldProt);
-      }
-   }
-   return 0;
-}
-
 // DumpAimerInfo(charIndex [, channel]) - diagnostic: logs aimer positions to Bfront2.log.
 // Dumps mFirePos, mMountPos, mBarrelPoseMatrix[0..3] trans, and mCurrentBarrel.
 static int lua_DumpAimerInfo(lua_State* L)
@@ -1271,7 +1242,6 @@ static const lua_func_entry custom_functions[] = {
    { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },
    { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
    { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
-   { "SetBarrelFireOrigin",      lua_SetBarrelFireOrigin },
    { "DumpAimerInfo",            lua_DumpAimerInfo },
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
    { "SetFogRange",              lua_SetFogRange },
