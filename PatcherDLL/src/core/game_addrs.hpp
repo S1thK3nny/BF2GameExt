@@ -310,6 +310,22 @@ namespace modtools {
    constexpr uintptr_t s_cached_particles            = 0x00B9DB78;  // sCachedParticles[300]
    constexpr uintptr_t s_caches                      = 0x00E5F650;  // RedParticleRenderer s_caches[15]
 
+   // ---- Controller / Input -------------------------------------------------------
+
+   constexpr uintptr_t controller_base_global   = 0x00CAEB20;
+   constexpr uintptr_t num_joysticks_global     = 0x00D2BDA8;
+   constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
+   constexpr uintptr_t joystick_discover        = 0x007485F0;
+   constexpr uintptr_t joystick_sync            = 0x007489A0;
+
+   // ---- Rumble -------------------------------------------------------------------
+
+   constexpr uintptr_t rumble_light_output      = 0x0084FF00;
+   constexpr uintptr_t rumble_heavy_output      = 0x0084FEF0;
+   constexpr uintptr_t rumble_state_setup       = 0x007413A0;
+   constexpr uintptr_t s_game_over              = 0x00C6AAE0;
+   constexpr uintptr_t weapon_signal_fire       = 0x0061C870;
+
 } // namespace modtools
 
 // =============================================================================
@@ -371,6 +387,21 @@ namespace steam {
    constexpr uintptr_t s_cached_particles            = 0x01EF5120;
    constexpr uintptr_t s_caches                      = 0x009661E0;
 
+   // ---- Controller / Input -------------------------------------------------------
+
+   constexpr uintptr_t controller_base_global   = 0x01EBDC50;
+   constexpr uintptr_t num_joysticks_global     = 0x0099CD08;
+   constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
+   constexpr uintptr_t joystick_discover        = 0x0061D250;
+   constexpr uintptr_t joystick_sync            = 0x0061D590;
+
+   // ---- Rumble -------------------------------------------------------------------
+
+   constexpr uintptr_t rumble_light_output      = 0x006C5550;
+   constexpr uintptr_t rumble_heavy_output      = 0x006C5540;
+   constexpr uintptr_t rumble_dispatch          = 0x00630D60;
+   constexpr uintptr_t s_game_over              = 0x01E5600A;
+
 } // namespace steam
 
 // =============================================================================
@@ -382,6 +413,21 @@ namespace gog {
 
    constexpr uintptr_t s_cached_particles            = 0x01EF6640;
    constexpr uintptr_t s_caches                      = 0x00967680;
+
+   // ---- Controller / Input -------------------------------------------------------
+
+   constexpr uintptr_t controller_base_global   = 0x01EBF100;
+   constexpr uintptr_t num_joysticks_global     = 0x0099E1A8;
+   constexpr uintptr_t joystick_config_base     = 0x01EFA590;
+   constexpr uintptr_t joystick_discover        = 0x0061E2B0;
+   constexpr uintptr_t joystick_sync            = 0x0061E5F0;
+
+   // ---- Rumble -------------------------------------------------------------------
+
+   constexpr uintptr_t rumble_light_output      = 0x006C65E0;
+   constexpr uintptr_t rumble_heavy_output      = 0x006C65D0;
+   constexpr uintptr_t rumble_dispatch          = 0x00631E00;
+   constexpr uintptr_t s_game_over              = 0x01E574B6;
 
 } // namespace gog
 

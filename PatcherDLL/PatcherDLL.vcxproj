@@ -131,6 +131,8 @@
     <ClInclude Include="src\loading_screen\shared.hpp" />
     <ClInclude Include="src\shell\gc_visual_limits.hpp" />
     <ClInclude Include="src\entity\anim_bank_append.hpp" />
+    <ClInclude Include="src\controller\controller_support.hpp" />
+    <ClInclude Include="src\controller\controller_rumble.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -160,6 +162,8 @@
     <ClCompile Include="src\loading_screen\renderer.cpp" />
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
+    <ClCompile Include="src\controller\controller_support.cpp" />
+    <ClCompile Include="src\controller\controller_rumble.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

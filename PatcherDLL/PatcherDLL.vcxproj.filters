@@ -26,6 +26,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="shell">
+      <UniqueIdentifier>{F6A7B8C9-D0E1-2345-FABC-456789012345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="controller">
+      <UniqueIdentifier>{A7B8C9D0-E1F2-3456-ABCD-567890123456}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
@@ -100,6 +106,18 @@
     <ClInclude Include="src\loading_screen\shared.hpp">
       <Filter>loading_screen</Filter>
     </ClInclude>
+    <ClInclude Include="src\shell\gc_visual_limits.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\anim_bank_append.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\controller\controller_support.hpp">
+      <Filter>controller</Filter>
+    </ClInclude>
+    <ClInclude Include="src\controller\controller_rumble.hpp">
+      <Filter>controller</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -167,6 +185,18 @@
     </ClCompile>
     <ClCompile Include="src\loading_screen\lifecycle.cpp">
       <Filter>loading_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\shell\gc_visual_limits.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\anim_bank_append.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\controller\controller_support.cpp">
+      <Filter>controller</Filter>
+    </ClCompile>
+    <ClCompile Include="src\controller\controller_rumble.cpp">
+      <Filter>controller</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

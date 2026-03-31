@@ -15,6 +15,8 @@
 #include "shell/gc_visual_limits.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "weapon/shield_channel_fix.hpp"
+#include "controller/controller_support.hpp"
+#include "controller/controller_rumble.hpp"
 
 #include <detours.h>
 
@@ -254,6 +256,12 @@ static void __cdecl hooked_init_state()
    if (g_L) {
       register_lua_functions(g_L);
    }
+
+   // Set up gamepad bindings + rumble hooks — must run after the game's input
+   // system is initialized (and after the CRT FP package is ready).
+   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   controller_setup_bindings(base);
+   if (g_rumbleEnabled) rumble_init(base);
 }
 
 void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)

@@ -3,6 +3,9 @@
 
 #include "apply_patches.hpp"
 #include "lua/lua_hooks.hpp"
+#include "controller/controller_support.hpp"
+#include "controller/controller_rumble.hpp"
+#include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
 
 static bool g_initialized = false;
@@ -112,6 +115,18 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);
+
+   // Controller config — read INI toggles now, actual init deferred to
+   // hooked_init_state (needs game input system + CRT FP ready).
+   if (ini_path) {
+      ini_config cfg{ini_path};
+      g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
+      g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
+      controller_set_ini_path(ini_path);
+   } else {
+      g_controllerEnabled = true;
+      g_rumbleEnabled = true;
+   }
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
