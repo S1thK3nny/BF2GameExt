@@ -4,6 +4,7 @@
 #include "resolve.hpp"
 #include "util/cfile.hpp"
 #include "util/ini_config.hpp"
+#include "util/ini_registry.hpp"
 #include "patch_table.hpp"
 
 #include <string.h>
@@ -48,27 +49,7 @@ static bool apply_patch(const patch& patch, const uintptr_t exe_base,
    return true;
 }
 
-// Map patch_set names to INI section + key.
-struct patch_ini_info {
-   const char* section;
-   const char* key;
-};
-
-static patch_ini_info patch_set_ini_info(const char* set_name)
-{
-   if (strcmp(set_name, "RedMemory Heap Extensions") == 0) return {"LimitIncreases", "HeapExtension"};
-   if (strcmp(set_name, "SoundParameterized Layer Limit Extension") == 0) return {"LimitIncreases", "SoundLayerLimit"};
-   if (strcmp(set_name, "DLC Mission Limit Extension") == 0) return {"LimitIncreases", "DLCMissionLimit"};
-   if (strcmp(set_name, "Sound Limit Extension") == 0) return {"LimitIncreases", "SoundLimit"};
-   if (strcmp(set_name, "Particle Cache Increase") == 0) return {"LimitIncreases", "ParticleCacheIncrease"};
-   if (strcmp(set_name, "Object Limit Increase") == 0) return {"LimitIncreases", "ObjectLimitIncrease"};
-   if (strcmp(set_name, "Combo Anims Increase") == 0) return {"LimitIncreases", "ComboAnimIncrease"};
-   if (strcmp(set_name, "High-Res Animation Limit") == 0) return {"LimitIncreases", "HighResAnimLimit"};
-   if (strcmp(set_name, "Network Timer Increase") == 0) return {"LimitIncreases", "NetworkTimerIncrease"};
-   if (strcmp(set_name, "Chunk Push Fix") == 0) return {"Fixes", "ChunkPushFix"};
-   if (strcmp(set_name, "Matrix/Item Pool Limit Extension") == 0) return {"LimitIncreases", "MatrixPoolIncrease"};
-   return {nullptr, nullptr};
-}
+// patch_set → INI section+key mapping now lives in ini_registry.hpp
 
 bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& sections,
                    const char* ini_path)
@@ -101,7 +82,7 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
 
       for (const patch_set& set : exe_list.patches) {
          // Check INI toggle for this patch set (defaults to enabled)
-         auto [ini_section, ini_key] = patch_set_ini_info(set.name);
+         auto [ini_section, ini_key] = ini_lookup_patch_set(set.name);
          if (ini_section && ini_key && !cfg.get_bool(ini_section, ini_key, true)) {
             log.printf("Skipping patch set (disabled in INI): %s\n", set.name);
             continue;

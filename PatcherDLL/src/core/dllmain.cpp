@@ -5,6 +5,7 @@
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "entity/soldier_prone.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
 
@@ -120,10 +121,12 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // hooked_init_state (needs game input system + CRT FP ready).
    if (ini_path) {
       ini_config cfg{ini_path};
+      g_proneEnabled = cfg.get_bool("Features", "Prone", false);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       controller_set_ini_path(ini_path);
    } else {
+      g_proneEnabled = false;
       g_controllerEnabled = true;
       g_rumbleEnabled = true;
    }

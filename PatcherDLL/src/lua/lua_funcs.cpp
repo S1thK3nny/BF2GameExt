@@ -3,7 +3,6 @@
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
-#include "entity/soldier_prone.hpp"
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -1251,21 +1250,6 @@ static int lua_SetFogEnable(lua_State* L)
    return 0;
 }
 
-// EnableProne(enable) — opt-in for maps that have prone animations loaded.
-// Call with 1/true to enable, 0/false to disable.  No args = enable.
-static int lua_EnableProne(lua_State* L)
-{
-   if (g_lua.gettop(L) >= 1) {
-      if (g_lua.isnumber(L, 1))
-         g_proneEnabled = g_lua.tonumber(L, 1) != 0.0f;
-      else
-         g_proneEnabled = g_lua.toboolean(L, 1) != 0;
-   } else {
-      g_proneEnabled = true;
-   }
-   return 0;
-}
-
 struct lua_func_entry {
    const char* name;
    lua_CFunction func;
@@ -1292,7 +1276,6 @@ static const lua_func_entry custom_functions[] = {
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
    { "SetFogRange",              lua_SetFogRange },
    { "SetFogEnable",             lua_SetFogEnable },
-   { "EnableProne",               lua_EnableProne },
    { nullptr, nullptr }
 };
 

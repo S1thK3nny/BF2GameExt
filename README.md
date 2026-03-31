@@ -73,7 +73,7 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 | `SetLoadDisplayLevel(path)` | Redirects to a custom load.cfg (call from script root or ScriptPreInit) |
 
 ### Soldier Systems
-- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture system. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain rotation fix that prevented prone from working on slopes. Lua: `EnableProne(enable)`
+- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture system. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain rotation fix that prevented prone from working on slopes. INI: `[Features] Prone=1`
 - **Multiple First-Person Animation Banks** - Allows each soldier class to use its own first-person animation bank instead of sharing one global set. Supports partial banks where missing animations fall through to defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **Animation Bank Appending** - Allows animation banks to be extended with additional numbered sub-banks across multiple .lvl files. The engine's `AnimationFinder::_AddBank` only scans for sub-banks once during the first .lvl load, so late-loaded sub-banks (e.g. `human_5` from a modified `ingame.lvl` after a mod's `dc:ingame.lvl` already ran `_AddBank("human")`) are silently ignored. The fix hooks `_AddBank` to retroactively append any sub-banks that exist in the hash table but weren't picked up during the initial scan. Works for any bank, not just `human`
 - **Unit Class Removal** - Dynamically remove classes from a team's spawn menu at runtime. Lua: `RemoveUnitClass(team, class)`
@@ -130,9 +130,24 @@ Works with Steam, GOG, and modtools builds. Compatible with other dinput8 proxy 
 
 ## Configuration
 
-Engine limit extensions can be individually toggled via `BF2GameExt.ini` (only used with the DInput8 Proxy method). If the INI file is absent, all features are enabled by default.
+All runtime options are controlled via `BF2GameExt.ini` (only used with the DInput8 Proxy method). If the INI file is absent, all features are enabled by default except those that require additional assets (e.g. Prone).
 
-Gameplay features are configured through `load.cfg` parameters, ODF properties, and Lua functions. See the [Examples](Examples/) folder for ready-to-use configurations with inline documentation.
+| Section | Purpose |
+|---------|---------|
+| `[General]` | Master enable switch, DLL path |
+| `[LimitIncreases]` | Engine limit patches (heap, sound, objects, etc.) |
+| `[Fixes]` | Bug-fix patches |
+| `[Features]` | Optional gameplay features (e.g. Prone) |
+| `[Controller]` | Gamepad enable and rumble toggles |
+| `[Controller.*]` | Per-mode button/axis bindings (Unit, Vehicle, Flyer, Hero, Turret) |
+
+The INI file is generated from the C++ source of truth. To regenerate after adding new features:
+
+```
+python generate_ini.py
+```
+
+Gameplay features are also configured through `load.cfg` parameters, ODF properties, and Lua functions. See the [Examples](Examples/) folder for ready-to-use configurations with inline documentation.
 
 ## Building from Source
 
