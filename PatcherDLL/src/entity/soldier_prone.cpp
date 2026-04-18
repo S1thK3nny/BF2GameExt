@@ -36,6 +36,8 @@
 //      the function's SSE stack-alignment prologue (AND ESP, 0xFFFFFFF0).
 // =============================================================================
 
+// TODO: Does not work with CustomAnimationBank weapon odf parameters. Acts similar to disabling it when a melee weapon is equipped, instantly throws the player out of prone.
+
 bool g_proneEnabled = false;
 
 // SoldierState enum values

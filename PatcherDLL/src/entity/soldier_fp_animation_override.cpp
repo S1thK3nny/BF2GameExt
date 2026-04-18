@@ -119,7 +119,6 @@ static int          g_bankCacheCount = 0;
 
 static void*  g_defaultSprintAnims[kHumanWeaponClasses] = {};
 static bool   g_defaultSprintLoaded = false;
-static bool   g_sprintLogOnce = false;
 static bool   g_wasSprinting = false;
 
 // ---------------------------------------------------------------------------
@@ -161,7 +160,6 @@ static int findOrCreateBankCache(const char* bankName)
 
 static void loadSprintAnims(const char* bankName, void* out[kHumanWeaponClasses])
 {
-   auto log = get_gamelog();
    int bankNameLen = (int)strlen(bankName);
    char name[128];
 
@@ -173,7 +171,6 @@ static void loadSprintAnims(const char* bankName, void* out[kHumanWeaponClasses]
       memcpy(name + bankNameLen, kSprintSuffixes[wc], suffixLen + 1);
 
       out[wc] = fn_FindAnimation(name);
-      log("[FPSprint] FindAnimation('%s') = %p\n", name, out[wc]);
    }
 }
 
@@ -216,11 +213,9 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
 
 static void loadBankCache(FPAnimCache* cache)
 {
-   auto log = get_gamelog();
-
    uint32_t addResult = fn_AddBank(cache->bankName);
    if (!(addResult & 1)) {
-      log("[FPAnimBank] AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
+      get_gamelog()("[FPAnimBank] AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
    }
 
    int bankNameLen = (int)strlen(cache->bankName);
@@ -259,10 +254,10 @@ static void loadBankCache(FPAnimCache* cache)
    for (int i = 0; i < kAnimCount; i++) {
       if (cache->anims[i]) count++;
    }
-   // Only log if something went wrong (partial load)
+
    if (count == 0) {
-      log("[FPAnimBank] Bank '%s': NO animations resolved (0/%d)\n",
-          cache->bankName, kAnimCount);
+      get_gamelog()("[FPAnimBank] Bank '%s': NO animations resolved (0/%d)\n",
+                   cache->bankName, kAnimCount);
    }
 }
 
@@ -336,13 +331,6 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
    // Sprint override: swap _run slots with _sprint animations
    if (isSprinting) {
       void** sprintAnims = cache ? cache->sprintAnims : g_defaultSprintAnims;
-      if (!g_sprintLogOnce) {
-         auto log = get_gamelog();
-         for (int wc = 0; wc < kHumanWeaponClasses; wc++)
-            log("[FPSprint] wc%d: sprint=%p, run=%p\n", wc, sprintAnims[wc],
-                g_mAnim[wc * kStatesPerWeapon + kRunState]);
-         g_sprintLogOnce = true;
-      }
       for (int wc = 0; wc < kHumanWeaponClasses; wc++) {
          if (sprintAnims[wc])
             g_mAnim[wc * kStatesPerWeapon + kRunState] = sprintAnims[wc];
@@ -409,6 +397,5 @@ void fp_anim_bank_reset()
    g_bankCacheCount = 0;
    memset(g_defaultSprintAnims, 0, sizeof(g_defaultSprintAnims));
    g_defaultSprintLoaded = false;
-   g_sprintLogOnce = false;
    g_wasSprinting = false;
 }
