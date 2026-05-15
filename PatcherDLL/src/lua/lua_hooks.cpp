@@ -92,29 +92,56 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       float* aimerFirePos = (float*)((char*)aimer + 0x88);  // Aimer::mFirePos
       float* rootPos      = (float*)((char*)aimer + 0x70);  // Aimer::mRootPos
 
-      // TODO: Environment reflections still cause the bolt to originate from the
-      //       reflected unit instead of the real one. The Y-clamping below only mitigates
-      //       vertical offset — the full reflected fire position needs to be discarded.
+      // Reflection guard: the engine's reflection render pass
+      // (FLRenderer::RenderReflections at 0x0081DCE0, region test at
+      // FLRenderer::IsReflected 0x0081CE10) mirrors mFirePointMatrix across
+      // the reflective surface.  Both water and rendertype-22 refractive
+      // floors produce a horizontal-plane Y-flip.
+      //
+      // A mirror flips the matrix's handedness — the 3×3 determinant goes
+      // from +1 (proper rotation) to -1 (improper rotation).  This catches
+      // every horizontal-plane mirror regardless of distance to the surface
+      // (a position-delta heuristic misses the case where the unit stands
+      // on the surface — Y delta drops to ~3 units).
+      //
+      // For a horizontal-plane reflection, only Y is mirrored: trans.x and
+      // trans.z are still the correct hp_fire world position.  We
+      // reconstruct Y by mirroring back across the soldier's feet plane,
+      // approximated as (rootPos.y − soldier_height).  Aimer::mRootPos was
+      // set by SetSoldierInfo to the un-reflected aim origin (eye height),
+      // so it's a clean reference.
+      const float* m0 = (float*)((char*)weapon + 0x20);
+      const float* m1 = m0 + 4;
+      const float* m2 = m0 + 8;
+      const float det =
+         m0[0] * (m1[1] * m2[2] - m1[2] * m2[1]) -
+         m0[1] * (m1[0] * m2[2] - m1[2] * m2[0]) +
+         m0[2] * (m1[0] * m2[1] - m1[1] * m2[0]);
 
-      // Water reflection check: the rendering reflection pass can mirror
-      // mFirePointMatrix Y across the water plane. Normal barrel-to-root
-      // Y delta is ~3 units; reflected can be 18+. If reflected, clamp Y
-      // to a reasonable offset from rootPos rather than skipping entirely.
       float fireY = trans[1];
-      float barrelRootDy = fireY - rootPos[1];
-      if (barrelRootDy < -5.0f || barrelRootDy > 5.0f) {
-         fireY = rootPos[1] - 2.7f;
+      if (det < 0.0f) {
+         // Reconstruct un-mirrored Y using the soldier's authoritative
+         // world position (struct_base + 0x124).  owner is the Controllable
+         // base == entity == struct_base + 0x240, so world.y is at
+         // owner - 0x240 + 0x124 = owner - 0x11C.  This is the engine's
+         // own ground/origin reference for the unit — no soldier-height
+         // assumption needed, and it works regardless of stance.
+         //
+         // Reflected trans.y = 2*Yw - true_y  →  true_y = 2*Yw - trans.y.
+         if (!owner) return false;
+         const float Yw = *(const float*)((const char*)owner - 0x11C);
+         fireY = 2.0f * Yw - trans[1];
       }
 
-      // Write to both mFirePos and mFirePointMatrix trans.
-      // Muzzle flash reads mFirePos; projectile system may read the matrix.
+      // Position sanity: reject grossly out-of-body X/Z (corrupt matrix).
+      const float dx = trans[0] - rootPos[0];
+      const float dz = trans[2] - rootPos[2];
+      if (dx < -5.0f || dx > 5.0f || dz < -5.0f || dz > 5.0f)
+         return false;
+
       aimerFirePos[0] = trans[0];
       aimerFirePos[1] = fireY;
       aimerFirePos[2] = trans[2];
-
-      trans[0] = aimerFirePos[0];
-      trans[1] = fireY;
-      trans[2] = aimerFirePos[2];
       return true;
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
