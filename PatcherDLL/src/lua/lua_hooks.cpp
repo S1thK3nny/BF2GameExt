@@ -95,7 +95,7 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       // Reflection guard: the engine's reflection render pass
       // (FLRenderer::RenderReflections at 0x0081DCE0, region test at
       // FLRenderer::IsReflected 0x0081CE10) mirrors mFirePointMatrix across
-      // the reflective surface.  Both water and rendertype-22 refractive
+      // the reflective surface.  Both water and reeflection regions
       // floors produce a horizontal-plane Y-flip.
       //
       // A mirror flips the matrix's handedness — the 3×3 determinant goes
