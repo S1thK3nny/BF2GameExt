@@ -131,6 +131,7 @@ namespace modtools {
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
    constexpr uintptr_t prone_height_switch_end     = 0x0053BD67;
    constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
+   constexpr uintptr_t weapon_melee_class_vtable   = 0x00A5434C;
 
    // ---- Entity / Cloth ---------------------------------------------------------
 

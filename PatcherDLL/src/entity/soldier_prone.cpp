@@ -36,8 +36,6 @@
 //      the function's SSE stack-alignment prologue (AND ESP, 0xFFFFFFF0).
 // =============================================================================
 
-// TODO: Does not work with CustomAnimationBank weapon odf parameters. Acts similar to disabling it when a melee weapon is equipped, instantly throws the player out of prone.
-
 bool g_proneEnabled = false;
 
 // SoldierState enum values
@@ -129,8 +127,14 @@ static uint32_t  g_lowresProneJumpOrig  = 0;
 
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
-static constexpr int kSoldierAnimWeapon = 0x020;  // WeaponClass -> WEAPON mSoldierAnimationWeapon enum
-static constexpr int WEAPON_TYPE_MELEE  = 4;       // melee weapon type
+
+// WeaponMeleeClass vtable pointer — resolved at install time.
+// Identifying melee via WeaponClass+0x20 (mSoldierAnimationWeapon) would
+// false-positive on CustomAnimationBank weapons: that property allocates a
+// fresh WEAPON enum slot (>= 5) via FUN_00570cc0, so any non-melee weapon
+// using CustomAnimationBank would look like melee.  Vtable identity is the
+// authoritative check.
+static void* g_weaponMeleeVtable = nullptr;
 
 // ---------------------------------------------------------------------------
 // owner_to_entity — converts SoldierAnimator::mOwner (struct_base) to entity
@@ -150,9 +154,6 @@ static bool is_melee_weapon(void* entity)
 {
     __try {
         char* base = (char*)entity;
-        // The byte at +0x512 encodes the weapon slot in its low nibble.
-        // The game extracts it via (SHL 4, SAR 4) — equivalent to & 0x0F
-        // for non-negative values.
         uint8_t raw = *(uint8_t*)(base + kWeaponSlot);
         int slot = raw & 0x0F;
         if (slot >= 8) return false;
@@ -160,10 +161,9 @@ static bool is_melee_weapon(void* entity)
         if (!weapon) return false;
         void* weaponClass = *(void**)((char*)weapon + kWeaponClassOffset);
         if (!weaponClass) return false;
-        int weaponType = *(int*)((char*)weaponClass + kSoldierAnimWeapon);
-        // MELEE = 4 in WEAPON enum; custom weapon types (>= 5) like
-        // lightsabers are also melee.  Block all types >= MELEE.
-        return weaponType >= WEAPON_TYPE_MELEE;
+        // The first dword of any C++ object is its vtable pointer.
+        void* vtable = *(void**)weaponClass;
+        return vtable == g_weaponMeleeVtable;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -372,6 +372,8 @@ void prone_system_install(uintptr_t exe_base)
 
     original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, prone_anim_accessor);
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, prone_set_action);
+
+    g_weaponMeleeVtable   = (void*)resolve(exe_base, weapon_melee_class_vtable);
 
     // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
