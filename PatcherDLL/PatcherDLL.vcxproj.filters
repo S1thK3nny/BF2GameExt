@@ -67,6 +67,9 @@
     <ClInclude Include="src\entity\cloth_collision_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\vehicle_view_toggle.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\disguise_model_override.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -151,6 +154,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\cloth_collision_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\vehicle_view_toggle.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\disguise_model_override.cpp">

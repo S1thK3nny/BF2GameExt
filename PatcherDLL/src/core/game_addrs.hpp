@@ -337,6 +337,24 @@ namespace modtools {
    constexpr uintptr_t m_camera_global                = 0x00d61ddc;
    constexpr uintptr_t team_get_objects_in_range      = 0x0048f210;
 
+   // ---- Vehicle view toggle (FP/TP) -------------------------------------------
+
+   // EntityHover / EntityWalker (and their network-replicated CommandHover /
+   // CommandWalker counterparts) share a Controllable-aimer subobject at
+   // struct_base + 0x258 whose vtable slot +0x3C is a const-true stub.  That
+   // slot is queried by the change-view gate in each vehicle's Update; const
+   // true means the gate always suppresses the toggle, so ground vehicles
+   // can't switch FP/TP unless ForceMode is set in the ODF.  Repoint the
+   // slot at the existing const-false thunk (used by the same vtables'
+   // slot +0x40) so the gate falls through to the toggle call.
+   constexpr uintptr_t veh_view_hover_vtable_3c_slot     = 0x00A3DDA4;
+   constexpr uintptr_t veh_view_walker_vtable_3c_slot    = 0x00A41EB4;
+   constexpr uintptr_t veh_view_cmd_hover_vtable_3c_slot  = 0x00A5709C;
+   constexpr uintptr_t veh_view_cmd_walker_vtable_3c_slot = 0x00A57CAC;
+   constexpr uintptr_t veh_view_hover_3c_orig_thunk      = 0x004139E9; // -> 0x005124E0 (return 1)
+   constexpr uintptr_t veh_view_walker_3c_orig_thunk     = 0x004127CE; // -> 0x00551B10 (return 1)
+   constexpr uintptr_t veh_view_return_false_thunk       = 0x00415A50; // -> 0x004BAAE0 (return 0)
+
    // ---- Networking state (multiplayer detection) ---------------------------------
 
    constexpr uintptr_t net_in_shell                   = 0x00ADABC2;

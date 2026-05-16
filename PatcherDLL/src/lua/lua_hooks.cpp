@@ -6,6 +6,7 @@
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/soldier_prone.hpp"
+#include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/flyer_boost_animation.hpp"
 #include "entity/cloth_collision_fix.hpp"
@@ -355,6 +356,7 @@ void lua_hooks_install(uintptr_t exe_base)
    loading_screen_install(exe_base);
    entity_carrier_fixes_install(exe_base);
    prone_system_install(exe_base);
+   vehicle_view_toggle_install(exe_base);
    fp_anim_bank_install(exe_base);
    flyer_boost_anim_install(exe_base);
    cloth_collision_fix_install(exe_base);
@@ -386,6 +388,7 @@ void lua_hooks_uninstall()
    loading_screen_uninstall();
    entity_carrier_fixes_uninstall();
    prone_system_uninstall();
+   vehicle_view_toggle_uninstall();
    fp_anim_bank_uninstall();
    flyer_boost_anim_uninstall();
    cloth_collision_fix_uninstall();

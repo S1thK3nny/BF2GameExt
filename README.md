@@ -90,6 +90,7 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 ### Vehicle Additions and Fixes
 - **Flyer Boost Animation** - If a flyer's AnimationName bank contains an animation named `boost`, it will automatically play when boosting with a smooth blend transition. Frame 0 should be the normal flying pose and the final frame the full boost pose.
 - **Carrier Fixes** - Originally an unused class, the Carrier Fixes address landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier, making it viable for modders to use as a VehiclePad.
+- **Vehicle First/Third Person Toggle** - Fixes change-view being silently dropped on hovers and walkers (EntityHover, EntityWalker, and their CommandHover / CommandWalker AI wrappers). Each class's Controllable-aimer subobject shipped with a const-true stub at vtable+0x3C, which the toggle gate read as "view change suppressed", so ground vehicles were stuck in third person unless `ForceMode` was set in the ODF. The fix repoints that slot at the const-false thunk already present at +0x40 of the same vtables.
 
 ### Event Callbacks
 - **OnCharacterExitVehicle** - Register Lua callbacks that fire when soldiers dismount vehicles, with filtering by name, team, or class. Lua: `OnCEV(fn)`, `OnCEVName(name, fn)`, `OnCEVTeam(team, fn)`, `OnCEVClass(class, fn)`, `ReleaseCEV(handle)`
