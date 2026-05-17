@@ -396,14 +396,52 @@ namespace steam {
    // ---- Aimer / Weapon -------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
-   constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xDEAD0015;  // TODO
-   constexpr uintptr_t weapon_override_aimer_impl  = 0xDEAD0016;           // TODO
-   constexpr uintptr_t weapon_override_aimer_thunk = 0xDEAD0017;           // TODO
+   constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b05ec; // WeaponCannon vftable (0x7b057c) + slot 28*4
+   constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
+   constexpr uintptr_t weapon_override_aimer_thunk = 0x00677780;          // No ILT thunk in release build; same as impl
    constexpr uintptr_t weapon_zoom_first_person = 0x00677d40;
+   constexpr uintptr_t weapon_update            = 0x006781B0;             // Weapon vtable (0x7b01a8) slot 1
+   // WeaponShield ctor (Steam 0x006917c0) does NOT write its own vtable — inherits Weapon's.
+   // weapon_shield_update therefore aliases weapon_update in Steam. Verify behavior before use.
+   constexpr uintptr_t weapon_shield_update     = 0x006781B0;             // Aliases weapon_update (no override in Steam build)
 
    // ---- Hashing / Texture lookup ---------------------------------------------
 
    constexpr uintptr_t hash_string               = 0x00726e50;  // PblHash::calcHash (__cdecl)
+   constexpr uintptr_t pbl_hash_table_find       = 0x00726e00;  // PblHashTableCode::_Find
+
+   // ---- Memory heap management -----------------------------------------------
+
+   constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
+
+   // ---- Entity / Soldier Prone -----------------------------------------------
+
+   constexpr uintptr_t prone_vtable_slot         = 0x0079cf6c;  // EntitySoldier +0x240 vtable (0x79cf2c) + 0x40
+
+   // ---- Entity / Vehicle (Carrier/Flyer) -------------------------------------
+
+   constexpr uintptr_t carrier_vtable            = 0x0079A34C;  // EntityCarrier vftable (from ctor 0x00496f60)
+   constexpr uintptr_t carrier_update            = 0x004971D0;  // EntityCarrier +0x240 vtable (0x79a1bc) slot 1
+   constexpr uintptr_t carrier_kill              = 0x00497110;  // EntityCarrier +0x140 vtable (0x79a470) slot 1
+   constexpr uintptr_t flyer_render              = 0x004AB040;  // EntityCarrier +0x94  vtable (0x79a49c) slot 19
+
+   // ---- Debug / Visualization ------------------------------------------------
+
+   constexpr uintptr_t freecam_update            = 0x0052D7B0;  // FreeCamera vtable (0x79f304) slot 1
+
+   // ---- Vehicle view toggle (FP/TP) ------------------------------------------
+
+   constexpr uintptr_t veh_view_hover_vtable_3c_slot     = 0x0079bbe0; // EntityHover +0x258 vtable (0x79bba4) + 0x3c
+   constexpr uintptr_t veh_view_walker_vtable_3c_slot    = 0x0079dadc; // EntityWalker +0x258 vtable (0x79daa0) + 0x3c
+   constexpr uintptr_t veh_view_cmd_hover_vtable_3c_slot  = 0x00798454; // CommandHover +0x258 vtable (0x798418) + 0x3c
+   constexpr uintptr_t veh_view_cmd_walker_vtable_3c_slot = 0x0079881c; // CommandWalker +0x258 vtable (0x7987e0) + 0x3c
+   constexpr uintptr_t veh_view_hover_3c_orig_thunk      = 0x00478db0; // const-true (MOV AL,1; RET)
+   constexpr uintptr_t veh_view_walker_3c_orig_thunk     = 0x0047fc70; // const-true (MOV AL,1; RET)
+   constexpr uintptr_t veh_view_return_false_thunk       = 0x004774c0; // const-false (XOR AL,AL; RET)
+
+   // ---- Weapon / Grappling Hook ----------------------------------------------
+
+   constexpr uintptr_t grapple_dtor              = 0x005ff360;  // ~OrdnanceGrapplingHook
 
    // ---- Animation (weapon/soldier) -------------------------------------------
 
@@ -416,7 +454,7 @@ namespace steam {
 
    // ---- Debug / Logging ------------------------------------------------------
 
-   constexpr uintptr_t game_log                    = 0xDEAD0018; // TODO
+   constexpr uintptr_t game_log                    = 0x006f6ff0; // RedWarning::LogMessage
 
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 
