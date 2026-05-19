@@ -480,20 +480,12 @@ static int lua_SetCharacterWeapon(lua_State* L)
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      // Patch factory+0x18 (OrdnanceClass*) and factory+0x1c from the source weapon.
+      // Swap vtable so virtual dispatch matches the target weapon type.
+      // Note: weapon+0x88 is m_pAmmoCounter (24-byte AmmoCounter), NOT an OrdnanceFactory.
+      // Old code wrote past the AmmoCounter boundary at +0x18/+0x1c, corrupting adjacent heap.
+      // The vtable swap + WeaponClass writes below are sufficient — ordnance class is reached
+      // via virtual dispatch through the swapped vtable.
       if (sourceWpn) {
-         uintptr_t srcFactory = 0, playerFactory = 0;
-         __try { srcFactory    = *(uintptr_t*)(sourceWpn + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         __try { playerFactory = *(uintptr_t*)(wpn        + 0x088); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         if (srcFactory && playerFactory) {
-            uintptr_t ord18 = 0; uint32_t val1c = 0;
-            __try { ord18 = *(uintptr_t*)(srcFactory + 0x018); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            __try { val1c = *(uint32_t* )(srcFactory + 0x01c); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            __try { *(uintptr_t*)(playerFactory + 0x018) = ord18; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            __try { *(uint32_t* )(playerFactory + 0x01c) = val1c; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         }
-
-         // Swap vtable so virtual dispatch matches the target weapon type.
          uintptr_t srcVtable = 0;
          __try { srcVtable = *(uintptr_t*)(sourceWpn); } __except(EXCEPTION_EXECUTE_HANDLER) {}
          if (srcVtable && srcVtable != 0xCDCDCDCDu)
@@ -592,6 +584,144 @@ static int lua_SetCharacterWeapon(lua_State* L)
          }
 
       }
+
+      g_lua.pushnumber(L, 1);
+      return 1;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      g_lua.pushnil(L);
+      return 1;
+   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Resolve (charIndex, channel) → active Weapon* for that channel.
+// Returns nullptr on any failure. Shared by GetWeaponAmmo / SetWeaponAmmo.
+//
+// Confirmed chain (see docs/CharacterWeaponSystem.md):
+//   charArray + idx*0x1B0     → charSlot
+//   *(charSlot + 0x148)       → intermediate
+//   intermediate + 0x18       → Controllable*
+//   *(ctrl + 0x4F8 + channel) → uint8 slotIdx
+//   *(ctrl + 0x4D8 + slotIdx*4) → Weapon*
+// ---------------------------------------------------------------------------
+static uintptr_t resolve_active_weapon(int charIndex, int channel)
+{
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
+
+   const int maxChars = *(int*)res(game_addrs::modtools::max_chars);
+   if (charIndex < 0 || charIndex >= maxChars) return 0;
+   if (channel < 0 || channel > 7) return 0;
+
+   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+   if (!arrayBase) return 0;
+
+   __try {
+      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
+      char* intermediate = *(char**)(charSlot + 0x148);
+      if (!intermediate) return 0;
+
+      char* ctrl = intermediate + 0x18;
+      uint8_t slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel);
+      if (slotIdx >= 8) return 0;
+
+      uintptr_t wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4);
+      if (!wpn || wpn == 0xCDCDCDCDu) return 0;
+      return wpn;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
+
+// ---------------------------------------------------------------------------
+// GetWeaponAmmo(charIndex [, channel]) - returns ammo state for the active
+// weapon in a given channel.
+//
+// All ammo is tracked in **clips**, not rounds. A weapon with a 50-round clip
+// reading (1, 3, 4, 50) means: 1 clip currently loaded (= 50 rounds), 3 spare
+// clips, max 4 clips, 50 rounds per clip → 200 rounds total.
+//
+// mCurClip is a float — it represents fractional clip remaining (1.0 = full,
+// decreases as rounds are fired; total rounds = mCurClip * mRoundsPerClip).
+//
+// AmmoCounter layout (24 bytes, allocated at Weapon+0x88):
+//   +0   AmmoCounterClass*  m_pClass         (→ +0 int mRoundsPerClip, +4 float mAmmoPerRound)
+//   +4   float              mDefaultMaxClips
+//   +8   float              mMaxClips        (current cap, can differ from default)
+//   +12  float              mNumClips        (reserve clips remaining)
+//   +16  float              mCurClip         (clips currently loaded — fractional)
+//   +20  uint               m_uiRefCount
+//
+// @param #int charIndex
+// @param #int channel    (default 0)
+// @return curClip, numClips, maxClips, roundsPerClip  — four numbers, or nil
+// ---------------------------------------------------------------------------
+static int lua_GetWeaponAmmo(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
+   const int charIndex = g_lua.tointeger(L, 1);
+   const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
+                       ? g_lua.tointeger(L, 2) : 0;
+
+   uintptr_t wpn = resolve_active_weapon(charIndex, channel);
+   if (!wpn) { g_lua.pushnil(L); return 1; }
+
+   __try {
+      uintptr_t ac = *(uintptr_t*)(wpn + 0x88);
+      if (!ac || ac == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+
+      float curClip  = *(float*)(ac + 0x10);
+      float numClips = *(float*)(ac + 0x0C);
+      float maxClips = *(float*)(ac + 0x08);
+
+      int roundsPerClip = 0;
+      uintptr_t acClass = *(uintptr_t*)(ac + 0x00);
+      if (acClass && acClass != 0xCDCDCDCDu)
+         roundsPerClip = *(int*)(acClass + 0x00);
+
+      g_lua.pushnumber(L, curClip);
+      g_lua.pushnumber(L, numClips);
+      g_lua.pushnumber(L, maxClips);
+      g_lua.pushnumber(L, roundsPerClip);
+      return 4;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      g_lua.pushnil(L);
+      return 1;
+   }
+}
+
+// ---------------------------------------------------------------------------
+// SetWeaponAmmo(charIndex, curClip [, numClips [, channel]]) - writes ammo state.
+//
+// Values are in **clips**, not rounds. curClip is fractional (1.0 = full clip
+// loaded, 0.5 = half a clip). numClips is the integer count of spare clips.
+// Pass nil for numClips to leave it untouched. Channel defaults to 0.
+//
+// @return 1 on success, nil on failure
+// ---------------------------------------------------------------------------
+static int lua_SetWeaponAmmo(lua_State* L)
+{
+   if (!g_lua.isnumber(L, 1) || !g_lua.isnumber(L, 2)) { g_lua.pushnil(L); return 1; }
+   const int   charIndex = g_lua.tointeger(L, 1);
+   const float curClip   = (float)g_lua.tonumber(L, 2);
+
+   const bool  haveNumClips = (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3));
+   const float numClips     = haveNumClips ? (float)g_lua.tonumber(L, 3) : 0.0f;
+
+   const int channel = (g_lua.gettop(L) >= 4 && g_lua.isnumber(L, 4))
+                       ? g_lua.tointeger(L, 4) : 0;
+
+   uintptr_t wpn = resolve_active_weapon(charIndex, channel);
+   if (!wpn) { g_lua.pushnil(L); return 1; }
+
+   __try {
+      uintptr_t ac = *(uintptr_t*)(wpn + 0x88);
+      if (!ac || ac == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+
+      *(float*)(ac + 0x10) = curClip;
+      if (haveNumClips) *(float*)(ac + 0x0C) = numClips;
 
       g_lua.pushnumber(L, 1);
       return 1;
@@ -1231,7 +1361,13 @@ static const lua_func_entry custom_functions[] = {
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
-   { "SetCharacterWeapon",    lua_SetCharacterWeapon },
+   // SetCharacterWeapon — disabled: years of iteration (v1..v5) never produced
+   // a stable swap. WeaponClass / vtable / MAP writes all leave engine state
+   // inconsistent in ways that drift across frames. Implementation kept in the
+   // file (lua_SetCharacterWeapon) for future reference but no longer exposed.
+   // { "SetCharacterWeapon",    lua_SetCharacterWeapon },
+   { "GetWeaponAmmo",         lua_GetWeaponAmmo },
+   { "SetWeaponAmmo",         lua_SetWeaponAmmo },
    { "HttpGetAsync",          lua_HttpGetAsync },
    { "HttpPutAsync",          lua_HttpPutAsync },
    { "HttpPostAsync",         lua_HttpPostAsync },

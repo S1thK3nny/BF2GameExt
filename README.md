@@ -16,10 +16,9 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
   - [Soldier Systems](#soldier-systems)
   - [Weapon Systems](#weapon-systems)
   - [Vehicle Fixes](#vehicle-fixes)
-  - [Event Callbacks](#event-callbacks)
-  - [Web Requests](#web-requests)
   - [Additional Debug Commands](#additional-debug-commands)
   - [Controller Support](#controller-support)
+- [Lua API](#lua-api)
 - [Supported Executables](#supported-executables)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -46,7 +45,7 @@ Automatic binary patches applied on load:
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256, particle icons from 128 to 512. Fixes pathways and fleet/planet icons silently disappearing on modded GC maps with many planets
 
 ### Loading Screen System
-The vanilla game reads a loading screen configuration from a munged `load.cfg`, but it cannot be overridden without replacing the base game file. BF2GameExt hooks into the `LoadDisplay` config parser and renderer to add new parameters that work alongside vanilla ones. Modders can also redirect the entire loading screen to a custom `load.cfg` via `SetLoadDisplayLevel(path)` in Lua.
+The vanilla game reads a loading screen configuration from a munged `load.cfg`, but it cannot be overridden without replacing the base game file. BF2GameExt hooks into the `LoadDisplay` config parser and renderer to add new parameters that work alongside vanilla ones. Modders can also redirect the entire loading screen to a custom `load.cfg` from Lua. See [Lua API](#lua-api).
 
 #### Custom Parameters
 
@@ -68,18 +67,12 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 | `RemoveToolTips` | `RemoveToolTips(1/0)` | Hides the tips box and text. Works independently of EnableBF1 |
 | `RemoveLoadingBar` | `RemoveLoadingBar(1/0)` | Hides the progress bar. Works independently of EnableBF1 |
 
-#### Lua Functions
-
-| Function | Description |
-|----------|-------------|
-| `SetLoadDisplayLevel(path)` | Redirects to a custom load.cfg (call from script root or ScriptPreInit) |
-
 ### Soldier Systems
 - **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture system. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain rotation fix that prevented prone from working on slopes. INI: `[Features] Prone=1`
 - **Multiple First-Person Animation Banks** - Allows each soldier class to use its own first-person animation bank instead of sharing one global set. Supports partial banks where missing animations fall through to defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **First-Person Sprint Animation** - The engine's FP state machine has no sprint state — it plays the run animation at higher speed. This adds support for a distinct sprint animation per weapon class. If `<bank>_rifle_sprint` (or `_bazooka_sprint`, `_tool_sprint`) exists in the animation bank, it will be used instead of the run animation while sprinting. Works with custom FP banks. Sprint animations are optional — if absent, the default run behavior is unchanged
 - **Animation Bank Appending** - Allows animation banks to be extended with additional numbered sub-banks across multiple .lvl files. The engine's `AnimationFinder::_AddBank` only scans for sub-banks once during the first .lvl load, so late-loaded sub-banks (e.g. `human_5` from a modified `ingame.lvl` after a mod's `dc:ingame.lvl` already ran `_AddBank("human")`) are silently ignored. The fix hooks `_AddBank` to retroactively append any sub-banks that exist in the hash table but weren't picked up during the initial scan. Works for any bank, not just `human`
-- **Unit Class Removal** - Dynamically remove classes from a team's spawn menu at runtime. Lua: `RemoveUnitClass(team, class)`
+- **Unit Class Removal** - Dynamically remove classes from a team's spawn menu at runtime. See [Lua API](#lua-api).
 
 ### Weapon Systems
 - **Barrel Fire Origin Fix** - Fixes ordnances spawning from `bone_head` instead of `hp_fire` on WeaponCannon. Forces projectiles to originate from the actual barrel hardpoint. INI: `[Fixes] BarrelFireOriginFix=1`
@@ -92,15 +85,6 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 - **Carrier Fixes** - Originally an unused class, the Carrier Fixes address landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier, making it viable for modders to use as a VehiclePad.
 - **Vehicle First/Third Person Toggle** - Fixes change-view being silently dropped on hovers and walkers (EntityHover, EntityWalker, and their CommandHover / CommandWalker AI wrappers). Each class's Controllable-aimer subobject shipped with a const-true stub at vtable+0x3C, which the toggle gate read as "view change suppressed", so ground vehicles were stuck in third person unless `ForceMode` was set in the ODF. The fix repoints that slot at the const-false thunk already present at +0x40 of the same vtables.
 
-### Event Callbacks
-- **OnCharacterExitVehicle** - Register Lua callbacks that fire when soldiers dismount vehicles, with filtering by name, team, or class. Lua: `OnCEV(fn)`, `OnCEVName(name, fn)`, `OnCEVTeam(team, fn)`, `OnCEVClass(class, fn)`, `ReleaseCEV(handle)`
-
-### Web Requests
-Make HTTP requests directly from Lua scripts - enables integration with external APIs, telemetry, live configuration, and more. All from within singleplayer or multiplayer missions.
-
-- `HttpGet(url)` / `HttpPut(url, body)` / `HttpPost(url, body)` - Synchronous requests, return response body
-- `HttpGetAsync(url)` / `HttpPutAsync(url, body)` / `HttpPostAsync(url, body)` - Fire-and-forget on background threads
-
 ### Additional Debug Commands
 Extra commands for the in-game console in the ModTools (`~`):
 
@@ -111,6 +95,74 @@ Extra commands for the in-game console in the ModTools (`~`):
 - **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard/mouse bindings. INI: `[Controller.*]` sections
 - **Aim Assist** - Xbox-style aim assist ported from the console version's dead code. Proximity friction, auto-lock-on-hit, target tracking, and directional friction. Controller-only, singleplayer-only. INI: `[AimAssist]`
 - **Rumble** - Controller vibration on weapon fire and damage. INI: `[Controller] Rumble=1`
+
+## Lua API
+
+All functions below are registered globally and callable from any mission, ScriptInit, or shell script. BF2_modtools only.
+
+### Character & Weapon Queries
+
+| Function | Description |
+|----------|-------------|
+| `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary, ...). Returns nil if the slot is empty. |
+| `GetWeaponAmmo(charIndex [, channel])` | Returns four numbers: `curClip, numClips, maxClips, roundsPerClip` for the active weapon in the channel (default 0). Ammo is tracked in **clips**, with `curClip` being a fractional 0.0–1.0 of one loaded clip. |
+| `SetWeaponAmmo(charIndex, curClip [, numClips [, channel]])` | Writes `curClip` (fractional 0.0–1.0) and optionally `numClips` (spare clips) on the active weapon. Pass nil for `numClips` to leave it untouched. |
+
+### Spawn Menu
+
+| Function | Description |
+|----------|-------------|
+| `RemoveUnitClass(team, className)` | Removes a unit class from a team's spawn menu at runtime. Compact-shifts the team's class arrays to preserve order. |
+
+### Animation
+
+| Function | Description |
+|----------|-------------|
+| `ReapplyAnimations()` | Re-runs the FP animation bank resolution for every active soldier. Use after a hotload that changes `FirstPersonAnimationBank` ODF values. |
+
+### Event Callbacks
+
+Register Lua callbacks that fire when soldiers dismount vehicles. All registration functions return a handle that can be passed to `ReleaseCharacterExitVehicle` to unsubscribe.
+
+| Function | Description |
+|----------|-------------|
+| `OnCharacterExitVehicle(fn)` | Fires on every character exiting any vehicle. |
+| `OnCharacterExitVehicleName(name, fn)` | Filtered to vehicles with the given entity name. |
+| `OnCharacterExitVehicleTeam(team, fn)` | Filtered to a specific team index. |
+| `OnCharacterExitVehicleClass(className, fn)` | Filtered to a specific vehicle ODF class. |
+| `ReleaseCharacterExitVehicle(handle)` | Unregister a previously-registered callback. |
+
+### Loading Screen
+
+| Function | Description |
+|----------|-------------|
+| `SetLoadDisplayLevel(path)` | Redirects the loading screen to a custom `load.cfg`. Call from script root or ScriptPreInit. |
+
+### Rendering
+
+| Function | Description |
+|----------|-------------|
+| `SetFogEnable(0/1)` | Toggles the D3D fog render state. |
+| `SetFogRange(start, end)` | Sets near/far fog distances. |
+
+### HTTP
+
+Make HTTP requests directly from Lua. Useful for telemetry, live configuration, or external API integration in either singleplayer or multiplayer missions.
+
+| Function | Description |
+|----------|-------------|
+| `HttpGet(url)` | Synchronous GET. Returns response body as a string, or nil on failure. |
+| `HttpPut(url, body)` | Synchronous PUT. Returns response body. |
+| `HttpPost(url, body)` | Synchronous POST. Returns response body. |
+| `HttpGetAsync(url)` | Fire-and-forget GET on a background thread. |
+| `HttpPutAsync(url, body)` | Fire-and-forget PUT. |
+| `HttpPostAsync(url, body)` | Fire-and-forget POST. |
+
+### Debug
+
+| Function | Description |
+|----------|-------------|
+| `DumpAimerInfo(charIndex)` | Prints the soldier's Aimer state (fire point, yaw/pitch, target) to the game debug log. |
 
 ## Supported Executables
 

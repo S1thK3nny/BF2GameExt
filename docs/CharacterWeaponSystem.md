@@ -188,16 +188,28 @@ offsets on Controllable are always zero. **Do not use.**
 
 ---
 
-## Weapon Object Layout (Confirmed Fields)
+## Weapon Object Layout (Confirmed via Steam-build PDB structs)
 
-Each weapon in the slot array is `~0x200` bytes, allocated contiguously.
+**Source of truth**: the Steam release `BattlefrontII.exe` (Ghidra port 8193) carries PDB-derived
+struct types `Weapon` (284 bytes) and `Weapon_vftable`. Offsets are 1:1 with the modtools build
+(verified against the well-known `+0x60`, `+0x88`, `+0xC8` fields). When in doubt, look it up
+in the Steam binary first.
+
+Weapon inherits from `Thread` (24 bytes at +0x00).
 
 ```
-Weapon vtables (multiple types — NOT consistent per channel):
-   0x00A52468  — used by: DC-15A blaster rifle, melee
-   0x00A53510  — used by: thermal detonator
-   0x00A53AE8  — used by: RPS-6 rocket launcher
-   0x00A53020  — used by: mine dispenser
+Weapon vtables (Weapon..WeaponD, alphabetized):
+   0x00A51C08  — Weapon (base)
+   0x00A520D8  — WeaponAreaEffect
+   0x00A52288  — WeaponBinoculars
+   0x00A52468  — WeaponCannon          (DC-15A blaster, melee, etc.)
+   0x00A52740  — WeaponCatapult        (turret arm)
+   0x00A52960  — WeaponDestruct
+   0x00A52B80  — WeaponDetonator       (extends WeaponDispenser)
+   0x00A52D68  — WeaponDisguise
+   0x00A53020  — WeaponDispenser       (mine dispenser)
+   0x00A53510  — (thermal detonator subclass)
+   0x00A53AE8  — WeaponGrapplingHook   (extends WeaponCannon)
 ```
 
 **WARNING**: You **cannot** determine a weapon's channel from its vtable. The game uses
@@ -205,36 +217,89 @@ multiple weapon subclasses, and weapons of the same channel may have different v
 Channel assignment comes from the ODF `WeaponChannel` property and is tracked at
 `ctrl+0x4F8`.
 
-| Offset          | Type          | Description                                        |
-|-----------------|---------------|----------------------------------------------------|
-| `+0x000`        | `void**`      | vtable (varies by weapon type — see above)         |
-| `+0x004`        | `void*`       | linked list sentinel (shared by weapons in same ctrl)|
-| `+0x008`        | `void*`       | outer linked list: next                            |
-| `+0x00C`        | `void*`       | outer linked list: prev                            |
-| `+0x010`        | `Weapon*`     | inner list: next (= self when single)              |
-| `+0x014`        | `Weapon*`     | inner list: prev (= self when single)              |
-| `+0x018..+0x05F`| —             | uninitialized (`0xCDCDCDCD`)                       |
-| **`+0x060`**    | **`WeaponClass*`** | **WeaponClass pointer** (also at `+0x064`, `+0x068`) |
-| `+0x06C`        | `void*`       | back-pointer to intermediate                       |
-| `+0x070`        | `void*`       | pointer near ctrl                                  |
-| `+0x074`        | `void*`       | pointer near `ctrl + 0x20`                         |
-| `+0x078`        | `void*`       | pointer near `ctrl + 0x28`                         |
-| `+0x0B8`        | `float`       | `1.0f`                                             |
-| `+0x0BC`        | `float`       | `2.5f`                                             |
-| `+0x0C0`        | `float`       | `2.5f`                                             |
-| `+0x0C4`        | `float`       | changes when weapon is used (float, not int)       |
-| `+0x0C8`        | `int`         | 6 or 5 for slotted weapons, -1 for special weapons |
-| `+0x0D8`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #1       |
-| `+0x0EC`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #2       |
-| `+0x100`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #3       |
-| `+0x130`        | `int`         | `0xFFFFFFFF` (`-1`)                                |
-| `+0x16C`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #4       |
-| `+0x184`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #5       |
-| `+0x19C`        | `void**`      | vtable `0x00A2B1BC` — intrusive list node #6       |
-| `+0x1A0`        | `void*`       | inter-weapon list link: → `wep[1]+0x0DC`           |
+| Offset   | Field                         | Type                  | Notes |
+|----------|-------------------------------|-----------------------|-------|
+| `+0x000` | vftable                       | `void**`              | varies by subclass |
+| `+0x000..+0x017` | `Thread` base         | (24 bytes)            | |
+| `+0x020` | `mFirePointMatrix`            | `PblMatrix` (64 b)    | |
+| **`+0x060`** | **`mStart`**              | **`WeaponClass*`**    | initial/template class |
+| **`+0x064`** | **`mClass`**              | **`WeaponClass*`**    | **current/effective class — mutable** (swaps for ammo modes) |
+| **`+0x068`** | **`mRenderClass`**        | **`WeaponClass*`**    | rendering-side class |
+| `+0x06C` | `mOwner`                      | `Controllable*`       | direct owner ptr (no chain needed) |
+| `+0x070` | `mAimer`                      | `Aimer*`              | |
+| `+0x074` | `mTrigger`                    | `Trigger*`            | fire trigger |
+| `+0x078` | `mReload`                     | `Trigger*`            | reload trigger (separate from fire) |
+| `+0x07C` | `mFirePos`                    | `PblVector3`          | 12 bytes |
+| **`+0x088`** | **`m_pAmmoCounter`**      | **`AmmoCounter*`**    | **24-byte heap object; NOT OrdnanceFactory** |
+| `+0x08C` | `m_pEnergyBar`                | `EnergyBar*`          | |
+| `+0x090` | `mCurChargeStrengthHeavy`     | `float`               | |
+| `+0x094` | `mCurChargeStrengthLight`     | `float`               | |
+| `+0x098` | `mCurChargeDelayHeavy`        | `float`               | |
+| `+0x09C` | `mCurChargeDelayLight`        | `float`               | |
+| `+0x0A0` | `mCurChargeRateLight`         | `float`               | |
+| `+0x0A4` | `mCurChargeRateHeavy`         | `float`               | |
+| `+0x0A8` | `mCurTimeAtMaxCharge`         | `float`               | |
+| `+0x0AC` | bitfield                      | `uint`                | `mHideWeapon:1, mFiredFlag:1, mSelectedFlag:1, m_iSoldierState:6` |
+| `+0x0B0` | `mState`                      | `WeaponState`         | 0=idle, 1=fire, 2=charge, 3=reload, 4=empty |
+| `+0x0B4` | `mStateTimer`                 | `float`               | incremented by dt |
+| `+0x0B8` | `mStateLimit`                 | `float`               | state duration cap |
+| `+0x0BC` | `mZoom`                       | `float`               | |
+| `+0x0C0` | `mZoomTurnScale`              | `float`               | |
+| `+0x0C4` | `mMuzzleFlashStartTime`       | `float`               | (NOT mLastFireTime — see +0xF8) |
+| **`+0x0C8`** | **`mSoldierAnimationMap`** | **`MAP` (int)**       | -1 = invalid; per-frame UpdateIndirect reads this |
+| `+0x0CC` | `mSoundControl`               | `GameSoundControllable` | |
+| `+0x0D0` | `mSoundControlFire`           | `GameSoundControllable` | |
+| `+0x0D4` | `mFoleyFXControl`             | `GameSoundControllable` | |
+| `+0x0D8` | `mSoundProps`                 | `GameSound*` (8 b)    | |
+| `+0x0E0` | `mSoundPropsFire`             | `GameSound*`          | |
+| `+0x0E8` | `mFoleyFXProps`               | `GameSound*`          | |
+| `+0x0F0` | `mChargeUpEmitter`            | `PblHandle<ParticleEmitterObject>` | |
+| `+0x0F8` | `mLastFireTime`               | `float`               | real last-fire timestamp |
+| `+0x0FC` | `mSkipTime`                   | `float`               | |
+| `+0x100` | bitfield                      | `bool`                | `mSkip:1, mCharged:1` |
+| `+0x101` | `mDeactivateScheduled`        | `uchar`               | |
+| `+0x104` | `mTarget`                     | `PblHandle<GameObject>` | lock-on target |
+| `+0x10C` | `mTargetBodyID`               | `int`                 | |
 
-The embedded nodes (vtable `0x00A2B1BC`) form an **intrusive doubly-linked list** spanning
-all weapon objects in the same Controllable.
+Total size: 284 bytes (Steam build; modtools may differ slightly past +0x10C).
+
+### Weapon vftable layout (slot index × 4 bytes)
+
+| Slot | Method | Notes |
+|------|--------|-------|
+| 0 | `~Weapon` (scalar deleting dtor) | |
+| 1 | `Update(dt)` | per-frame state pump |
+| 2-4 | `ActivateThread` / `Deactivate` / `IsThreadActive` | from `Thread` base |
+| 5-7 | RTTI helpers | |
+| 9 | `GetOrdnanceVelocity` | |
+| 10 | `GetOrdnanceGravity` | |
+| 11-13 | `IsLocked` / `GetLocked` / `GetLockedTargetBodyID` | missile lock |
+| 16-17 | `GetYawSpread` / `GetPitchSpread` | recoil |
+| 18 | `Deflect` | lightsaber-deflect hook |
+| 19 | `SignalFire` | network/event fire signal |
+| 20 | `ShouldShowReticule` | HUD |
+| 21-22 | `IsMelee` / `IsMeleeThrow` | type queries |
+| 23 | `NotifySoldierState` | |
+| 24 | `SoldierCanOperate` | |
+| 25-28 | `OverrideSoldierVelocity` / `Controls` / `EnergyRestore` / `Aimer` | |
+| **29** | **`Select(param_1, silent)`** | weapon-select state init + sound |
+| 30 | `Deselect` | |
+| 31 | `IsBusy` | |
+| 33-34 | `Write` / `Read` | netcode |
+| 35 | `Render` | |
+| 36 | `GetNameHash` | |
+| 37-39 | `EnterIdle` / `UpdateIdle` / `ExitIdle` | |
+| 40 | `EnterFire` | |
+| 42-43 | `StopFireSound` x2 | |
+| 51 | `ExitEmpty` | |
+| 52 | `CheckCharge` | |
+| 53 | `CheckFire` | predicate |
+| 54 | `FireDone` | |
+| 55 | `CheckEmpty` | |
+| 57 | `CheckReload` | |
+| 58 | `ReloadDone` | |
+
+**No `ForceReload` virtual exists** — reload is driven by `mReload` Trigger + state machine.
 
 ---
 
@@ -403,15 +468,20 @@ These approaches were tested and confirmed to fail. Documented here to save futu
 | `+0x4F8`  | `m_aChannelSlotIndex`     | `uint8_t[8]`       |
 | `+0x744`  | `m_nMaxWeaponSlots`       | `int` (value: 8)   |
 
-**Weapon struct** (apply to all Weapon vtable types):
+**Weapon struct** (use Steam-build `Weapon` struct as canonical reference):
 | Offset    | Field Name                | Type              |
 |-----------|---------------------------|--------------------|
-| `+0x004`  | `m_pListSentinel`         | `void*`            |
-| `+0x008`  | `m_pListNext`             | `void*`            |
-| `+0x00C`  | `m_pListPrev`             | `void*`            |
-| `+0x060`  | `m_pWeaponClass`          | `WeaponClass*`     |
-| `+0x06C`  | `m_pIntermediate`         | `void*`            |
-| `+0x0C8`  | `m_nAmmoOrMode`           | `int`              |
+| `+0x060`  | `mStart`                  | `WeaponClass*`     |
+| `+0x064`  | `mClass`                  | `WeaponClass*`     |
+| `+0x068`  | `mRenderClass`            | `WeaponClass*`     |
+| `+0x06C`  | `mOwner`                  | `Controllable*`    |
+| `+0x088`  | `m_pAmmoCounter`          | `AmmoCounter*`     |
+| `+0x08C`  | `m_pEnergyBar`            | `EnergyBar*`       |
+| `+0x0B0`  | `mState`                  | `WeaponState`      |
+| `+0x0B4`  | `mStateTimer`             | `float`            |
+| `+0x0B8`  | `mStateLimit`             | `float`            |
+| `+0x0C8`  | `mSoldierAnimationMap`    | `MAP` (int)        |
+| `+0x0F8`  | `mLastFireTime`           | `float`            |
 
 **WeaponClass struct** (at `0x00A525F4`):
 | Offset    | Field Name                | Type              |
