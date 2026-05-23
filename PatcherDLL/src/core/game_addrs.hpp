@@ -42,6 +42,11 @@ namespace modtools {
    constexpr uintptr_t lua_settop        = 0x7B7E70;
    constexpr uintptr_t lua_insert        = 0x7B7F20;
 
+   // Stock Lua callback: CreateEntity(class, matrix, name). Detoured to apply
+   // VehicleSpawn-style post-create fixup (team + activate) so vehicles
+   // spawned this way can actually fire weapons.
+   constexpr uintptr_t lua_create_entity = 0x00472730;
+
    // ---- Aimer / Weapon -------------------------------------------------------
 
    // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)

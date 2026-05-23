@@ -367,6 +367,7 @@ void lua_hooks_install(uintptr_t exe_base)
    anim_bank_append_install(exe_base);
    shield_channel_fix_install(exe_base);
    aim_assist_install(exe_base);
+   lua_create_entity_hook_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.
    // Validate that the slot currently points to the vanilla implementation.

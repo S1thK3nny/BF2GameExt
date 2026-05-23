@@ -2,7 +2,9 @@
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
+#include "core/game_addrs.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
+#include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
 
@@ -1349,6 +1351,92 @@ static int lua_SetFogEnable(lua_State* L)
    fn(enable);
 
    return 0;
+}
+
+// Replicates the post-create steps that VehicleSpawn::UpdateSpawn (0x00665a50)
+// performs after EntityClass::Create. Stock `CreateEntity` Lua callback skips
+// these, so vehicles spawned via it have no team / damage owner and weapons
+// silently no-op.
+//
+//   1. ctrl = entity->vtable[9]()        — get controllable
+//   2. ctrl->vtable[36](team)            — Controllable::SetTeam (+0x234 low 4 bits)
+//   3. patch +0x234 bits 4-7  = team     — spawner-team
+//   4. patch +0x234 bits 8-11 = team     — group/owner bits
+//   5. ctrl->vtable[5]()                 — activate
+//
+// Returns true on success.
+static bool apply_vehicle_fixup(void* entity, int team)
+{
+   if (!entity) return false;
+
+   typedef void* (__fastcall* GetCtrl_t)(void* ecx);
+   typedef void  (__fastcall* SetTeam_t)(void* ecx, void* edx, int team);
+   typedef void  (__fastcall* Activate_t)(void* ecx);
+
+   __try {
+      void** evt = *(void***)entity;
+      auto getCtrl = (GetCtrl_t)evt[9];
+      void* ctrl = getCtrl(entity);
+      if (!ctrl) return false;
+
+      void** cvt = *(void***)ctrl;
+      auto setTeam  = (SetTeam_t)cvt[36];
+      auto activate = (Activate_t)cvt[5];
+
+      setTeam(ctrl, nullptr, team);
+
+      uint32_t* pField = (uint32_t*)((char*)ctrl + 0x234);
+      uint32_t v = *pField;
+      v = (v & ~0x0F0u) | ((uint32_t)(team & 0xF) << 4);
+      v = (v & ~0xF00u) | ((uint32_t)(team & 0xF) << 8);
+      *pField = v;
+
+      activate(ctrl);
+      return true;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
+// Detour for stock `Lua_Callbacks::CreateEntity` (0x00472730).
+//
+// Original Lua signature: CreateEntity(className, matrix, name) -> entity|nil
+// Extended signature:     CreateEntity(className, matrix, name [, team]) -> entity|nil
+//
+// After the original call returns (top of Lua stack = entity lightuserdata or
+// nil), runs the vehicle fixup so weapons work. Team defaults to 0 if omitted.
+// Non-vehicle entities are tolerated — apply_vehicle_fixup is SEH-guarded and
+// for entities without the expected vtable layout it'll either no-op or fail
+// cleanly without affecting the returned entity.
+typedef int (__cdecl* fn_lua_create_entity_t)(void* L);
+static fn_lua_create_entity_t original_lua_create_entity = nullptr;
+
+static int __cdecl hooked_lua_create_entity(void* L)
+{
+   int team = 0;
+   const bool haveTeam = g_lua.gettop && g_lua.isnumber &&
+                         g_lua.gettop((lua_State*)L) >= 4 &&
+                         g_lua.isnumber((lua_State*)L, 4);
+   if (haveTeam) team = g_lua.tointeger((lua_State*)L, 4);
+
+   const int ret = original_lua_create_entity(L);
+   if (ret <= 0) return ret;
+
+   void* entity = g_lua.touserdata((lua_State*)L, -1);
+   if (entity) apply_vehicle_fixup(entity, team);
+   return ret;
+}
+
+void lua_create_entity_hook_install(uintptr_t exe_base)
+{
+   original_lua_create_entity = (fn_lua_create_entity_t)
+      resolve(exe_base, game_addrs::modtools::lua_create_entity);
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)original_lua_create_entity, hooked_lua_create_entity);
+   DetourTransactionCommit();
 }
 
 struct lua_func_entry {
