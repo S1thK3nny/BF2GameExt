@@ -16,6 +16,7 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
   - [Soldier Systems](#soldier-systems)
   - [Weapon Systems](#weapon-systems)
   - [Vehicle Fixes](#vehicle-fixes)
+  - [AI Systems](#ai-systems)
   - [Additional Debug Commands](#additional-debug-commands)
   - [Controller Support](#controller-support)
 - [Lua API](#lua-api)
@@ -85,6 +86,11 @@ The vanilla game reads a loading screen configuration from a munged `load.cfg`, 
 - **Carrier Fixes** - Originally an unused class, the Carrier Fixes address landing state oscillation, cargo attachment, LOD rendering, and animation override for EntityCarrier, making it viable for modders to use as a VehiclePad.
 - **Vehicle First/Third Person Toggle** - Fixes change-view being silently dropped on hovers and walkers (EntityHover, EntityWalker, and their CommandHover / CommandWalker AI wrappers). Each class's Controllable-aimer subobject shipped with a const-true stub at vtable+0x3C, which the toggle gate read as "view change suppressed", so ground vehicles were stuck in third person unless `ForceMode` was set in the ODF. The fix repoints that slot at the const-false thunk already present at +0x40 of the same vtables.
 - **CreateEntity Vehicle Weapons Fix** - Vehicles spawned via Lua `CreateEntity` would work fine except for their weapons silently no-oping. Stock `CreateEntity` only calls `EntityClass::Create`; it skips the team-set and activate steps that `VehicleSpawn::UpdateSpawn` performs after creation. Without a team set, `OrdnanceFactory` has no `DamageOwner` and refuses to spawn projectiles. The fix detours `CreateEntity` and runs the post-create sequence (`SetTeam`, spawn-team / group bits at `+0x234`, controllable activate) automatically. Adds an optional 4th argument: `CreateEntity(class, matrix, name [, team])`, with it defaulting to 0 if omitted. Back-compatible with existing call sites.
+
+### AI Systems
+- **Dead Body Shooting Control** - Vanilla `CombatHelper::DeadBodyCheck` makes **Alliance** units (the team whose `Team::mSide == 1`) break off to walk up to and fire on nearby soldier corpses. Two INI toggles control this behavior:
+  - `[Features] DisableDeadBodyShooting=1` *(default on)* - Stops the behavior entirely, for every side, so no one ever shoots dead bodies. Overrides the all-factions toggle.
+  - `[Features] DeadBodyShootingAllFactions=1` *(default off)* - Extends the behavior to all factions instead of just Alliance. Ignored while `DisableDeadBodyShooting=1`.
 
 ### Additional Debug Commands
 Extra commands for the in-game console in the ModTools (`~`):
@@ -199,7 +205,7 @@ All runtime options are controlled via `BF2GameExt.ini` (only used with the DInp
 | `[General]` | Master enable switch, DLL path |
 | `[LimitIncreases]` | Engine limit patches (heap, sound, objects, etc.) |
 | `[Fixes]` | Bug-fix patches |
-| `[Features]` | Optional gameplay features (e.g. Prone) |
+| `[Features]` | Optional gameplay features (e.g. Prone) and AI behavior toggles (dead-body shooting) |
 | `[Controller]` | Gamepad enable and rumble toggles |
 | `[Controller.*]` | Per-mode button/axis bindings (Unit, Vehicle, Flyer, Hero, Turret) |
 

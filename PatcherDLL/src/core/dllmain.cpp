@@ -2,6 +2,7 @@
 #include "pch.h"
 
 #include "apply_patches.hpp"
+#include "resolve.hpp"
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -13,6 +14,39 @@
 static bool g_initialized = false;
 
 static void install_patches_impl(uintptr_t exe_base, const char* ini_path);
+
+// ---------------------------------------------------------------------------
+// CombatHelper::DeadBodyCheck (0x5b4ec0) toggles.
+//
+// Vanilla behaviour: Alliance units (Team::mSide == 1) walk to and shoot
+// nearby soldier corpses. Two optional byte patches control this. They are
+// modtools VAs and are guarded by their expected original bytes, so they
+// silently no-op on the GOG/Steam builds (different addresses).
+//
+//   disableAll  — NOP the first guard's JGE so DeadBodyCheck always returns
+//                 false: NOBODY shoots corpses (this overrides allFactions,
+//                 since the function bails before reaching the side gate).
+//                   0x5b4ed3: 7D 07  JGE 0x5b4edc -> 90 90
+//                   (falls through to the 0x5b4ed5 XOR AL,AL / RET epilogue)
+//
+//   allFactions — NOP the mSide==1 JNZ so the side gate always passes: ALL
+//                 factions shoot corpses (the team != 0 null-check above is
+//                 left intact).
+//                   0x5b4f06: 75 16  JNZ 0x5b4f1e -> 90 90
+//
+// Must run while the executable sections are still RW (before re-protect).
+// ---------------------------------------------------------------------------
+static void apply_deadbody_check_patches(uintptr_t exe_base, bool disableAll, bool allFactions)
+{
+   if (disableAll) {
+      uint8_t* p = (uint8_t*)resolve(exe_base, 0x5b4ed3);
+      if (p[0] == 0x7D && p[1] == 0x07) { p[0] = 0x90; p[1] = 0x90; }
+   }
+   if (allFactions) {
+      uint8_t* p = (uint8_t*)resolve(exe_base, 0x5b4f06);
+      if (p[0] == 0x75 && p[1] == 0x16) { p[0] = 0x90; p[1] = 0x90; }
+   }
+}
 
 // ---------------------------------------------------------------------------
 // Proxy path: BF2GameExt_Init / BF2GameExt_Shutdown
@@ -116,12 +150,17 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    }
 
    // Read INI toggles before installing hooks (some hooks check config at install time).
+   // Defaults: dead-body shooting disabled for everyone; all-factions toggle off.
+   bool disableDeadBody       = true;
+   bool deadBodyAllFactions   = false;
    if (ini_path) {
       ini_config cfg{ini_path};
       g_useBarrelFireOrigin = cfg.get_bool("Fixes", "BarrelFireOriginFix", true);
       g_proneEnabled = cfg.get_bool("Features", "Prone", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
+      disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
+      deadBodyAllFactions = cfg.get_bool("Features", "DeadBodyShootingAllFactions", false);
       controller_set_ini_path(ini_path);
       aim_assist_load_config(ini_path);
    } else {
@@ -130,6 +169,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_controllerEnabled = true;
       g_rumbleEnabled = true;
    }
+
+   // Sections are still RW here (re-protected below) — safe to apply byte patches.
+   apply_deadbody_check_patches(exe_base, disableDeadBody, deadBodyAllFactions);
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);

@@ -56,6 +56,8 @@ inline constexpr IniEntry g_ini_registry[] = {
 
    // [Features] — optional gameplay features (may require additional assets)
    INI_ENTRY("Features", "Prone", "1", "Enable prone stance (requires prone animations in soldier banks)"),
+   INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
+   INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
 
    // [Controller] — gamepad support
    INI_ENTRY("Controller", "Enabled", "1", "Enable gamepad / controller support"),
