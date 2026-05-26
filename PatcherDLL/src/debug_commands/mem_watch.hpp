@@ -12,16 +12,24 @@
 // guesswork.
 //
 // Console usage (~ console):
-//   memwatch <hexaddr> [len] [r|w|rw]
+//   memwatch [u]<hexaddr> [len] [r|w|rw]
 //        Arm a watchpoint. len = 1|2|4 bytes (default 4). Mode default rw.
+//        Leading 'u' => address is UNRELOCATED (Ghidra imagebase 0x400000) and
+//        is auto-rebased to the runtime module (e.g. 'memwatch uB9A3F0' to watch
+//        a DAT_00B9A3F0 global). Without 'u', addr is an absolute runtime address.
 //        NOTE: x86 has no read-only breakpoint; 'r' is treated as 'rw'. Use 'w'
 //        (write-only) and diff against a 'rw' run to isolate pure reads.
 //        addr must be aligned to len. Repeat to arm more (up to 4).
-//   memwatch              -> print collected accessor EIPs and DISARM everything.
+//   memwatch              -> print collected accessors and DISARM everything.
 //   memwatch clear        -> disarm everything without reporting.
 //
-// Reported EIPs are unrelocated (imagebase 0x400000) for direct Ghidra lookup,
-// and point to the instruction AFTER the access (a data bp is a trap).
+// For each distinct accessor the report shows (captured on first sighting):
+//   - EIP (unrelocated, imagebase 0x400000) — the instruction AFTER the access
+//   - hit count and which DR matched
+//   - the dword value at the watched address
+//   - EAX/ECX/EDX/ESI/EDI register snapshot
+//   - a best-effort call stack (unrelocated return addresses)
+// All addresses are unrelocated for direct Ghidra lookup.
 // =============================================================================
 
 class MemWatch {
