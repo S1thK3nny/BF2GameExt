@@ -9,6 +9,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/flyer_boost_animation.hpp"
+#include "entity/flyer_strafe_mode.hpp"
 #include "entity/cloth_collision_fix.hpp"
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/grappling_hook.hpp"
@@ -281,6 +282,7 @@ static void __cdecl hooked_init_state()
    // Reset FP animation bank mappings (stale class pointers from previous level)
    fp_anim_bank_reset();
    flyer_boost_anim_reset();
+   flyer_strafe_mode_reset();
    disguise_ext_reset();
 
    // Register debug console commands (engine is fully initialized now)
@@ -359,6 +361,7 @@ void lua_hooks_install(uintptr_t exe_base)
    vehicle_view_toggle_install(exe_base);
    fp_anim_bank_install(exe_base);
    flyer_boost_anim_install(exe_base);
+   flyer_strafe_mode_install(exe_base);
    cloth_collision_fix_install(exe_base);
    disguise_ext_install(exe_base);
    grapple_fix_install(exe_base);
@@ -392,6 +395,7 @@ void lua_hooks_uninstall()
    vehicle_view_toggle_uninstall();
    fp_anim_bank_uninstall();
    flyer_boost_anim_uninstall();
+   flyer_strafe_mode_uninstall();
    cloth_collision_fix_uninstall();
    disguise_ext_uninstall();
    grapple_fix_uninstall();

@@ -64,6 +64,9 @@
     <ClInclude Include="src\entity\flyer_boost_animation.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\flyer_strafe_mode.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\cloth_collision_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -154,6 +157,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_boost_animation.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\flyer_strafe_mode.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\cloth_collision_fix.cpp">

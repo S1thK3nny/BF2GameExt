@@ -115,6 +115,7 @@
     <ClInclude Include="src\entity\soldier_prone.hpp" />
     <ClInclude Include="src\entity\soldier_fp_animation_override.hpp" />
     <ClInclude Include="src\entity\flyer_boost_animation.hpp" />
+    <ClInclude Include="src\entity\flyer_strafe_mode.hpp" />
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
@@ -150,6 +151,7 @@
     <ClCompile Include="src\entity\soldier_prone.cpp" />
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp" />
     <ClCompile Include="src\entity\flyer_boost_animation.cpp" />
+    <ClCompile Include="src\entity\flyer_strafe_mode.cpp" />
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
     <ClCompile Include="src\entity\vehicle_view_toggle.cpp" />
     <ClCompile Include="src\entity\anim_bank_append.cpp" />

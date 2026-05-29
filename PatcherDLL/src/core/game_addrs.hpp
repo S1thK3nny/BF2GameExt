@@ -214,6 +214,8 @@ namespace modtools {
    constexpr uintptr_t carrier_take_off             = 0x004F8B70;
    constexpr uintptr_t carrier_vtable               = 0x00A3A670;
    constexpr uintptr_t flyer_render                 = 0x004f6970;
+   constexpr uintptr_t flyer_update                 = 0x004fc930;  // EntityFlyer::Update (player flight physics)
+   constexpr uintptr_t flyer_class_set_property     = 0x004FA310;  // EntityFlyerClass::SetProperty
    constexpr uintptr_t turret_update_indirect       = 0x005673a0;
    constexpr uintptr_t turret_activate              = 0x00563a90;
    constexpr uintptr_t aimer_activate               = 0x005ef020;
