@@ -174,6 +174,10 @@ namespace modtools {
    constexpr uintptr_t assign_animations            = 0x00581AF0;
    constexpr uintptr_t anim_finder_add_bank        = 0x00580860;  // AnimationFinder::_AddBank
    constexpr uintptr_t anim_finder_add_entry       = 0x0057E220;  // AnimationFinder: add RedAnimation* to bank array
+   constexpr uintptr_t anim_add_skeleton_bank      = 0x0057DEC0;  // FUN_0057dec0: skeleton-shared bank add (line 671, writes inline mAnimBankOld directly)
+   constexpr uintptr_t anim_finder_resolve         = 0x0057F860;  // FUN_0057f860: AnimationFinder resolve loop (reads finder->mAnimBank, calls RedAnimation::FindAnimation)
+   constexpr uintptr_t anim_class_find_in_banks    = 0x0057DE40;  // SoldierAnimatorClass::FindAnimation — iterates this->mAnimBankOld[0..count] inline, calls RedAnimation::FindAnimation
+   constexpr uintptr_t red_find_animation          = 0x008037B0;  // RedAnimation::FindAnimation(hash, name)
    constexpr uintptr_t anim_hash_table             = 0x00D5B9E4;  // global PblHashTableCode for RedAnimation
    constexpr uintptr_t anim_instance                = 0x00B8D3C4;
 

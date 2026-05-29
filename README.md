@@ -40,6 +40,7 @@ Automatic binary patches applied on load:
 - **Object Limit** - Doubles EntityEx hash table from 1024 to 2048 buckets, raising the active object cap
 - **Combo Animation Limit** - Increases from 30 to 90 entries, with expanded animation index range
 - **High-Res Animation Limit** - Increases from 50 to 12,800 entries
+- **Soldier Animation Bank Limit** - Raises the per-class loaded animation-bank cap from 18 to 128 (the `Out of space for soldier animation banks (max 18)` error). The 18-slot inline array is relocated to a per-class heap buffer and every consumer redirected to it. Note: a bank name split into numbered sub-banks (`human_0`..`human_N`) counts as one slot each, so this lets a class load far more split banks than before. **Caveat — a separate, deeper limit is NOT raised:** the number of *distinct bank names* is hard-capped at **16** and *weapon types* at **20** (fused into fixed-size stack arrays in `SetupBodyMasks`; raising them is impractical and the bank-name cap cannot be raised without corrupting the stack). Keep modded soldier classes to **≤16 distinct bank names and ≤20 weapon types**.
 - **String Pool** - Increases string pool from 32KB to 128KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends matrix pool to 256x original capacity
 - **Renderer Cache** - Increases particle renderer cache from 15 to 120 entries
