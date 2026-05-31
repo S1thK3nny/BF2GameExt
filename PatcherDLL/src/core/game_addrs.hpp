@@ -183,6 +183,12 @@ namespace modtools {
    constexpr uintptr_t anim_read_zaf               = 0x00803530;  // RedAnimation::ReadZaf(uint) — creates RedAnimation entries from a .zaf chunk
    constexpr uintptr_t anim_read_zaa               = 0x00803BA0;  // RedAnimation::ReadZaa(PblMemChunk*) — creates RedAnimation entries from a .zaa chunk
    constexpr uintptr_t anim_instance                = 0x00B8D3C4;
+   // SoldierAnimationBank distinct-name registry (the hard 16-NAME cap in SetupBodyMasks).
+   // Only SoldierAnimationBank::AddBank (0x5704b0) fills it, so vehicle/FP/etc. banks never
+   // appear here — this is the authoritative "counts toward the crash limit" set.
+   //   _GetBank(i) (0x5703c0) = base + i*0x2c ; slot+0x00 char name[0x20], +0x20 uint nameHash, +0x24 int parentBankIdx
+   constexpr uintptr_t anim_soldier_bank_registry  = 0x00ACECF8;  // s_human — slot array, stride 0x2c
+   constexpr uintptr_t anim_soldier_bank_count     = 0x00ACECE8;  // INT_00acece8 — distinct soldier bank-NAME count (max 16)
 
    // ---- Entity / Vehicle -------------------------------------------------------
 
