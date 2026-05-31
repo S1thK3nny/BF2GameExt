@@ -126,6 +126,7 @@
     <ClInclude Include="src\debug_commands\hover_springs.hpp" />
     <ClInclude Include="src\debug_commands\weapon_ranges.hpp" />
     <ClInclude Include="src\debug_commands\mem_watch.hpp" />
+    <ClInclude Include="src\debug_commands\list_anim_banks.hpp" />
     <ClInclude Include="src\util\cfile.hpp" />
     <ClInclude Include="src\util\ini_config.hpp" />
     <ClInclude Include="src\util\slim_vector.hpp" />
@@ -163,6 +164,7 @@
     <ClCompile Include="src\debug_commands\hover_springs.cpp" />
     <ClCompile Include="src\debug_commands\weapon_ranges.cpp" />
     <ClCompile Include="src\debug_commands\mem_watch.cpp" />
+    <ClCompile Include="src\debug_commands\list_anim_banks.cpp" />
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
     <ClCompile Include="src\loading_screen\renderer.cpp" />

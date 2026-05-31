@@ -9,6 +9,7 @@
 #include "hover_springs.hpp"
 #include "weapon_ranges.hpp"
 #include "mem_watch.hpp"
+#include "list_anim_banks.hpp"
 // Add new command headers here
 // -----------------------------------------------------------------------------
 
@@ -41,6 +42,7 @@ static void __cdecl hooked_EngineConsoleReg()
    HoverSprings::lateInit();
    WeaponRanges::lateInit();
    MemWatch::lateInit();
+   ListAnimBanks::lateInit();
    // Add new command lateInits here
 }
 
@@ -60,6 +62,7 @@ void DebugCommandRegistry::install(uintptr_t exe_base)
    HoverSprings::install(exe_base);
    WeaponRanges::install(exe_base);
    MemWatch::install(exe_base);
+   ListAnimBanks::install(exe_base);
    // Add new command installs here
 
    // Hook the engine's console registration to piggyback our commands
@@ -79,6 +82,7 @@ void DebugCommandRegistry::uninstall()
    HoverSprings::uninstall();
    WeaponRanges::uninstall();
    MemWatch::uninstall();
+   ListAnimBanks::uninstall();
    // Add new command uninstalls here
 
    DetourTransactionBegin();

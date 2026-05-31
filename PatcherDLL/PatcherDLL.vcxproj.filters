@@ -97,6 +97,9 @@
     <ClInclude Include="src\debug_commands\mem_watch.hpp">
       <Filter>debug_commands</Filter>
     </ClInclude>
+    <ClInclude Include="src\debug_commands\list_anim_banks.hpp">
+      <Filter>debug_commands</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\cfile.hpp">
       <Filter>util</Filter>
     </ClInclude>
@@ -190,6 +193,9 @@
       <Filter>debug_commands</Filter>
     </ClCompile>
     <ClCompile Include="src\debug_commands\mem_watch.cpp">
+      <Filter>debug_commands</Filter>
+    </ClCompile>
+    <ClCompile Include="src\debug_commands\list_anim_banks.cpp">
       <Filter>debug_commands</Filter>
     </ClCompile>
     <ClCompile Include="src\util\cfile.cpp">

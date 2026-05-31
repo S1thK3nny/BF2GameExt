@@ -178,7 +178,10 @@ namespace modtools {
    constexpr uintptr_t anim_finder_resolve         = 0x0057F860;  // FUN_0057f860: AnimationFinder resolve loop (reads finder->mAnimBank, calls RedAnimation::FindAnimation)
    constexpr uintptr_t anim_class_find_in_banks    = 0x0057DE40;  // SoldierAnimatorClass::FindAnimation — iterates this->mAnimBankOld[0..count] inline, calls RedAnimation::FindAnimation
    constexpr uintptr_t red_find_animation          = 0x008037B0;  // RedAnimation::FindAnimation(hash, name)
-   constexpr uintptr_t anim_hash_table             = 0x00D5B9E4;  // global PblHashTableCode for RedAnimation
+   constexpr uintptr_t anim_hash_table             = 0x00D5B9E4;  // global PblHashTableCode<RedAnimation> base (flat array; size 0x800)
+   constexpr uintptr_t anim_dump_gfx_mem_flag      = 0x00D4D954;  // g_bDumpGraphicsMemoryUsage — when set, Read{Zaa,Zaf} store the bank name at RedAnimation+0x20 (the -dumpgfxmem cmdline switch)
+   constexpr uintptr_t anim_read_zaf               = 0x00803530;  // RedAnimation::ReadZaf(uint) — creates RedAnimation entries from a .zaf chunk
+   constexpr uintptr_t anim_read_zaa               = 0x00803BA0;  // RedAnimation::ReadZaa(PblMemChunk*) — creates RedAnimation entries from a .zaa chunk
    constexpr uintptr_t anim_instance                = 0x00B8D3C4;
 
    // ---- Entity / Vehicle -------------------------------------------------------
