@@ -190,6 +190,26 @@ namespace modtools {
    constexpr uintptr_t anim_soldier_bank_registry  = 0x00ACECF8;  // s_human — slot array, stride 0x2c
    constexpr uintptr_t anim_soldier_bank_count     = 0x00ACECE8;  // INT_00acece8 — distinct soldier bank-NAME count (max 16)
 
+   // RedConsole direct output — bypasses RedWarning::LogMessage entirely (prints
+   // only to the in-game console, NOT the bf2log). Kept for reference.
+   constexpr uintptr_t console_print_msg            = 0x007FFC20;  // RedConsole::PrintMsg(this=console, char* text) __thiscall; buffers until '\n', no printf formatting
+   constexpr uintptr_t console_instance_ptr         = 0x00D5799C;  // DAT_00d5799c — global RedConsole* (null until console exists)
+
+   // RedWarning log decoration control. LogMessage (game_log) writes to all
+   // destinations incl. the bf2log file; when g_bFormatted==0 it emits the raw
+   // text with NO "Message Severity: N\n<file>(line)" header (that header is
+   // built by FUN_007e3830 only on the formatted path). Save/clear/restore it
+   // around a LogMessage call to log a clean line.
+   constexpr uintptr_t log_formatted_flag           = 0x00CF6910;  // RedWarning::g_bFormatted (byte)
+
+   // SoldierAnimator upper-body update (vtable virtual). param_3 = SoldierAnimation*;
+   // it reads param_3->+8 (anim data block) unconditionally at 0x5789e8. When a class
+   // exceeds the 16 distinct-bank-NAME cap, AddBank returns -1, the map entry resolves
+   // through _GetBank(-1) garbage, and param_3->+8 dangles → CTD. Guard = vtable swap.
+   constexpr uintptr_t soldier_upper_anim_vtable_slot = 0x00A4A6F0;  // vtable slot holding the thunk
+   constexpr uintptr_t soldier_upper_anim_thunk       = 0x00416EF0;  // thunk_FUN_00578970 (current slot value)
+   constexpr uintptr_t soldier_upper_anim_impl        = 0x00578970;  // FUN_00578970 body
+
    // ---- Entity / Vehicle -------------------------------------------------------
 
    constexpr uintptr_t char_exit_vehicle            = 0x0052FC70;

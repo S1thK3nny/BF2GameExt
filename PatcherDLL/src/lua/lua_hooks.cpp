@@ -15,6 +15,7 @@
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "entity/anim_bank_append.hpp"
+#include "entity/soldier_upperbody_anim_guard.hpp"
 #include "weapon/shield_channel_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -365,6 +366,7 @@ void lua_hooks_install(uintptr_t exe_base)
    DebugCommandRegistry::install(exe_base);
    gc_visual_limits_install(exe_base);
    anim_bank_append_install(exe_base);
+   soldier_upperbody_anim_guard_install(exe_base);
    shield_channel_fix_install(exe_base);
    aim_assist_install(exe_base);
    lua_create_entity_hook_install(exe_base);
@@ -398,6 +400,7 @@ void lua_hooks_uninstall()
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
    anim_bank_append_uninstall();
+   soldier_upperbody_anim_guard_uninstall();
    shield_channel_fix_uninstall();
    aim_assist_uninstall();
 

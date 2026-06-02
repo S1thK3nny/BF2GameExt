@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <detours.h>
 
 // =============================================================================
@@ -70,6 +71,29 @@ uint8_t*  s_dumpFlag  = nullptr;   // g_bDumpGraphicsMemoryUsage
 GameLog_t s_log       = nullptr;
 char*     s_reg       = nullptr;   // soldier bank-name registry base
 int*      s_regCount  = nullptr;   // distinct soldier bank-name count
+
+// ---- Clean log output (bf2log, no RedWarning severity/source header) --------
+uint8_t* s_fmtFlag = nullptr;   // RedWarning::g_bFormatted
+
+// printf-style line emitter that routes through RedWarning::LogMessage (so it
+// lands in the bf2log like every other engine message), but temporarily clears
+// g_bFormatted so the line isn't decorated with "Message Severity: N\n
+// <file>(line)". Save/restore keeps it safe under nesting / the -dumpgfxmem path.
+void con_log(const char* fmt, ...)
+{
+   if (!s_log) return;
+   char buf[1024];
+   va_list ap;
+   va_start(ap, fmt);
+   _vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
+   va_end(ap);
+   buf[sizeof(buf) - 1] = '\0';
+
+   uint8_t prev = s_fmtFlag ? *s_fmtFlag : 0;
+   if (s_fmtFlag) *s_fmtFlag = 0;
+   s_log("%s", buf);
+   if (s_fmtFlag) *s_fmtFlag = prev;
+}
 
 // ---- Scoped name-capture hooks on the two bank loaders ----------------------
 typedef void(__cdecl* ReadChunk_t)(void* chunk);
@@ -157,7 +181,7 @@ bool distinct_add(const char* root)
 int list_soldier_registry()
 {
    if (!s_reg || !s_regCount) {
-      s_log("[animbanks] soldier bank registry not resolved.\n");
+      con_log("[animbanks] soldier bank registry not resolved.\n");
       return 1;
    }
 
@@ -165,7 +189,7 @@ int list_soldier_registry()
    __try { count = *s_regCount; } __except (EXCEPTION_EXECUTE_HANDLER) { count = -1; }
    constexpr int kMaxReg = 64;
    if (count < 0 || count > kMaxReg) {   // sanity guard against a bad read
-      s_log("[animbanks] soldier bank count looks invalid (%d).\n", count);
+      con_log("[animbanks] soldier bank count looks invalid (%d).\n", count);
       return 1;
    }
 
@@ -242,7 +266,7 @@ int list_soldier_registry()
       }
    }
 
-   s_log("[animbanks] soldier animation bank names (count toward the %d-name cap):\n",
+   con_log("[animbanks] soldier animation bank names (count toward the %d-name cap):\n",
          kSoldierBankCap);
    for (int i = 0; i < count; ++i) {
       int loaded = subResident[i];
@@ -256,23 +280,23 @@ int list_soldier_registry()
       else
          _snprintf(tail, sizeof(tail), "[no-data]");
       tail[sizeof(tail) - 1] = '\0';
-      s_log("  %2d  %-28s hash=%08X  %s\n", i, regName[i], regHash[i], tail);
+      con_log("  %2d  %-28s hash=%08X  %s\n", i, regName[i], regHash[i], tail);
 
       // List the actual .zaabin sub-banks attributed to this name.
       for (int s = 0; s < nSub; ++s) {
          if (subOwner[s] != i) continue;
-         s_log("        - %-26s %s\n", subName[s], subData[s] ? "[resident]" : "[no-data] ");
+         con_log("        - %-26s %s\n", subName[s], subData[s] ? "[resident]" : "[no-data] ");
       }
    }
 
-   s_log("[animbanks] distinct soldier bank names=%d / %d max%s\n",
+   con_log("[animbanks] distinct soldier bank names=%d / %d max%s\n",
          count, kSoldierBankCap,
          count >= kSoldierBankCap ? "  *** AT CAP — one more crashes ***" : "");
-   s_log("[animbanks] soldier .zaabin sub-banks loaded=%d resident (+%d no-data)\n",
+   con_log("[animbanks] soldier .zaabin sub-banks loaded=%d resident (+%d no-data)\n",
          totalResident, totalNoData);
    if (count == 0)
-      s_log("[animbanks] none registered yet (load a level / spawn a soldier first).\n");
-   s_log("[animbanks] (use 'listanimbanks all' for the full RedAnimation table incl. vehicles)\n");
+      con_log("[animbanks] none registered yet (load a level / spawn a soldier first).\n");
+   con_log("[animbanks] (use 'listanimbanks all' for the full RedAnimation table incl. vehicles)\n");
    return 1;
 }
 
@@ -281,13 +305,13 @@ int list_soldier_registry()
 // ---------------------------------------------------------------------------
 int list_all_banks()
 {
-   if (!s_table) { s_log("[animbanks] hash table not resolved.\n"); return 1; }
+   if (!s_table) { con_log("[animbanks] hash table not resolved.\n"); return 1; }
 
    distinct_reset();
    int total    = 0;   // entries present in the table (key != 0)
    int resident = 0;   // of those, with ZephyrAnimBank data actually loaded
 
-   s_log("[animbanks] all loaded animation banks (RedAnimation table):\n");
+   con_log("[animbanks] all loaded animation banks (RedAnimation table):\n");
 
    for (int b = 0; b < kBuckets; ++b) {
       uint32_t key = 0;
@@ -318,16 +342,16 @@ int list_all_banks()
       strip_subbank(root);
       distinct_add(root);
 
-      s_log("  %-32s hash=%08X  %s%s\n",
+      con_log("  %-32s hash=%08X  %s%s\n",
             name, hash,
             hasData ? "[resident]" : "[no-data] ",
             named ? "" : " (name not captured)");
    }
 
-   s_log("[animbanks] total banks=%d (resident=%d, no-data=%d) | distinct roots=%d\n",
+   con_log("[animbanks] total banks=%d (resident=%d, no-data=%d) | distinct roots=%d\n",
          total, resident, total - resident, s_nDistinct);
    if (total == 0)
-      s_log("[animbanks] none loaded yet (load a level first).\n");
+      con_log("[animbanks] none loaded yet (load a level first).\n");
    return 1;
 }
 
@@ -356,6 +380,7 @@ void ListAnimBanks::install(uintptr_t exe_base)
    s_dumpFlag = (uint8_t*) resolve(exe_base, game_addrs::modtools::anim_dump_gfx_mem_flag);
    s_reg      = (char*)    resolve(exe_base, game_addrs::modtools::anim_soldier_bank_registry);
    s_regCount = (int*)     resolve(exe_base, game_addrs::modtools::anim_soldier_bank_count);
+   s_fmtFlag  = (uint8_t*) resolve(exe_base, game_addrs::modtools::log_formatted_flag);
 
    // Hook the two bank loaders so name capture is enabled ONLY while they run
    // (see file header). They are created early, before any .lvl loads.

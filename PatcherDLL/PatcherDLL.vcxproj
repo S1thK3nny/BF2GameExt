@@ -134,6 +134,7 @@
     <ClInclude Include="src\loading_screen\shared.hpp" />
     <ClInclude Include="src\shell\gc_visual_limits.hpp" />
     <ClInclude Include="src\entity\anim_bank_append.hpp" />
+    <ClInclude Include="src\entity\soldier_upperbody_anim_guard.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
     <ClInclude Include="src\controller\aim_assist.hpp" />
@@ -154,6 +155,7 @@
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
     <ClCompile Include="src\entity\vehicle_view_toggle.cpp" />
     <ClCompile Include="src\entity\anim_bank_append.cpp" />
+    <ClCompile Include="src\entity\soldier_upperbody_anim_guard.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />

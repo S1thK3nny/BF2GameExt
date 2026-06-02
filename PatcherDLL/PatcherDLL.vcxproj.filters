@@ -121,6 +121,9 @@
     <ClInclude Include="src\entity\anim_bank_append.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\soldier_upperbody_anim_guard.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\controller\controller_support.hpp">
       <Filter>controller</Filter>
     </ClInclude>
@@ -214,6 +217,9 @@
       <Filter>shell</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\anim_bank_append.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_upperbody_anim_guard.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">
