@@ -495,6 +495,37 @@ namespace steam {
    constexpr uintptr_t m_camera_global                = 0x007f58e0;
    constexpr uintptr_t team_get_objects_in_range      = 0x006552d0;
 
+   constexpr uintptr_t anim_finder_add_bank     = 0x00645a00;
+   constexpr uintptr_t carrier_attach_cargo     = 0x00497300;
+   constexpr uintptr_t carrier_take_off         = 0x004b3c60;
+   constexpr uintptr_t cloth_enforce_collisions = 0x006569c0;
+   constexpr uintptr_t load_config_real         = 0x005777e0;
+   constexpr uintptr_t load_data_file_real      = 0x00577620;
+   constexpr uintptr_t load_end_real            = 0x00576b90;
+   constexpr uintptr_t mem_pool_alloc           = 0x006dc370;
+   constexpr uintptr_t pbl_read_next_data       = 0x00727e30;
+   constexpr uintptr_t pbl_read_next_scope      = 0x00727eb0;
+   constexpr uintptr_t progress_set_all_on      = 0x00578c00;
+   constexpr uintptr_t prone_crouch_inner       = 0x004ed550;
+   constexpr uintptr_t prone_game_sound_play    = 0x00538010;
+   constexpr uintptr_t prone_set_state          = 0x004ee2c0;
+   constexpr uintptr_t red_pose_convert_skel32  = 0x006ddb30;
+   constexpr uintptr_t snd_engine_update        = 0x00734590;
+   constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
+   constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
+   constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
+   constexpr uintptr_t zephyr_skeleton_open     = 0x0072cc40;
+   constexpr uintptr_t anim_add_skeleton_bank   = 0x00644570;
+   constexpr uintptr_t carrier_initiate_landing = 0x004b3d50;
+   constexpr uintptr_t draw_line_3d             = 0x006f12a0;
+   constexpr uintptr_t draw_sphere              = 0x006f0a70;
+   constexpr uintptr_t pbl_config_copy_ctor     = 0x00727de0;
+   constexpr uintptr_t spline_build             = 0x0072a710;
+   constexpr uintptr_t zephyr_pose_static_blend = 0x0072dc80;
+   constexpr uintptr_t zephyr_pose_static_dtor  = 0x0072db10;
+   constexpr uintptr_t zephyr_pose_static_set   = 0x0072dfd0;
+   constexpr uintptr_t zephyr_skeleton_finalize = 0x0072bc30;
+
 } // namespace steam
 
 // =============================================================================
