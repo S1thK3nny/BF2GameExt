@@ -81,6 +81,7 @@ using fn_AddSkel_t   = bool(__fastcall*)(void* ecx, void* edx, void* skel);
 using fn_Resolve_t   = int (__fastcall*)(void* ecx, void* edx, void* a2, int a3, unsigned a4);
 using fn_FindBanks_t = int (__fastcall*)(void* ecx, void* edx, unsigned hash, char* name);
 using fn_RedFind_t   = int (__fastcall*)(void* bank, void* edx, unsigned hash, char* name);
+using fn_ZephyrFind_t= int (__fastcall*)(void* zephyrBank, void* edx, unsigned hash);
 using fn_PblHash_t   = void(__thiscall*)(uint32_t* outHash, const char* str);
 using fn_HashFind_t  = void*(__cdecl*)(void* table, int size, uint32_t hash);
 using fn_GameLog_t   = void(__cdecl*)(const char* fmt, ...);
@@ -93,7 +94,8 @@ static fn_AddBank_t     original_AddBank     = nullptr;
 static fn_AddSkel_t     original_AddSkel     = nullptr;   // FUN_0057dec0 (skeleton-shared inline writer)
 static fn_Resolve_t     original_Resolve     = nullptr;   // FUN_0057f860 (resolve loop)
 static fn_FindBanks_t   original_FindInBanks = nullptr;   // FUN_0057de40 (inline search loop)
-static fn_RedFind_t     fn_RedFindAnimation  = nullptr;   // RedAnimation::FindAnimation (called by hooked_FindInBanks)
+static fn_RedFind_t     fn_RedFindAnimation  = nullptr;   // RedAnimation::FindAnimation (modtools; inlined away on Steam)
+static fn_ZephyrFind_t  fn_ZephyrBankFind    = nullptr;   // ZephyrAnimBank find — Steam path (thiscall(bank, hash))
 static fn_PblHash_t     fn_pblHash           = nullptr;
 static fn_HashFind_t    fn_hashFind          = nullptr;
 static fn_GameLog_t     fn_log               = nullptr;
@@ -344,12 +346,19 @@ static int __fastcall hooked_Resolve(void* ecx, void* edx, void* a2, int a3, uns
 
 
 // ---------------------------------------------------------------------------
-// hooked_FindInBanks — FUN_0057de40, SoldierAnimatorClass::FindAnimation. The
-// stock function loops this->mAnimBankOld[0..mAnimBankCount) calling
-// RedAnimation::FindAnimation on each, returning the first hit. It reads the
-// inline slab by fixed offset (not via a finder), so once we move the banks to
-// the heap it reads the empty slab and crashes. Reimplement over the same
-// per-class heap buffer; the count int stays inline (shared, correct).
+// hooked_FindInBanks — FUN_0057de40 / Steam FUN_006442a0,
+// SoldierAnimatorClass::FindAnimation. The stock function loops
+// this->mAnimBankOld[0..mAnimBankCount) looking each bank up, returning the
+// first hit. It reads the inline slab by fixed offset (not via a finder), so
+// once we move the banks to the heap it reads the empty slab and crashes.
+// Reimplement over the same per-class heap buffer; the count int stays inline
+// (shared, correct).
+//
+// Signature is identical on both builds (Steam still RETs 8 — the name arg is
+// passed but unused there).  The per-bank lookup differs: modtools calls
+// RedAnimation::FindAnimation(bank, hash, name) (which also does the
+// name/used bookkeeping); Steam inlined that away and calls the ZephyrAnimBank
+// finder on bank->_pZephyrAnimBank (+0x14) directly, so we do the same.
 // ---------------------------------------------------------------------------
 static int __fastcall hooked_FindInBanks(void* ecx, void* /*edx*/, unsigned hash, char* name)
 {
@@ -364,7 +373,14 @@ static int __fastcall hooked_FindInBanks(void* ecx, void* /*edx*/, unsigned hash
     for (int i = 0; i < count; i++) {
         void* bank = arr[i];
         if (!bank) continue;                       // skip empty slots defensively
-        int r = fn_RedFindAnimation(bank, nullptr, hash, name);
+        int r;
+        if (fn_RedFindAnimation) {
+            r = fn_RedFindAnimation(bank, nullptr, hash, name);
+        } else {
+            void* zb = *(void**)((char*)bank + kRA_ZephyrAnimBank);
+            if (!zb) continue;
+            r = fn_ZephyrBankFind(zb, nullptr, hash);
+        }
         if (r) return r;
     }
     return 0;
@@ -377,17 +393,33 @@ static int __fastcall hooked_FindInBanks(void* ecx, void* /*edx*/, unsigned hash
 
 void anim_bank_append_install(uintptr_t exe_base)
 {
-    using namespace game_addrs::modtools;
+    if (g_build == GameBuild::Unknown) return;
 
-    original_AddBank     = (fn_AddBank_t)resolve(exe_base, anim_finder_add_bank);
-    original_AddSkel     = (fn_AddSkel_t)resolve(exe_base, anim_add_skeleton_bank);
-    original_Resolve     = (fn_Resolve_t)resolve(exe_base, anim_finder_resolve);
-    original_FindInBanks = (fn_FindBanks_t)resolve(exe_base, anim_class_find_in_banks);
-    fn_RedFindAnimation  = (fn_RedFind_t)resolve(exe_base, red_find_animation);
-    fn_pblHash           = (fn_PblHash_t)resolve(exe_base, hash_string_thiscall);
-    fn_hashFind          = (fn_HashFind_t)resolve(exe_base, pbl_hash_table_find);
-    g_animHashTable      = (void*)resolve(exe_base, anim_hash_table);
-    fn_log               = (fn_GameLog_t)resolve(exe_base, game_log);
+    // Everything the hooks need; a build with any of these unmapped (GOG)
+    // skips cleanly.  red_find_animation / zephyr_anim_bank_find are the
+    // per-build lookup alternatives — exactly one must be present.
+    if (g_addr->anim_finder_add_bank == 0 || g_addr->anim_add_skeleton_bank == 0 ||
+        g_addr->anim_finder_resolve == 0 || g_addr->anim_class_find_in_banks == 0 ||
+        g_addr->anim_hash_table == 0 || g_addr->hash_string_thiscall == 0 ||
+        g_addr->pbl_hash_table_find == 0)
+        return;
+    if (g_addr->red_find_animation == 0 && g_addr->zephyr_anim_bank_find == 0)
+        return;
+
+    original_AddBank     = (fn_AddBank_t)resolve(exe_base, g_addr->anim_finder_add_bank);
+    original_AddSkel     = (fn_AddSkel_t)resolve(exe_base, g_addr->anim_add_skeleton_bank);
+    original_Resolve     = (fn_Resolve_t)resolve(exe_base, g_addr->anim_finder_resolve);
+    original_FindInBanks = (fn_FindBanks_t)resolve(exe_base, g_addr->anim_class_find_in_banks);
+    fn_RedFindAnimation  = g_addr->red_find_animation
+                              ? (fn_RedFind_t)resolve(exe_base, g_addr->red_find_animation)
+                              : nullptr;
+    fn_ZephyrBankFind    = g_addr->zephyr_anim_bank_find
+                              ? (fn_ZephyrFind_t)resolve(exe_base, g_addr->zephyr_anim_bank_find)
+                              : nullptr;
+    fn_pblHash           = (fn_PblHash_t)resolve(exe_base, g_addr->hash_string_thiscall);
+    fn_hashFind          = (fn_HashFind_t)resolve(exe_base, g_addr->pbl_hash_table_find);
+    g_animHashTable      = (void*)resolve(exe_base, g_addr->anim_hash_table);
+    fn_log               = get_gamelog();
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

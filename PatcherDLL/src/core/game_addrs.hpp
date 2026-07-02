@@ -471,6 +471,23 @@ namespace steam {
    constexpr uintptr_t set_weapon_anim_map       = 0x0063f7b0;  // SetWeaponAnimationMap
    constexpr uintptr_t anim_add_bank             = 0x0063c460;  // SoldierAnimationBank::AddBank
 
+   // ---- Animation bank appending (anim_bank_append.cpp) -----------------------
+
+   // AnimationFinder resolve loop (modtools FUN_0057f860). thiscall, 3 stack
+   // args, RET 0xC — same shape as modtools; reads finder->mAnimBank (+0x20C).
+   constexpr uintptr_t anim_finder_resolve       = 0x00644FE0;
+   // SoldierAnimatorClass::FindAnimation inline slab loop (modtools FUN_0057de40).
+   // thiscall(hash, name) RET 8 — still cleans 2 args but the name is unused:
+   // Steam inlined RedAnimation::FindAnimation away and calls the ZephyrAnimBank
+   // finder on bankEntry+0x14 directly.
+   constexpr uintptr_t anim_class_find_in_banks  = 0x006442A0;
+   // Global PblHashTableCode for RedAnimation (size 0x800, from _AddBank disasm).
+   constexpr uintptr_t anim_hash_table           = 0x0099E80C;
+   // ZephyrAnimBank find — thiscall(ECX=ZephyrAnimBank*, hash), RET 4.
+   // NOTE: no red_find_animation on Steam (inlined; standalone body stripped) —
+   // anim_bank_append branches on that field being 0.
+   constexpr uintptr_t zephyr_anim_bank_find     = 0x0072BA40;
+
    // ---- Hashing (thiscall wrapper) -------------------------------------------
 
    constexpr uintptr_t hash_string_thiscall      = 0x00726d20;  // PblHash::PblHash

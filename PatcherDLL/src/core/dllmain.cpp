@@ -7,6 +7,7 @@
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
+#include "entity/anim_bank_append.hpp"
 #include "entity/soldier_prone.hpp"
 #include "util/crash_logger.hpp"
 #include "util/ini_config.hpp"
@@ -187,6 +188,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // outside the modtools-only lua_hooks_install, while sections are still RW.
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
+   anim_bank_append_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
