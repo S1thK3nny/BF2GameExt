@@ -4,6 +4,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/game_logging.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/soldier_prone.hpp"
@@ -401,6 +402,7 @@ void lua_hooks_uninstall()
    anim_bank_append_uninstall();
    shield_channel_fix_uninstall();
    aim_assist_uninstall();
+   game_logging_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

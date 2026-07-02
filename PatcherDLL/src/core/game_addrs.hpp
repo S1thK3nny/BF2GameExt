@@ -502,6 +502,15 @@ namespace steam {
 
    constexpr uintptr_t game_log                    = 0x006f6ff0; // RedWarning::LogMessage
 
+   // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
+   // builds ship RedWarning file logging compiled but disabled.  After
+   // RedWarning::Init (detoured), raise the file destination's min severity to
+   // 0 and set pcLoggingEnabled — the same work the modtools build does itself
+   // (modtools leaves these unmapped; feature no-ops there).
+   constexpr uintptr_t red_warning_init            = 0x006F6EA0; // void()
+   constexpr uintptr_t red_warning_set_dest_min_severity = 0x006F7280; // void(int dest, int minSeverity)
+   constexpr uintptr_t pc_logging_enabled          = 0x01EAEDE6; // bool
+
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 
    constexpr uintptr_t s_cached_particles            = 0x01EF5120;
@@ -598,6 +607,12 @@ namespace gog {
    constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
    constexpr uintptr_t m_camera_global                = 0x007f6d80;
    constexpr uintptr_t team_get_objects_in_range      = 0x00656370;
+
+   // ---- Debug / Logging (see steam namespace for docs) -------------------------
+
+   constexpr uintptr_t red_warning_init            = 0x006F7F70;
+   constexpr uintptr_t red_warning_set_dest_min_severity = 0x006F8350;
+   constexpr uintptr_t pc_logging_enabled          = 0x01EB029A;
 
 } // namespace gog
 

@@ -452,6 +452,20 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            // Port of PrismaticFlower's fix (upstream 2cb6a11): PropGenerator::Update
+            // sometimes branches over the cluster-object-array bounds check (typically
+            // at very high FOVs) and reads past the array end. Redirect that branch to
+            // the bounds check; the two swapped instructions create a clean jump target.
+            patch_set{
+               .name = "PropGenerator Update Loop Exit Condition",
+               .patches =
+                  {
+                     patch{0x0073d314, 0x49, 0x33, {.values_are_8bit = true}},  // branch offset -> bounds check
+                     patch{0x0073d344, 0x4024548B, 0x01714488},                 // swap: MOV EDX,[ESP+40] <-> MOV [ECX+ESI*2+1],AL
+                     patch{0x0073d348, 0x01714488, 0x4024548B},
+                  },
+            },
+
          },
    },
 
@@ -779,6 +793,15 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .patches =
                   {
                      patch{0x13b293 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
+                  },
+            },
+
+            // Port of PrismaticFlower's fix (upstream 2cb6a11) — see modtools set.
+            patch_set{
+               .name = "PropGenerator Update Loop Exit Condition",
+               .patches =
+                  {
+                     patch{0x0062bf6b, 0x68, 0x42, {.values_are_8bit = true}},  // branch offset -> bounds check
                   },
             },
 
@@ -1140,6 +1163,15 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .patches =
                   {
                      patch{0x13a543 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
+                  },
+            },
+
+            // Port of PrismaticFlower's fix (upstream 2cb6a11) — see modtools set.
+            patch_set{
+               .name = "PropGenerator Update Loop Exit Condition",
+               .patches =
+                  {
+                     patch{0x0062aedb, 0x68, 0x42, {.values_are_8bit = true}},  // branch offset -> bounds check
                   },
             },
 

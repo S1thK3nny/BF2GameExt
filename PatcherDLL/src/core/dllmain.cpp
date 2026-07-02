@@ -10,6 +10,7 @@
 #include "entity/anim_bank_append.hpp"
 #include "entity/soldier_prone.hpp"
 #include "util/crash_logger.hpp"
+#include "util/game_logging.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
 
@@ -164,6 +165,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       ini_config cfg{ini_path};
       g_useBarrelFireOrigin = cfg.get_bool("Fixes", "BarrelFireOriginFix", true);
       g_proneEnabled = cfg.get_bool("Features", "Prone", true);
+      g_gameLoggingEnabled = cfg.get_bool("Features", "GameLogging", false);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -189,6 +191,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
    anim_bank_append_install(exe_base);
+   game_logging_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

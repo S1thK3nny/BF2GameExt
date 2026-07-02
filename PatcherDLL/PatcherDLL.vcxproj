@@ -172,6 +172,7 @@
     <ClCompile Include="src\debug_commands\mem_watch.cpp" />
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\util\crash_logger.cpp" />
+    <ClCompile Include="src\util\game_logging.cpp" />
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
     <ClCompile Include="src\loading_screen\renderer.cpp" />
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />
