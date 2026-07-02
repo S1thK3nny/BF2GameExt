@@ -437,9 +437,15 @@ namespace steam {
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
    constexpr uintptr_t prone_primary_stance_and  = 0x005435E4;
    constexpr uintptr_t WeaponMeleeClass_vftable  = 0x007B1534;
+   // Lowres name table entry [2] ("rifle_crouch_idle_takeknee" @ 0x7AE7F8);
+   // 8-byte entries {name*, flag} based 0x7E99D0.
    constexpr uintptr_t lowres_prone_anim_name_ptr = 0x007E99E0;
-   constexpr uintptr_t lowres_prone_jump_entry   = 0x00649348;
-   constexpr uintptr_t lowres_prone_jump_target  = 0x006491C0;
+   // GetAnimatorLocal (0x648ff0) dispatch: byte map @0x649368 routes state 2
+   // (PRONE) to its own dedicated case @0x6491C9 = "MOV EBX,1; JMP merge"
+   // (EBX = lowres pose index -> crouch pose).  Patch the imm byte 1 -> 2 so
+   // prone uses pose slot 2 (the name-table entry patched above).  No jump
+   // table repoint needed on Steam.
+   constexpr uintptr_t lowres_prone_case_imm     = 0x006491CA;
 
    // ---- Entity / Vehicle (Carrier/Flyer) -------------------------------------
 

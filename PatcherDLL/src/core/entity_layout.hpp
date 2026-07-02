@@ -34,9 +34,13 @@ constexpr SoldierLayout kSoldierModtools = {
    /* mState */ 0x514, /* weaponIndex */ 0x512, /* weaponArray */ 0x4F0,
    /* soundPos2 */ 0x2AC, /* foleyProne */ 0xD8, /* aiHeightBaseRm */ 6 /* ESI */,
 };
+// Steam foleyProne: release FoleyFXSoldier packs 13 8-byte GameSound slots
+// after a 0x18-byte header (debug uses 20-byte GameSounds from +0x24).  Grid
+// anchored on 3 sites: Crouch plays mSquat @ +0x68 (0x4ED58B), Stand plays
+// mStand @ +0x70 (0x4ED23E) and mLand @ +0x50 (0x4ED2E5) -> mProne = +0x60.
 constexpr SoldierLayout kSoldierSteam = {
    /* mState */ 0x504, /* weaponIndex */ 0x502, /* weaponArray */ 0x4E0,
-   /* soundPos2 */ 0x29C, /* foleyProne */ 0 /* mProne not re-derived */, /* aiHeightBaseRm */ 7 /* EDI */,
+   /* soundPos2 */ 0x29C, /* foleyProne */ 0x60, /* aiHeightBaseRm */ 7 /* EDI */,
 };
 
 // Active build's layout; defaults to modtools (set in game_build_select()).

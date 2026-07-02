@@ -121,9 +121,13 @@ static const char* g_lowresProneAnimName = "rifle_prone_idle_emote";
 static const char** g_lowresProneNamePtr = nullptr;
 static const char*  g_lowresProneNameOrig = nullptr;
 
-// Lowres prone runtime dispatch patch (jump table entry)
+// Lowres prone runtime dispatch patch (modtools: jump table entry)
 static uint32_t* g_lowresProneJumpEntry = nullptr;
 static uint32_t  g_lowresProneJumpOrig  = 0;
+
+// Lowres prone runtime dispatch patch (Steam: MOV EBX imm byte in the
+// dedicated prone case of GetAnimatorLocal)
+static uint8_t* g_lowresProneCaseImmPtr = nullptr;
 
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
@@ -531,17 +535,18 @@ void prone_system_install(uintptr_t exe_base)
     }
 
     // -----------------------------------------------------------------------
-    // Lowres prone runtime dispatch fix: patch the jump table.
+    // Lowres prone runtime dispatch fix.
     //
-    // GetAnimatorLocal_ has a switch on mState.  The PRONE case (2) jumps
-    // to the CROUCH idle path (ESI=1).  Patch the jump table entry to point
-    // to the code that sets ESI=2 (the prone animation index).
+    // GetAnimatorLocal has a switch on mState; the PRONE case selects the
+    // CROUCH lowres pose (index 1) instead of pose 2 (whose name-table entry
+    // we patch to the prone anim above).  The fix differs per build:
     //
-    // MODTOOLS ONLY: on Steam the index-2 set is compiled branchlessly
-    // (SETBE BL; INC EBX at lowres_prone_jump_target) with no clean MOV-imm
-    // target to repoint to, so jumping the table entry there would run SETBE
-    // against stale flags.  Skipped on Steam — this only affects the distant
-    // lowres LOD pose (cosmetic); near/normal prone is unaffected.
+    //   modtools: repoint the jump table entry for case 2 at the existing
+    //   "MOV ESI,2" case body.
+    //
+    //   Steam (0x648ff0): a byte map (0x649368) routes state 2 to its OWN
+    //   dedicated case @0x6491C9 = "MOV EBX,1; JMP merge" — no other state
+    //   maps there, so just patch the MOV immediate 1 -> 2.
     // -----------------------------------------------------------------------
     if (g_build == GameBuild::Modtools &&
         g_addr->lowres_prone_jump_entry && g_addr->lowres_prone_jump_target) {
@@ -549,6 +554,13 @@ void prone_system_install(uintptr_t exe_base)
         g_lowresProneJumpOrig = *g_lowresProneJumpEntry;
         uintptr_t target = (uintptr_t)resolve(exe_base, g_addr->lowres_prone_jump_target);
         *g_lowresProneJumpEntry = (uint32_t)target;
+    }
+    else if (g_addr->lowres_prone_case_imm) {
+        uint8_t* p = (uint8_t*)resolve(exe_base, g_addr->lowres_prone_case_imm);
+        if (*p == 0x01) {
+            *p = 0x02;
+            g_lowresProneCaseImmPtr = p;
+        }
     }
 
 }
@@ -597,6 +609,11 @@ void prone_system_uninstall()
         protected_write(g_lowresProneJumpEntry, &g_lowresProneJumpOrig,
                         sizeof(g_lowresProneJumpOrig));
         g_lowresProneJumpEntry = nullptr;
+    }
+    if (g_lowresProneCaseImmPtr) {
+        const uint8_t orig = 0x01;
+        protected_write(g_lowresProneCaseImmPtr, &orig, 1);
+        g_lowresProneCaseImmPtr = nullptr;
     }
 
     // Detach hooks
