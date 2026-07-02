@@ -89,6 +89,14 @@ namespace modtools {
    constexpr uintptr_t tex_hash_table            = 0x00d4f994;
    constexpr uintptr_t color_ptr_global          = 0xae2150;
 
+   // ---- Terrain RedTexture cleanup (port of upstream 4a8d0df) -----------------
+   // ReadTerrain (__cdecl(void* reader)); detoured to re-resolve the terrain
+   // shader's cached detail/white RedTexture* each map load (fixes stale
+   // pointers when a playlist map lacks a detail map).
+   constexpr uintptr_t read_terrain              = 0x007e5e10;
+   constexpr uintptr_t terrain_null_detail_texture = 0x00edd114; // RedTexture**
+   constexpr uintptr_t terrain_white_texture       = 0x00edd11c; // RedTexture**
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
@@ -418,6 +426,12 @@ namespace steam {
 
    constexpr uintptr_t hash_string               = 0x00726e50;  // PblHash::calcHash (__cdecl)
    constexpr uintptr_t pbl_hash_table_find       = 0x00726e00;  // PblHashTableCode::_Find
+   constexpr uintptr_t tex_hash_table            = 0x008eed8c;  // RedTexture PblHashTable
+
+   // ---- Terrain RedTexture cleanup (port of upstream 4a8d0df) -----------------
+   constexpr uintptr_t read_terrain              = 0x006c2460;
+   constexpr uintptr_t terrain_null_detail_texture = 0x009c922c;
+   constexpr uintptr_t terrain_white_texture       = 0x009c9230;
 
    // ---- Memory heap management -----------------------------------------------
 
@@ -613,6 +627,14 @@ namespace gog {
    constexpr uintptr_t red_warning_init            = 0x006F7F70;
    constexpr uintptr_t red_warning_set_dest_min_severity = 0x006F8350;
    constexpr uintptr_t pc_logging_enabled          = 0x01EB029A;
+
+   // ---- Hashing / Terrain (port of upstream 4a8d0df) ---------------------------
+
+   constexpr uintptr_t pbl_hash_table_find       = 0x00727ed0;  // PblHashTableCode::_Find
+   constexpr uintptr_t tex_hash_table            = 0x008f022c;  // RedTexture PblHashTable
+   constexpr uintptr_t read_terrain              = 0x006c34f0;
+   constexpr uintptr_t terrain_null_detail_texture = 0x009ca6cc;
+   constexpr uintptr_t terrain_white_texture       = 0x009ca6d0;
 
 } // namespace gog
 

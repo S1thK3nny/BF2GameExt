@@ -5,6 +5,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "util/game_logging.hpp"
+#include "entity/terrain_texture_fix.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/soldier_prone.hpp"
@@ -403,6 +404,7 @@ void lua_hooks_uninstall()
    shield_channel_fix_uninstall();
    aim_assist_uninstall();
    game_logging_uninstall();
+   terrain_texture_fix_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

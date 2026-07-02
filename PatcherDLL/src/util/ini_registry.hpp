@@ -53,6 +53,8 @@ inline constexpr IniEntry g_ini_registry[] = {
    // [Fixes] — bug-fix patches
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Fix chunk push crash", "Chunk Push Fix"),
    INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
+   INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
+   INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
    INI_ENTRY("Fixes", "BarrelFireOriginFix", "1", "Fire projectiles from barrel hardpoint instead of bone_head"),
 
    // [Features] — optional gameplay features (may require additional assets)

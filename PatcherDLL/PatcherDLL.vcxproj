@@ -160,6 +160,7 @@
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
     <ClCompile Include="src\entity\vehicle_view_toggle.cpp" />
     <ClCompile Include="src\entity\anim_bank_append.cpp" />
+    <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />

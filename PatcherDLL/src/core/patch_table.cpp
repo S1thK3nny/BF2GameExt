@@ -466,6 +466,22 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            // Port of PrismaticFlower's fix (upstream 9c6170e): SkyObjectClass
+            // instances are capped by a global counter; NOP out the "INC ECX;
+            // MOV [count],ECX" (7 bytes) so the count never advances and the
+            // limit is never hit.  3-byte prefix as three 8-bit patches + the
+            // 4-byte address operand -> a 4-byte NOP (0F 1F 40 00 = 0x00401F0F).
+            patch_set{
+               .name = "SkyObjectClass Limit Extension",
+               .patches =
+                  {
+                     patch{0x006c23ae, 0x41, 0x0f, {.values_are_8bit = true}},   // INC ECX     -> NOP (0F 1F 00)
+                     patch{0x006c23af, 0x89, 0x1f, {.values_are_8bit = true}},
+                     patch{0x006c23b0, 0x0d, 0x00, {.values_are_8bit = true}},
+                     patch{0x006c23b1, 0x00ba45cc, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],ECX operand -> 4-byte NOP
+                  },
+            },
+
          },
    },
 
@@ -802,6 +818,22 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .patches =
                   {
                      patch{0x0062bf6b, 0x68, 0x42, {.values_are_8bit = true}},  // branch offset -> bounds check
+                  },
+            },
+
+            // Port of PrismaticFlower's fix (upstream 9c6170e) — see modtools set.
+            // GoG has two counter-increment sites (INC ECX;MOV and INC EAX;MOV).
+            patch_set{
+               .name = "SkyObjectClass Limit Extension",
+               .patches =
+                  {
+                     patch{0x00639e3e, 0x41, 0x0f, {.values_are_8bit = true}},   // INC ECX -> NOP (0F 1F 00)
+                     patch{0x00639e3f, 0x89, 0x1f, {.values_are_8bit = true}},
+                     patch{0x00639e40, 0x0d, 0x00, {.values_are_8bit = true}},
+                     patch{0x00639e41, 0x01eb051c, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],ECX operand -> 4-byte NOP
+                     patch{0x00639e68, 0x40, 0x66, {.values_are_8bit = true}},   // INC EAX -> NOP (66 90)
+                     patch{0x00639e69, 0xa3, 0x90, {.values_are_8bit = true}},
+                     patch{0x00639e6a, 0x01eb051c, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],EAX operand -> 4-byte NOP
                   },
             },
 
@@ -1172,6 +1204,21 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .patches =
                   {
                      patch{0x0062aedb, 0x68, 0x42, {.values_are_8bit = true}},  // branch offset -> bounds check
+                  },
+            },
+
+            // Port of PrismaticFlower's fix (upstream 9c6170e) — see modtools set.
+            patch_set{
+               .name = "SkyObjectClass Limit Extension",
+               .patches =
+                  {
+                     patch{0x00638d9e, 0x41, 0x0f, {.values_are_8bit = true}},   // INC ECX -> NOP (0F 1F 00)
+                     patch{0x00638d9f, 0x89, 0x1f, {.values_are_8bit = true}},
+                     patch{0x00638da0, 0x0d, 0x00, {.values_are_8bit = true}},
+                     patch{0x00638da1, 0x01eaf068, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],ECX operand -> 4-byte NOP
+                     patch{0x00638dc8, 0x40, 0x66, {.values_are_8bit = true}},   // INC EAX -> NOP (66 90)
+                     patch{0x00638dc9, 0xa3, 0x90, {.values_are_8bit = true}},
+                     patch{0x00638dca, 0x01eaf068, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],EAX operand -> 4-byte NOP
                   },
             },
 
