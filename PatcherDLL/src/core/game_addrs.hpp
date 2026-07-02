@@ -123,20 +123,20 @@ namespace modtools {
 
    // ---- Entity / Soldier Prone --------------------------------------------------
 
-   constexpr uintptr_t prone_crouch_inner          = 0x00543B60;
-   constexpr uintptr_t prone_standup_inner         = 0x005435D0;
-   constexpr uintptr_t prone_set_state             = 0x00406C62;
-   constexpr uintptr_t prone_get_foley_fx          = 0x0040E1DD;
-   constexpr uintptr_t prone_game_sound_play       = 0x00415451;
+   constexpr uintptr_t EntitySoldier_crouch        = 0x00543B60;
+   constexpr uintptr_t EntitySoldier_stand         = 0x005435D0;
+   constexpr uintptr_t EntitySoldier_prone         = 0x00A40718;
+   constexpr uintptr_t EntitySoldier_SetState             = 0x00406C62;
+   constexpr uintptr_t FoleyFXCollider_GetFoleyFX  = 0x0040E1DD;
+   constexpr uintptr_t GameSound_play              = 0x00415451;
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
-   constexpr uintptr_t prone_set_action            = 0x00575D50;
-   constexpr uintptr_t prone_vtable_slot           = 0x00A40718;
+   constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
    constexpr uintptr_t prone_guard_jnz             = 0x00545BA6;
    constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
    constexpr uintptr_t prone_height_switch_end     = 0x0053BD67;
    constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
-   constexpr uintptr_t weapon_melee_class_vtable   = 0x00A5434C;
+   constexpr uintptr_t WeaponMeleeClass_vftable   = 0x00A5434C;
 
    // ---- Entity / Cloth ---------------------------------------------------------
 
@@ -424,8 +424,22 @@ namespace steam {
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
 
    // ---- Entity / Soldier Prone -----------------------------------------------
-
-   constexpr uintptr_t prone_vtable_slot         = 0x0079cf6c;  // EntitySoldier +0x240 vtable (0x79cf2c) + 0x40
+   constexpr uintptr_t EntitySoldier_prone       = 0x0079cfcc;
+   constexpr uintptr_t EntitySoldier_crouch      = 0x004ed550;
+   constexpr uintptr_t EntitySoldier_stand       = 0x004ed080;
+   constexpr uintptr_t EntitySoldier_SetState    = 0x004ee2c0;
+   constexpr uintptr_t FoleyFXCollider_GetFoleyFX = 0x004e7bf0;
+   constexpr uintptr_t prone_anim_accessor       = 0x0063c2d0;
+   constexpr uintptr_t SoldierAnimator_SetAction = 0x0063ed60;
+   constexpr uintptr_t prone_guard_jnz           = 0x004e8968;
+   constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
+   constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
+   constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
+   constexpr uintptr_t prone_primary_stance_and  = 0x005435E4;
+   constexpr uintptr_t WeaponMeleeClass_vftable  = 0x007B1534;
+   constexpr uintptr_t lowres_prone_anim_name_ptr = 0x007E99E0;
+   constexpr uintptr_t lowres_prone_jump_entry   = 0x00649348;
+   constexpr uintptr_t lowres_prone_jump_target  = 0x006491C0;
 
    // ---- Entity / Vehicle (Carrier/Flyer) -------------------------------------
 
@@ -506,9 +520,8 @@ namespace steam {
    constexpr uintptr_t pbl_read_next_data       = 0x00727e30;
    constexpr uintptr_t pbl_read_next_scope      = 0x00727eb0;
    constexpr uintptr_t progress_set_all_on      = 0x00578c00;
-   constexpr uintptr_t prone_crouch_inner       = 0x004ed550;
-   constexpr uintptr_t prone_game_sound_play    = 0x00538010;
-   constexpr uintptr_t prone_set_state          = 0x004ee2c0;
+
+   constexpr uintptr_t GameSound_play           = 0x00538010;
    constexpr uintptr_t red_pose_convert_skel32  = 0x006ddb30;
    constexpr uintptr_t snd_engine_update        = 0x00734590;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;

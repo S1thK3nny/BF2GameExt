@@ -50,9 +50,9 @@ static constexpr int STATE_PRONE  = 2;
 //   entity+0x514 = struct+0x754  SoldierState mState
 //   entity+0x520 = struct+0x760  SoldierAnimator*
 //   entity+0x218 = struct+0x458  EntitySoldierClass*
-static constexpr int kMState        = 0x514; // SoldierState mState
-static constexpr int kWeaponSlot    = 0x512; // mWeaponIndex byte (low nibble = slot)
-static constexpr int kWeaponArray   = 0x4F0; // Weapon*[8] mWeapon
+// Build-VARYING EntitySoldier offsets (mState, weaponIndex, weaponArray,
+// soundPos2, foleyProne) live in SoldierLayout / g_soldier — see entity_layout.hpp.
+// kCrouchTrigger is a Controllable-base field, build-invariant on all builds.
 static constexpr int kCrouchTrigger = 0x48;  // Controllable::mControlCrouch (Controllable base == entity)
 
 // SoldierAnimator offsets (Ghidra struct: SoldierAnimator, 8240 bytes)
@@ -154,10 +154,10 @@ static bool is_melee_weapon(void* entity)
 {
     __try {
         char* base = (char*)entity;
-        uint8_t raw = *(uint8_t*)(base + kWeaponSlot);
+        uint8_t raw = *(uint8_t*)(base + g_soldier->weaponIndex);
         int slot = raw & 0x0F;
         if (slot >= 8) return false;
-        void* weapon = *(void**)(base + kWeaponArray + slot * 4);
+        void* weapon = *(void**)(base + g_soldier->weaponArray + slot * 4);
         if (!weapon) return false;
         void* weaponClass = *(void**)((char*)weapon + kWeaponClassOffset);
         if (!weaponClass) return false;
@@ -195,12 +195,12 @@ static bool do_prone_transition(void* entity)
 
     __try {
         // FoleyFXSoldier::mProne (GameSound at +0xD8, confirmed in Ghidra struct)
-        if (fn_getFoleyFX && fn_gameSoundPlay) {
+        if (g_soldier->foleyProne && fn_getFoleyFX && fn_gameSoundPlay) {
             void* foley = fn_getFoleyFX(struct_base);
             if (foley) {
-                void* sound = (char*)foley + 0xD8; // FoleyFXSoldier::mProne
-                void* pos1  = struct_base + 0x120; // world pos
-                void* pos2  = (char*)entity + 0x2AC;
+                void* sound = (char*)foley + g_soldier->foleyProne; // FoleyFXSoldier::mProne
+                void* pos1  = struct_base + 0x120;                  // world pos (struct_base+0x120, same all builds)
+                void* pos2  = (char*)entity + g_soldier->soundPos2;
                 fn_gameSoundPlay(sound, pos1, pos2, 0, 1);
             }
         }
@@ -230,7 +230,7 @@ static bool do_prone_transition(void* entity)
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 {
-    int state = *(int*)((char*)ecx + kMState);
+    int state = *(int*)((char*)ecx + g_soldier->mState);
 
     if (state == STATE_PRONE) {
         // PRONE -> STAND (with headroom-blocked fallback to CROUCH)
@@ -264,7 +264,7 @@ static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 // ---------------------------------------------------------------------------
 static bool __fastcall hooked_StandUp(void* ecx, void* /*edx*/)
 {
-    int state = *(int*)((char*)ecx + kMState);
+    int state = *(int*)((char*)ecx + g_soldier->mState);
 
     if (state == STATE_CROUCH) {
         // Check the crouch Trigger for double-tap (bit 4)
@@ -287,11 +287,26 @@ static bool __fastcall hooked_StandUp(void* ecx, void* /*edx*/)
 // system passes a null SoldierAnimation* here and crashes.  Returning 0
 // (same as the function's own fallback for *param==0) lets the animation
 // system degrade gracefully instead of crashing.
+//
+// MUST be register-transparent: the accessor is a 2-instruction leaf that
+// clobbers only EAX, and the Steam LTCG build has callers that rely on that —
+// Combo::ResolveForWeapon (0x4757a0) keeps the pointer it passes in ECX alive
+// in EDX ACROSS the call and dereferences EDX afterwards.  A plain C hook
+// compiled by MSVC treats EDX as volatile and zeroes it, so the caller then
+// reads [0+4] -> AV at 0x4757ad whenever a melee weapon resolves its combos
+// (i.e. instantly on Jedi spawn).  Hence naked asm: touch only EAX, tail-jump
+// to the Detours trampoline for the non-null path.
 // ---------------------------------------------------------------------------
-static unsigned short __fastcall hooked_animAccessor(void* ecx, void* /*edx*/)
+static __declspec(naked) unsigned short __fastcall hooked_animAccessor(void* /*ecx*/, void* /*edx*/)
 {
-    if (!ecx) return 0;
-    return original_animAccessor(ecx, nullptr);
+    __asm {
+        test ecx, ecx
+        jz   ret_zero
+        jmp  dword ptr [original_animAccessor]
+    ret_zero:
+        xor  eax, eax
+        ret
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,19 +376,26 @@ static bool __fastcall vtable_Prone(void* ecx, void* /*edx*/)
 // ---------------------------------------------------------------------------
 void prone_system_install(uintptr_t exe_base)
 {
-    using namespace game_addrs::modtools;
+    if (g_build == GameBuild::Unknown) return;
+    if (g_addr->EntitySoldier_crouch == 0 || g_addr->EntitySoldier_stand == 0 ||
+        g_addr->EntitySoldier_SetState == 0 || g_addr->EntitySoldier_prone == 0)
+        return;
+
+    // Per-build EntitySoldier offsets come from g_soldier (entity_layout.hpp),
+    // already selected by game_build_select().  Controllable / SoldierAnimator /
+    // Weapon offsets used below are build-invariant constants.
 
     // Resolve function pointers
-    original_Crouch    = (fn_Stance_t)resolve(exe_base, prone_crouch_inner);
-    original_StandUp   = (fn_Stance_t)resolve(exe_base, prone_standup_inner);
-    fn_setState        = (fn_SetState_t)resolve(exe_base, prone_set_state);
-    fn_getFoleyFX      = (fn_GetFoleyFX_t)resolve(exe_base, prone_get_foley_fx);
-    fn_gameSoundPlay   = (fn_GameSoundPlay_t)resolve(exe_base, prone_game_sound_play);
+    original_Crouch    = (fn_Stance_t)resolve(exe_base, g_addr->EntitySoldier_crouch);
+    original_StandUp   = (fn_Stance_t)resolve(exe_base, g_addr->EntitySoldier_stand);
+    fn_setState        = (fn_SetState_t)resolve(exe_base, g_addr->EntitySoldier_SetState);
+    fn_getFoleyFX      = (fn_GetFoleyFX_t)resolve(exe_base, g_addr->FoleyFXCollider_GetFoleyFX);
+    fn_gameSoundPlay   = (fn_GameSoundPlay_t)resolve(exe_base, g_addr->GameSound_play);
 
-    original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, prone_anim_accessor);
-    original_SetAction    = (fn_SetAction_t)resolve(exe_base, prone_set_action);
+    original_animAccessor = (fn_AnimAccessor_t)resolve(exe_base, g_addr->prone_anim_accessor);
+    original_SetAction    = (fn_SetAction_t)resolve(exe_base, g_addr->SoldierAnimator_SetAction);
 
-    g_weaponMeleeVtable   = (void*)resolve(exe_base, weapon_melee_class_vtable);
+    g_weaponMeleeVtable   = (void*)resolve(exe_base, g_addr->WeaponMeleeClass_vftable);
 
     // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
@@ -388,7 +410,7 @@ void prone_system_install(uintptr_t exe_base)
     // Pandemic left a hardcoded check: if (mState == PRONE) Crouch();
     // Change the JNZ (0x75) to JMP (0xEB) so the Crouch() call is always skipped.
     {
-        uint8_t* pJnz = (uint8_t*)resolve(exe_base, prone_guard_jnz);
+        uint8_t* pJnz = (uint8_t*)resolve(exe_base, g_addr->prone_guard_jnz);
         if (*pJnz == 0x75)
             *pJnz = 0xEB;
     }
@@ -412,7 +434,7 @@ void prone_system_install(uintptr_t exe_base)
     // (both earlier/later in the same function) are preserved.
     // -----------------------------------------------------------------------
     {
-        uint8_t* p = (uint8_t*)resolve(exe_base, prone_acklay_gate_jnz);
+        uint8_t* p = (uint8_t*)resolve(exe_base, g_addr->prone_acklay_gate_jnz);
         if (p[0] == 0x0F && p[1] == 0x85) {
             memcpy(g_acklayGateOrig, p, 6);
             g_acklayGatePtr = p;
@@ -430,7 +452,7 @@ void prone_system_install(uintptr_t exe_base)
     }
 
     // Patch Controllable vtable: Prone slot (offset 0xA0)
-    g_proneVtableSlotPtr = (void**)resolve(exe_base, prone_vtable_slot);
+    g_proneVtableSlotPtr = (void**)resolve(exe_base, g_addr->EntitySoldier_prone);
     g_proneVtableSlotOrig = *g_proneVtableSlotPtr;
     *g_proneVtableSlotPtr = (void*)&vtable_Prone;
 
@@ -443,25 +465,29 @@ void prone_system_install(uintptr_t exe_base)
     // a small code cave that calls vtable[0xA0] (Prone) and patch the
     // jump table entry for case 2 to point there.
     //
-    // Original dispatch at case 1 (Crouch):
-    //   8B 16        MOV EDX, [ESI]       ; vtable
-    //   8B CE        MOV ECX, ESI         ; this
+    // Original dispatch at case 1 (Crouch), where <reg> holds `this` (ESI on
+    // modtools, EDI on Steam — see SoldierLayout::aiHeightBaseRm):
+    //   8B 1<rm>     MOV EDX, [<reg>]     ; vtable
+    //   8B C<rm>     MOV ECX, <reg>       ; this
     //   FF 92 9C..   CALL [EDX + 0x9C]    ; Crouch()
     //   E9 95..      JMP end_of_switch
     //
-    // Our stub does the same but calls [EDX + 0xA0] (Prone).
+    // Our stub does the same but calls [EDX + 0xA0] (Prone).  The `this`
+    // register must match the patched build's dispatch site or the stub reads a
+    // garbage vtable and crashes.
     // -----------------------------------------------------------------------
     {
-        uintptr_t switchEnd = (uintptr_t)resolve(exe_base, prone_height_switch_end);
+        uintptr_t switchEnd = (uintptr_t)resolve(exe_base, g_addr->prone_height_switch_end);
+        const uint8_t rm = g_soldier->aiHeightBaseRm; // 6 = ESI (modtools), 7 = EDI (Steam)
 
         g_proneDispatchStub = (uint8_t*)VirtualAlloc(
             nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (g_proneDispatchStub) {
             uint8_t* p = g_proneDispatchStub;
-            // MOV EDX, [ESI]
-            *p++ = 0x8B; *p++ = 0x16;
-            // MOV ECX, ESI
-            *p++ = 0x8B; *p++ = 0xCE;
+            // MOV EDX, [<reg>]   (8B /r, reg=EDX=010, mod=00)
+            *p++ = 0x8B; *p++ = (uint8_t)(0x10 | rm);
+            // MOV ECX, <reg>     (8B /r, reg=ECX=001, mod=11)
+            *p++ = 0x8B; *p++ = (uint8_t)(0xC8 | rm);
             // CALL [EDX + 0xA0]
             *p++ = 0xFF; *p++ = 0x92;
             *p++ = 0xA0; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00;
@@ -471,7 +497,7 @@ void prone_system_install(uintptr_t exe_base)
             memcpy(p, &rel, 4);
 
             // Patch jump table entry [2] to point to our stub
-            g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, prone_height_jump_table + 8);
+            g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, g_addr->prone_height_jump_table + 8);
             g_heightJumpTableOrig = *g_heightJumpTableEntry;
             *g_heightJumpTableEntry = (uint32_t)(uintptr_t)g_proneDispatchStub;
         }
@@ -485,7 +511,7 @@ void prone_system_install(uintptr_t exe_base)
     // 0x03 to 0x07 so all three stance bits (Stand, Crouch, Prone) are kept.
     // -----------------------------------------------------------------------
     {
-        uint8_t* pAnd = (uint8_t*)resolve(exe_base, prone_primary_stance_and);
+        uint8_t* pAnd = (uint8_t*)resolve(exe_base, g_addr->prone_primary_stance_and);
         if (*pAnd == 0x03)
             *pAnd = 0x07;
     }
@@ -498,8 +524,8 @@ void prone_system_install(uintptr_t exe_base)
     // in the shipped lowres banks, so it falls back to crouch.  Patch the
     // table pointer to use "rifle_prone_idle_emote" instead.
     // -----------------------------------------------------------------------
-    {
-        g_lowresProneNamePtr = (const char**)resolve(exe_base, lowres_prone_anim_name_ptr);
+    if (g_addr->lowres_prone_anim_name_ptr) {
+        g_lowresProneNamePtr = (const char**)resolve(exe_base, g_addr->lowres_prone_anim_name_ptr);
         g_lowresProneNameOrig = *g_lowresProneNamePtr;
         *g_lowresProneNamePtr = g_lowresProneAnimName;
     }
@@ -510,11 +536,18 @@ void prone_system_install(uintptr_t exe_base)
     // GetAnimatorLocal_ has a switch on mState.  The PRONE case (2) jumps
     // to the CROUCH idle path (ESI=1).  Patch the jump table entry to point
     // to the code that sets ESI=2 (the prone animation index).
+    //
+    // MODTOOLS ONLY: on Steam the index-2 set is compiled branchlessly
+    // (SETBE BL; INC EBX at lowres_prone_jump_target) with no clean MOV-imm
+    // target to repoint to, so jumping the table entry there would run SETBE
+    // against stale flags.  Skipped on Steam — this only affects the distant
+    // lowres LOD pose (cosmetic); near/normal prone is unaffected.
     // -----------------------------------------------------------------------
-    {
-        g_lowresProneJumpEntry = (uint32_t*)resolve(exe_base, lowres_prone_jump_entry);
+    if (g_build == GameBuild::Modtools &&
+        g_addr->lowres_prone_jump_entry && g_addr->lowres_prone_jump_target) {
+        g_lowresProneJumpEntry = (uint32_t*)resolve(exe_base, g_addr->lowres_prone_jump_entry);
         g_lowresProneJumpOrig = *g_lowresProneJumpEntry;
-        uintptr_t target = (uintptr_t)resolve(exe_base, lowres_prone_jump_target);
+        uintptr_t target = (uintptr_t)resolve(exe_base, g_addr->lowres_prone_jump_target);
         *g_lowresProneJumpEntry = (uint32_t)target;
     }
 
@@ -531,9 +564,13 @@ void prone_system_uninstall()
         }
     }
 
-    // Restore AI height dispatch jump table
+    // Restore AI height dispatch jump table.
+    // NOTE: uninstall runs at DLL detach, long after install_patches_impl
+    // re-protected the exe sections — every restore below must go through
+    // protected_write or it access-violates (jump tables live in .text).
     if (g_heightJumpTableEntry && g_heightJumpTableOrig) {
-        *g_heightJumpTableEntry = g_heightJumpTableOrig;
+        protected_write(g_heightJumpTableEntry, &g_heightJumpTableOrig,
+                        sizeof(g_heightJumpTableOrig));
     }
 
     // Free AI dispatch stub
@@ -544,19 +581,21 @@ void prone_system_uninstall()
 
     // Restore Acklay gate patch
     if (g_acklayGatePtr) {
-        memcpy(g_acklayGatePtr, g_acklayGateOrig, 6);
+        protected_write(g_acklayGatePtr, g_acklayGateOrig, 6);
         g_acklayGatePtr = nullptr;
     }
 
     // Restore lowres prone animation name
     if (g_lowresProneNamePtr && g_lowresProneNameOrig) {
-        *g_lowresProneNamePtr = g_lowresProneNameOrig;
+        protected_write(g_lowresProneNamePtr, &g_lowresProneNameOrig,
+                        sizeof(g_lowresProneNameOrig));
         g_lowresProneNamePtr = nullptr;
     }
 
     // Restore lowres prone runtime dispatch
     if (g_lowresProneJumpEntry && g_lowresProneJumpOrig) {
-        *g_lowresProneJumpEntry = g_lowresProneJumpOrig;
+        protected_write(g_lowresProneJumpEntry, &g_lowresProneJumpOrig,
+                        sizeof(g_lowresProneJumpOrig));
         g_lowresProneJumpEntry = nullptr;
     }
 

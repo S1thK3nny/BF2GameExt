@@ -2,6 +2,7 @@
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
 #include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
@@ -308,6 +309,9 @@ void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
 
 void lua_hooks_install(uintptr_t exe_base)
 {
+   // Detour-hook layer targets raw modtools VAs / inline sites -> modtools only.
+   HOOK_REQUIRE_MODTOOLS();
+
    using namespace game_addrs::modtools;
 
    g_lua.pushcclosure = (fn_lua_pushcclosure)resolve(exe_base, lua_pushcclosure);
@@ -355,7 +359,6 @@ void lua_hooks_install(uintptr_t exe_base)
 
    loading_screen_install(exe_base);
    entity_carrier_fixes_install(exe_base);
-   prone_system_install(exe_base);
    vehicle_view_toggle_install(exe_base);
    fp_anim_bank_install(exe_base);
    flyer_boost_anim_install(exe_base);
@@ -366,7 +369,6 @@ void lua_hooks_install(uintptr_t exe_base)
    gc_visual_limits_install(exe_base);
    anim_bank_append_install(exe_base);
    shield_channel_fix_install(exe_base);
-   aim_assist_install(exe_base);
    lua_create_entity_hook_install(exe_base);
 
    // Patch WeaponCannon vtable: replace OverrideAimer with our hook.

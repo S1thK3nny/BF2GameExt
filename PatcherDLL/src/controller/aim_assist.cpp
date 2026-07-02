@@ -859,8 +859,14 @@ void aim_assist_install(uintptr_t exe_base)
 
     if (!s_aimAssistEnabled) return;
 
-    // TODO: select based on exe identification once global exe type detection exists
-    s_addrs = &MODTOOLS_ADDRS;
+    // Select the address set for the detected build. Aim assist is fully ported
+    // for all three, so it runs everywhere; an unidentified build skips.
+    switch (g_build) {
+        case GameBuild::Modtools: s_addrs = &MODTOOLS_ADDRS; break;
+        case GameBuild::Steam:    s_addrs = &STEAM_ADDRS; break;
+        case GameBuild::GOG:      s_addrs = &GOG_ADDRS; break;
+        default: return;
+    }
 
     s_lockOnMgrArray = (uintptr_t)resolve(exe_base, s_addrs->lockon_mgr_array);
     s_cameraGlobal = (uintptr_t)resolve(exe_base, s_addrs->m_camera_global);

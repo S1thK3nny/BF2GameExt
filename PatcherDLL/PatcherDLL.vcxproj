@@ -145,6 +145,7 @@
     </ClCompile>
     <ClCompile Include="src\core\dllmain.cpp" />
     <ClCompile Include="src\core\apply_patches.cpp" />
+    <ClCompile Include="src\core\game_build.cpp" />
     <ClCompile Include="src\core\patch_table.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />
@@ -164,6 +165,7 @@
     <ClCompile Include="src\debug_commands\weapon_ranges.cpp" />
     <ClCompile Include="src\debug_commands\mem_watch.cpp" />
     <ClCompile Include="src\util\cfile.cpp" />
+    <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
     <ClCompile Include="src\loading_screen\renderer.cpp" />
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />

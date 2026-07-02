@@ -2,12 +2,22 @@
 
 #include "apply_patches.hpp"
 #include "resolve.hpp"
+#include "game_build.hpp"
 #include "util/cfile.hpp"
 #include "util/ini_config.hpp"
 #include "util/ini_registry.hpp"
 #include "patch_table.hpp"
 
 #include <string.h>
+
+// Map an identified patch-list name to the runtime build enum used by the hooks.
+static GameBuild build_from_name(const char* name)
+{
+   if (strstr(name, "modtools")) return GameBuild::Modtools;
+   if (strstr(name, "Steam")) return GameBuild::Steam;
+   if (strstr(name, "GoG") || strstr(name, "GOG")) return GameBuild::GOG;
+   return GameBuild::Unknown;
+}
 
 static bool memeq(const void* left, size_t left_size, const void* right, size_t right_size)
 {
@@ -27,12 +37,15 @@ static auto resolve_file_address(uintptr_t offset, const slim_vector<section_inf
    return nullptr;
 }
 
-static bool apply_patch(const patch& patch, const uintptr_t exe_base,
-                        const slim_vector<section_info>& sections)
+// Verify a patch's site holds its expected original value (does not write).
+static bool verify_patch(const patch& patch, const uintptr_t exe_base,
+                         const slim_vector<section_info>& sections)
 {
    char* patch_address = patch.flags.file_offset
                             ? resolve_file_address(patch.address, sections)
                             : (char*)resolve(exe_base, patch.address);
+
+   if (not patch_address) return false;
 
    const uint32_t expected_value = patch.flags.expected_is_va
                                       ? (uint32_t)(uintptr_t)resolve(exe_base, patch.expected_value)
@@ -40,13 +53,20 @@ static bool apply_patch(const patch& patch, const uintptr_t exe_base,
 
    const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(expected_value);
 
-   if (not memeq(patch_address, cmp_size, &expected_value, cmp_size)) {
-      return false;
-   }
+   return memeq(patch_address, cmp_size, &expected_value, cmp_size);
+}
+
+// Write a patch's replacement value (caller must have verify_patch'd it first).
+static void write_patch(const patch& patch, const uintptr_t exe_base,
+                        const slim_vector<section_info>& sections)
+{
+   char* patch_address = patch.flags.file_offset
+                            ? resolve_file_address(patch.address, sections)
+                            : (char*)resolve(exe_base, patch.address);
+
+   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(patch.replacement_value);
 
    memcpy(patch_address, &patch.replacement_value, cmp_size);
-
-   return true;
 }
 
 // patch_set → INI section+key mapping now lives in ini_registry.hpp
@@ -80,7 +100,14 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
 
       log.printf("Identified executable as: %s\nApplying patches.\n", exe_list.name);
 
+      // Select the runtime address table for the detour-based hooks installed later.
+      game_build_select(build_from_name(exe_list.name));
+
       for (const patch_set& set : exe_list.patches) {
+         // exe_patch_list::patches is a fixed PATCH_COUNT array; lists with fewer
+         // sets leave default-constructed tail slots — skip them.
+         if (!set.name[0]) continue;
+
          // Check INI toggle for this patch set (defaults to enabled)
          auto [ini_section, ini_key] = ini_lookup_patch_set(set.name);
          if (ini_section && ini_key && !cfg.get_bool(ini_section, ini_key, true)) {
@@ -88,21 +115,23 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
             continue;
          }
 
-         log.printf("Applying patch set: %s\n", set.name);
-
+         // Verify every site in the set first. If any expected value mismatches
+         // (wrong build/version, or an address we haven't mapped), skip the whole
+         // set rather than leaving it half-applied — other sets still apply.
+         const patch* bad = nullptr;
          for (const patch& patch : set.patches) {
-            if (not apply_patch(patch, exe_base, sections)) {
-               log.printf(R"(Failed to apply patch
-   address = %x
-   expected_value = %x
-   replacement_value = %x
-   flags = {.file_offset = %i, .expected_is_va = %i}
-)",
-                          patch.address, patch.expected_value, patch.replacement_value,
-                          (int)patch.flags.file_offset, (int)patch.flags.expected_is_va);
+            if (not verify_patch(patch, exe_base, sections)) { bad = &patch; break; }
+         }
 
-               return false;
-            }
+         if (bad) {
+            log.printf("Skipping patch set (site mismatch @ %x, expected %x): %s\n",
+                       bad->address, bad->expected_value, set.name);
+            continue;
+         }
+
+         log.printf("Applying patch set: %s\n", set.name);
+         for (const patch& patch : set.patches) {
+            write_patch(patch, exe_base, sections);
          }
       }
 

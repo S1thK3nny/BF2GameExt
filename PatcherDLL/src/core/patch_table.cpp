@@ -1044,6 +1044,19 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x74B82 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // ResolveForWeapon (CMP AL, 0xA4)
                      // Combo::State::Deflect::DeflectAnimation — rejects anim indices >= 0xA4
                      patch{0x72BD9 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // DeflectAnimation (CMP CL, 0xA4)
+                     // WeaponMelee current-combo-anim helper (VA 0x688b80) — returns hardcoded
+                     // 0xA4 as its "no animation" sentinel (MOV AL,0xA4; POP ESI; RET).  Both of
+                     // its callers are the EntitySoldier::Render compare sites patched to 0xFE
+                     // above, so an unpatched return here makes "no melee anim" read as REAL anim
+                     // index 0xA4 -> garbage combo/anim data -> crash whenever a melee unit is
+                     // in play.  Modtools inlines this helper into Render, where the four Render
+                     // patches already cover its sentinel — Steam keeps it out-of-line, so the
+                     // sentinel needs its own patch.
+                     patch{0x287FA5, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // melee-anim helper sentinel return (MOV AL, 0xA4)
+                     // EntitySoldier::Update — inlined weapon-loop bound check on the melee anim
+                     // index (CALL helper@0x688b70; CMP AL,0xA4; JAE skip), gated on
+                     // weapon->IsMelee().  Same 0xA4 total-index bound as the Render sites.
+                     patch{0xE94F9 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // EntitySoldier::Update (CMP AL, 0xA4)
                   },
             },
 

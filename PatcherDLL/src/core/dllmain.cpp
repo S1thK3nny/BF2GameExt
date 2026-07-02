@@ -8,6 +8,7 @@
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
 #include "entity/soldier_prone.hpp"
+#include "util/crash_logger.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
 
@@ -106,6 +107,11 @@ void __declspec(dllexport) ExportFunction() {}
 
 static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 {
+   // First thing, before any patching: capture first-chance fatal exceptions
+   // to BF2GameExt_crash.log (the game's own SEH handler can otherwise swallow
+   // the crash and exit without a trace).
+   crash_logger_install();
+
    char* const game_address = (char*)exe_base;
 
    IMAGE_DOS_HEADER& dos_header = *(IMAGE_DOS_HEADER*)game_address;
@@ -175,6 +181,12 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);
+
+   // Build-aware installers (select their address set from g_build / g_addr),
+   // so they run on every identified build — not just modtools.  Called here,
+   // outside the modtools-only lua_hooks_install, while sections are still RW.
+   aim_assist_install(exe_base);
+   prone_system_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
