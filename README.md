@@ -12,6 +12,7 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
 
 - [Features](#features)
   - [Engine Limit Extensions](#engine-limit-extensions)
+  - [Engine & Rendering Fixes](#engine--rendering-fixes)
   - [Loading Screen System](#loading-screen-system)
   - [Soldier Systems](#soldier-systems)
   - [Weapon Systems](#weapon-systems)
@@ -45,6 +46,14 @@ Automatic binary patches applied on load:
 - **Matrix/Item Pool** - Extends matrix pool to 256x original capacity
 - **Renderer Cache** - Increases particle renderer cache from 15 to 120 entries
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256, particle icons from 128 to 512. Fixes pathways and fleet/planet icons silently disappearing on modded GC maps with many planets
+- **SkyObjectClass Limit** - Removes the hard cap on `SkyObjectClass` instances by neutralizing the global instance counter, allowing sky domes/backdrops with many objects. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
+
+### Engine & Rendering Fixes
+General engine bug fixes ported from PrismaticFlower's upstream, applied on all supported builds (modtools/Steam/GOG):
+
+- **PropGenerator Loop Fix** - `PropGenerator::Update` (procedural foliage) could branch past its cluster-object array bounds check at very high FOVs and read past the array end, crashing. The patch redirects that branch back to the bounds check. INI: `[Fixes] PropGeneratorLoopFix=1`
+- **Terrain Texture Fix** - The terrain shader caches two `RedTexture*` globals (the null detail map and white fallback) that are only assigned on maps that have a terrain detail map. Switching in a playlist from a detail-map map to one without leaves a stale pointer → garbage/crash. The fix hooks `ReadTerrain` to re-resolve both textures from the hash table before every terrain load, so they're always valid. (Also fixes an upstream copy-paste bug that fed the detail-map hash into the white slot.) INI: `[Fixes] TerrainTextureFix=1`
+- **Game Logging Enablement** - Retail builds (Steam/GOG) ship the engine's `BFront2.log` file logging compiled in but disabled. This re-enables it without needing the `/log` command-line flag, useful for diagnosing crashes and mod issues. No-op on modtools (which always logs). INI: `[Features] GameLogging=0` *(off by default)*
 
 ### Loading Screen System
 The vanilla game reads a loading screen configuration from a munged `load.cfg`, but it cannot be overridden without replacing the base game file. BF2GameExt hooks into the `LoadDisplay` config parser and renderer to add new parameters that work alongside vanilla ones. Modders can also redirect the entire loading screen to a custom `load.cfg` from Lua. See [Lua API](#lua-api).
@@ -175,10 +184,10 @@ Make HTTP requests directly from Lua. Useful for telemetry, live configuration, 
 ## Supported Executables
 
 - **BF2_modtools** - Full support (modding executable from the official mod tools)
-- **[GoG](https://www.gog.com/en/game/star_wars_battlefront_ii)** - Binary patches only
-- **[Steam](https://store.steampowered.com/app/6060)** - Binary patches only
+- **[GoG](https://www.gog.com/en/game/star_wars_battlefront_ii)** - Binary patches + ported hook features
+- **[Steam](https://store.steampowered.com/app/6060)** - Binary patches + ported hook features
 
-Lua extensions and hooks currently target BF2_modtools only. GoG/Steam support for the full feature set is planned.
+A runtime build-dispatch layer resolves per-build addresses, so an increasing set of hook-based features now runs on Steam and GOG in addition to the binary patches — including prone, aim assist, animation bank appending, and the terrain/prop/sky fixes. The full Lua API and the remaining hooks currently target BF2_modtools only; broader GoG/Steam coverage is ongoing.
 
 ## Installation
 
@@ -206,7 +215,7 @@ All runtime options are controlled via `BF2GameExt.ini` (only used with the DInp
 | `[General]` | Master enable switch, DLL path |
 | `[LimitIncreases]` | Engine limit patches (heap, sound, objects, etc.) |
 | `[Fixes]` | Bug-fix patches |
-| `[Features]` | Optional gameplay features (e.g. Prone) and AI behavior toggles (dead-body shooting) |
+| `[Features]` | Optional gameplay features (e.g. Prone), diagnostics (game logging), and AI behavior toggles (dead-body shooting) |
 | `[Controller]` | Gamepad enable and rumble toggles |
 | `[Controller.*]` | Per-mode button/axis bindings (Unit, Vehicle, Flyer, Hero, Turret) |
 

@@ -585,6 +585,27 @@ namespace steam {
    constexpr uintptr_t zephyr_pose_static_set   = 0x0072dfd0;
    constexpr uintptr_t zephyr_skeleton_finalize = 0x0072bc30;
 
+   constexpr uintptr_t anim_find_animation       = 0x00520f50;  // FindAnimation (name-matched)
+   constexpr uintptr_t carrier_detach_cargo      = 0x00497410;  // DetachCargo (name-matched; adjacent to carrier_attach_cargo)
+   constexpr uintptr_t console_add_variable      = 0x0041fe80;  // RedCommandConsole::AddVariable (name-matched)
+   constexpr uintptr_t disguise_raise            = 0x00682f30;  // WhoTwiggedMe (name-matched)
+   constexpr uintptr_t load_update_real          = 0x00576c00;  // LoadDisplay Update (adjacent to load_end_real)
+   constexpr uintptr_t weapon_signal_fire        = 0x00679610;  // SignalFire (name-matched)
+   constexpr uintptr_t snd_sound_play            = 0x0073a430;  // Snd::Play (gate: 7 shared callees + 2-source)
+   constexpr uintptr_t passenger_activate        = 0x004dd7c0;  // ActivatePhysics (2-source agreement)
+   constexpr uintptr_t rumble_state_setup        = 0x006b2790;  // rumble state setup (2-source agreement)
+
+   constexpr uintptr_t aimer_activate            = 0x0043e380;  // Aimer::ActivatePhysics (decompile-identical)
+   constexpr uintptr_t get_weapon_anim_map       = 0x0063c970;  // SoldierAnimationBank::FindMap (decompile-identical table scan)
+   constexpr uintptr_t snd_find_by_hash_id       = 0x00736a90;  // Properties::FindByHashID (decompile-identical list scan)
+   constexpr uintptr_t carrier_update_landed_ht  = 0x004974b0;  // EntityCarrier::UpdateLandedHeight (unique name + bridge agree; adjacent to carrier_detach_cargo)
+   constexpr uintptr_t disguise_drop             = 0x00683090;  // WeaponDisguise::FinishDroppingDisguise (diff + independent label; adjacent to disguise_raise)
+   constexpr uintptr_t load_render_real          = 0x00576f10;  // LoadDisplay::Render (bridge + LoadDisplay CU cluster with load_update_real/load_end_real)
+   constexpr uintptr_t render_screen_real        = 0x00577280;  // LoadDisplay::RenderScreen (CU cluster; same render call shape)
+   constexpr uintptr_t platform_render_texture   = 0x00423980;  // PlatformRenderTexture (called from render_screen_real at matching site; arg shape matches)
+   constexpr uintptr_t disguise_set_property     = 0x00683430;  // WeaponDisguiseClass::SetProperty (unique hit of key hash 0x8da6fec5 in .text)
+   constexpr uintptr_t game_model_table          = 0x01ec1234;  // GameModel hash table (positional _Find call match in building SetProperty; xref count 12 vs 14)
+
 } // namespace steam
 
 // =============================================================================

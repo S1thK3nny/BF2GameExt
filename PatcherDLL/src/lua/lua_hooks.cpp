@@ -365,7 +365,6 @@ void lua_hooks_install(uintptr_t exe_base)
    fp_anim_bank_install(exe_base);
    flyer_boost_anim_install(exe_base);
    cloth_collision_fix_install(exe_base);
-   disguise_ext_install(exe_base);
    grapple_fix_install(exe_base);
    DebugCommandRegistry::install(exe_base);
    gc_visual_limits_install(exe_base);

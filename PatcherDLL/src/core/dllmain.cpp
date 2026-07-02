@@ -8,6 +8,7 @@
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
 #include "entity/anim_bank_append.hpp"
+#include "weapon/disguise_model_override.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "util/crash_logger.hpp"
@@ -193,6 +194,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
    anim_bank_append_install(exe_base);
+   disguise_ext_install(exe_base);
    game_logging_install(exe_base);
    terrain_texture_fix_install(exe_base);
 

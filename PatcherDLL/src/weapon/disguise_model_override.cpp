@@ -158,6 +158,13 @@ static void* getWeaponClass(void* weaponThis)
 static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
+    // Lazy init: cannot call game code during install — dllmain's install window
+    // has exe sections set PAGE_READWRITE (no EXEC), and the Steam exe is DEP-enabled
+    // (modtools only tolerated it because its 2005 exe has no NX flag). By the time
+    // ODF properties are parsed the game is running and .text is executable again.
+    if (g_disguiseModelPropHash == 0 && fn_hash_string)
+        g_disguiseModelPropHash = fn_hash_string("DisguiseModel");
+
     if (hash == g_disguiseModelPropHash && g_disguiseModelPropHash != 0) {
         if (!value) return;
         DisguiseConfig* cfg = findOrCreateConfig(ecx);
@@ -249,16 +256,25 @@ static void __fastcall hooked_DisguiseDrop(void* ecx, void* edx)
 
 void disguise_ext_install(uintptr_t exe_base)
 {
-    using namespace game_addrs::modtools;
-    fn_hash_string    = (fn_hash_string_t)resolve(exe_base, hash_string);
-    fn_hashtable_find = (fn_HashTableFind_t)resolve(exe_base, pbl_hash_table_find);
-    g_gameModelTable  = (uint32_t*)resolve(exe_base, game_model_table);
+    // Build-aware: all required addresses must be known for the active build.
+    // Struct offsets used above (weapon+0x64/0x68/0x6C/0xC8, obj+0x18, vtable+0x20,
+    // EntityGeometry+0x130 mModel) verified identical in modtools and Steam
+    // (FinishRaisingDisguise decompile comparison + release PDB struct).
+    if (g_addr->hash_string == 0 || g_addr->pbl_hash_table_find == 0 ||
+        g_addr->game_model_table == 0 || g_addr->disguise_set_property == 0 ||
+        g_addr->disguise_raise == 0 || g_addr->disguise_drop == 0)
+        return;
 
-    g_disguiseModelPropHash = fn_hash_string("DisguiseModel");
+    fn_hash_string    = (fn_hash_string_t)resolve(exe_base, g_addr->hash_string);
+    fn_hashtable_find = (fn_HashTableFind_t)resolve(exe_base, g_addr->pbl_hash_table_find);
+    g_gameModelTable  = (uint32_t*)resolve(exe_base, g_addr->game_model_table);
 
-    original_SetProperty    = (fn_SetProperty_t)resolve(exe_base, disguise_set_property);
-    original_DisguiseRaise  = (fn_DisguiseFunc_t)resolve(exe_base, disguise_raise);
-    original_DisguiseDrop   = (fn_DisguiseFunc_t)resolve(exe_base, disguise_drop);
+    // g_disguiseModelPropHash computed lazily in hooked_SetProperty — see note there.
+    g_disguiseModelPropHash = 0;
+
+    original_SetProperty    = (fn_SetProperty_t)resolve(exe_base, g_addr->disguise_set_property);
+    original_DisguiseRaise  = (fn_DisguiseFunc_t)resolve(exe_base, g_addr->disguise_raise);
+    original_DisguiseDrop   = (fn_DisguiseFunc_t)resolve(exe_base, g_addr->disguise_drop);
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
