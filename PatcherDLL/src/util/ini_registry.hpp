@@ -56,6 +56,10 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
    INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
    INI_ENTRY("Fixes", "BarrelFireOriginFix", "1", "Fire projectiles from barrel hardpoint instead of bone_head"),
+   INI_ENTRY("Fixes", "BlurDownsizeClamp", "1", "Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "ScreenshotFix", "1", "Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "ErrorDialogFix", "1", "Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "DLCMissionInitFix", "0", "EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off)"),
 
    // [Features] — optional gameplay features (may require additional assets)
    INI_ENTRY("Features", "Prone", "1", "Enable prone stance (requires prone animations in soldier banks)"),

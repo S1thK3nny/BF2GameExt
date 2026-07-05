@@ -11,6 +11,8 @@ struct cfile {
    void printf(char const* const format, ...) const;
    void vprintf(char const* const format, va_list args) const;
 
+   void write(const void* bytes, size_t count) const;
+
    explicit operator bool() const noexcept;
 
 private:

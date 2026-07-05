@@ -97,6 +97,21 @@ namespace modtools {
    constexpr uintptr_t terrain_null_detail_texture = 0x00edd114; // RedTexture**
    constexpr uintptr_t terrain_white_texture       = 0x00edd11c; // RedTexture**
 
+   // ---- BlurEffect downsize clamp (port of upstream 1f8f618) -------------------
+   // BlurEffect::Render body (__thiscall(self, uint flags); the vtable slot holds
+   // the ILT thunk 0x00409755 -> this body).  Detoured to clamp the downsized
+   // render-target resolution (mDownsizeFactor @ +0x30) to 512px max.
+   constexpr uintptr_t blur_effect_render              = 0x0077a930;
+   // RedRenderer::pcGetViewportExtents(__cdecl float* minX, minY, maxX, maxY)
+   constexpr uintptr_t red_renderer_get_viewport_extents = 0x00805f40;
+
+   // ---- GameState (DLC mission-list init fix, port of upstream e8b6fa7) --------
+   // Static GameState::State objects/functions.  vtable: [0]=dtor [1]=Enter
+   // [2]=Update [3]=Exit.  shell_state is the OBJECT address, not a pointer.
+   constexpr uintptr_t gamestate_shell_state           = 0x00ac6d84;
+   constexpr uintptr_t gamestate_shell_state_enter     = 0x00407ac7; // ILT thunk -> ShellState::Enter
+   constexpr uintptr_t gamestate_mission_state_enter   = 0x00407fb8; // ILT thunk -> MissionState::Enter
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
@@ -433,6 +448,29 @@ namespace steam {
    constexpr uintptr_t terrain_null_detail_texture = 0x009c922c;
    constexpr uintptr_t terrain_white_texture       = 0x009c9230;
 
+   // ---- BlurEffect downsize clamp (port of upstream 1f8f618) -------------------
+   constexpr uintptr_t blur_effect_render              = 0x0040f8d0;
+   constexpr uintptr_t red_renderer_get_viewport_extents = 0x006b86a0;
+
+   // ---- Screenshot redirect (port of upstream 9a6d4b9) -------------------------
+   // The game's IDirect3DDevice9* global.  Careful: under Shader Patch the wrong
+   // call through this could crash — we only ever do backbuffer copy + lock.
+   constexpr uintptr_t d3d_device                      = 0x007f594c;
+   // E8 rel32 call site of the broken Screenshot::RequestScreenshot (target is
+   // read from the rel32 at install time and detoured).
+   constexpr uintptr_t screenshot_request_call_site    = 0x00533520;
+
+   // ---- RedWarning::DialogBoxMessage fix (port of upstream aefa406) ------------
+   // FF 15 [DialogBoxParamA] indirect call inside RedWarning::DialogBoxMessage.
+   // The retail exes lack the dialog template resource, so the call always fails;
+   // rewritten to 90 E8 rel32 -> our shim using a template in BF2GameExt.dll.
+   constexpr uintptr_t red_warning_dialog_call_site    = 0x006f6b69;
+
+   // ---- GameState (DLC mission-list init fix, port of upstream e8b6fa7) --------
+   constexpr uintptr_t gamestate_shell_state           = 0x007eb998;
+   constexpr uintptr_t gamestate_shell_state_enter     = 0x0053b980;
+   constexpr uintptr_t gamestate_mission_state_enter   = 0x0053bae0;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
@@ -656,6 +694,26 @@ namespace gog {
    constexpr uintptr_t read_terrain              = 0x006c34f0;
    constexpr uintptr_t terrain_null_detail_texture = 0x009ca6cc;
    constexpr uintptr_t terrain_white_texture       = 0x009ca6d0;
+
+   // ---- BlurEffect downsize clamp (see steam namespace for docs) ---------------
+
+   constexpr uintptr_t blur_effect_render              = 0x0040f8d0;
+   constexpr uintptr_t red_renderer_get_viewport_extents = 0x006b9730;
+
+   // ---- Screenshot redirect (see steam namespace for docs) ---------------------
+
+   constexpr uintptr_t d3d_device                      = 0x007f6dec;
+   constexpr uintptr_t screenshot_request_call_site    = 0x00534290;
+
+   // ---- RedWarning::DialogBoxMessage fix (see steam namespace for docs) --------
+
+   constexpr uintptr_t red_warning_dialog_call_site    = 0x006f7c39;
+
+   // ---- GameState (DLC mission-list init fix) -----------------------------------
+
+   constexpr uintptr_t gamestate_shell_state           = 0x007ec968;
+   constexpr uintptr_t gamestate_shell_state_enter     = 0x0053c6d0;
+   constexpr uintptr_t gamestate_mission_state_enter   = 0x0053c830;
 
 } // namespace gog
 

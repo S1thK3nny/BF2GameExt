@@ -143,6 +143,10 @@
     <ClInclude Include="src\controller\controller_rumble.hpp" />
     <ClInclude Include="src\controller\aim_assist.hpp" />
     <ClInclude Include="src\util\ini_registry.hpp" />
+    <ClInclude Include="src\util\error_dialog_fix.hpp" />
+    <ClInclude Include="src\render\blur_downsize_clamp.hpp" />
+    <ClInclude Include="src\render\screenshot_fix.hpp" />
+    <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -181,6 +185,10 @@
     <ClCompile Include="src\controller\controller_support.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
     <ClCompile Include="src\controller\aim_assist.cpp" />
+    <ClCompile Include="src\util\error_dialog_fix.cpp" />
+    <ClCompile Include="src\render\blur_downsize_clamp.cpp" />
+    <ClCompile Include="src\render\screenshot_fix.cpp" />
+    <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

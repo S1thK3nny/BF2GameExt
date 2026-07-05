@@ -11,7 +11,11 @@
 #include "weapon/disguise_model_override.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
+#include "render/blur_downsize_clamp.hpp"
+#include "render/screenshot_fix.hpp"
+#include "shell/dlc_mission_init_fix.hpp"
 #include "util/crash_logger.hpp"
+#include "util/error_dialog_fix.hpp"
 #include "util/game_logging.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
@@ -169,6 +173,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_proneEnabled = cfg.get_bool("Features", "Prone", true);
       g_gameLoggingEnabled = cfg.get_bool("Features", "GameLogging", false);
       g_terrainTextureFixEnabled = cfg.get_bool("Fixes", "TerrainTextureFix", true);
+      g_blurDownsizeClampEnabled = cfg.get_bool("Fixes", "BlurDownsizeClamp", true);
+      g_screenshotFixEnabled = cfg.get_bool("Fixes", "ScreenshotFix", true);
+      g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
+      g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -197,6 +205,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    disguise_ext_install(exe_base);
    game_logging_install(exe_base);
    terrain_texture_fix_install(exe_base);
+   blur_downsize_clamp_install(exe_base);
+   screenshot_fix_install(exe_base);
+   error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
+   dlc_mission_init_fix_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

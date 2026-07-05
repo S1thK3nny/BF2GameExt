@@ -32,6 +32,13 @@ void cfile::vprintf(char const* const format, va_list args) const
    fflush(file);
 }
 
+void cfile::write(const void* bytes, size_t count) const
+{
+   if (not file) return;
+
+   fwrite(bytes, 1, count, file);
+}
+
 cfile::operator bool() const noexcept
 {
    return file;
