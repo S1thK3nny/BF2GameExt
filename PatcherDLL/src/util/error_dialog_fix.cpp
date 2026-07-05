@@ -17,15 +17,42 @@
 // forwards to DialogBoxParamA with BF2GameExt.dll's HINSTANCE and the
 // IDD_GAMEMESSAGEDIALOG template from our Resource.rc (same control IDs the
 // game's DLGPROC expects: IDOK + edit control 1001).
+//
+// Z-order: the game calls DialogBoxParamA with hWndParent = NULL (checked in
+// both builds' RedWarning::DialogBoxMessage), and the retail game window is a
+// topmost fullscreen window — an ownerless, non-topmost dialog opens BEHIND
+// it and can never be raised above it (modtools' window isn't topmost, which
+// is the only reason the stock dialog shows there).  Our template therefore
+// carries DS_SETFOREGROUND + WS_EX_TOPMOST, and the DLGPROC below wraps the
+// game's proc to force the dialog to the foreground on WM_INITDIALOG.
 // =============================================================================
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
+// Only one fatal-error dialog can be up at a time (DialogBoxParamA is modal
+// and RedWarning::DialogBoxMessage runs on the game thread) — a single static
+// slot for the wrapped proc is fine.
+static DLGPROC g_gameDialogProc = nullptr;
+
+static INT_PTR CALLBACK ForegroundDialogProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    const INT_PTR result = g_gameDialogProc(hDlg, msg, wParam, lParam);
+
+    if (msg == WM_INITDIALOG) {
+        SetWindowPos(hDlg, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        SetForegroundWindow(hDlg);
+    }
+
+    return result;
+}
+
 static int __stdcall RedWarning_DialogBoxParamA(void* /*hInstance*/, const char* /*lpTemplateName*/,
                                                 void* hWndParent, void* lpDialogFunc, LPARAM dwInitParam)
 {
+    g_gameDialogProc = (DLGPROC)lpDialogFunc;
+
     return (int)DialogBoxParamA((HINSTANCE)&__ImageBase, MAKEINTRESOURCEA(IDD_GAMEMESSAGEDIALOG),
-                                (HWND)hWndParent, (DLGPROC)lpDialogFunc, dwInitParam);
+                                (HWND)hWndParent, ForegroundDialogProc, dwInitParam);
 }
 
 bool g_errorDialogFixEnabled = true;
