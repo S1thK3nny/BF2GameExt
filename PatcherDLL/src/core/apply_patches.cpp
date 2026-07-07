@@ -149,8 +149,6 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
          log.printf("Object limit sentinel initialized (PblHash(\"%s\"))\n", sentinel_class);
       }
 
-      // TODO: Add INI toggle for GC Visual Limits (currently always-on via Detours in gc_visual_limits.cpp)
-
       return true;
    }
 

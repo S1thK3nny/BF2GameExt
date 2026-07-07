@@ -52,10 +52,9 @@ static const uint32_t s_aComboAnimation_addr = (uint32_t)&s_aComboAnimation_stor
 static char s_aeComboAnimationPool_storage[0x4 * 256 * 3] = {};
 static const uint32_t s_aeComboAnimationPool_addr = (uint32_t)&s_aeComboAnimationPool_storage[0];
 
-// Renderer cache increase: 15 -> 60 entries
+// Renderer cache increase: 15 -> RENDERER_CACHE_SLOTS entries
 // Each RedParticleRenderer cache entry is 0x3558 bytes.
-static const uint32_t renderer_cache_new_limit = 120;
-char g_sCaches_storage[renderer_cache_new_limit * 0x3558] = {};
+char g_sCaches_storage[RENDERER_CACHE_SLOTS * 0x3558] = {};
 static const uint32_t g_sCaches_address = (uint32_t)&g_sCaches_storage[0];
 static const uint32_t modtools_sCaches_va = game_addrs::modtools::s_caches;
 static const uint32_t steam_sCaches_va = game_addrs::steam::s_caches;

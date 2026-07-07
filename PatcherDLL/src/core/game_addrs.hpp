@@ -280,6 +280,20 @@ namespace modtools {
    constexpr uintptr_t gc_particle_alloc_size_op    = 0x0045B8BD;
    constexpr uintptr_t gc_beam_alloc_size_op        = 0x0045B8FD;
 
+   // ---- RedParticleRenderer (batching caches used by the GC galaxy map) ---------
+   // SubmitParticle(type, pos, colorPtr, size, u, rgba, vec3, vec3) — __cdecl,
+   // 8 stack dwords. currentCache/cacheIndex/caches: 15 caches of 0x3558 bytes,
+   // 200 particle entries (0x44 bytes) each; header fields at +0x3520.
+   constexpr uintptr_t rpr_submit_particle          = 0x00825180;
+   constexpr uintptr_t rpr_current_cache            = 0x00E5F644;
+   constexpr uintptr_t rpr_cache_index              = 0x00E5F648;
+   // SetCurrentCache found-entry path "ADD ECX, s_caches" imm32 operand — holds
+   // the LIVE array base (the DLL's 120-slot g_sCaches_storage when the
+   // Particle Cache Increase redirect is applied, else the exe's s_caches[15]).
+   constexpr uintptr_t rpr_setcache_base_operand    = 0x00824D55;
+   // SetCurrentCache allocation clamp "CMP EDX, 0xF" imm8 operand.
+   constexpr uintptr_t rpr_setcache_limit_imm8_op   = 0x00824D3D;
+
    // ---- GameLoop state ---------------------------------------------------------
 
    constexpr uintptr_t gameloop_pause_mode          = 0x00c6aae8;  // bool, true when ESC paused
@@ -562,6 +576,44 @@ namespace steam {
    constexpr uintptr_t red_warning_init            = 0x006F6EA0; // void()
    constexpr uintptr_t red_warning_set_dest_min_severity = 0x006F7280; // void(int dest, int minSeverity)
    constexpr uintptr_t pc_logging_enabled          = 0x01EAEDE6; // bool
+
+   // ---- Shell / GC Visual Limits -----------------------------------------------
+   // Release-build (LTCG) Add functions use custom register conventions (the
+   // particle Add takes size in XMM3), so unlike modtools we do NOT detour them
+   // — the limits are raised with pure byte patches instead:
+   //   gc_*_count_patches      — disp32 operands of the count field (beam 0xB1C,
+   //                             particle 0xE1C) across Add/Render/PostLoadHack
+   //   gc_beam_limit_imm8_op   — CMP EAX,0x40 imm8 in beam Add (max value 0xFF,
+   //                             so the Steam beam limit is 255, not 256)
+   //   gc_particle_limit_imm32_op — CMP ECX,0x80 imm32 in particle Add
+   //   gc_*_alloc_size_op      — PUSH imm32 operator new sizes in PostLoadHack
+   constexpr uintptr_t gc_beam_add                  = 0x0057FF60;  // __cdecl-like, 7 stack args, RET 0x1C
+   constexpr uintptr_t gc_particle_add              = 0x005802C0;  // 4 stack args + size in XMM3, RET 0x10
+
+   constexpr uintptr_t gc_beam_count_patches[]      = {
+       0x0057FF6C, 0x0057FF89,                          // Add (read/write)
+       0x0057FBC0, 0x0057FF2A, 0x0057FF38, 0x0057FF49,  // DrawAllBeamBetween::Render
+       0x0058059E,                                      // PostLoadHack count reset
+   };
+
+   constexpr uintptr_t gc_particle_count_patches[]  = {
+       0x005802D2, 0x005802FC,                          // Add (read/write)
+       0x005801C2, 0x00580299, 0x005802A7,              // DrawAllParticleAt::Render
+       0x0058054A,                                      // PostLoadHack count reset
+   };
+
+   constexpr uintptr_t gc_beam_limit_imm8_op        = 0x0057FF72;
+   constexpr uintptr_t gc_particle_limit_imm32_op   = 0x005802D8;
+   constexpr uintptr_t gc_particle_alloc_size_op    = 0x00580515;
+   constexpr uintptr_t gc_beam_alloc_size_op        = 0x00580563;
+
+   // ---- RedParticleRenderer (see modtools namespace for docs) -------------------
+   // Same cache layout as modtools: 15 caches x 0x3558 bytes, 200-entry cap.
+   constexpr uintptr_t rpr_submit_particle          = 0x006D33A0;
+   constexpr uintptr_t rpr_current_cache            = 0x009661B4;
+   constexpr uintptr_t rpr_cache_index              = 0x009661B8;
+   constexpr uintptr_t rpr_setcache_base_operand    = 0x006D3306;
+   constexpr uintptr_t rpr_setcache_limit_imm8_op   = 0x006D32EA;
 
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 

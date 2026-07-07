@@ -367,7 +367,6 @@ void lua_hooks_install(uintptr_t exe_base)
    cloth_collision_fix_install(exe_base);
    grapple_fix_install(exe_base);
    DebugCommandRegistry::install(exe_base);
-   gc_visual_limits_install(exe_base);
    shield_channel_fix_install(exe_base);
    lua_create_entity_hook_install(exe_base);
 

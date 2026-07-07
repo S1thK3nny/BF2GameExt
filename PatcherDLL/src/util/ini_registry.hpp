@@ -49,6 +49,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Increase network timer count",                        "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
    INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
+   INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
 
    // [Fixes] — bug-fix patches
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Fix chunk push crash", "Chunk Push Fix"),

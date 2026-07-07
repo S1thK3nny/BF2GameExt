@@ -43,8 +43,12 @@ struct exe_patch_list {
 
 extern const exe_patch_list patch_lists[EXE_COUNT];
 
-// Renderer cache storage — redirected from s_caches[15] by binary patches.
-// Used by particle_renderer_patch.cpp to set the overflow hook's array pointer.
+// Renderer cache storage — redirected from s_caches[15] by the "Particle Cache
+// Increase" binary patches.  The base redirect alone doesn't raise the 15-slot
+// allocation clamp in SetCurrentCache; gc_visual_limits.cpp patches that clamp
+// to RENDERER_CACHE_SLOTS (and spills full caches into the spare slots) when it
+// detects the redirect is active.
+static constexpr uint32_t RENDERER_CACHE_SLOTS = 120;
 extern char g_sCaches_storage[];
 
 // Initialize the sentinel value at the end of the relocated EntityEx::mIdMap hash table.

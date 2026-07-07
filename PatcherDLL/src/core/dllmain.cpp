@@ -14,6 +14,7 @@
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
+#include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
 #include "util/error_dialog_fix.hpp"
 #include "util/game_logging.hpp"
@@ -177,6 +178,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_screenshotFixEnabled = cfg.get_bool("Fixes", "ScreenshotFix", true);
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
+      g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -209,6 +211,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    screenshot_fix_install(exe_base);
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
+   gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
