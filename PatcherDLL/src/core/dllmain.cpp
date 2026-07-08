@@ -13,6 +13,8 @@
 #include "entity/terrain_texture_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
+#include "render/hud_widescreen.hpp"
+#include "weapon/anim_textures.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
@@ -179,6 +181,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
+      g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -212,6 +215,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
+   hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
+   anim_textures_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

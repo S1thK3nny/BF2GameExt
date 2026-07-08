@@ -139,6 +139,12 @@
     <ClInclude Include="src\render\screenshot_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\hud_widescreen.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\weapon\anim_textures.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp">
       <Filter>shell</Filter>
     </ClInclude>
@@ -239,6 +245,12 @@
     </ClCompile>
     <ClCompile Include="src\render\screenshot_fix.cpp">
       <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_widescreen.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\anim_textures.cpp">
+      <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp">
       <Filter>shell</Filter>

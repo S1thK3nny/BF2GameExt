@@ -47,6 +47,17 @@ static ZoomFirstPerson_t fn_ZoomFirstPerson = nullptr;
 // When enabled, reads the barrel fire point matrix translation from the Weapon
 // and writes it to the Aimer's mFirePos. Falls back to vanilla aimer position
 // when the matrix is stale (first-person zoom) or reflected (water).
+//
+// TODO(reticle interaction): this fix was tuned against the vanilla (letterbox)
+// reticle. It fires from the barrel hardpoint, which sits off-axis from the
+// camera/crosshair, so the shot direction picks up barrel-to-crosshair
+// parallax. The [Fixes] ReticleCorrection feature (render/hud_widescreen.cpp)
+// re-aligns the reticle to the true 3D aim point, which makes that parallax
+// visible: barrel-origin shots no longer land exactly on the corrected
+// reticle (worst at close range and with large hp_fire offsets). Proper fix is
+// to converge the barrel fire direction on the corrected screen-space aim
+// point (aim at the crosshair ray, not straight out of the barrel) instead of
+// only relocating mFirePos. Until then, ReticleCorrection=0 sidesteps it.
 static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 {
    if (!g_useBarrelFireOrigin) return false;

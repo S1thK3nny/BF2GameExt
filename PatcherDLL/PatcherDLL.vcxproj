@@ -146,6 +146,8 @@
     <ClInclude Include="src\util\error_dialog_fix.hpp" />
     <ClInclude Include="src\render\blur_downsize_clamp.hpp" />
     <ClInclude Include="src\render\screenshot_fix.hpp" />
+    <ClInclude Include="src\render\hud_widescreen.hpp" />
+    <ClInclude Include="src\weapon\anim_textures.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
   </ItemGroup>
   <ItemGroup>
@@ -188,6 +190,8 @@
     <ClCompile Include="src\util\error_dialog_fix.cpp" />
     <ClCompile Include="src\render\blur_downsize_clamp.cpp" />
     <ClCompile Include="src\render\screenshot_fix.cpp" />
+    <ClCompile Include="src\render\hud_widescreen.cpp" />
+    <ClCompile Include="src\weapon\anim_textures.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />
   </ItemGroup>
   <ItemGroup>

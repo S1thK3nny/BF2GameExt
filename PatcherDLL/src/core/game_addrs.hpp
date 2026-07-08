@@ -408,6 +408,32 @@ namespace modtools {
    constexpr uintptr_t net_enabled_next               = 0x00BE14F1;
    constexpr uintptr_t net_on_client                  = 0x00BE14FD;
 
+   // ---- Weapon / Animated Lightsaber Textures (anim_textures.cpp) --------------
+   // Port of Xbox's AnimTexture1-3 WeaponMelee blade properties (4-frame blade
+   // texture cycle).  _RenderLightsabre is pure __cdecl (7 stack args) on
+   // modtools; the blade array lives at WeaponMeleeClass+0x3DC (entries 0x34
+   // bytes, base texture hash at +0x28).  The "Blade" parse path stashes the
+   // model / name-hash / unknown into these globals for BladeLookup.
+   constexpr uintptr_t lightsabre_render            = 0x00633660;
+   constexpr uintptr_t weaponmelee_set_property     = 0x0063AB40;
+   constexpr uintptr_t blade_lookup                 = 0x00635180;
+   constexpr uintptr_t blade_global_model           = 0x00B92AD8;
+   constexpr uintptr_t blade_global_namehash        = 0x00B92AD4;
+   constexpr uintptr_t blade_global_unk             = 0x00B92AD0;
+
+   // ---- HUD Widescreen Reticle Correction (hud_widescreen.cpp) -----------------
+   // Pre-distorts the reticle Y in ReticuleDisplay::Update so it lands on the
+   // correct 3D aim point after the vanilla letterbox transform.  Modtools uses
+   // x87: redirect the FADD [1.0] / FMUL [0.5] constant-address operands to
+   // DLL-controlled statics.  ReticuleDisplay::Update (which owns the reticle
+   // transform we patch) is detoured to refresh the correction params from the
+   // live screen dimensions each frame.
+   constexpr uintptr_t reticle_display_update       = 0x00683270; // ReticuleDisplay::Update __thiscall bool(this,float)
+   constexpr uintptr_t hud_screen_width             = 0x00E5B508;
+   constexpr uintptr_t hud_screen_height            = 0x00E5B50C;
+   constexpr uintptr_t hud_reticle_fadd_operand     = 0x006834D9; // FADD [1.0] operand at +2
+   constexpr uintptr_t hud_reticle_fmul_operand     = 0x006834E5; // FMUL [0.5] operand at +2
+
 } // namespace modtools
 
 // =============================================================================
@@ -696,6 +722,24 @@ namespace steam {
    constexpr uintptr_t disguise_set_property     = 0x00683430;  // WeaponDisguiseClass::SetProperty (unique hit of key hash 0x8da6fec5 in .text)
    constexpr uintptr_t game_model_table          = 0x01ec1234;  // GameModel hash table (positional _Find call match in building SetProperty; xref count 12 vs 14)
 
+   // ---- Weapon / Animated Lightsaber Textures (see modtools for docs) ----------
+   // Steam/GOG _RenderLightsabre is an LTCG hybrid (ECX=pos, EDX=dir, 5 stack
+   // args, caller-clean).  Blade array is at WeaponMeleeClass+0x2C8.
+   constexpr uintptr_t lightsabre_render            = 0x0068F260;
+   constexpr uintptr_t weaponmelee_set_property     = 0x0068D880;
+   constexpr uintptr_t blade_lookup                 = 0x0068ED40;
+   constexpr uintptr_t blade_global_model           = 0x01FAC3A0;
+   constexpr uintptr_t blade_global_namehash        = 0x01FAC39C;
+   constexpr uintptr_t blade_global_unk             = 0x01FAC3A4;
+
+   // ---- HUD Widescreen Reticle Correction (see modtools for docs) --------------
+   // Retail is SSE: replace the 24-byte MULSS...ADDSS region in
+   // ReticuleDisplay::Update with a CALL to our correction thunk.
+   constexpr uintptr_t reticle_display_update       = 0x00630650; // ReticuleDisplay::Update __thiscall bool(this,float)
+   constexpr uintptr_t hud_screen_width             = 0x0093E4A4;
+   constexpr uintptr_t hud_screen_height            = 0x0093E4A8;
+   constexpr uintptr_t hud_reticle_mulss_patch      = 0x006308F6; // start of 24-byte MULSS..ADDSS region
+
 } // namespace steam
 
 // =============================================================================
@@ -766,6 +810,24 @@ namespace gog {
    constexpr uintptr_t gamestate_shell_state           = 0x007ec968;
    constexpr uintptr_t gamestate_shell_state_enter     = 0x0053c6d0;
    constexpr uintptr_t gamestate_mission_state_enter   = 0x0053c830;
+
+   // ---- Weapon / Animated Lightsaber Textures (see modtools for docs) ----------
+   // Same LTCG hybrid convention as Steam.  Blade array at WeaponMeleeClass+0x2C8.
+   constexpr uintptr_t lightsabre_render            = 0x006902F0;
+   constexpr uintptr_t weaponmelee_set_property     = 0x0068E910;
+   constexpr uintptr_t blade_lookup                 = 0x0068FDD0;
+   constexpr uintptr_t blade_global_model           = 0x01FAD850;
+   constexpr uintptr_t blade_global_namehash        = 0x01FAD84C;
+   constexpr uintptr_t blade_global_unk             = 0x01FAD854;
+
+   // ---- HUD Widescreen Reticle Correction (see modtools for docs) --------------
+   // ReticuleDisplay::Update — derived from Steam (0x00630650) + the region's
+   // Steam->GOG shift (0x10A0, from the mulss-patch pair); guarded at runtime by
+   // a prologue check so a wrong guess disables the GOG refresh instead of crashing.
+   constexpr uintptr_t reticle_display_update       = 0x006316F0;
+   constexpr uintptr_t hud_screen_width             = 0x0093F944;
+   constexpr uintptr_t hud_screen_height            = 0x0093F948;
+   constexpr uintptr_t hud_reticle_mulss_patch      = 0x00631996;
 
 } // namespace gog
 
