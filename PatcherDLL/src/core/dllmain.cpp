@@ -9,6 +9,7 @@
 #include "controller/aim_assist.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "weapon/disguise_model_override.hpp"
+#include "weapon/barrel_fire_origin.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
@@ -204,6 +205,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Build-aware installers (select their address set from g_build / g_addr),
    // so they run on every identified build — not just modtools.  Called here,
    // outside the modtools-only lua_hooks_install, while sections are still RW.
+   barrel_fire_origin_install(exe_base);
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
    anim_bank_append_install(exe_base);

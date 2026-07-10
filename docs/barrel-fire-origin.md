@@ -180,7 +180,7 @@ are shifted by +4 bytes in the modtools binary compared to the PDB.
 
 ## Current Code State
 
-### lua/lua_hooks.cpp — hooked_cannon_OverrideAimer
+### weapon/barrel_fire_origin.cpp — hooked_cannon_OverrideAimer (snippet below is an older revision; see the source for current)
 
 ```cpp
 static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
@@ -327,14 +327,120 @@ Output includes: `Weapon::mZoom`, owner byte dump (0x100-0x300),
 
 ---
 
+## Steam crash — SOLVED 2026-07-10: was aim assist, NOT this hook
+
+**Status: the hook is installed on modtools AND Steam.** The crash that got it
+gated to modtools on 2026-07-10 was misattributed — this hook was innocent.
+
+The crash:
+
+```
+AV READ 42C80088  at BattlefrontII.exe+0x255334  (Ghidra VA 0x655334)
+  MOVSX EAX, byte ptr [EDX + ESI + 0x88]   ; EDX=0, ESI=0x42C80000 == 100.0f
+```
+
+**Real cause (found via the `BF2GameExt.dll+0x197AF` return address on the crash
+stack):** the aim-assist **proximity friction** query in `aim_assist.cpp` called
+`TeamManager::sGetObjectsInRange` (Steam `0x6552D0`, GOG `0x656370`) through the
+modtools **cdecl** signature `(pos, radius, out, maxCount, team, flags, exclude)`.
+On the release (LTCG) builds the function actually uses a custom register
+convention:
+
+```
+ECX = pos, EDX = out, XMM1 = radius,
+stack = (maxCount, team, flags, exclude), plain RET (caller cleans)
+```
+
+With the cdecl call every stack argument shifts one slot: the callee reads the
+caller's `100.0f` radius constant (`0x42C80000`) as its `Team*` and faults on the
+relations byte at `[team+0x88]` → AV address `0x42C80088`. The crash fires with a
+gamepad connected + `[AimAssist]` + `ProximityFriction` enabled, regardless of the
+barrel-fire-origin toggle — which is why gating this hook never actually fixed it.
+Fixed by a marshalling thunk in `aim_assist.cpp` (`teamGetObjectsInRange_release_thunk`)
+selected for Steam/GOG at install.
+
+**Why the old "OverrideAimer returns true" theory was wrong:** the return value of
+`OverrideAimer` is **discarded at every release call site**. The virtual invoker was
+found by byte-scanning the Phantom build for `call [reg+0x70]`:
+`EntitySoldier::Update` calls it at Phantom `0x584cc6` — `call [eax+0x70]` followed
+by an unconditional `jmp`, no `test al,al` (likewise the two `MountedTurret::Update`
+sites at `0x6740ee`/`0x674154`). Returning `true` unconditionally has no
+second-order AI/lock-on effect. The earlier verification stands: vtable slot and
+Aimer/Weapon offsets are correct and the mFirePos write is safe.
+
+## Steam Port (2026-07-08) — superseded by the crash note above
+
+Ported the origin-only fix (no direction convergence — that attempt was reverted).
+Installed build-aware via `barrel_fire_origin_install()` (weapon/barrel_fire_origin.cpp),
+called from dllmain's build-aware section, so it runs on Steam as well as modtools. GOG
+not yet derived (no-ops there).
+
+**Steam addresses** (base 0x400000), already present in `game_addrs::steam`:
+
+| Item | Steam | Verified |
+|------|-------|----------|
+| Weapon::OverrideAimer impl (returns false) | 0x00677780 | slot content + decompile |
+| Weapon::OverrideAimer thunk | 0x00677780 | no ILT thunk in release; == impl |
+| WeaponCannon vtable | 0x007B057C | ctor `mov [esi],0x7b057c` |
+| WeaponCannon OverrideAimer slot (vtable+0x70) | 0x007B05EC | contains 0x00677780 |
+
+**Struct offsets** — all build-invariant EXCEPT `mIsAiming` (Controllable):
+
+| Field | Modtools | Steam | Source |
+|-------|----------|-------|--------|
+| mIsAiming (TargetInfo+0x18) | 0x160 | **0x15C** | TargetInfo 0x148→0x144 (game_struct_reference.md) |
+| mOwner/mClass/mAimer/mFirePointMatrix | 0x6C/0x64/0x70/0x20 | same | Weapon invariant |
+| mTracker (Trackable+0x1C) | 0x34 | 0x34 | Trackable invariant |
+| Tracker::mIsFirstPersonView | 0x14 | 0x14 | assumed engine-invariant (verify if FP-scope off) |
+| WeaponClass +0x2B0 zoom bit | 0x2B0 | 0x2B0 | WeaponClass invariant |
+| Aimer::mFirePos/mRootPos | 0x88/0x70 | same | Aimer invariant |
+
+The hook selects `mIsAiming` via `s_barrelMisAimingOff` (set in the installer).
+
+**Caveat — reflection guard:** the water-reflection Y reconstruction reads
+`owner-0x11C` (soldier world Y = Entity+0x124, assuming Entity→Controllable=0x240).
+That assumption is unverified on Steam; if it's off, only the muzzle-flash Y inside
+water reflections is wrong (main pass uses trans[1] directly, unaffected; whole block
+is under det<0 + __try). Verify if reflections look wrong near water on Steam.
+
+---
+
+## Address Reference (modtools exe, base 0x400000)
+
+| Item | Address |
+|------|---------|
+| Weapon::OverrideAimer impl | 0x61CEE0 |
+| Weapon::OverrideAimer thunk | 0x4068DE |
+| WeaponCannon vtable OverrideAimer slot | 0xA524D8 |
+| Aimer::SetSoldierInfo | 0x5EE9D0 (thunk 0x402702) |
+| EntitySoldier::UpdateWeaponAndAimer | 0x52C980 (thunk 0x40283D) |
+| Weapon::ZoomFirstPerson | 0x61B640 (static type check, NOT runtime) |
+| MuzzleFlashRenderer::RenderFlash | needs address |
+| sEyePointOffset (3x PblVector3) | 0xACE360 |
+| sEyePointRelativeWeaponOffset | 0xACE384 |
+| Character array base ptr | 0xB93A08 |
+| Max character count | 0xB939F4 |
+| Team array ptr | 0xAD5D64 |
+| Global class def list | 0xACD2C8 |
+| GameLog | 0x7E3D50 |
+| HashString | 0x7E1BD0 |
+
+---
+
 ## Files Modified
 
 | File | Purpose |
 |------|---------|
-| `PatcherDLL/src/lua/lua_hooks.hpp` | Address constants, extern declarations |
-| `PatcherDLL/src/lua/lua_hooks.cpp` | OverrideAimer vtable hook, install/uninstall |
-| `PatcherDLL/src/lua/lua_funcs.cpp` | SetBarrelFireOrigin, DumpAimerInfo Lua functions |
+| `PatcherDLL/src/weapon/barrel_fire_origin.{hpp,cpp}` | OverrideAimer vtable hook + build-aware install/uninstall (moved here from lua_hooks 2026-07-08; no Lua dependency) |
+| `PatcherDLL/src/lua/lua_funcs.cpp` | `DumpAimerInfo` diagnostic Lua function (modtools-only) |
+| `PatcherDLL/src/core/dllmain.cpp` | reads INI toggle; calls `barrel_fire_origin_install` in the build-aware section |
+| `PatcherDLL/src/core/game_addrs.hpp` | modtools + steam addresses |
 | `docs/barrel-fire-origin.md` | This file |
+
+**Note:** `SetBarrelFireOrigin` (the old live Lua toggle) no longer exists — control
+is INI-only (`[Fixes] BarrelFireOriginFix`). The hook was historically parked in
+`lua_hooks.cpp` because it began as a modtools Lua experiment; it has no Lua tie and
+now lives in its own `weapon/` module.
 
 ---
 

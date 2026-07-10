@@ -669,7 +669,7 @@ namespace steam {
    constexpr uintptr_t get_cur_wpn                    = 0x00484310;
    constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
    constexpr uintptr_t m_camera_global                = 0x007f58e0;
-   constexpr uintptr_t team_get_objects_in_range      = 0x006552d0;
+   constexpr uintptr_t team_get_objects_in_range      = 0x006552d0; // LTCG convention: ECX=pos, EDX=out, XMM1=radius, stack=(max,team,flags,exclude) — NOT cdecl; use the aim_assist release thunk
 
    constexpr uintptr_t anim_finder_add_bank     = 0x00645a00;
    constexpr uintptr_t carrier_attach_cargo     = 0x00497300;
@@ -775,7 +775,7 @@ namespace gog {
    constexpr uintptr_t get_cur_wpn                    = 0x00484310;
    constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
    constexpr uintptr_t m_camera_global                = 0x007f6d80;
-   constexpr uintptr_t team_get_objects_in_range      = 0x00656370;
+   constexpr uintptr_t team_get_objects_in_range      = 0x00656370; // same LTCG convention as steam (byte-identical fn) — use the aim_assist release thunk
 
    // ---- Debug / Logging (see steam namespace for docs) -------------------------
 

@@ -79,6 +79,9 @@
     <ClInclude Include="src\weapon\grappling_hook.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
+    <ClInclude Include="src\weapon\barrel_fire_origin.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\shield_channel_fix.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -187,6 +190,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\grappling_hook.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\barrel_fire_origin.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\shield_channel_fix.cpp">

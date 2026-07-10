@@ -120,10 +120,6 @@ extern lua_api g_lua;
 // The captured lua_State pointer (set when hook fires)
 extern lua_State* g_L;
 
-// Barrel fire origin toggle — when true, WeaponCannon fires from barrel
-// hardpoint (mBarrelPoseMatrix) instead of the default aimer position.
-extern bool g_useBarrelFireOrigin;
-
 // Modder-configurable load level path used by LoadDisplay::EnterState.
 // Defaults to "Load\\load" (vanilla). Set via SetLoadDisplayLevel() before
 // the load screen fires (e.g. from ScriptPreInit).

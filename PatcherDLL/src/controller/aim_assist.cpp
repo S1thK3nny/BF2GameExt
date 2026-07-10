@@ -146,10 +146,41 @@ static uintptr_t s_lockOnMgrArray = 0;  // LockOnManager* array base
 static uintptr_t s_cameraGlobal = 0;  // RedCamera** (dereference once for RedCamera*)
 
 // TeamManager::sGetObjectsInRange — returns validated GameObjects from team member lists
-// __cdecl(PblVector3* pos, float radius, GameObject** out, int maxCount, Team* team, int affiliationFlags, GameObject* exclude)
 // With team=NULL, affiliationFlags=0x02: returns ALL team-registered objects in range.
+//
+// CALLING CONVENTION DIFFERS PER BUILD:
+//  - Modtools (debug, 0x48F210): plain
+//    __cdecl(pos, radius, out, maxCount, team, flags, exclude)
+//  - Steam 0x6552D0 / GOG 0x656370 (release, LTCG custom convention):
+//    ECX=pos, EDX=out, XMM1=radius, stack=(maxCount, team, flags, exclude),
+//    plain RET (caller cleans).  Byte-identical prologues on both builds.
+// Calling the release builds with the cdecl signature shifts every stack arg by
+// one slot: the callee reads our radius float (100.0f = 0x42C80000) as its Team*
+// and faults dereferencing [team+0x88]
 using fn_TeamGetObjectsInRange = int(__cdecl*)(float* pos, float radius, uintptr_t* out, int maxCount, void* team, int flags, uintptr_t exclude);
 static fn_TeamGetObjectsInRange s_teamGetObjectsInRange = nullptr;
+
+// Raw game-function pointer for the release-convention thunk below (Steam/GOG).
+static void* s_teamGetObjectsInRangeRelease = nullptr;
+
+static int __cdecl teamGetObjectsInRange_release_thunk(
+    float* pos, float radius, uintptr_t* out, int maxCount, void* team, int flags, uintptr_t exclude)
+{
+    int result;
+    __asm {
+        movss  xmm1, radius
+        push   exclude
+        push   flags
+        push   team
+        push   maxCount
+        mov    edx, out
+        mov    ecx, pos
+        call   s_teamGetObjectsInRangeRelease
+        add    esp, 16
+        mov    result, eax
+    }
+    return result;
+}
 
 // GetCurWpn — returns Weapon* from Controllable
 using fn_GetCurWpn = void* (__thiscall*)(void* ctrl);
@@ -875,7 +906,15 @@ void aim_assist_install(uintptr_t exe_base)
     s_wpnClassHorizThreshold = s_addrs->wpn_class_horiz_threshold;
 
     s_setTargetLockedObj = (fn_SetTargetLockedObj)resolve(exe_base, s_addrs->set_target_locked_obj);
-    s_teamGetObjectsInRange = (fn_TeamGetObjectsInRange)resolve(exe_base, s_addrs->team_get_objects_in_range);
+
+    // Modtools keeps the source cdecl signature; Steam/GOG use the LTCG register
+    // convention and must go through the marshalling thunk (see typedef comment).
+    if (g_build == GameBuild::Modtools) {
+        s_teamGetObjectsInRange = (fn_TeamGetObjectsInRange)resolve(exe_base, s_addrs->team_get_objects_in_range);
+    } else {
+        s_teamGetObjectsInRangeRelease = resolve(exe_base, s_addrs->team_get_objects_in_range);
+        s_teamGetObjectsInRange = teamGetObjectsInRange_release_thunk;
+    }
 
     original_PCUpdate = (fn_PlayerControllerUpdate)resolve(exe_base, s_addrs->player_controller_update);
 
@@ -914,6 +953,7 @@ void aim_assist_uninstall()
     s_getCurWpn = nullptr;
     s_setTargetLockedObj = nullptr;
     s_teamGetObjectsInRange = nullptr;
+    s_teamGetObjectsInRangeRelease = nullptr;
     s_playerEntity = 0;
     s_autoLockTarget = 0;
     s_autoLockHandleId = 0;
