@@ -127,6 +127,23 @@ namespace modtools {
    constexpr uintptr_t voice_to_handle             = 0x0088b5d0;
    constexpr uintptr_t snd_engine_update           = 0x008827b0;
 
+   // GameSoundEngine::gEnableSoundWarnings — bool gating the "GameSound::SetID -
+   // Unable to find sound property" RedWarning (and the sibling "not loaded"
+   // warning) in GameSound::SetID.  Read-only at runtime (the game never writes
+   // it); image default is 0 (warnings off).  Set to 1 to surface missing-sound
+   // warnings.  Retail (Steam/GOG) compiled this warning code out entirely — the
+   // sole GameSound::SetID has no such read and the strings are stripped — so the
+   // feature is modtools-only.
+   constexpr uintptr_t g_enable_sound_warnings     = 0x00cf41d8;
+
+   // Snd::PrintDebugString(char*) — the Snd::Globals warning function that every
+   // sound warning routes through (via Snd::PrintDebugMessage).  It wraps the
+   // message as "Sound (%s)" for RedWarning + also PblTraceP's it.  The upstream
+   // Snd::PrintDebugMessage always appends a '\n' on top of format strings that
+   // already end in one, so the "%s" injects "\n\n" *inside* the parens (blank
+   // line + orphan ')').  Detoured to strip trailing newlines before the wrap.
+   constexpr uintptr_t snd_print_debug_string      = 0x0074e6f0;
+
    // ---- Debug / Logging ------------------------------------------------------
 
    // GameLog(fmt, ...) — printf-style debug logger, __cdecl

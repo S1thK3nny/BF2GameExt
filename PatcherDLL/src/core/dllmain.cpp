@@ -21,6 +21,7 @@
 #include "shell/dlc_mission_init_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
+#include "util/enable_sound_warnings.hpp"
 #include "util/error_dialog_fix.hpp"
 #include "util/game_logging.hpp"
 #include "util/ini_config.hpp"
@@ -178,6 +179,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_useBarrelFireOrigin = cfg.get_bool("Fixes", "BarrelFireOriginFix", true);
       g_proneEnabled = cfg.get_bool("Features", "Prone", true);
       g_gameLoggingEnabled = cfg.get_bool("Features", "GameLogging", false);
+      g_enableSoundWarnings = cfg.get_bool("Features", "EnableSoundWarnings", false);
       g_terrainTextureFixEnabled = cfg.get_bool("Fixes", "TerrainTextureFix", true);
       g_blurDownsizeClampEnabled = cfg.get_bool("Fixes", "BlurDownsizeClamp", true);
       g_screenshotFixEnabled = cfg.get_bool("Fixes", "ScreenshotFix", true);
@@ -223,6 +225,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
+   enable_sound_warnings_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

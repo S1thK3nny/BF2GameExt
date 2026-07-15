@@ -142,6 +142,9 @@
     <ClInclude Include="src\util\error_dialog_fix.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\enable_sound_warnings.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\blur_downsize_clamp.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -256,6 +259,9 @@
       <Filter>controller</Filter>
     </ClCompile>
     <ClCompile Include="src\util\error_dialog_fix.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\enable_sound_warnings.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\render\blur_downsize_clamp.cpp">

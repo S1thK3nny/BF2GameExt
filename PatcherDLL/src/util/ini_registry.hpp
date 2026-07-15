@@ -66,6 +66,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    // [Features] — optional gameplay features (may require additional assets)
    INI_ENTRY("Features", "Prone", "1", "Enable prone stance (requires prone animations in soldier banks)"),
    INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds (modtools always logs)"),
+   INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code)"),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
 
