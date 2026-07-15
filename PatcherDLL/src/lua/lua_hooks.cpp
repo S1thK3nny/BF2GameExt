@@ -19,6 +19,8 @@
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "entity/anim_bank_append.hpp"
+#include "entity/land_on_arrival_fix.hpp"
+#include "entity/flyer_sound_fix.hpp"
 #include "weapon/shield_channel_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -268,6 +270,8 @@ void lua_hooks_uninstall()
    game_logging_uninstall();
    terrain_texture_fix_uninstall();
    barrel_fire_origin_uninstall();
+   land_on_arrival_uninstall();
+   flyer_sound_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

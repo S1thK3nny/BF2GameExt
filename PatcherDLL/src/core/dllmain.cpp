@@ -10,6 +10,8 @@
 #include "entity/anim_bank_append.hpp"
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/barrel_fire_origin.hpp"
+#include "entity/land_on_arrival_fix.hpp"
+#include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
@@ -219,6 +221,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
+   land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
+   flyer_sound_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

@@ -242,6 +242,12 @@ namespace modtools {
    constexpr uintptr_t aimer_activate               = 0x005ef020;
    constexpr uintptr_t passenger_activate           = 0x00568540;
    constexpr uintptr_t mem_pool_alloc               = 0x00802300;
+
+   // ---- Flyer path following / engine sound --------------------------------
+   constexpr uintptr_t path_follower_land_jg        = 0x005ED340;  // EntityPathFollower::Update — JG gating the LandOnArrival check to node 0 (7F 25)
+   constexpr uintptr_t entity_flyer_land            = 0x004F1380;  // EntityFlyer::Land (== carrier_initiate_landing)
+   constexpr uintptr_t path_follower_reset          = 0x005E7290;  // EntityPathFollower::Reset(pathClass) — __thiscall, RET 4
+   constexpr uintptr_t vehicle_engine_update        = 0x007600F0;  // VehicleEngine::Update — __thiscall, 14 stack args, RET 0x38
    constexpr uintptr_t vehicle_tracker_pool         = 0x00B9A758;
 
    // Carrier inline patch sites
@@ -711,6 +717,12 @@ namespace steam {
    constexpr uintptr_t passenger_activate        = 0x004dd7c0;  // ActivatePhysics (2-source agreement)
    constexpr uintptr_t rumble_state_setup        = 0x006b2790;  // rumble state setup (2-source agreement)
 
+   // ---- Flyer path following / engine sound --------------------------------
+   constexpr uintptr_t path_follower_land_jg     = 0x004D52FD;  // EntityPathFollower::Update — JG gating the LandOnArrival check to node 0 (7F 42)
+   constexpr uintptr_t entity_flyer_land         = 0x004B3D50;  // EntityFlyer::Land (== carrier_initiate_landing)
+   constexpr uintptr_t path_follower_reset       = 0x004D2970;  // EntityPathFollower::Reset — __thiscall, RET 4 (class arg unused on release)
+   constexpr uintptr_t vehicle_engine_update     = 0x0066CCB0;  // VehicleEngine::Update — LTCG: ECX=this, XMM2=dt, 13 stack args, RET 0x34
+
    constexpr uintptr_t aimer_activate            = 0x0043e380;  // Aimer::ActivatePhysics (decompile-identical)
    constexpr uintptr_t get_weapon_anim_map       = 0x0063c970;  // SoldierAnimationBank::FindMap (decompile-identical table scan)
    constexpr uintptr_t snd_find_by_hash_id       = 0x00736a90;  // Properties::FindByHashID (decompile-identical list scan)
@@ -776,6 +788,13 @@ namespace gog {
    constexpr uintptr_t set_target_locked_obj          = 0x004844A0;
    constexpr uintptr_t m_camera_global                = 0x007f6d80;
    constexpr uintptr_t team_get_objects_in_range      = 0x00656370; // same LTCG convention as steam (byte-identical fn) — use the aim_assist release thunk
+
+   // ---- Flyer path following / engine sound (byte-identical to steam except
+   //      vehicle_engine_update at the usual GOG +0x10A0 shift) ------------------
+   constexpr uintptr_t path_follower_land_jg     = 0x004D52FD;
+   constexpr uintptr_t entity_flyer_land         = 0x004B3D50;
+   constexpr uintptr_t path_follower_reset       = 0x004D2970;
+   constexpr uintptr_t vehicle_engine_update     = 0x0066DD50;
 
    // ---- Debug / Logging (see steam namespace for docs) -------------------------
 
