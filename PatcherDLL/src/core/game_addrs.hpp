@@ -112,6 +112,18 @@ namespace modtools {
    constexpr uintptr_t gamestate_shell_state_enter     = 0x00407ac7; // ILT thunk -> ShellState::Enter
    constexpr uintptr_t gamestate_mission_state_enter   = 0x00407fb8; // ILT thunk -> MissionState::Enter
 
+   // ---- EntityHover self-piloted crash fix -----------------------------------
+   // EntityHover::UpdateIndirect (0x515cc0) AI obstacle-avoidance fetches the
+   // hover's pilot and calls pilot->GetGameObject() with no null check; a
+   // self-piloted hover (PilotType=self) has no pilot -> the getter returns
+   // null -> AV read [pilot+0x18] at 0x515e3e (SP and MP).
+   //   ..._pilot_call : the `E8 rel32` CALL to the getter, immediately followed
+   //                    by `8B 50 18 8D 48 18 FF 52 20` (the unguarded deref).
+   //   ..._get_active_pilot : the getter (FUN_004d49f0) -> mPilot, or null when
+   //                    PilotType is self / vehicleself-on-self.
+   constexpr uintptr_t hover_updateindirect_pilot_call = 0x00515e39;
+   constexpr uintptr_t controllable_get_active_pilot   = 0x004d49f0;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
@@ -533,6 +545,15 @@ namespace steam {
    constexpr uintptr_t gamestate_shell_state           = 0x007eb998;
    constexpr uintptr_t gamestate_shell_state_enter     = 0x0053b980;
    constexpr uintptr_t gamestate_mission_state_enter   = 0x0053bae0;
+
+   // ---- EntityHover self-piloted crash fix (see modtools notes) --------------
+   // Steam EntityHover::UpdateIndirect is vfunction50 @0x4c6ef0; crash at
+   // 0x4c703e.  The compiler emitted a different (but equivalent) GetGameObject
+   // idiom here — `8D 48 18  8B 01  8B 40 20  FF D0` — see the per-build guard
+   // in hover_pilot_null_fix.cpp.  Getter (FUN_0043aad0) is byte-identical to
+   // modtools' (reads +0x144 pilotType / +0xd0 mPilot).
+   constexpr uintptr_t hover_updateindirect_pilot_call = 0x004c7036;
+   constexpr uintptr_t controllable_get_active_pilot   = 0x0043aad0;
 
    // ---- Memory heap management -----------------------------------------------
 

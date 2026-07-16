@@ -14,6 +14,7 @@
 #include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
+#include "entity/hover_pilot_null_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
@@ -224,6 +225,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
+   hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
 
