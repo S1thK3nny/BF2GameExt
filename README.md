@@ -16,7 +16,7 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
   - [Loading Screen System](#loading-screen-system)
   - [Soldier Systems](#soldier-systems)
   - [Weapon Systems](#weapon-systems)
-  - [Vehicle Fixes](#vehicle-fixes)
+  - [Vehicle Additions and Fixes](#vehicle-additions-and-fixes)
   - [AI Systems](#ai-systems)
   - [Additional Debug Commands](#additional-debug-commands)
   - [Controller Support](#controller-support)
