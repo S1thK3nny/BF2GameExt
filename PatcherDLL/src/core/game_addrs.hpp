@@ -124,6 +124,15 @@ namespace modtools {
    constexpr uintptr_t hover_updateindirect_pilot_call = 0x00515e39;
    constexpr uintptr_t controllable_get_active_pilot   = 0x004d49f0;
 
+   // Second self-piloted-hover crash: issuing a unit order crashes in
+   // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
+   // derefs the same null pilot link (+0xCC) on a self-piloted hover.
+   //   crash_site  : `8B BF 48 01 00 00` MOV EDI,[EDI+0x148] (EDI = null pilot).
+   //   skip_target : the block's convergence point (also the GetNumCameras()==0
+   //                 branch target), reached at block-level ESP.
+   constexpr uintptr_t hover_command_crash_site  = 0x00549bf8;
+   constexpr uintptr_t hover_command_skip_target = 0x00549cfb;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
@@ -554,6 +563,15 @@ namespace steam {
    // modtools' (reads +0x144 pilotType / +0xd0 mPilot).
    constexpr uintptr_t hover_updateindirect_pilot_call = 0x004c7036;
    constexpr uintptr_t controllable_get_active_pilot   = 0x0043aad0;
+
+   // Second self-piloted-hover crash (unit-order path).  Steam codegen differs:
+   // the null link is in EAX and the crash instr is `MOV ECX,[EAX+0x148]`
+   // (8B 88 48 01 00 00) preceded by `MOV EAX,[EAX+0xCC]` (8B 80 CC..).  Unlike
+   // modtools there is NO pending stack here (the preceding call's args are
+   // cleaned before the chain), so the skip is a bare jump to the convergence
+   // point (the GetNumCameras()==0 branch target, reached at block-level ESP).
+   constexpr uintptr_t hover_command_crash_site  = 0x004ece30;
+   constexpr uintptr_t hover_command_skip_target = 0x004ecb1e;
 
    // ---- Memory heap management -----------------------------------------------
 

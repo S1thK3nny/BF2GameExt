@@ -7,44 +7,42 @@
 #include <cstring>
 
 // =============================================================================
-// EntityHover self-piloted crash fix.
+// EntityHover self-piloted crash fixes.
 //
-// Crash (confirmed on modtools BattlefrontII.Debug build):
-//   C0000005 READ addr 0x18, EAX=0 at EIP 0x00515E3E, inside
-//   EntityHover::UpdateIndirect (0x515cc0).
+// A hover vehicle with PilotType=self in its ODF crashes the game, because
+// several code paths fetch the vehicle's pilot and dereference it with no null
+// check.  Every stock hover is soldier-entered (PilotType=vehicle) so the pilot
+// is always valid and these were never guarded; a self-piloted hover has none.
+// Two independent crash sites, both patched here (always on, no INI toggle):
 //
-// The AI obstacle-avoidance block builds a 2-entry ignore list for a collision
-// raycast: { the hover itself, the hover's pilot }.  It gets the pilot via
-// FUN_004d49f0 (returns Controllable::mPilot, or null when PilotType is self /
-// vehicleself-on-self) and then dereferences it with no guard:
+//   1. EntityHover::UpdateIndirect (AI obstacle-avoidance).  Calls a "get pilot,
+//      or null if self-piloted" getter and immediately does pilot->GetGameObject()
+//      to exclude it from a collision raycast:
+//        modtools 0x515e39  E8 rel32       CALL  get_active_pilot   ; EAX=pilot|0
+//                 0x515e3e  8B 50 18       MOV   EDX,[EAX+0x18]     ; AV when EAX=0
+//                 ...       8D 48 18 / FF 52 20 -> pilot->GetGameObject()
+//      Fix: redirect the getter CALL to a shim that substitutes the hover itself
+//      when the getter returns null (harmless double entry in the ignore list).
+//      Fixed on modtools + Steam.
 //
-//   00515E39  E8 rel32       CALL   get_active_pilot        ; EAX = pilot | 0
-//   00515E3E  8B 50 18       MOV    EDX,[EAX+0x18]          ; <-- AV when EAX=0
-//   00515E41  8D 48 18       LEA    ECX,[EAX+0x18]
-//   00515E44  FF 52 20       CALL   [EDX+0x20]              ; pilot->GetGameObject()
-//
-// Stock hovers are all soldier-entered (PilotType=vehicle) so mPilot is always
-// valid; a self-piloted hover has none, get_active_pilot returns null, and the
-// deref faults.  It's the AI-drive path, so it happens in SP and MP.
-//
-// Fix: point the CALL at a tiny shim that runs the real getter and, when it
-// returns null, substitutes the hover's own Controllable (the getter's ECX arg).
-// GetGameObject() then resolves to the hover itself, which is merely added to
-// the raycast ignore list a second time — harmless.  The hover's Controllable
-// has the same layout as a pilot Controllable, so [self+0x18]->vtable[0x20] is
-// the identical virtual call.
-//
-// Always on (no INI toggle): a crash-only-on-a-specific-ODF-value fix nobody
-// would want disabled.
-//
-// TODO(self-piloted-hover): a *user command* issued to a self-piloted hover
-// (e.g. "stop" / "halt") also crashes the game. A separate unguarded null
-// pilot deref on a different code path than UpdateIndirect.  Not yet located;
-// this fix does NOT cover it.  Find and guard that site too.
+//   2. EntitySoldier::Update (modtools 0x549bf8) — the event-0x1a/0x1b order-
+//      acknowledge block that runs when a unit is given an order.  It walks
+//      target->[0x20C]->[0x0C]->pilot(+0xCC)->[0x148]->GetGameObject(); the pilot
+//      link is null for a self-piloted hover:
+//        0x549bf2  8B BF CC000000  MOV EDI,[EDI+0xCC]   ; pilot (null)
+//        0x549bf8  8B BF 48010000  MOV EDI,[EDI+0x148]  ; AV read 0x148
+//      Fix: overwrite the 6-byte load with a jump to a guard that, when the pilot
+//      is null, jumps to the block's convergence point, skipping the acknowledge.
+//      Fixed on modtools + Steam (registers and pending-stack state differ per
+//      build - see the two guards below).
 // =============================================================================
 
-// Resolved address of the game's pilot getter (FUN_004d49f0): __fastcall, takes
-// the hover Controllable in ECX, returns mPilot or null.  Set by install.
+// -----------------------------------------------------------------------------
+// #1 — EntityHover::UpdateIndirect getter shim.
+// -----------------------------------------------------------------------------
+// Resolved address of the game's pilot getter (modtools FUN_004d49f0 / Steam
+// FUN_0043aad0): __fastcall, takes the hover Controllable in ECX, returns
+// mPilot or null.  Set by install.
 static uintptr_t s_getActivePilot = 0;
 
 // Patched call site + its original rel32 operand (for uninstall).
@@ -52,7 +50,7 @@ static uint8_t* s_site    = nullptr;
 static int32_t  s_origRel = 0;
 
 // The unguarded pilot->GetGameObject() idiom that must immediately follow the
-// CALL — used to positively identify the site before patching (so a wrong
+// CALL - used to positively identify the site before patching (so a wrong
 // address on an un-derived build no-ops instead of corrupting code).  Same
 // semantics on both builds, different codegen:
 //   modtools: MOV EDX,[EAX+0x18]; LEA ECX,[EAX+0x18];   CALL [EDX+0x20]
@@ -87,7 +85,7 @@ __declspec(naked) static void hover_pilot_getter_guarded()
    }
 }
 
-void hover_pilot_null_fix_install(uintptr_t exe_base)
+static void install_updateindirect_shim(uintptr_t exe_base)
 {
    uintptr_t     callSiteVA, getterVA;
    const uint8_t* idiom;
@@ -126,13 +124,129 @@ void hover_pilot_null_fix_install(uintptr_t exe_base)
       (int32_t)((uintptr_t)&hover_pilot_getter_guarded - ((uintptr_t)site + 5));
 }
 
+// -----------------------------------------------------------------------------
+// #2 — EntitySoldier::Update order-acknowledge null-pilot guard.
+// -----------------------------------------------------------------------------
+// The crash is a 6-byte `MOV reg,[reg+0x148]` where reg already holds the null
+// pilot link loaded by the preceding `MOV reg,[reg+0xCC]`.  We overwrite the load
+// with a jump to a build-specific guard that, on null, jumps to the block's
+// convergence point (the GetNumCameras()==0 branch target), skipping the whole
+// order-acknowledge; otherwise it runs the original load and continues.
+//
+// The two builds differ in registers and in stack state at the crash:
+//   modtools 0x549bf8: null in EDI; `MOV EDI,[EDI+0x148]`; the preceding 0x1a-
+//     event call's 5 args (0x14 bytes) are still pending here (cleaned by an
+//     ADD ESP,0x14 *after* the crash), so the skip must discard them first,
+//     then jump to 0x549cfb.
+//   Steam 0x4ece30:    null in EAX; `MOV ECX,[EAX+0x148]`; the preceding call's
+//     args were already cleaned before the chain, so ESP is at block level and
+//     the skip is a bare jump to 0x4ecb1e.
+static void*    s_cmdContinue = nullptr; // crash_site + 6 (non-null path)
+static void*    s_cmdSkip     = nullptr; // block convergence point
+static uint8_t* s_cmdSite     = nullptr;
+static uint8_t  s_cmdOrig[6]  = {};
+
+__declspec(naked) static void hover_cmd_null_guard_modtools()
+{
+   __asm {
+      test edi, edi
+      jz   skip
+      mov  edi, [edi + 0x148]     // original overwritten instruction
+      jmp  [s_cmdContinue]
+   skip:
+      add  esp, 0x14              // discard the pending 0x1a-call args
+      jmp  [s_cmdSkip]
+   }
+}
+
+__declspec(naked) static void hover_cmd_null_guard_steam()
+{
+   __asm {
+      test eax, eax
+      jz   skip
+      mov  ecx, [eax + 0x148]     // original overwritten instruction
+      jmp  [s_cmdContinue]
+   skip:
+      jmp  [s_cmdSkip]            // no pending args on Steam
+   }
+}
+
+static void install_command_guard(uintptr_t exe_base)
+{
+   uintptr_t siteVA, skipVA;
+   const uint8_t* kSite;
+   const uint8_t* kPrev;
+   void*     guard;
+
+   // Crash-site signature = `MOV reg,[reg+0x148]`; preceding-load signature =
+   // `MOV reg,[reg+0xCC]` (the null pilot link).  Registers differ per build.
+   static const uint8_t kSiteModtools[] = {0x8B, 0xBF, 0x48, 0x01, 0x00, 0x00}; // MOV EDI,[EDI+0x148]
+   static const uint8_t kPrevModtools[] = {0x8B, 0xBF, 0xCC, 0x00, 0x00, 0x00}; // MOV EDI,[EDI+0xCC]
+   static const uint8_t kSiteSteam[]    = {0x8B, 0x88, 0x48, 0x01, 0x00, 0x00}; // MOV ECX,[EAX+0x148]
+   static const uint8_t kPrevSteam[]    = {0x8B, 0x80, 0xCC, 0x00, 0x00, 0x00}; // MOV EAX,[EAX+0xCC]
+
+   switch (g_build) {
+   case GameBuild::Modtools:
+      siteVA = game_addrs::modtools::hover_command_crash_site;
+      skipVA = game_addrs::modtools::hover_command_skip_target;
+      kSite = kSiteModtools; kPrev = kPrevModtools;
+      guard = (void*)&hover_cmd_null_guard_modtools;
+      break;
+   case GameBuild::Steam:
+      siteVA = game_addrs::steam::hover_command_crash_site;
+      skipVA = game_addrs::steam::hover_command_skip_target;
+      kSite = kSiteSteam; kPrev = kPrevSteam;
+      guard = (void*)&hover_cmd_null_guard_steam;
+      break;
+   default:
+      return; // GOG / unknown: not derived
+   }
+   if (siteVA == 0 || skipVA == 0) return;
+
+   uint8_t* site = (uint8_t*)resolve(exe_base, siteVA);
+
+   // Positive-ID the site and its preceding null-pilot load.  Bail on mismatch.
+   if (std::memcmp(site, kSite, 6) != 0) return;
+   if (std::memcmp(site - 6, kPrev, 6) != 0) return;
+
+   s_cmdContinue = (void*)(site + 6);
+   s_cmdSkip     = resolve(exe_base, skipVA);
+   s_cmdSite     = site;
+   std::memcpy(s_cmdOrig, site, sizeof(s_cmdOrig));
+
+   // E9 rel32 (JMP to guard) over bytes 0..4, NOP the 6th byte.  .text is RW
+   // during install.
+   int32_t rel = (int32_t)((uintptr_t)guard - ((uintptr_t)site + 5));
+   site[0] = 0xE9;
+   *(int32_t*)(site + 1) = rel;
+   site[5] = 0x90;
+}
+
+// -----------------------------------------------------------------------------
+// Public install / uninstall.
+// -----------------------------------------------------------------------------
+void hover_pilot_null_fix_install(uintptr_t exe_base)
+{
+   install_updateindirect_shim(exe_base);
+   install_command_guard(exe_base);
+}
+
 void hover_pilot_null_fix_uninstall()
 {
-   if (!s_site) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_site + 1, sizeof(int32_t), PAGE_EXECUTE_READWRITE, &oldProt)) {
-      *(int32_t*)(s_site + 1) = s_origRel;
-      VirtualProtect(s_site + 1, sizeof(int32_t), oldProt, &oldProt);
+   if (s_site) {
+      DWORD oldProt;
+      if (VirtualProtect(s_site + 1, sizeof(int32_t), PAGE_EXECUTE_READWRITE, &oldProt)) {
+         *(int32_t*)(s_site + 1) = s_origRel;
+         VirtualProtect(s_site + 1, sizeof(int32_t), oldProt, &oldProt);
+      }
+      s_site = nullptr;
    }
-   s_site = nullptr;
+   if (s_cmdSite) {
+      DWORD oldProt;
+      if (VirtualProtect(s_cmdSite, sizeof(s_cmdOrig), PAGE_EXECUTE_READWRITE, &oldProt)) {
+         std::memcpy(s_cmdSite, s_cmdOrig, sizeof(s_cmdOrig));
+         VirtualProtect(s_cmdSite, sizeof(s_cmdOrig), oldProt, &oldProt);
+      }
+      s_cmdSite = nullptr;
+   }
 }
