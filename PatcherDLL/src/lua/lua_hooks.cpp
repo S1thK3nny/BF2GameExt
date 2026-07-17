@@ -12,6 +12,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/soldier_override_texture.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_boost_animation.hpp"
 #include "entity/cloth_collision_fix.hpp"
@@ -169,6 +170,7 @@ static void __cdecl hooked_init_state()
    // Droideka DisableBallMode is build-aware and installs from dllmain; on the
    // other builds it detours init_state itself (lua_hooks is modtools-only).
    droideka_ball_mode_reset();
+   soldier_override_texture_reset();
 
    // Register debug console commands (engine is fully initialized now)
    DebugCommandRegistry::lateInit();

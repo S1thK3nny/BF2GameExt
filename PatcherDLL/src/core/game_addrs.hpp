@@ -216,6 +216,18 @@ namespace modtools {
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004EF2FA;
 
+   // ---- Entity / Soldier override textures (OverrideTexture3..5) ---------------
+   // See entity/soldier_override_texture.cpp. Extends the stock 2-slot soldier
+   // override_texture system to 5. Stock reads two class fields (+0x988/+0x98C)
+   // in the render funcs below and binds them, via RedShadingPose::CreateShadingState
+   // keyed by the model material-name hash, to shader int-param 0x891891e9. We add
+   // slots 3-5 from a class side table. hash_string (above) = PblHash::_MakeHash.
+   constexpr uintptr_t soldier_class_set_property  = 0x0053FA20; // EntitySoldierClass::SetProperty
+   constexpr uintptr_t soldier_render              = 0x00535D90; // EntitySoldier::Render (this->class @ +0x3C4)
+   constexpr uintptr_t soldier_element_render_ctx  = 0x00674890; // SoldierElement::RenderUsingContext (this->class @ +0x130)
+   constexpr uintptr_t shading_pose_create_state   = 0x0083E4E0; // RedShadingPose::CreateShadingState(pose, matNameHash)
+   constexpr uintptr_t shading_state_get_int_param = 0x0083E1B0; // RedShadingState::GetIntParam(state, paramHash)
+
    // ---- Entity / Cloth ---------------------------------------------------------
 
    constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
@@ -224,7 +236,6 @@ namespace modtools {
 
    // ---- Animation ---------------------------------------------------------------
 
-   constexpr uintptr_t fp_anim_set_property        = 0x0053FA20;
    constexpr uintptr_t fp_update_soldier            = 0x004A9BE0;
    constexpr uintptr_t anim_add_bank               = 0x004A8FC0;
    constexpr uintptr_t anim_find_animation         = 0x004A7900;
@@ -617,6 +628,15 @@ namespace steam {
    constexpr uintptr_t droideka_class_set_property = 0x004A82A0; // class vtable 0x79aeb4 slot 6
    constexpr uintptr_t droideka_update_pilot       = 0x004A2030; // entity vtable +0x120
    constexpr uintptr_t droideka_class_derive       = 0x004A8180; // class vtable 0x79aeb4 slot 1
+
+   // ---- Entity / Soldier override textures (OverrideTexture3..5) --------------
+   // Steam offsets differ from modtools (release vs debug). Class fields the stock
+   // render binds are +0x794/+0x798. See entity/soldier_override_texture.cpp.
+   constexpr uintptr_t soldier_class_set_property  = 0x004F82E0; // EntitySoldierClass::SetProperty
+   constexpr uintptr_t soldier_render              = 0x004E23D0; // EntitySoldier::Render (this->class @ +0x3AC)
+   constexpr uintptr_t soldier_element_render_ctx  = 0x0048DC90; // SoldierElement::RenderUsingContext (this->class @ +0x130)
+   constexpr uintptr_t shading_pose_create_state   = 0x006ED4F0; // RedShadingPose::CreateShadingState
+   constexpr uintptr_t shading_state_get_int_param = 0x006ED5F0; // RedShadingState::GetIntParam
 
    // ---- Entity / Droideka death animation fix --------------------------------
    // The `CALL [EAX+0x130]` (NextState) inside EntityDroideka::Update that

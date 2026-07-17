@@ -12,6 +12,7 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/soldier_override_texture.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
@@ -233,6 +234,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    enable_sound_warnings_install(exe_base);
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
+   soldier_override_texture_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

@@ -368,7 +368,7 @@ void fp_anim_bank_install(uintptr_t exe_base)
 
    g_fpBankPropHash = fn_hash_string("FirstPersonAnimationBank");
 
-   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, fp_anim_set_property);
+   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, soldier_class_set_property);
    original_UpdateSoldier = (fn_UpdateSoldier_t) resolve(exe_base, fp_update_soldier);
 
    DetourTransactionBegin();
