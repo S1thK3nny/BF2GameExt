@@ -12,6 +12,7 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
@@ -188,6 +189,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
+      g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
@@ -230,6 +232,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    droideka_ball_mode_install(exe_base);
+   droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

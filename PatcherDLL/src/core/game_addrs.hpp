@@ -208,6 +208,14 @@ namespace modtools {
    constexpr uintptr_t droideka_update_pilot       = 0x004E8250; // entity vtable +0x120
    constexpr uintptr_t droideka_class_derive       = 0x004E5400; // class vtable 0xa3bb00 slot 1
 
+   // ---- Entity / Droideka death animation fix ---------------------------------
+   // The `CALL [EDX+0x130]` (NextState) inside EntityDroideka::Update (0x4ee5a0)
+   // that re-issues the die input every frame while mIsDead.  ECX = entity base
+   // at the call.  Guards above it: TEST [ESI+0x1aa4],8 @0x4ef23d (mIsDead),
+   // CMP [ESI+0x1a74],4 @0x4ef24a (mState==dead).
+
+   constexpr uintptr_t droideka_update_nextstate_call = 0x004EF2FA;
+
    // ---- Entity / Cloth ---------------------------------------------------------
 
    constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
@@ -609,6 +617,13 @@ namespace steam {
    constexpr uintptr_t droideka_class_set_property = 0x004A82A0; // class vtable 0x79aeb4 slot 6
    constexpr uintptr_t droideka_update_pilot       = 0x004A2030; // entity vtable +0x120
    constexpr uintptr_t droideka_class_derive       = 0x004A8180; // class vtable 0x79aeb4 slot 1
+
+   // ---- Entity / Droideka death animation fix --------------------------------
+   // The `CALL [EAX+0x130]` (NextState) inside EntityDroideka::Update that
+   // re-issues the die input every frame while mIsDead.  ECX = entity base at
+   // the call.  Guard above it: CMP [EBX+0x1a54],4 @0x4a4ae0 (mState==dead).
+
+   constexpr uintptr_t droideka_update_nextstate_call = 0x004A4B94;
 
    // Lowres name table entry [2] ("rifle_crouch_idle_takeknee" @ 0x7AE7F8);
    // 8-byte entries {name*, flag} based 0x7E99D0.

@@ -12,6 +12,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_boost_animation.hpp"
 #include "entity/cloth_collision_fix.hpp"
 #include "weapon/disguise_model_override.hpp"
@@ -277,6 +278,7 @@ void lua_hooks_uninstall()
    land_on_arrival_uninstall();
    flyer_sound_uninstall();
    droideka_ball_mode_uninstall();
+   droideka_death_anim_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
