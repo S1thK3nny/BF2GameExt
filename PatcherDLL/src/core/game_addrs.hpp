@@ -199,6 +199,15 @@ namespace modtools {
    constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
    constexpr uintptr_t WeaponMeleeClass_vftable   = 0x00A5434C;
 
+   // ---- Entity / Droideka DisableBallMode --------------------------------------
+   // EntityDroideka::UpdatePilot is the sole roll/unroll request site (player and
+   // AI both).  Struct offsets (mClass +0x450, mState +0x1A74) live with the
+   // build switch in entity/droideka_ball_mode.cpp.
+
+   constexpr uintptr_t droideka_class_set_property = 0x004EA800; // class vtable 0xa3bb00 slot 6
+   constexpr uintptr_t droideka_update_pilot       = 0x004E8250; // entity vtable +0x120
+   constexpr uintptr_t droideka_class_derive       = 0x004E5400; // class vtable 0xa3bb00 slot 1
+
    // ---- Entity / Cloth ---------------------------------------------------------
 
    constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
@@ -591,6 +600,16 @@ namespace steam {
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
    constexpr uintptr_t prone_primary_stance_and  = 0x005435E4;
    constexpr uintptr_t WeaponMeleeClass_vftable  = 0x007B1534;
+
+   // ---- Entity / Droideka DisableBallMode ------------------------------------
+   // Release layout differs from modtools (mState +0x1A54 not 0x1A74, mClass
+   // +0x438 not 0x450) — offsets live with the build switch in
+   // entity/droideka_ball_mode.cpp.
+
+   constexpr uintptr_t droideka_class_set_property = 0x004A82A0; // class vtable 0x79aeb4 slot 6
+   constexpr uintptr_t droideka_update_pilot       = 0x004A2030; // entity vtable +0x120
+   constexpr uintptr_t droideka_class_derive       = 0x004A8180; // class vtable 0x79aeb4 slot 1
+
    // Lowres name table entry [2] ("rifle_crouch_idle_takeknee" @ 0x7AE7F8);
    // 8-byte entries {name*, flag} based 0x7E99D0.
    constexpr uintptr_t lowres_prone_anim_name_ptr = 0x007E99E0;

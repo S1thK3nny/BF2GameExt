@@ -11,6 +11,7 @@
 #include "entity/soldier_prone.hpp"
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
+#include "entity/droideka_ball_mode.hpp"
 #include "entity/flyer_boost_animation.hpp"
 #include "entity/cloth_collision_fix.hpp"
 #include "weapon/disguise_model_override.hpp"
@@ -164,6 +165,9 @@ static void __cdecl hooked_init_state()
    fp_anim_bank_reset();
    flyer_boost_anim_reset();
    disguise_ext_reset();
+   // Droideka DisableBallMode is build-aware and installs from dllmain; on the
+   // other builds it detours init_state itself (lua_hooks is modtools-only).
+   droideka_ball_mode_reset();
 
    // Register debug console commands (engine is fully initialized now)
    DebugCommandRegistry::lateInit();
@@ -272,6 +276,7 @@ void lua_hooks_uninstall()
    barrel_fire_origin_uninstall();
    land_on_arrival_uninstall();
    flyer_sound_uninstall();
+   droideka_ball_mode_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

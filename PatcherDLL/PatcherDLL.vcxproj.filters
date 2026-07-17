@@ -127,6 +127,9 @@
     <ClInclude Include="src\entity\land_on_arrival_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\droideka_ball_mode.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\flyer_sound_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -250,6 +253,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\land_on_arrival_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\droideka_ball_mode.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_sound_fix.cpp">

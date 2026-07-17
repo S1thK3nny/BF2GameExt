@@ -11,6 +11,7 @@
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/barrel_fire_origin.hpp"
 #include "entity/land_on_arrival_fix.hpp"
+#include "entity/droideka_ball_mode.hpp"
 #include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/terrain_texture_fix.hpp"
@@ -228,6 +229,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
+   droideka_ball_mode_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
