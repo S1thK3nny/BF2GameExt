@@ -327,22 +327,38 @@ static int lua_GetCharacterWeapon(lua_State* L)
 // @param #int    charIndex   Integer character unit index (0-based)
 // @param #string odfName     ODF name to switch to (must be loaded by the level)
 // @param #int    channel     Weapon channel (default 0): 0=primary, 1=secondary
-// @return #bool              true on success, nil on failure.
+// @return #bool              1 on success, nil on failure.
 //
-// Mechanism:
-//   1. Resolve charIndex → ctrl (same chain as GetCharacterWeapon)
-//   2. Get the active weapon slot for the given channel
-//   3. Walk the global WeaponClass linked list (WeaponClass+0x008 = next)
-//      starting from the current weapon's WeaponClass, looking for odfName
-//   4. Swap weapon+0x060, +0x064, +0x068 to point at the found WeaponClass
-//   5. Call Controllable::SetWeaponIndex (0x005E6F70) with the same slot index to
-//      re-trigger the game's own PlayAnimation path for the newly-swapped WeaponClass.
+// v6 (2026-07-18) — engine-native rebuild. See docs/CharacterWeaponSystem.md
+// "SetCharacterWeapon v6" for the full RE trail (Phantom-build PDB).
 //
-// Limitations:
-//   - Only works with ODFs already loaded in memory (ReadDataFile'd at level load)
-//   - Does NOT call Weapon::Init — ammo count and heat are NOT reset to the new
-//     weapon's defaults. The engine reads damage/projectile/model from WeaponClass
-//     at fire time, so behavior changes immediately even without Init.
+// TODO:
+// - Crashes when swapping in first person
+// - Crashes when swapping for a unit containing a melee weapon
+//
+// Do exactly what EntitySoldier's constructor does for one slot
+// (modtools ctor 0x5339d0, weapon-build loop at 0x533e20):
+//   1. Resolve entity (EntitySoldier's Controllable sub-object, struct+0x240).
+//   2. Find the target WeaponClass in the Factory list (unchanged walk).
+//   3. Fill a stack WeaponDesc {owner, aimer, trigger, reload, numClips, 0, 0}
+//      with the same pointers the ctor passes.
+//   4. newWpn = foundWc->vtbl[+0x8](&desc)  — WeaponClass::Build. The Weapon
+//      ctor allocates its own AmmoCounter/EnergyBar, binds the soldier's
+//      aimer to itself, and resolves its own animation MAP from the owner's
+//      animation bank (Weapon.cpp:0x60 "Weapon failed to find animmap %s_%s").
+//   5. Swap the new pointer into the soldier's mWeapon slot (entity+0x4F0[slot],
+//      the same memory GetCharacterWeapon reads) and the slot-0 cache.
+//   6. Re-run the ctor's aimer fixup: Aimer::SetWeapon(mWeapon[weaponIndex[0]]).
+//   7. Destroy the old weapon via its own virtual deleting dtor (vtbl[0](1)) —
+//      identical to ~EntitySoldier's teardown. Frees back to Weapon pool.
+// Net pool delta: +1 Build, -1 destroy = zero. No vtable hacks, no donor
+// weapon scan, no MAP bookkeeping.
+//
+// Guardrails:
+//   - Refused in multiplayer (weapon rebuild is not replicated).
+//   - Refused for slots using WeaponShareAmmo / WeaponShareEnergy (the desc
+//     would need the shared refcounted counter wired through; not done yet).
+//   - Only works with ODFs already loaded in memory (in a .lvl the level read).
 static int lua_SetCharacterWeapon(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
@@ -355,38 +371,92 @@ static int lua_SetCharacterWeapon(lua_State* L)
    const char* targetOdf = g_lua.tolstring(L, 2, nullptr);
    if (!targetOdf || targetOdf[0] == '\0') { g_lua.pushnil(L); return 1; }
 
+   // Only channels 0/1 exist: the engine's mWeaponIndex map (struct+0x750) and
+   // the trigger array the WeaponDesc points into (struct+0x278) are 2 entries.
    const int channel = (g_lua.gettop(L) >= 3 && g_lua.isnumber(L, 3))
                        ? g_lua.tointeger(L, 3) : 0;
-   if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
+   if (channel < 0 || channel > 1) { g_lua.pushnil(L); return 1; }
+
+   // Multiplayer guard — the rebuild is purely local and would desync peers.
+   // Exact game idiom (EntitySoldier ctor @0x534001): netEnabledNext only counts
+   // while in the shell; in-game the authority is netEnabled. A plain OR of both
+   // flags wrongly blocked SP missions when netEnabledNext lingered from the shell.
+   {
+      const uint8_t inShell = *(uint8_t*)res(game_addrs::modtools::net_in_shell);
+      const uint8_t net = inShell ? *(uint8_t*)res(game_addrs::modtools::net_enabled_next)
+                                  : *(uint8_t*)res(game_addrs::modtools::net_enabled);
+      if (net) {
+         fn_GameLog("SetCharacterWeapon: disabled in multiplayer (inShell=%d).\n", (int)inShell);
+         g_lua.pushnil(L);
+         return 1;
+      }
+   }
 
    const int maxChars = *(int*)res(game_addrs::modtools::max_chars);
-   if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
+   if (charIndex < 0 || charIndex >= maxChars) {
+      fn_GameLog("SetCharacterWeapon: charIndex %d out of range (max %d).\n", charIndex, maxChars);
+      g_lua.pushnil(L); return 1;
+   }
 
    const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
-   if (!arrayBase) { g_lua.pushnil(L); return 1; }
+   if (!arrayBase) {
+      fn_GameLog("SetCharacterWeapon: character array not initialised.\n");
+      g_lua.pushnil(L); return 1;
+   }
 
    __try {
       char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
       char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) { g_lua.pushnil(L); return 1; }
+      if (!intermediate) {
+         fn_GameLog("SetCharacterWeapon: char %d has no unit (intermediate null).\n", charIndex);
+         g_lua.pushnil(L); return 1;
+      }
 
-      char* ctrl = intermediate + 0x18;  // Controllable*
+      // The pointer stored at charSlot+0x148 IS the soldier's Controllable
+      // sub-object (struct+0x240) — the exact pointer the engine passes as
+      // WeaponDesc::mOwner. Proof: GetCharacterWeapon's proven reads at
+      // (intermediate+0x18)+0x4D8 / +0x4F8 land on struct+0x730 (mWeapon) and
+      // struct+0x750 (mWeaponIndex) from the ctor disasm — the "+0x18 ctrl
+      // view" was an accidental offset onto the same object. The old
+      // *(ctrl+0x290) "entity" pointer was NOT the soldier (its +0x4F0 reads
+      // NULL for the player) and is no longer used.
+      const uintptr_t entity = (uintptr_t)intermediate;
+      if (entity == 0xCDCDCDCDu) {
+         fn_GameLog("SetCharacterWeapon: char %d controllable ptr invalid.\n", charIndex);
+         g_lua.pushnil(L); return 1;
+      }
 
-      // Get active weapon slot for this channel.
-      uint8_t slotIdx = 0;
-      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      // Channel → slot index. entity+0x510 = mWeaponIndex[2] (struct+0x750,
+      // filled by the ctor's channel-mapping loop @0x533f50; 0xFF = empty).
+      // Same bytes GetCharacterWeapon reads as ctrl+0x4F8.
+      uint8_t slotIdx = 0xFF;
+      __try { slotIdx = *(uint8_t*)(entity + 0x510 + channel); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
+      if (slotIdx >= 8) {
+         fn_GameLog("SetCharacterWeapon: char %d channel %d has no weapon slot (idx=%d).\n",
+                    charIndex, channel, (int)slotIdx);
+         g_lua.pushnil(L); return 1;
+      }
 
-      uintptr_t wpn = 0;
-      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      // Old weapon from the ENTITY-side array entity+0x4F0 (struct+0x730) —
+      // the array the ctor fills with Build results and ~EntitySoldier frees.
+      uintptr_t oldWpn = 0;
+      __try { oldWpn = *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+      if (!oldWpn || oldWpn == 0xCDCDCDCDu) {
+         fn_GameLog("SetCharacterWeapon: char %d slot %d entity-side weapon invalid (0x%08x).\n",
+                    charIndex, (int)slotIdx, (unsigned)oldWpn);
+         g_lua.pushnil(L); return 1;
+      }
 
       uintptr_t startWc = 0;
-      __try { startWc = *(uintptr_t*)(wpn + 0x060); }
+      __try { startWc = *(uintptr_t*)(oldWpn + 0x060); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-      if (!startWc || startWc == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
+      if (!startWc || startWc == 0xCDCDCDCDu) {
+         fn_GameLog("SetCharacterWeapon: char %d slot %d WeaponClass ptr invalid.\n",
+                    charIndex, (int)slotIdx);
+         g_lua.pushnil(L); return 1;
+      }
 
       // Walk the WeaponClass global linked list.
       // Flink/Blink (WC+0x008/0x00C) store adjacentWC+0x004; subtract 4 when following.
@@ -435,157 +505,169 @@ static int lua_SetCharacterWeapon(lua_State* L)
          return 1;
       }
 
-      // Scan for a live weapon of the target type to borrow its OrdnanceClass* and vtable.
-      uintptr_t sourceWpn = 0;
-      int32_t newMapFromEntity = -1;  // entity-side MAP from source char (set by UpdateIndirect each frame)
-      int scanMax = 0;
-      __try { scanMax = *(int*)res(game_addrs::modtools::max_chars); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      const int scanLimit = (scanMax < 512) ? 512 : scanMax;
+      // Already holding the requested class — nothing to do. (Note: name matching
+      // accepts suffixes, so this also triggers if the argument suffix-matches
+      // the weapon already held.)
+      if (foundWc == startWc) {
+         fn_GameLog("SetCharacterWeapon: char %d already holds '%s' - no-op.\n", charIndex, targetOdf);
+         g_lua.pushnumber(L, 1); return 1;
+      }
+
+      // EntitySoldierClass — per-slot loadout config (modtools offsets read
+      // straight from the ctor's weapon-build loop @0x533e20):
+      //   +0x984 int8 mWeaponCount, +0x93C WeaponClass*[], +0x95C int mWeaponAmmo[],
+      //   +0x97C int8 mWeaponChannel[]
+      uintptr_t esClass = 0;
+      __try { esClass = *(uintptr_t*)(entity + 0x218); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if (!esClass || esClass == 0xCDCDCDCDu) {
+         fn_GameLog("SetCharacterWeapon: char %d EntitySoldierClass ptr invalid.\n", charIndex);
+         g_lua.pushnil(L); return 1;
+      }
+
+      int8_t weaponCount = 0;
+      __try { weaponCount = *(int8_t*)(esClass + 0x984); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if ((int)slotIdx >= (int)weaponCount) {
+         fn_GameLog("SetCharacterWeapon: slot %d >= class weapon count %d.\n",
+                    (int)slotIdx, (int)weaponCount);
+         g_lua.pushnil(L); return 1;
+      }
+
+      // WeaponAmmo config for this slot:
+      //   negative       → WeaponShareAmmo with another slot   → refuse
+      //   bit 0x40000000 → WeaponShareEnergy with another slot → refuse
+      //   bit 0x20000000 → infinite ammo → mNumClips = INT_MAX (ctor @0x533eb6)
+      int32_t ammoVal = 0;
+      __try { ammoVal = *(int32_t*)(esClass + 0x95C + slotIdx * 4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if (ammoVal < 0 || (ammoVal & 0x40000000)) {
+         fn_GameLog("SetCharacterWeapon: slot %d uses WeaponShareAmmo/Energy - not supported.\n",
+                    (int)slotIdx);
+         g_lua.pushnil(L);
+         return 1;
+      }
+      const int32_t numClips = (ammoVal & 0x20000000) ? 0x7FFFFFFF : (ammoVal & 0xFFFFFF);
+
+      int8_t chSlot = (int8_t)channel;
+      __try { chSlot = *(int8_t*)(esClass + 0x97C + slotIdx); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if (chSlot < 0 || chSlot > 1) chSlot = (int8_t)channel;
+
+      // WeaponDesc — identical to the stack desc the soldier ctor builds
+      // (@0x533e30..0x533ee6). All pointers reference the live soldier, so the
+      // new Weapon reads the same triggers/aimer the old one did.
+      struct WeaponDescRaw {
+         uintptr_t owner;             // Controllable sub-object (== entity)
+         uintptr_t aimer;             // entity+0x2D0 (struct+0x510)
+         uintptr_t trigger;           // entity+0x38+ch*4 (struct+0x278)
+         uintptr_t reload;            // entity+0x40 (struct+0x280)
+         int32_t   numClips;
+         uintptr_t sharedAmmoCounter; // unused (shared slots refused above)
+         uintptr_t sharedEnergyBar;   // unused
+      } desc = {};
+
+      desc.owner    = entity;
+      desc.aimer    = entity + 0x2D0;
+      desc.numClips = numClips;
+
+      uint8_t dualFlag = 0;
+      __try { dualFlag = *(uint8_t*)(entity + 0x24A); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if ((dualFlag & 1) && chSlot == 1) {
+         // Dual-wield secondary: fire trigger is the reload trigger, no reload.
+         desc.trigger = entity + 0x40;
+         desc.reload  = 0;
+      } else {
+         desc.trigger = entity + 0x38 + (uintptr_t)chSlot * 4;
+         desc.reload  = entity + 0x40;
+      }
+
+      // Build the replacement — WeaponClass::Build, vtable slot +0x8,
+      // __thiscall(WeaponDesc*), returns Weapon* (NULL if the pool is full).
+      // The Weapon ctor allocates its own AmmoCounter/EnergyBar, binds the
+      // soldier's aimer to itself, and resolves its animation MAP from the
+      // owner's animation bank — no manual MAP fixing needed.
+      uintptr_t newWpn = 0;
       __try {
-         for (int ci = 0; ci < scanLimit && !sourceWpn; ci++) {
-            if (ci == charIndex) continue;
-            __try {
-               char* cs2 = (char*)arrayBase + ci * 0x1B0;
-               char* im2 = *(char**)(cs2 + 0x148);
-               if (!im2 || im2 == (char*)0xCDCDCDCDu) continue;
-               char* ct2 = im2 + 0x18;
-               for (int si = 0; si < 8 && !sourceWpn; si++) {
-                  __try {
-                     uintptr_t w = *(uintptr_t*)((uintptr_t)ct2 + 0x4D8 + si * 4);
-                     if (!w || w == 0xCDCDCDCDu) continue;
-                     uintptr_t wc = *(uintptr_t*)(w + 0x060);
-                     if (!wc || wc == 0xCDCDCDCDu) continue;
-                     const char* wcName = (const char*)(wc + 0x30);
-                     __try {
-                        size_t wl = strlen(wcName), tl = strlen(targetOdf);
-                        if ((_stricmp(wcName, targetOdf) == 0) ||
-                            (wl > tl && _stricmp(wcName + wl - tl, targetOdf) == 0)) {
-                           sourceWpn = w;
-                           // Also grab the MAP from this source character's entity-side weapon slot
-                           // (entity+0x4F0[si]+0xC8). Entity-side weapons carry the live MAP that
-                           // UpdateIndirect maintains — ctrl-side +0xC8 is often uninitialised (-1).
-                           __try {
-                              uintptr_t srcEnt = *(uintptr_t*)((uintptr_t)ct2 + 0x290);
-                              if (srcEnt && srcEnt != 0xCDCDCDCDu) {
-                                 uintptr_t ewpn = *(uintptr_t*)(srcEnt + 0x4F0 + si * 4);
-                                 if (ewpn && ewpn != 0xCDCDCDCDu) {
-                                    int32_t em = *(int32_t*)(ewpn + 0x0C8);
-                                    if (em != -1) newMapFromEntity = em;
-                                 }
-                              }
-                           } __except(EXCEPTION_EXECUTE_HANDLER) {}
-                        }
-                     } __except(EXCEPTION_EXECUTE_HANDLER) {}
-                  } __except(EXCEPTION_EXECUTE_HANDLER) {}
-               }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         typedef uintptr_t (__thiscall* WcBuild_t)(uintptr_t wc, WeaponDescRaw* d);
+         WcBuild_t fnBuild = *(WcBuild_t*)(*(uintptr_t*)foundWc + 0x8);
+         newWpn = fnBuild(foundWc, &desc);
+      } __except(EXCEPTION_EXECUTE_HANDLER) { newWpn = 0; }
+      if (!newWpn) {
+         fn_GameLog("SetCharacterWeapon: WeaponClass::Build failed for '%s' (Weapon pool full?).\n",
+                    targetOdf);
+         g_lua.pushnil(L);
+         return 1;
+      }
+
+      // Swap into the mWeapon slot the engine owns (struct+0x730). This is the
+      // same memory GetCharacterWeapon reads (as ctrl+0x4D8), so Get reflects
+      // the swap immediately — there is no second array.
+      __try { *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4) = newWpn; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // Retarget the cached slot-0 weapon pointer (struct+0x718, the old
+      // "ctrl+0x4C0 always equals slot[0]" observation) if it held the old one.
+      __try {
+         uintptr_t* cache = (uintptr_t*)(entity + 0x4D8);
+         if (*cache == oldWpn) *cache = newWpn;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // The Weapon ctor unconditionally bound the aimer to the NEW weapon.
+      // Re-run the soldier ctor's post-loop fixup (@0x533fee): point the aimer
+      // back at the primary-channel active weapon (which is newWpn itself when
+      // that is the slot we just swapped).
+      __try {
+         int8_t aimSlot = *(int8_t*)(entity + 0x510);
+         if (aimSlot >= 0 && aimSlot < 8) {
+            uintptr_t aimWpn = *(uintptr_t*)(entity + 0x4F0 + aimSlot * 4);
+            if (aimWpn && aimWpn != 0xCDCDCDCDu) {
+               typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
+               ((AimerSetWeapon_t)res(game_addrs::modtools::aimer_set_weapon))(entity + 0x2D0, aimWpn);
+            }
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      // Swap vtable so virtual dispatch matches the target weapon type.
-      // Note: weapon+0x88 is m_pAmmoCounter (24-byte AmmoCounter), NOT an OrdnanceFactory.
-      // Old code wrote past the AmmoCounter boundary at +0x18/+0x1c, corrupting adjacent heap.
-      // The vtable swap + WeaponClass writes below are sufficient — ordnance class is reached
-      // via virtual dispatch through the swapped vtable.
-      if (sourceWpn) {
-         uintptr_t srcVtable = 0;
-         __try { srcVtable = *(uintptr_t*)(sourceWpn); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         if (srcVtable && srcVtable != 0xCDCDCDCDu)
-            __try { *(uintptr_t*)(wpn) = srcVtable; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      }
-
-      // Write all three WC pointers in the Weapon instance.
-      __try { *(uintptr_t*)(wpn + 0x060) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      __try { *(uintptr_t*)(wpn + 0x064) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      __try { *(uintptr_t*)(wpn + 0x068) = foundWc; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      // Trigger per-character animation update.
-      //
-      // UpdateIndirect (0x0053b920) reads entity+0x4F0[slotIdx]+0xC8 every tick and calls
-      // SetWeaponAnimationMap (SWAM) when that MAP differs from the animator's current MAP.
-      // SWAM has an internal guard (only acts on MAP change), but if two paths alternate
-      // between different MAPs every frame the pool grows +4/frame.
-      //
-      // MAP is an index into a global (BANK, WEAPON_type) table at 0xacf558.
-      // FUN_00570760(BANK, WEAPON_type) scans this table and returns the matching index.
-      //
-      // Strategy: compute correctMAP for the TARGET character's own animation bank.
-      //   entity+0x218  -> EntitySoldierClass* (mClass)
-      //                    [EntitySoldier struct base = entity-0x240;
-      //                     mClass at struct+0x458 → entity+0x218]
-      //   entityClass+0x1378 -> BANK (EntitySoldierClass::mAnimationBank)
-      //   FUN_00570760(BANK, foundWc->mSoldierAnimationWeapon) -> correctMAP
-      //
-      // Confirmed struct offsets:
-      //   ctrl+0x290        -> entity  (EntitySoldier* = struct_base+0x240)
-      //   entity+0x4F0[N]   -> Weapon* (rendering-side array; struct mWeapon @ +0x730)
-      //   entity+0x520      -> SoldierAnimator* (struct mSoldierAnimator @ +0x760)
-      //   entity+0x218      -> EntitySoldierClass* (struct mClass @ +0x458)
-      //   EntitySoldierClass+0x1378 -> BANK (mAnimationBank)
-      //   WeaponClass+0x020 -> WEAPON (mSoldierAnimationWeapon)
-      //   weapon+0xC8       -> int MAP
-      {
-         uintptr_t entity          = 0;
-         uintptr_t soldierAnimator = 0;
-         uintptr_t entityWpn       = 0;
-         uintptr_t targetBank      = 0;
-         int32_t   correctMAP      = -1;
-
-         // Resolve entity, SoldierAnimator, and entity-side weapon.
-         __try {
-            entity = *(uintptr_t*)((uintptr_t)ctrl + 0x290);
-            if (entity) {
-               soldierAnimator = *(uintptr_t*)(entity + 0x520);
-               entityWpn       = *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4);
-               if (entityWpn == 0xCDCDCDCDu) entityWpn = 0;
-            }
-         } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-         // Get the target character's animation bank directly from EntitySoldierClass.
-         // This is the BANK that was used when registering all this soldier's weapon MAPs.
-         if (entity) {
-            __try {
-               uintptr_t entityClass = *(uintptr_t*)(entity + 0x218);
-               if (entityClass && entityClass != 0xCDCDCDCDu)
-                  targetBank = *(uintptr_t*)(entityClass + 0x1378);
-            } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-            if (targetBank) {
-               __try {
-                  uint32_t wSA = *(uint32_t*)((uintptr_t)foundWc + 0x020);
-                  typedef int32_t (__cdecl* FN570760_t)(uintptr_t, uint32_t);
-                  correctMAP = ((FN570760_t)res(game_addrs::modtools::get_weapon_anim_map))(targetBank, wSA);
-               } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            }
+      // The Weapon ctor leaves the "currently drawn" flag (weapon+0xAC bit 2)
+      // CLEAR — Weapon::Update's IDLE state refuses to even read the fire
+      // trigger until Weapon::Select sets it (Select = vtable+0x74; body sets
+      // field_0xAC = (field_0xAC & 0xFFFFFE07) | 4; slot verified identical in
+      // modtools @0x61ba80 and Phantom @0x7af080). The game only calls Select
+      // on a weapon switch, so without this the swapped-in weapon can't fire
+      // until the player cycles to the other channel and back. Call it now if
+      // the swapped slot is the one currently drawn (entity+0x512 low nibble =
+      // active slot index, the byte UpdateIndirect reads). Second arg true =
+      // skip the weapon-change sound.
+      __try {
+         uint8_t active = *(uint8_t*)(entity + 0x512) & 0x0F;
+         if (active == (uint8_t)slotIdx) {
+            typedef void (__thiscall* WpnSelect_t)(uintptr_t w, uint32_t chan, uint32_t quiet);
+            WpnSelect_t fnSelect = *(WpnSelect_t*)(*(uintptr_t*)newWpn + 0x74);
+            fnSelect(newWpn, (uint32_t)channel, 1u);
          }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-         // Fallback: weapon type not registered in target bank, or entity not reachable.
-         // Use source weapon MAP as last resort (may be in a different bank).
-         if (correctMAP == -1) {
-            if (newMapFromEntity != -1)  correctMAP = newMapFromEntity;
-            else if (sourceWpn)
-               __try { correctMAP = *(int32_t*)(sourceWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      // Destroy the old weapon LAST, after every reference is rebound.
+      // Virtual deleting dtor (vtbl[0](1)) — the same call ~EntitySoldier makes.
+      // Frees the item back to the Weapon pool; ~Weapon stops its sounds and
+      // releases its refcounted AmmoCounter/EnergyBar. Net pool delta: zero.
+      __try {
+         typedef void (__thiscall* WpnDelete_t)(uintptr_t w, uint32_t flags);
+         ((WpnDelete_t)(**(uintptr_t**)oldWpn))(oldWpn, 1);
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // Instant animation switch. The Weapon ctor already wrote the correct MAP
+      // into newWpn+0xC8 (resolved from the owner's animation bank), and
+      // EntitySoldier::UpdateIndirect (0x0053b920) re-asserts it every frame —
+      // both sides now agree, so no oscillation is possible. Calling SWAM here
+      // just makes the stance change this frame instead of next.
+      __try {
+         uintptr_t animator = *(uintptr_t*)(entity + 0x520);
+         int32_t   newMap   = *(int32_t*)(newWpn + 0x0C8);
+         if (animator && animator != 0xCDCDCDCDu && newMap != -1) {
+            typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
+            ((SetWeaponAnimMap_t)res(game_addrs::modtools::set_weapon_anim_map))((void*)animator, newMap);
          }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-         // --- Apply writes ---
-
-         // ctrl-side weapon.MAP
-         if (correctMAP != -1)
-            __try { *(int32_t*)(wpn + 0x0C8) = correctMAP; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-         if (entity) {
-            // entity-side weapon.MAP — UpdateIndirect reads this every tick.
-            if (correctMAP != -1 && entityWpn)
-               __try { *(int32_t*)(entityWpn + 0x0C8) = correctMAP; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-            if (soldierAnimator) {
-               // Immediate visual switch.
-               typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
-               __try { ((SetWeaponAnimMap_t)res(game_addrs::modtools::set_weapon_anim_map))((void*)soldierAnimator, correctMAP); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            }
-         }
-
-      }
+      fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] rebuilt -> '%s' (wpn=0x%08x map=%d)\n",
+                 charIndex, (int)chSlot, (int)slotIdx, targetOdf,
+                 (unsigned)newWpn, *(int32_t*)(newWpn + 0x0C8));
 
       g_lua.pushnumber(L, 1);
       return 1;
@@ -1020,9 +1102,21 @@ static int lua_HttpPostAsync(lua_State* L)
 
 
 // ---------------------------------------------------------------------------
-// ReapplyAnimations() - calls SoldierAnimatorClass::AssignAnimations (0x00581AF0).
-// Re-wires all weapon animation banks for every soldier in the level.
-// Call this after SetCharacterWeapon if animations haven't updated visually.
+// ReapplyAnimations() - calls SoldierAnimatorClass::SetupBodyMasks (0x00581AF0),
+// the full animation-bank assignment pass that normally runs once at level load.
+//
+// ⚠️ LEAK HAZARD — do NOT call this repeatedly (verified 2026-07-18):
+// every pass re-resolves every animation of every bank through
+// AnimationFinder::AssignAnimation (0x57fa90), which allocates a fresh
+// "SoldierAnimation" pool entry (16 bytes) per animation WITHOUT freeing the
+// previous pass's entries (~250 entries leaked per call, endless
+// 'Memory pool "SoldierAnimation" is full' spam), re-prints every
+// "Can't find soldier animation ..." warning, and re-attempts a ~100 MB
+// Heap 5 (Runtime) allocation that starts failing once the heap is exhausted.
+//
+// SetCharacterWeapon v6 does NOT need this — the Weapon ctor resolves its own
+// animation MAP. Only use ReapplyAnimations once after a deliberate hotload
+// that changes FirstPersonAnimationBank ODF values, and accept the leak.
 // ---------------------------------------------------------------------------
 static int lua_ReapplyAnimations(lua_State* L)
 {
@@ -1449,11 +1543,10 @@ static const lua_func_entry custom_functions[] = {
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
-   // SetCharacterWeapon — disabled: years of iteration (v1..v5) never produced
-   // a stable swap. WeaponClass / vtable / MAP writes all leave engine state
-   // inconsistent in ways that drift across frames. Implementation kept in the
-   // file (lua_SetCharacterWeapon) for future reference but no longer exposed.
-   // { "SetCharacterWeapon",    lua_SetCharacterWeapon },
+   // v6 rebuild (2026-07-18): builds a real Weapon via WeaponClass::Build and
+   // destroys the old one — the v1..v5 in-place mutation approach corrupted
+   // MemoryPool free lists (see docs/CharacterWeaponSystem.md).
+   { "SetCharacterWeapon",    lua_SetCharacterWeapon },
    { "GetWeaponAmmo",         lua_GetWeaponAmmo },
    { "SetWeaponAmmo",         lua_SetWeaponAmmo },
    { "HttpGetAsync",          lua_HttpGetAsync },

@@ -135,6 +135,7 @@ All functions below are registered globally and callable from any mission, Scrip
 | Function | Description |
 |----------|-------------|
 | `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary, ...). Returns nil if the slot is empty. |
+| `SetCharacterWeapon(charIndex, odfName [, channel])` | Replaces the active weapon in a channel (0 = primary, 1 = secondary) with another already-loaded weapon ODF. Builds a real Weapon through the engine's own factory and destroys the old one — ammo, animation stance, and aimer all come out correct. Singleplayer only; slots using `WeaponShareAmmo`/`WeaponShareEnergy` are refused. Returns 1 on success, nil on failure. |
 | `GetWeaponAmmo(charIndex [, channel])` | Returns four numbers: `curClip, numClips, maxClips, roundsPerClip` for the active weapon in the channel (default 0). Ammo is tracked in **clips**, with `curClip` being a fractional 0.0–1.0 of one loaded clip. |
 | `SetWeaponAmmo(charIndex, curClip [, numClips [, channel]])` | Writes `curClip` (fractional 0.0–1.0) and optionally `numClips` (spare clips) on the active weapon. Pass nil for `numClips` to leave it untouched. |
 
@@ -148,7 +149,7 @@ All functions below are registered globally and callable from any mission, Scrip
 
 | Function | Description |
 |----------|-------------|
-| `ReapplyAnimations()` | Re-runs the FP animation bank resolution for every active soldier. Use after a hotload that changes `FirstPersonAnimationBank` ODF values. |
+| `ReapplyAnimations()` | Re-runs the full animation bank assignment for every soldier class. **Warning: leaks ~250 `SoldierAnimation` pool entries and ~100 MB of Heap 5 per call — never call it repeatedly, and never after `SetCharacterWeapon` (not needed since v6).** Only use once after a deliberate hotload that changes `FirstPersonAnimationBank` ODF values. |
 
 ### Event Callbacks
 

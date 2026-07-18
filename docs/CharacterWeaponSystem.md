@@ -20,9 +20,141 @@ void* resolved = (void*)((unrelocated_addr - 0x400000u) + base);
 | WeaponClass pointer in Weapon (`+0x060`)             | ✅ Confirmed      |
 | ODF name in WeaponClass (`+0x30`, inline string)     | ✅ Confirmed      |
 | Channel→slot index array at `ctrl+0x4F8`             | ✅ Confirmed      |
-| `GetCharacterWeapon(char, 0)` returns held primary   | ✅ Working        |
+| `GetCharacterWeapon(char, 0)` returns held primary   | ✅ Confirmed      |
 | `GetCharacterWeapon(char, 1)` returns held secondary  | ✅ Working        |
 | Weapon channel classification by vtable              | ❌ Unreliable     |
+| `SetCharacterWeapon` v6 (engine-native rebuild)      | ✅ Implemented 2026-07-18 |
+
+---
+
+## SetCharacterWeapon v6 — Weapon Pool Leak Root Cause & Rebuild (2026-07-18)
+
+Investigated with the Phantom build (real PDB, fully named). This section supersedes
+every earlier SetCharacterWeapon mechanism note in this file.
+
+### The Weapon MemoryPool — complete lifecycle
+
+`Weapon::sMemoryPool` — Phantom `0xc73bb8`, **modtools `0xb91c10`**, item size `0x140`.
+`MemoryPool` layout (Phantom PDB, 84 bytes): `+0x10 mLabel[32]`, `+0x30 mSize`,
+`+0x34 mCount`, `+0x38 mGrow`, `+0x3C mUsed`, `+0x40 mPeak`, `+0x48 mPool`,
+`+0x50 mFree` (free-list head; **a free item's first dword is its next-link**).
+
+Complete xref enumeration of the pool proves:
+
+* **Allocated ONLY by** `WeaponXxxClass::Build` (one override per weapon subclass;
+  base `WeaponClass::Build` Phantom `0x7ad310` = Factory vtable slot 2, `vtbl+0x8`).
+  Called from entity constructors at spawn (EntitySoldier ctor Phantom `0x565f80`,
+  modtools `0x5339d0`) and DisplaySoldier spawn previews.
+* **Freed ONLY by** each subclass's virtual deleting destructor (`vtbl[0](1)`),
+  called from `~EntitySoldier` etc. All subclasses free into the same pool.
+* `SoldierAnimator::SetWeaponAnimationMap`, `SetWeaponIndex` (a one-byte write),
+  and `Weapon::Update` allocate **nothing**.
+
+When `MemoryPool::Allocate` finds `mFree == NULL` it logs
+`Memory pool "%s" is full; raise count to at least %d`, heap-allocates
+`mSize * mGrow` (the per-use lag), and bumps `mCount += mGrow` (the observed `+4`).
+
+### Why v1..v5 grew the pool
+
+The old func never allocated — it **corrupted pool free lists**, which makes the
+allocator believe the pool is permanently full, so every later soldier/vehicle
+spawn triggers another +4 grow, forever:
+
+1. **AmmoCounter overflow**: `weapon+0x88` is an `AmmoCounter` — exactly `0x18`
+   bytes, pool-allocated. The old "OrdnanceFactory patch" wrote to `+0x18/+0x1c`,
+   i.e. the first 8 bytes of the *adjacent pool item* — the free-list link if
+   that item was free.
+2. **Stale ctrl-side Weapon***: the char-chain weapon pointer can reference an
+   already-freed pool item after a respawn (the code's own `0xCDCDCDCD` checks
+   prove freed memory was hit). The vtable swap wrote `weapon+0x0` — on a freed
+   item that IS the free-list link of the **Weapon pool itself**.
+3. The vtable swap also made the *wrong* `~WeaponXxx` run at soldier teardown.
+
+The ctrl-side vs entity-side MAP flip-flop that v5 fought was only ever the
+*animation* bug — SWAM allocates nothing and cannot grow any pool.
+
+### v6 mechanism — engine-native rebuild
+
+Replicate the EntitySoldier ctor's weapon-build (modtools loop at `0x533e20`)
+for one slot, then destroy the old instance. Net pool delta: zero.
+
+`WeaponDesc` (28 bytes, from Phantom PDB, verified against the modtools disasm):
+
+| Offset | Field | modtools value the ctor passes |
+|--------|-------|--------------------------------|
+| +0x00 | `Controllable* mOwner` | soldier struct+0x240 (the "entity" pointer) |
+| +0x04 | `Aimer* mAimer` | struct+0x510 (= entity+0x2D0) |
+| +0x08 | `Trigger* mTrigger` | struct+0x278 + channel*4 (= entity+0x38+ch*4); dual-wield ch1: struct+0x280 |
+| +0x0C | `Trigger* mReload` | struct+0x280 (= entity+0x40); dual-wield ch1: NULL |
+| +0x10 | `int mNumClips` | `WeaponAmmo & 0xFFFFFF`; `0x20000000` flag → `INT_MAX` |
+| +0x14 | `AmmoCounter*` | only for `WeaponShareAmmo` (negative ammo value) |
+| +0x18 | `EnergyBar*` | only for `WeaponShareEnergy` (flag `0x40000000`) |
+
+`EntitySoldierClass` (modtools): `+0x93C WeaponClass*[]`, `+0x95C int WeaponAmmo[]`,
+`+0x97C int8 WeaponChannel[]`, `+0x984 int8 WeaponCount`.
+
+Key win: `Weapon::Weapon` (Phantom `0x7abdd0`) **allocates its own
+AmmoCounter/EnergyBar, calls `Aimer::SetWeapon(this)` itself, and resolves its
+own animation MAP** from the owner's animation bank (`Weapon.cpp:0x60`,
+"Weapon failed to find animmap %s_%s"). All v1..v5 MAP bookkeeping is obsolete.
+
+**Object-model correction (2026-07-18, test round 3):** the pointer at
+`charSlot+0x148` ("intermediate") **IS the soldier's Controllable sub-object
+(struct+0x240)** — use it directly. The legacy `ctrl = intermediate+0x18` view
+only works because `ctrl+0x4D8` = struct+0x730 (`mWeapon`) and `ctrl+0x4F8` =
+struct+0x750 (`mWeaponIndex`) — the same array through an accidental +0x18
+alias; there is **no second weapon array**. The old `*(ctrl+0x290)` "entity"
+pointer is NOT the soldier (for the player its +0x4F0 reads NULL) — v5's
+"entity-side writes" through it silently did nothing, which is why v5 never
+stabilised.
+
+Steps (implemented in `lua_SetCharacterWeapon`, `lua_funcs.cpp`):
+1. Resolve `entity = *(charSlot+0x148)` (the Controllable sub-object), slot via
+   `entity+0x510[channel]` (mWeaponIndex, `0xFF` = empty).
+2. Find the target `WeaponClass` (Factory list walk, unchanged).
+3. Refuse slots whose `WeaponAmmo` uses share flags; build the `WeaponDesc`.
+4. `newWpn = foundWc->vtbl[+0x8](&desc)` — `WeaponClass::Build`.
+5. Store into `entity+0x4F0[slot]`; retarget ctrl-side mirrors (`ctrl+0x4D8[]`,
+   `ctrl+0x4C0` cache) that still point at the old instance.
+6. Aimer fixup (ctor post-loop, `0x533fee`): `Aimer::SetWeapon` (ILT thunk
+   `0x407B76`) with `mWeapon[mWeaponIndex[0]]`.
+7. If the swapped slot is the currently drawn one (`entity+0x512 & 0xF`), call
+   `Weapon::Select` on the new weapon — **vtable+0x74**, `(uint chan, bool quiet)`,
+   body sets `weapon+0xAC = (…& 0xFFFFFE07) | 4`. The ctor leaves that bit clear
+   and `Weapon::Update`'s IDLE state won't read the fire trigger without it
+   (symptom: can't shoot until cycling channels). Verified same slot both builds
+   (modtools body `0x61ba80`, Phantom `0x7af080`).
+8. Destroy old weapon via `oldWpn->vtbl[0](1)` — same call `~EntitySoldier`
+   makes. `~Weapon` stops sounds and releases refcounted counters.
+9. Optional instant SWAM with `newWpn+0xC8`.
+
+### Runtime verification targets (memwatch)
+
+* modtools `Weapon::sMemoryPool.mUsed` = `0xb91c4c` — should stay flat across calls.
+* modtools `Weapon::sMemoryPool.mFree` = `0xb91c60` — must never be scribbled.
+
+**VERIFIED 2026-07-18 (play test + memwatch on 0xb91c4c):** all 272 observed
+Weapon-pool allocations went through `MemoryPool::Allocate` (`0x8024AB/0x8024B9`)
+with `mUsed` oscillating around 36 — v6 is pool-balanced.
+
+### ⚠️ Do NOT pair v6 with `ReapplyAnimations()`
+
+The old v5-era advice ("call ReapplyAnimations after SetCharacterWeapon") is
+obsolete AND harmful. `ReapplyAnimations` = `SoldierAnimatorClass::SetupBodyMasks`
+(`0x581AF0`), the once-per-level-load bank assignment pass. Every extra call:
+
+* re-resolves every animation of every bank via `AnimationFinder::AssignAnimation`
+  (`0x57fa90`), allocating a fresh 16-byte `SoldierAnimation` pool entry
+  (pool global modtools `0xb8c5b8`) per animation **without freeing the previous
+  pass's entries** — ~250 leaked per call, endless
+  `Memory pool "SoldierAnimation" is full` spam;
+* re-prints every `Can't find soldier animation %s_%s_%s(_%s)` warning
+  (SetupBodyMasks owns that string — seeing units like templeguard/riotshield/BX
+  in the log during a weapon swap is the fingerprint of this global pass running);
+* re-attempts a ~100 MB Heap 5 (Runtime) allocation that starts failing once the
+  heap is exhausted.
+
+v6 makes the call unnecessary: the Weapon ctor resolves its own MAP.
 
 ---
 
@@ -341,13 +473,15 @@ WeaponClass vtable: 0x00A525F4
 
 ## PDB-Known Controllable Methods
 
-These addresses come from a PDB but the **Controllable vtable entries do NOT match them** at
-runtime — the derived class overrides every slot. These are useful for setting breakpoints
-or finding cross-references in Ghidra, but cannot be found via vtable scanning.
+⚠️ **These addresses are retail-PDB values and DO NOT hold in the modtools exe.**
+Verified 2026-07-18: `0x5E6F70` is undefined bytes in BF2_modtools_MemExt (no
+function, no xrefs). The real modtools `EntitySoldier::SetWeaponIndex` is at
+`0x57dc10` in the Phantom build and is a trivial one-byte slot write — it never
+allocated anything. Kept below for historical reference only.
 
 | Method                     | Address      | Notes                                                   |
 |----------------------------|--------------|---------------------------------------------------------|
-| `SetWeaponIndex(int, int)` | `0x005E6F70` | Sets weapon for (slotIdx, channel). `RET 0xC`. Calls `PlayAnimation`. |
+| `SetWeaponIndex(int, int)` | `0x005E6F70` | ❌ retail-PDB only; undefined bytes in modtools. |
 | `GetCurWpn()`              | `0x005E7090` | Traverses float-priority sorted linked list via FPU `FCOMP`. |
 | `GetActiveWeaponChannel()` | `0x004DBCF0` | Stub: `XOR EAX,EAX; RET` — always returns 0.           |
 | `GetWpnChannel()`          | `0x005E7100` | All `INT3` — pure virtual, not implemented.             |
@@ -408,6 +542,9 @@ These approaches were tested and confirmed to fail. Documented here to save futu
 | PDB addresses in Controllable vtable  | Derived class overrides ALL vtable entries; 0 PDB matches |
 | `GetActiveWeaponChannel()` at `0x4DBCF0` | Stub function, always returns 0 (xor eax,eax; ret) |
 | `GetWpnChannel()` at `0x5E7100`       | All INT3 — pure virtual, never implemented         |
+| SetCharacterWeapon v1..v3: in-place WC/MAP writes | Ctrl-side vs entity-side MAP fight (anim flicker); writes to stale weapon pointers corrupted pool free lists |
+| SetCharacterWeapon v3..v5: donor vtable swap + "OrdnanceFactory" patch | `weapon+0x88` is a 0x18-byte AmmoCounter — `+0x18/+0x1c` writes hit the adjacent pool item's free-list link → "Memory pool full" grows forever (+4/spawn) with lag per grow |
+| SetCharacterWeapon v4: SoldierElement MAP write | SoldierElement is spawn-menu-preview only; no instance exists for in-game characters |
 
 ---
 

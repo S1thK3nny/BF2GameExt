@@ -255,12 +255,13 @@ namespace modtools {
    constexpr uintptr_t max_chars                    = 0xB939F4;
    constexpr uintptr_t team_array_base              = 0xAD5D64;
    constexpr uintptr_t class_def_list               = 0xACD2C8;
+   constexpr uintptr_t aimer_set_weapon             = 0x00407B76;  // Aimer::SetWeapon(Weapon*) ILT thunk — ECX=Aimer*, called by EntitySoldier ctor @0x533ffc
 
    // ---- Animation (weapon/soldier) ---------------------------------------------
 
    constexpr uintptr_t get_weapon_anim_map          = 0x00570760;
    constexpr uintptr_t set_weapon_anim_map          = 0x004170D5;
-   constexpr uintptr_t assign_animations            = 0x00581AF0;
+   constexpr uintptr_t assign_animations            = 0x00581AF0;  // real name: SoldierAnimatorClass::SetupBodyMasks — leaks SoldierAnimation pool per call, see lua_ReapplyAnimations
    constexpr uintptr_t anim_finder_add_bank        = 0x00580860;  // AnimationFinder::_AddBank
    constexpr uintptr_t anim_finder_add_entry       = 0x0057E220;  // AnimationFinder: add RedAnimation* to bank array
    constexpr uintptr_t anim_add_skeleton_bank      = 0x0057DEC0;  // FUN_0057dec0: skeleton-shared bank add (line 671, writes inline mAnimBankOld directly)
