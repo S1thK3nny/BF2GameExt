@@ -335,6 +335,7 @@ static int lua_GetCharacterWeapon(lua_State* L)
 // TODO:
 // - Crashes when swapping in first person
 // - Crashes when swapping for a unit containing a melee weapon
+// - Guard when a  "Weapon failed to find animmap x_y" occurs (the MAP is not loaded for the new weapon, so the ctor fails).
 //
 // Do exactly what EntitySoldier's constructor does for one slot
 // (modtools ctor 0x5339d0, weapon-build loop at 0x533e20):
