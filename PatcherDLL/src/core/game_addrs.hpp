@@ -241,6 +241,7 @@ namespace modtools {
    constexpr uintptr_t anim_find_animation         = 0x004A7900;
    constexpr uintptr_t fp_anim_array               = 0x00B70E30;  // ZephyrAnim*[48]
    constexpr uintptr_t anim_name_table             = 0x00A36C88;  // const char*[48]
+   constexpr uintptr_t fp_renderable               = 0x00B70F40;  // FirstPerson::s_pRenderable — FirstPersonRenderable* (size-1 array on PC, one per camera); +0x1600 = mCurrentWeapon
 
    // ---- Weapon / Disguise ------------------------------------------------------
 

@@ -333,9 +333,11 @@ static int lua_GetCharacterWeapon(lua_State* L)
 // "SetCharacterWeapon v6" for the full RE trail (Phantom-build PDB).
 //
 // TODO:
-// - Crashes when swapping in first person
-// - Crashes when swapping for a unit containing a melee weapon
-// - Guard when a  "Weapon failed to find animmap x_y" occurs (the MAP is not loaded for the new weapon, so the ctor fails).
+// - Melee-family swaps are untested and likely unsafe even with the animmap
+//   guard: WeaponMeleeThrow caches m_pPrimaryWeapon (its WeaponMelee partner)
+//   once at build time and derefs it unconditionally, so swapping a hero's
+//   saber out dangles the throw weapon's back-pointer. Refuse melee swaps if
+//   this ever matters.
 //
 // Do exactly what EntitySoldier's constructor does for one slot
 // (modtools ctor 0x5339d0, weapon-build loop at 0x533e20):
@@ -359,6 +361,9 @@ static int lua_GetCharacterWeapon(lua_State* L)
 //   - Refused in multiplayer (weapon rebuild is not replicated).
 //   - Refused for slots using WeaponShareAmmo / WeaponShareEnergy (the desc
 //     would need the shared refcounted counter wired through; not done yet).
+//   - Refused when the unit's animation bank has no animmap for the new
+//     weapon (Weapon ctor leaves MAP=-1 → anim system crash); the freshly
+//     built weapon is destroyed again and the old one stays in the slot.
 //   - Only works with ODFs already loaded in memory (in a .lvl the level read).
 static int lua_SetCharacterWeapon(lua_State* L)
 {
@@ -597,6 +602,37 @@ static int lua_SetCharacterWeapon(lua_State* L)
          return 1;
       }
 
+      // Animmap guard. The Weapon ctor resolves its animation MAP from the
+      // owner's animation bank; when the bank has no map for this weapon it
+      // warns ("Weapon failed to find animmap %s_%s", Weapon.cpp:96) and
+      // leaves weapon+0xC8 = -1, which the animation system later crashes on.
+      // Roll back: destroy the new weapon and rebind the aimer (the Weapon
+      // ctor pointed it at newWpn; ~Weapon does not touch it, so destroy-then-
+      // rebind is safe). The entity slots are still untouched here, so the
+      // unit simply keeps its old weapon.
+      int32_t newMap = -1;
+      __try { newMap = *(int32_t*)(newWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      if (newMap == -1) {
+         __try {
+            typedef void (__thiscall* WpnDelete_t)(uintptr_t w, uint32_t flags);
+            ((WpnDelete_t)(**(uintptr_t**)newWpn))(newWpn, 1);
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         __try {
+            int8_t aimSlot = *(int8_t*)(entity + 0x510);
+            if (aimSlot >= 0 && aimSlot < 8) {
+               uintptr_t aimWpn = *(uintptr_t*)(entity + 0x4F0 + aimSlot * 4);
+               if (aimWpn && aimWpn != 0xCDCDCDCDu) {
+                  typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
+                  ((AimerSetWeapon_t)res(game_addrs::modtools::aimer_set_weapon))(entity + 0x2D0, aimWpn);
+               }
+            }
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         fn_GameLog("SetCharacterWeapon: '%s' has no animmap in char %d's animation bank - swap refused.\n",
+                    targetOdf, charIndex);
+         g_lua.pushnil(L);
+         return 1;
+      }
+
       // Swap into the mWeapon slot the engine owns (struct+0x730). This is the
       // same memory GetCharacterWeapon reads (as ctrl+0x4D8), so Get reflects
       // the swap immediately — there is no second array.
@@ -650,6 +686,19 @@ static int lua_SetCharacterWeapon(lua_State* L)
       __try {
          typedef void (__thiscall* WpnDelete_t)(uintptr_t w, uint32_t flags);
          ((WpnDelete_t)(**(uintptr_t**)oldWpn))(oldWpn, 1);
+      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+      // First-person view-model cache. FirstPersonRenderable keeps the active
+      // Weapon* at +0x1600 (mCurrentWeapon) and its holster transition keeps
+      // rendering it via vtbl+0x8C after a weapon change — with the old
+      // weapon destroyed that call lands in freed pool memory (RenderSoldier
+      // crash at 0x4aa59c, EIP=0). Clearing it is engine-safe: RenderSoldier
+      // null-checks the field, and UpdateSoldier's holster path requires it
+      // to be non-null, so the swapped-in weapon is adopted immediately.
+      __try {
+         uintptr_t fpr = *(uintptr_t*)res(game_addrs::modtools::fp_renderable);
+         if (fpr && fpr != 0xCDCDCDCDu && *(uintptr_t*)(fpr + 0x1600) == oldWpn)
+            *(uintptr_t*)(fpr + 0x1600) = 0;
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
       // Instant animation switch. The Weapon ctor already wrote the correct MAP

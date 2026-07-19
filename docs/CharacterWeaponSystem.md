@@ -128,6 +128,41 @@ Steps (implemented in `lua_SetCharacterWeapon`, `lua_funcs.cpp`):
    makes. `~Weapon` stops sounds and releases refcounted counters.
 9. Optional instant SWAM with `newWpn+0xC8`.
 
+### Post-v6 crash fixes (2026-07-19)
+
+**Animmap guard (rollback).** If the unit's animation bank has no animmap for
+the new weapon, the Weapon ctor warns (`Weapon failed to find animmap %s_%s`,
+Weapon.cpp:96) and leaves `weapon+0xC8 = -1`; the animation system later
+crashes on MAP -1 (e.g. giving a `templeguard`-bank jedi a rifle). After Build,
+v6 now checks `newWpn+0xC8 == -1` and rolls back: destroy the new weapon via
+its virtual dtor, re-run the Aimer fixup (the ctor had bound the aimer to the
+new weapon; `~Weapon` — Phantom `0x7ad050` — never touches the aimer, so
+destroy-then-rebind is safe), log, return nil. The entity slots are untouched
+at that point, so the unit keeps its old weapon. Net pool delta still zero.
+
+**First-person stale view-model pointer.** `FirstPersonRenderable` caches the
+active `Weapon*` at `+0x1600` (`mCurrentWeapon`, struct confirmed via Ghidra:
+`+0x15FC mObjectModel`, `+0x1610 mOwner`). `UpdateSoldier` (`0x4a9be0`)
+re-resolves the weapon each frame but *deliberately keeps the old pointer*
+during the hands-down/holster transition — taken whenever the fresh weapon's
+`+0xAC` **bit 1** is clear, and `Select` only sets bit 2, so a freshly built
+weapon always routes through it. With the old weapon destroyed,
+`RenderSoldier` (`0x4aa2c0`) then calls `mCurrentWeapon->vtbl[+0x8C]` at
+`0x4aa59c` on a freed pool item whose first dword is now a free-list link →
+`call 0` (the observed `EIP=00000000` crash). Fix: after destroying the old
+weapon, read `FirstPerson::s_pRenderable` (modtools `0xb70f40`,
+`game_addrs::modtools::fp_renderable` — a size-1 array on PC like the other
+splitscreen arrays) and null `+0x1600` if it still equals the old pointer.
+Null is engine-safe: `RenderSoldier` null-checks the field, and the holster
+path requires it non-null, so the new weapon is adopted immediately.
+
+**Residual melee hazard (not fixed, only documented):** `WeaponMeleeThrow`
+(Phantom ctor `0x7cc8c0`) caches `m_pPrimaryWeapon` — the owner's `WeaponMelee`
+found by scanning slots once at build — and derefs it unconditionally.
+Swapping a hero's saber out would dangle it. In practice the animmap guard
+refuses most cross-family swaps (jedi banks lack `_rifle` maps and vice
+versa), but melee-family swaps should be considered unsupported.
+
 ### Runtime verification targets (memwatch)
 
 * modtools `Weapon::sMemoryPool.mUsed` = `0xb91c4c` — should stay flat across calls.
