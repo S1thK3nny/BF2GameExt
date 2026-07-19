@@ -262,7 +262,6 @@ namespace modtools {
 
    constexpr uintptr_t get_weapon_anim_map          = 0x00570760;
    constexpr uintptr_t set_weapon_anim_map          = 0x004170D5;
-   constexpr uintptr_t assign_animations            = 0x00581AF0;  // real name: SoldierAnimatorClass::SetupBodyMasks — leaks SoldierAnimation pool per call, see lua_ReapplyAnimations
    constexpr uintptr_t anim_finder_add_bank        = 0x00580860;  // AnimationFinder::_AddBank
    constexpr uintptr_t anim_finder_add_entry       = 0x0057E220;  // AnimationFinder: add RedAnimation* to bank array
    constexpr uintptr_t anim_add_skeleton_bank      = 0x0057DEC0;  // FUN_0057dec0: skeleton-shared bank add (line 671, writes inline mAnimBankOld directly)
@@ -270,7 +269,6 @@ namespace modtools {
    constexpr uintptr_t anim_class_find_in_banks    = 0x0057DE40;  // SoldierAnimatorClass::FindAnimation — iterates this->mAnimBankOld[0..count] inline, calls RedAnimation::FindAnimation
    constexpr uintptr_t red_find_animation          = 0x008037B0;  // RedAnimation::FindAnimation(hash, name)
    constexpr uintptr_t anim_hash_table             = 0x00D5B9E4;  // global PblHashTableCode for RedAnimation
-   constexpr uintptr_t anim_instance                = 0x00B8D3C4;
 
    // ---- Entity / Vehicle -------------------------------------------------------
 
@@ -481,6 +479,16 @@ namespace modtools {
    constexpr uintptr_t net_enabled                    = 0x00BE14F0;
    constexpr uintptr_t net_enabled_next               = 0x00BE14F1;
    constexpr uintptr_t net_on_client                  = 0x00BE14FD;
+
+   // ---- Fog (SetFogRange / SetFogEnable Lua funcs) ------------------------------
+   // RedRenderer::SetFogRange/SetFogEnable set the D3D render states; the
+   // FLRenderer m_fFogStart/m_fFogEnd globals persist the range (FLRenderer::
+   // SetFogRange only stores these two dwords, so the Lua func writes them
+   // directly — release builds inlined the setter away).
+   constexpr uintptr_t red_renderer_set_fog_range     = 0x0080B920;
+   constexpr uintptr_t red_renderer_set_fog_enable    = 0x0080B900;
+   constexpr uintptr_t fl_fog_start                   = 0x00E5BA64;
+   constexpr uintptr_t fl_fog_end                     = 0x00E5BB4C;
 
    // ---- Weapon / Animated Lightsaber Textures (anim_textures.cpp) --------------
    // Port of Xbox's AnimTexture1-3 WeaponMelee blade properties (4-frame blade
@@ -874,6 +882,41 @@ namespace steam {
    constexpr uintptr_t hud_screen_width             = 0x0093E4A4;
    constexpr uintptr_t hud_screen_height            = 0x0093E4A8;
    constexpr uintptr_t hud_reticle_mulss_patch      = 0x006308F6; // start of 24-byte MULSS..ADDSS region
+
+   // ---- Lua core / character system (ported 2026-07-20) ------------------------
+   // Character slot layout is build-INVARIANT (verified via Lua_Callbacks::
+   // GetCharacterUnit 0x58fcd0 / GetCharacterTeam 0x58f820: stride 0x1B0,
+   // ctrl +0x148, team +0x134).  Team struct likewise (+0x48 count, +0x50
+   // classDefs, +0x54 min, +0x58 max — Team::FindUnitClassSlot 0x654020,
+   // Team::_SetClassUnitCounts 0x6548c0).
+   constexpr uintptr_t char_exit_vehicle   = 0x004F1380;  // EntitySoldier::ExitVehicle (vtable 0x79cf2c slot +0x68)
+   constexpr uintptr_t char_array_base     = 0x01E30334;  // Character::sCharacters
+   constexpr uintptr_t max_chars           = 0x01E30330;  // Character::sCharacterLimit
+   constexpr uintptr_t team_array_base     = 0x007E9AA0;  // g_ppTeams (double-deref like modtools)
+   constexpr uintptr_t class_def_list      = 0x007EC560;  // Factory<Entity,EntityClass,EntityDesc>::sList (node+0x4 next, +0xC def; def+0x18 hash)
+   constexpr uintptr_t aimer_set_weapon    = 0x0043E400;  // Aimer::SetWeapon (EntitySoldier ctor fixup @0x4defa2)
+   constexpr uintptr_t lua_create_entity   = 0x0058EB20;  // Lua_Callbacks::CreateEntity (reg table 0x7e7830)
+   constexpr uintptr_t enter_state_path_op = 0x00577661;  // "Load\\load" MOV ECX,imm32 operand in LoadDataFile (release: MOV not PUSH)
+
+   // netEnabled/netEnabledNext are laid out in REVERSE order vs modtools —
+   // semantics verified against the Phantom-named CMOVNZ idiom in the
+   // EntitySoldier ctor @0x4defa7: inShell ? netEnabledNext : netEnabled.
+   constexpr uintptr_t net_in_shell        = 0x007E8007;
+   constexpr uintptr_t net_enabled         = 0x01E62EA9;
+   constexpr uintptr_t net_enabled_next    = 0x01E62EA8;
+
+   // ---- First person (from FirstPerson::Init 0x521000) -------------------------
+   // FirstPersonRenderable is 0x1650 bytes on release too; mCurrentWeapon
+   // +0x1600 confirmed via the Phantom PDB struct (build-invariant).
+   constexpr uintptr_t fp_renderable       = 0x01E55F00;  // FirstPerson::s_pRenderable[0]
+   constexpr uintptr_t fp_anim_array       = 0x01E55E30;  // FirstPerson::mAnim[48]
+   constexpr uintptr_t anim_name_table     = 0x00789760;  // FirstPersonAnimName[48]
+
+   // ---- Fog (see modtools namespace for docs) ----------------------------------
+   constexpr uintptr_t red_renderer_set_fog_range  = 0x006B3640;
+   constexpr uintptr_t red_renderer_set_fog_enable = 0x006B3620;
+   constexpr uintptr_t fl_fog_start        = 0x008F6DBC;  // FLRenderer::m_fFogStart (RenderFarScene @0x6bd940 reads)
+   constexpr uintptr_t fl_fog_end          = 0x008F6DC0;  // FLRenderer::m_fFogEnd
 
 } // namespace steam
 

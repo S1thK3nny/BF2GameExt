@@ -3,6 +3,7 @@
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include <detours.h>
 #include <wininet.h>
@@ -270,13 +271,14 @@ static int lua_GetCharacterWeapon(lua_State* L)
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
+   if (!g_addr->char_array_base || !g_addr->max_chars) { g_lua.pushnil(L); return 1; }
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(game_addrs::modtools::max_chars);
+   const int maxChars  = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) { g_lua.pushnil(L); return 1; }
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
@@ -284,22 +286,24 @@ static int lua_GetCharacterWeapon(lua_State* L)
    if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) { g_lua.pushnil(L); return 1; }
+      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+      // The pointer at slot+0x148 is the soldier's Controllable sub-object
+      // (struct+0x240) — the "entity" view all g_soldier offsets are based on.
+      // (The historical "+0x18 ctrl view" read the same fields at aliased
+      // offsets; direct entity offsets are what the per-build layout stores.)
+      uintptr_t entity = *(uintptr_t*)(charSlot + 0x148);
+      if (!entity) { g_lua.pushnil(L); return 1; }
 
-      char* ctrl = intermediate + 0x18;  // Controllable*
-
-      // Read the slot index for the requested channel
+      // Read the slot index for the requested channel (mWeaponIndex[channel])
       uint8_t slotIdx = 0;
-      __try { slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel); }
+      __try { slotIdx = *(uint8_t*)(entity + g_soldier->weaponIndexMap + channel); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
 
       if (slotIdx >= 8) { g_lua.pushnil(L); return 1; }
 
-      // Read weapon pointer from slot array
+      // Read weapon pointer from mWeapon[slotIdx]
       uintptr_t wpn = 0;
-      __try { wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4); }
+      __try { wpn = *(uintptr_t*)(entity + g_soldier->weaponArray + slotIdx * 4); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!wpn || wpn == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
 
@@ -369,7 +373,13 @@ static int lua_SetCharacterWeapon(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
-   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
+
+   if (!g_addr->char_array_base || !g_addr->max_chars || !g_addr->game_log ||
+       !g_addr->net_in_shell || !g_addr->aimer_set_weapon) {
+      g_lua.pushnil(L); return 1;
+   }
+   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
+   const SoldierLayout& lay = *g_soldier;
 
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
 
@@ -388,9 +398,9 @@ static int lua_SetCharacterWeapon(lua_State* L)
    // while in the shell; in-game the authority is netEnabled. A plain OR of both
    // flags wrongly blocked SP missions when netEnabledNext lingered from the shell.
    {
-      const uint8_t inShell = *(uint8_t*)res(game_addrs::modtools::net_in_shell);
-      const uint8_t net = inShell ? *(uint8_t*)res(game_addrs::modtools::net_enabled_next)
-                                  : *(uint8_t*)res(game_addrs::modtools::net_enabled);
+      const uint8_t inShell = *(uint8_t*)res(g_addr->net_in_shell);
+      const uint8_t net = inShell ? *(uint8_t*)res(g_addr->net_enabled_next)
+                                  : *(uint8_t*)res(g_addr->net_enabled);
       if (net) {
          fn_GameLog("SetCharacterWeapon: disabled in multiplayer (inShell=%d).\n", (int)inShell);
          g_lua.pushnil(L);
@@ -398,13 +408,13 @@ static int lua_SetCharacterWeapon(lua_State* L)
       }
    }
 
-   const int maxChars = *(int*)res(game_addrs::modtools::max_chars);
+   const int maxChars = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) {
       fn_GameLog("SetCharacterWeapon: charIndex %d out of range (max %d).\n", charIndex, maxChars);
       g_lua.pushnil(L); return 1;
    }
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) {
       fn_GameLog("SetCharacterWeapon: character array not initialised.\n");
       g_lua.pushnil(L); return 1;
@@ -432,11 +442,10 @@ static int lua_SetCharacterWeapon(lua_State* L)
          g_lua.pushnil(L); return 1;
       }
 
-      // Channel → slot index. entity+0x510 = mWeaponIndex[2] (struct+0x750,
-      // filled by the ctor's channel-mapping loop @0x533f50; 0xFF = empty).
-      // Same bytes GetCharacterWeapon reads as ctrl+0x4F8.
+      // Channel → slot index. mWeaponIndex[2] (modtools struct+0x750 / Steam
+      // +0x740, filled by the ctor's channel-mapping loop; 0xFF = empty).
       uint8_t slotIdx = 0xFF;
-      __try { slotIdx = *(uint8_t*)(entity + 0x510 + channel); }
+      __try { slotIdx = *(uint8_t*)(entity + lay.weaponIndexMap + channel); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (slotIdx >= 8) {
          fn_GameLog("SetCharacterWeapon: char %d channel %d has no weapon slot (idx=%d).\n",
@@ -444,10 +453,10 @@ static int lua_SetCharacterWeapon(lua_State* L)
          g_lua.pushnil(L); return 1;
       }
 
-      // Old weapon from the ENTITY-side array entity+0x4F0 (struct+0x730) —
-      // the array the ctor fills with Build results and ~EntitySoldier frees.
+      // Old weapon from the ENTITY-side mWeapon[] array — the array the ctor
+      // fills with Build results and ~EntitySoldier frees.
       uintptr_t oldWpn = 0;
-      __try { oldWpn = *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4); }
+      __try { oldWpn = *(uintptr_t*)(entity + lay.weaponArray + slotIdx * 4); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!oldWpn || oldWpn == 0xCDCDCDCDu) {
          fn_GameLog("SetCharacterWeapon: char %d slot %d entity-side weapon invalid (0x%08x).\n",
@@ -519,19 +528,18 @@ static int lua_SetCharacterWeapon(lua_State* L)
          g_lua.pushnumber(L, 1); return 1;
       }
 
-      // EntitySoldierClass — per-slot loadout config (modtools offsets read
-      // straight from the ctor's weapon-build loop @0x533e20):
-      //   +0x984 int8 mWeaponCount, +0x93C WeaponClass*[], +0x95C int mWeaponAmmo[],
-      //   +0x97C int8 mWeaponChannel[]
+      // EntitySoldierClass — per-slot loadout config (offsets from the ctor's
+      // weapon-build loop; modtools @0x533e20, Steam @0x4dedc0 — see
+      // entity_layout.hpp).
       uintptr_t esClass = 0;
-      __try { esClass = *(uintptr_t*)(entity + 0x218); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { esClass = *(uintptr_t*)(entity + lay.classPtr); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if (!esClass || esClass == 0xCDCDCDCDu) {
          fn_GameLog("SetCharacterWeapon: char %d EntitySoldierClass ptr invalid.\n", charIndex);
          g_lua.pushnil(L); return 1;
       }
 
       int8_t weaponCount = 0;
-      __try { weaponCount = *(int8_t*)(esClass + 0x984); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { weaponCount = *(int8_t*)(esClass + lay.clsWeaponCount); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if ((int)slotIdx >= (int)weaponCount) {
          fn_GameLog("SetCharacterWeapon: slot %d >= class weapon count %d.\n",
                     (int)slotIdx, (int)weaponCount);
@@ -543,7 +551,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       //   bit 0x40000000 → WeaponShareEnergy with another slot → refuse
       //   bit 0x20000000 → infinite ammo → mNumClips = INT_MAX (ctor @0x533eb6)
       int32_t ammoVal = 0;
-      __try { ammoVal = *(int32_t*)(esClass + 0x95C + slotIdx * 4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { ammoVal = *(int32_t*)(esClass + lay.clsWeaponAmmo + slotIdx * 4); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if (ammoVal < 0 || (ammoVal & 0x40000000)) {
          fn_GameLog("SetCharacterWeapon: slot %d uses WeaponShareAmmo/Energy - not supported.\n",
                     (int)slotIdx);
@@ -553,7 +561,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       const int32_t numClips = (ammoVal & 0x20000000) ? 0x7FFFFFFF : (ammoVal & 0xFFFFFF);
 
       int8_t chSlot = (int8_t)channel;
-      __try { chSlot = *(int8_t*)(esClass + 0x97C + slotIdx); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { chSlot = *(int8_t*)(esClass + lay.clsWeaponChannel + slotIdx); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if (chSlot < 0 || chSlot > 1) chSlot = (int8_t)channel;
 
       // WeaponDesc — identical to the stack desc the soldier ctor builds
@@ -570,11 +578,11 @@ static int lua_SetCharacterWeapon(lua_State* L)
       } desc = {};
 
       desc.owner    = entity;
-      desc.aimer    = entity + 0x2D0;
+      desc.aimer    = entity + lay.aimer;
       desc.numClips = numClips;
 
       uint8_t dualFlag = 0;
-      __try { dualFlag = *(uint8_t*)(entity + 0x24A); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { dualFlag = *(uint8_t*)(entity + lay.dualWieldFlag); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if ((dualFlag & 1) && chSlot == 1) {
          // Dual-wield secondary: fire trigger is the reload trigger, no reload.
          desc.trigger = entity + 0x40;
@@ -618,12 +626,12 @@ static int lua_SetCharacterWeapon(lua_State* L)
             ((WpnDelete_t)(**(uintptr_t**)newWpn))(newWpn, 1);
          } __except(EXCEPTION_EXECUTE_HANDLER) {}
          __try {
-            int8_t aimSlot = *(int8_t*)(entity + 0x510);
+            int8_t aimSlot = *(int8_t*)(entity + lay.weaponIndexMap);
             if (aimSlot >= 0 && aimSlot < 8) {
-               uintptr_t aimWpn = *(uintptr_t*)(entity + 0x4F0 + aimSlot * 4);
+               uintptr_t aimWpn = *(uintptr_t*)(entity + lay.weaponArray + aimSlot * 4);
                if (aimWpn && aimWpn != 0xCDCDCDCDu) {
                   typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
-                  ((AimerSetWeapon_t)res(game_addrs::modtools::aimer_set_weapon))(entity + 0x2D0, aimWpn);
+                  ((AimerSetWeapon_t)res(g_addr->aimer_set_weapon))(entity + lay.aimer, aimWpn);
                }
             }
          } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -633,29 +641,30 @@ static int lua_SetCharacterWeapon(lua_State* L)
          return 1;
       }
 
-      // Swap into the mWeapon slot the engine owns (struct+0x730). This is the
-      // same memory GetCharacterWeapon reads (as ctrl+0x4D8), so Get reflects
-      // the swap immediately — there is no second array.
-      __try { *(uintptr_t*)(entity + 0x4F0 + slotIdx * 4) = newWpn; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      // Swap into the mWeapon slot the engine owns. This is the same memory
+      // GetCharacterWeapon reads, so Get reflects the swap immediately — there
+      // is no second array.
+      __try { *(uintptr_t*)(entity + lay.weaponArray + slotIdx * 4) = newWpn; } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
-      // Retarget the cached slot-0 weapon pointer (struct+0x718, the old
-      // "ctrl+0x4C0 always equals slot[0]" observation) if it held the old one.
+      // Retarget the cached slot-0 weapon pointer (modtools struct+0x718, the
+      // old "ctrl+0x4C0 always equals slot[0]" observation) if it held the old
+      // one.  Compare-guarded, so a stale offset guess is a no-op.
       __try {
-         uintptr_t* cache = (uintptr_t*)(entity + 0x4D8);
+         uintptr_t* cache = (uintptr_t*)(entity + lay.slot0Cache);
          if (*cache == oldWpn) *cache = newWpn;
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
       // The Weapon ctor unconditionally bound the aimer to the NEW weapon.
-      // Re-run the soldier ctor's post-loop fixup (@0x533fee): point the aimer
-      // back at the primary-channel active weapon (which is newWpn itself when
-      // that is the slot we just swapped).
+      // Re-run the soldier ctor's post-loop fixup (modtools @0x533fee, Steam
+      // @0x4defa2): point the aimer back at the primary-channel active weapon
+      // (which is newWpn itself when that is the slot we just swapped).
       __try {
-         int8_t aimSlot = *(int8_t*)(entity + 0x510);
+         int8_t aimSlot = *(int8_t*)(entity + lay.weaponIndexMap);
          if (aimSlot >= 0 && aimSlot < 8) {
-            uintptr_t aimWpn = *(uintptr_t*)(entity + 0x4F0 + aimSlot * 4);
+            uintptr_t aimWpn = *(uintptr_t*)(entity + lay.weaponArray + aimSlot * 4);
             if (aimWpn && aimWpn != 0xCDCDCDCDu) {
                typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
-               ((AimerSetWeapon_t)res(game_addrs::modtools::aimer_set_weapon))(entity + 0x2D0, aimWpn);
+               ((AimerSetWeapon_t)res(g_addr->aimer_set_weapon))(entity + lay.aimer, aimWpn);
             }
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -671,7 +680,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // active slot index, the byte UpdateIndirect reads). Second arg true =
       // skip the weapon-change sound.
       __try {
-         uint8_t active = *(uint8_t*)(entity + 0x512) & 0x0F;
+         uint8_t active = *(uint8_t*)(entity + lay.weaponIndex) & 0x0F;
          if (active == (uint8_t)slotIdx) {
             typedef void (__thiscall* WpnSelect_t)(uintptr_t w, uint32_t chan, uint32_t quiet);
             WpnSelect_t fnSelect = *(WpnSelect_t*)(*(uintptr_t*)newWpn + 0x74);
@@ -696,9 +705,12 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // null-checks the field, and UpdateSoldier's holster path requires it
       // to be non-null, so the swapped-in weapon is adopted immediately.
       __try {
-         uintptr_t fpr = *(uintptr_t*)res(game_addrs::modtools::fp_renderable);
-         if (fpr && fpr != 0xCDCDCDCDu && *(uintptr_t*)(fpr + 0x1600) == oldWpn)
-            *(uintptr_t*)(fpr + 0x1600) = 0;
+         if (g_addr->fp_renderable) {
+            // mCurrentWeapon +0x1600 is build-invariant (Phantom PDB struct).
+            uintptr_t fpr = *(uintptr_t*)res(g_addr->fp_renderable);
+            if (fpr && fpr != 0xCDCDCDCDu && *(uintptr_t*)(fpr + 0x1600) == oldWpn)
+               *(uintptr_t*)(fpr + 0x1600) = 0;
+         }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
       // Instant animation switch. The Weapon ctor already wrote the correct MAP
@@ -707,11 +719,11 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // both sides now agree, so no oscillation is possible. Calling SWAM here
       // just makes the stance change this frame instead of next.
       __try {
-         uintptr_t animator = *(uintptr_t*)(entity + 0x520);
+         uintptr_t animator = *(uintptr_t*)(entity + lay.animator);
          int32_t   newMap   = *(int32_t*)(newWpn + 0x0C8);
-         if (animator && animator != 0xCDCDCDCDu && newMap != -1) {
+         if (animator && animator != 0xCDCDCDCDu && newMap != -1 && g_addr->set_weapon_anim_map) {
             typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
-            ((SetWeaponAnimMap_t)res(game_addrs::modtools::set_weapon_anim_map))((void*)animator, newMap);
+            ((SetWeaponAnimMap_t)res(g_addr->set_weapon_anim_map))((void*)animator, newMap);
          }
       } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -745,23 +757,24 @@ static uintptr_t resolve_active_weapon(int charIndex, int channel)
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
-   const int maxChars = *(int*)res(game_addrs::modtools::max_chars);
+   if (!g_addr->char_array_base || !g_addr->max_chars) return 0;
+
+   const int maxChars = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
    if (channel < 0 || channel > 7) return 0;
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) return 0;
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) return 0;
+      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+      uintptr_t entity = *(uintptr_t*)(charSlot + 0x148);
+      if (!entity) return 0;
 
-      char* ctrl = intermediate + 0x18;
-      uint8_t slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel);
+      uint8_t slotIdx = *(uint8_t*)(entity + g_soldier->weaponIndexMap + channel);
       if (slotIdx >= 8) return 0;
 
-      uintptr_t wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4);
+      uintptr_t wpn = *(uintptr_t*)(entity + g_soldier->weaponArray + slotIdx * 4);
       if (!wpn || wpn == 0xCDCDCDCDu) return 0;
       return wpn;
    }
@@ -889,7 +902,11 @@ static int lua_RemoveUnitClass(lua_State* L)
 {
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t addr) -> uintptr_t { return addr - kUnrelocatedBase + base; };
-   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
+
+   if (!g_addr->team_array_base || !g_addr->game_log ||
+       !g_addr->class_def_list || !g_addr->hash_string_thiscall)
+      return 0;
+   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
 
    if (!g_lua.isnumber(L, 1)) return 0;
 
@@ -906,7 +923,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 
    // Get team pointer from g_ppTeams[teamIndex].
    // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
-   const uintptr_t teamArrayBase = *(uintptr_t*)res(game_addrs::modtools::team_array_base);
+   const uintptr_t teamArrayBase = *(uintptr_t*)res(g_addr->team_array_base);
    void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
    if (!teamPtr) {
       fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
@@ -935,12 +952,12 @@ static int lua_RemoveUnitClass(lua_State* L)
       // HashString: __thiscall, ECX = 8-byte stack buffer, stack arg = name string.
       // buf[0] is the resulting integer hash.
       typedef void* (__thiscall* HashString_t)(void* buf, const char* name);
-      const auto fn_HashString = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
+      const auto fn_HashString = (HashString_t)res(g_addr->hash_string_thiscall);
       alignas(4) int hashBuf[2] = {};
       fn_HashString(hashBuf, unitClass);
       const int targetHash = hashBuf[0];
 
-      uintptr_t node = *(uintptr_t*)res(game_addrs::modtools::class_def_list);
+      uintptr_t node = *(uintptr_t*)res(g_addr->class_def_list);
       void* classDef = nullptr;
       for (int guard = 0; guard < 1024; ++guard) {
          void* element = *(void**)(node + 0x0c);
@@ -1152,40 +1169,6 @@ static int lua_HttpPostAsync(lua_State* L)
 
 
 // ---------------------------------------------------------------------------
-// ReapplyAnimations() - calls SoldierAnimatorClass::SetupBodyMasks (0x00581AF0),
-// the full animation-bank assignment pass that normally runs once at level load.
-//
-// ⚠️ LEAK HAZARD — do NOT call this repeatedly (verified 2026-07-18):
-// every pass re-resolves every animation of every bank through
-// AnimationFinder::AssignAnimation (0x57fa90), which allocates a fresh
-// "SoldierAnimation" pool entry (16 bytes) per animation WITHOUT freeing the
-// previous pass's entries (~250 entries leaked per call, endless
-// 'Memory pool "SoldierAnimation" is full' spam), re-prints every
-// "Can't find soldier animation ..." warning, and re-attempts a ~100 MB
-// Heap 5 (Runtime) allocation that starts failing once the heap is exhausted.
-//
-// SetCharacterWeapon v6 does NOT need this — the Weapon ctor resolves its own
-// animation MAP. Only use ReapplyAnimations once after a deliberate hotload
-// that changes FirstPersonAnimationBank ODF values, and accept the leak.
-// ---------------------------------------------------------------------------
-static int lua_ReapplyAnimations(lua_State* L)
-{
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
-
-   typedef void (__fastcall* AssignAnimations_t)(void*);
-   const auto fn_assign = (AssignAnimations_t)res(game_addrs::modtools::assign_animations);
-   void* animInst = *(void**)res(game_addrs::modtools::anim_instance);
-   if (!animInst) { g_lua.pushnil(L); return 1; }
-
-   __try { fn_assign(animInst); } __except(EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
-
-   g_lua.pushnumber(L, 1);
-   return 1;
-}
-
-
-// ---------------------------------------------------------------------------
 // OnCharacterExitVehicle / Name / Team / Class / Release
 //
 // Custom Lua C functions that store callbacks in the Lua registry and track
@@ -1243,8 +1226,9 @@ static int lua_OnCEVName(lua_State* L)
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
+   if (!g_addr->hash_string_thiscall) { g_lua.pushnil(L); return 1; }
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
+   const auto fn_Hash = (HashString_t)res(g_addr->hash_string_thiscall);
    alignas(4) int hashBuf[2] = {};
    fn_Hash(hashBuf, name);
    const uint32_t nameHash = (uint32_t)hashBuf[0];
@@ -1293,9 +1277,12 @@ static int lua_OnCEVClass(lua_State* L)
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
+   if (!g_addr->hash_string_thiscall || !g_addr->game_log || !g_addr->class_def_list) {
+      g_lua.pushnil(L); return 1;
+   }
    typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(game_addrs::modtools::hash_string_thiscall);
-   const auto fn_GameLog = (GameLog_t)res(game_addrs::modtools::game_log);
+   const auto fn_Hash = (HashString_t)res(g_addr->hash_string_thiscall);
+   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
 
    // Hash the class name and walk the EntityClass global registry to resolve it
    // to a live EntityClass pointer. Registration fails if the class isn't loaded.
@@ -1304,7 +1291,7 @@ static int lua_OnCEVClass(lua_State* L)
    const uint32_t targetHash = (uint32_t)hashBuf[0];
 
    void* classPtr = nullptr;
-   uintptr_t node = *(uintptr_t*)res(game_addrs::modtools::class_def_list);
+   uintptr_t node = *(uintptr_t*)res(g_addr->class_def_list);
    for (int guard = 0; guard < 4096; ++guard) {
       void* ec = *(void**)(node + 0x0C);
       if (!ec) break;
@@ -1355,27 +1342,27 @@ static int lua_DumpAimerInfo(lua_State* L)
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
 
    if (!g_lua.isnumber(L, 1)) return 0;
+   if (!g_addr->char_array_base || !g_addr->max_chars) return 0;
 
    const int charIndex = g_lua.tointeger(L, 1);
-   const int maxChars  = *(int*)res(game_addrs::modtools::max_chars);
+   const int maxChars  = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
 
-   const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
+   const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) return 0;
 
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
                        ? g_lua.tointeger(L, 2) : 0;
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
-      if (!intermediate) return 0;
-      char* ctrl = intermediate + 0x18;
+      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+      uintptr_t entity = *(uintptr_t*)(charSlot + 0x148);
+      if (!entity) return 0;
 
       // Get weapon from channel
-      uint8_t slotIdx = *(uint8_t*)((uintptr_t)ctrl + 0x4F8 + channel);
+      uint8_t slotIdx = *(uint8_t*)(entity + g_soldier->weaponIndexMap + channel);
       if (slotIdx >= 8) return 0;
-      uintptr_t wpn = *(uintptr_t*)((uintptr_t)ctrl + 0x4D8 + slotIdx * 4);
+      uintptr_t wpn = *(uintptr_t*)(entity + g_soldier->weaponArray + slotIdx * 4);
       if (!wpn) return 0;
 
       // Weapon::mAimer at weapon+0x70
@@ -1468,15 +1455,20 @@ static int lua_SetFogRange(lua_State* L)
    float fogFar  = (float)g_lua.tonumber(L, 2);
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
+
+   if (!g_addr->red_renderer_set_fog_range) return 0;
 
    // RedRenderer::SetFogRange(float, float) — cdecl, sets D3DRS_FOGSTART/FOGEND
    typedef void(__cdecl* SetFogRange_t)(float, float);
-   auto RedRenderer_SetFogRange = (SetFogRange_t)(base + 0x0080b920 - 0x400000);
-   RedRenderer_SetFogRange(fogNear, fogFar);
+   ((SetFogRange_t)res(g_addr->red_renderer_set_fog_range))(fogNear, fogFar);
 
-   // FLRenderer::SetFogRange(float, float) — cdecl, stores in globals for persistence
-   auto FLRenderer_SetFogRange = (SetFogRange_t)(base + 0x0081afe0 - 0x400000);
-   FLRenderer_SetFogRange(fogNear, fogFar);
+   // FLRenderer fog globals — persistence across RenderFarScene's save/restore.
+   // (FLRenderer::SetFogRange only stores these; release builds inlined it.)
+   if (g_addr->fl_fog_start && g_addr->fl_fog_end) {
+      *(float*)res(g_addr->fl_fog_start) = fogNear;
+      *(float*)res(g_addr->fl_fog_end)   = fogFar;
+   }
 
    return 0;
 }
@@ -1488,11 +1480,13 @@ static int lua_SetFogEnable(lua_State* L)
    bool enable = g_lua.tonumber(L, 1) != 0;
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
+
+   if (!g_addr->red_renderer_set_fog_enable) return 0;
 
    // RedRenderer::SetFogEnable(bool) — cdecl, sets D3DRS_FOGENABLE
    typedef void(__cdecl* SetFogEnable_t)(bool);
-   auto fn = (SetFogEnable_t)(base + 0x0080b900 - 0x400000);
-   fn(enable);
+   ((SetFogEnable_t)res(g_addr->red_renderer_set_fog_enable))(enable);
 
    return 0;
 }
@@ -1574,8 +1568,10 @@ static int __cdecl hooked_lua_create_entity(void* L)
 
 void lua_create_entity_hook_install(uintptr_t exe_base)
 {
+   if (!g_addr->lua_create_entity) return;
+
    original_lua_create_entity = (fn_lua_create_entity_t)
-      resolve(exe_base, game_addrs::modtools::lua_create_entity);
+      resolve(exe_base, g_addr->lua_create_entity);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -1603,7 +1599,6 @@ static const lua_func_entry custom_functions[] = {
    { "HttpPutAsync",          lua_HttpPutAsync },
    { "HttpPostAsync",         lua_HttpPostAsync },
    { "RemoveUnitClass",       lua_RemoveUnitClass },
-   { "ReapplyAnimations",     lua_ReapplyAnimations },
    { "OnCharacterExitVehicle",       lua_OnCEV },
    { "OnCharacterExitVehicleName",   lua_OnCEVName },
    { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },

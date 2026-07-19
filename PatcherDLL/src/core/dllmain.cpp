@@ -213,9 +213,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);
 
-   // Build-aware installers (select their address set from g_build / g_addr),
-   // so they run on every identified build — not just modtools.  Called here,
-   // outside the modtools-only lua_hooks_install, while sections are still RW.
+   // Installers that select their address set from g_addr; each no-ops where its
+   // addresses are unknown.  Called here while sections are still RW.
    barrel_fire_origin_install(exe_base);
    aim_assist_install(exe_base);
    prone_system_install(exe_base);

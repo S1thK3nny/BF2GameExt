@@ -5,6 +5,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "util/game_logging.hpp"
+#include "util/cfile.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "loading_screen/loading_screen.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
@@ -64,7 +65,10 @@ static fn_char_exit_vehicle original_char_exit_vehicle = nullptr;
 
 static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, int arg1, int arg2)
 {
-   // thisPtr = character Controllable* (EntitySoldier + 0x240).
+   // thisPtr = character Controllable* (EntitySoldier + 0x240; base invariant
+   // across builds).  Character slot layout (stride 0x1B0, +0x148 ctrl, +0x14C
+   // vehicle ctrl, +0x134 team) is build-invariant — verified on Steam via
+   // Lua_Callbacks::GetCharacterUnit/GetCharacterTeam.
    // Scan the character array BEFORE calling original (original clears state).
    int       charIndex      = -1;
    void*     vehicleCtrl    = nullptr;
@@ -76,8 +80,8 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + exe_base; };
 
    __try {
-      const uintptr_t arrayBase = *(uintptr_t*)res(game_addrs::modtools::char_array_base);
-      const int       maxChars  = *(int*)      res(game_addrs::modtools::max_chars);
+      const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
+      const int       maxChars  = *(int*)      res(g_addr->max_chars);
       if (arrayBase && maxChars > 0) {
          for (int i = 0; i < maxChars; i++) {
             const uintptr_t slot = arrayBase + (uintptr_t)i * 0x1B0;
@@ -157,7 +161,7 @@ static void __cdecl hooked_init_state()
    // RESET the path to vanilla every time a new mission/state starts
    strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), "Load\\load", _TRUNCATE);
 
-   g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), game_addrs::modtools::g_lua_state_ptr);
+   g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), g_addr->g_lua_state_ptr);
 
    // Reset callback storage for the new Lua state.
    memset(g_cevCallbacks, 0, sizeof(g_cevCallbacks));
@@ -167,23 +171,28 @@ static void __cdecl hooked_init_state()
    fp_anim_bank_reset();
    flyer_boost_anim_reset();
    disguise_ext_reset();
-   // Droideka DisableBallMode is build-aware and installs from dllmain; on the
-   // other builds it detours init_state itself (lua_hooks is modtools-only).
    droideka_ball_mode_reset();
    soldier_override_texture_reset();
 
-   // Register debug console commands (engine is fully initialized now)
-   DebugCommandRegistry::lateInit();
+   if (g_build == GameBuild::Modtools) {
+      // Register debug console commands (engine is fully initialized now).
+      // Console registration addresses are modtools-only.
+      DebugCommandRegistry::lateInit();
+   }
 
    if (g_L) {
       register_lua_functions(g_L);
    }
 
-   // Set up gamepad bindings + rumble hooks — must run after the game's input
-   // system is initialized (and after the CRT FP package is ready).
-   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   controller_setup_bindings(base);
-   if (g_rumbleEnabled) rumble_init(base);
+   if (g_build == GameBuild::Modtools) {
+      // Set up gamepad bindings + rumble hooks — must run after the game's input
+      // system is initialized (and after the CRT FP package is ready).
+      // Modtools-only until the release-build controller struct offsets
+      // (ctrlBase+0x428 / tables +0x1ACC/+0x20BC) are verified.
+      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+      controller_setup_bindings(base);
+      if (g_rumbleEnabled) rumble_init(base);
+   }
 }
 
 void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
@@ -197,63 +206,79 @@ void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
 
 void lua_hooks_install(uintptr_t exe_base)
 {
-   // Detour-hook layer targets raw modtools VAs / inline sites -> modtools only.
-   HOOK_REQUIRE_MODTOOLS();
+   // Requires the Lua VM API + init_state; no-ops on builds that lack them.
+   if (!g_addr->init_state || !g_addr->g_lua_state_ptr || !g_addr->lua_pushcclosure)
+      return;
 
-   using namespace game_addrs::modtools;
+   g_lua.pushcclosure = (fn_lua_pushcclosure)resolve(exe_base, g_addr->lua_pushcclosure);
+   g_lua.pushlstring  = (fn_lua_pushlstring) resolve(exe_base, g_addr->lua_pushlstring);
+   g_lua.settable     = (fn_lua_settable)    resolve(exe_base, g_addr->lua_settable);
+   g_lua.tolstring    = (fn_lua_tolstring)   resolve(exe_base, g_addr->lua_tolstring);
+   g_lua.pushnumber   = (fn_lua_pushnumber)  resolve(exe_base, g_addr->lua_pushnumber);
+   g_lua.tonumber     = (fn_lua_tonumber)    resolve(exe_base, g_addr->lua_tonumber);
+   g_lua.gettop       = (fn_lua_gettop)      resolve(exe_base, g_addr->lua_gettop);
+   g_lua.pushnil      = (fn_lua_pushnil)     resolve(exe_base, g_addr->lua_pushnil);
+   g_lua.pushboolean  = (fn_lua_pushboolean) resolve(exe_base, g_addr->lua_pushboolean);
+   g_lua.toboolean    = (fn_lua_toboolean)   resolve(exe_base, g_addr->lua_toboolean);
+   g_lua.touserdata        = (fn_lua_touserdata)       resolve(exe_base, g_addr->lua_touserdata);
+   g_lua.pushlightuserdata = (fn_lua_pushlightuserdata) resolve(exe_base, g_addr->lua_pushlightuserdata);
+   g_lua.isnumber          = (fn_lua_isnumber)          resolve(exe_base, g_addr->lua_isnumber);
+   g_lua.gettable     = (fn_lua_gettable)    resolve(exe_base, g_addr->lua_gettable);
+   g_lua.pcall        = (fn_lua_pcall)       resolve(exe_base, g_addr->lua_pcall);
+   g_lua.rawgeti      = (fn_lua_rawgeti)     resolve(exe_base, g_addr->lua_rawgeti);
+   g_lua.settop       = (fn_lua_settop)       resolve(exe_base, g_addr->lua_settop);
+   g_lua.insert       = (fn_lua_insert)       resolve(exe_base, g_addr->lua_insert);
+   original_init_state = (fn_init_state)resolve(exe_base, g_addr->init_state);
 
-   g_lua.pushcclosure = (fn_lua_pushcclosure)resolve(exe_base, lua_pushcclosure);
-   g_lua.pushlstring  = (fn_lua_pushlstring) resolve(exe_base, lua_pushlstring);
-   g_lua.settable     = (fn_lua_settable)    resolve(exe_base, lua_settable);
-   g_lua.tolstring    = (fn_lua_tolstring)   resolve(exe_base, lua_tolstring);
-   g_lua.pushnumber   = (fn_lua_pushnumber)  resolve(exe_base, lua_pushnumber);
-   g_lua.tonumber     = (fn_lua_tonumber)    resolve(exe_base, lua_tonumber);
-   g_lua.gettop       = (fn_lua_gettop)      resolve(exe_base, lua_gettop);
-   g_lua.pushnil      = (fn_lua_pushnil)     resolve(exe_base, lua_pushnil);
-   g_lua.pushboolean  = (fn_lua_pushboolean) resolve(exe_base, lua_pushboolean);
-   g_lua.toboolean    = (fn_lua_toboolean)   resolve(exe_base, lua_toboolean);
-   g_lua.touserdata        = (fn_lua_touserdata)       resolve(exe_base, lua_touserdata);
-   g_lua.pushlightuserdata = (fn_lua_pushlightuserdata) resolve(exe_base, lua_pushlightuserdata);
-   g_lua.isnumber          = (fn_lua_isnumber)          resolve(exe_base, lua_isnumber);
-   g_lua.gettable     = (fn_lua_gettable)    resolve(exe_base, lua_gettable);
-   g_lua.pcall        = (fn_lua_pcall)       resolve(exe_base, lua_pcall);
-   g_lua.rawgeti      = (fn_lua_rawgeti)     resolve(exe_base, lua_rawgeti);
-   g_lua.settop       = (fn_lua_settop)       resolve(exe_base, lua_settop);
-   g_lua.insert       = (fn_lua_insert)       resolve(exe_base, lua_insert);
-   original_init_state = (fn_init_state)resolve(exe_base, init_state);
-
-   original_char_exit_vehicle = (fn_char_exit_vehicle)resolve(exe_base, char_exit_vehicle);
+   // Character-exit-vehicle event hook — needs the exit function AND the char
+   // array globals for the pre-call scan.
+   const bool wantCEV = g_addr->char_exit_vehicle && g_addr->char_array_base && g_addr->max_chars;
+   if (wantCEV)
+      original_char_exit_vehicle = (fn_char_exit_vehicle)resolve(exe_base, g_addr->char_exit_vehicle);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    LONG r1 = DetourAttach(&(PVOID&)original_init_state, hooked_init_state);
-   LONG r2 = DetourAttach(&(PVOID&)original_char_exit_vehicle, hooked_char_exit_vehicle);
+   LONG r2 = wantCEV ? DetourAttach(&(PVOID&)original_char_exit_vehicle, hooked_char_exit_vehicle) : 0;
    LONG rc = DetourTransactionCommit();
 
-   auto fn_log = get_gamelog();
-   fn_log("DetourAttach init_state=%ld  exit_vehicle=%ld  commit=%ld\n", r1, r2, rc);
+   // NOTE: lua_hooks_install runs from dllmain while the exe sections are still
+   // PAGE_READWRITE (non-executable) — see dllmain.cpp.  Calling any game
+   // function here (e.g. game_log / RedWarning::LogMessage) faults with an EXEC
+   // access violation under DEP on Steam.  So install-window diagnostics go to a
+   // CRT log file instead of get_gamelog().
+   cfile install_log("BF2GameExt_install.log", "a");
+   install_log.printf("[lua_hooks] DetourAttach init_state=%ld  exit_vehicle=%ld  commit=%ld\n",
+                      r1, r2, rc);
 
-   // Patch the PUSH imm32 operand inside LoadDisplay::EnterState so the
-   // hardcoded "Load\\load" pointer is replaced by &g_loadDisplayPath.
+   // Patch the imm32 operand of the instruction that loads the hardcoded
+   // "Load\\load" pointer (PUSH on modtools, MOV ECX on Steam) so it points at
+   // g_loadDisplayPath instead.  Modders call SetLoadDisplayLevel() to
+   // override the path before the load screen fires.
    // dllmain.cpp has already made all sections PAGE_READWRITE at this point.
-   g_enter_state_path_op_ptr  = (uint32_t*)resolve(exe_base, game_addrs::modtools::enter_state_path_op);
-   g_enter_state_path_op_orig = *g_enter_state_path_op_ptr;
-   *g_enter_state_path_op_ptr = (uint32_t)(uintptr_t)g_loadDisplayPath;
-   fn_log("[LoadDisplay] patched path operand 0x%08x -> 0x%08x (\"%s\")\n",
-          g_enter_state_path_op_orig, *g_enter_state_path_op_ptr, g_loadDisplayPath);
+   if (g_addr->enter_state_path_op) {
+      g_enter_state_path_op_ptr  = (uint32_t*)resolve(exe_base, g_addr->enter_state_path_op);
+      g_enter_state_path_op_orig = *g_enter_state_path_op_ptr;
+      *g_enter_state_path_op_ptr = (uint32_t)(uintptr_t)g_loadDisplayPath;
+      install_log.printf("[LoadDisplay] patched path operand 0x%08x -> 0x%08x (\"%s\")\n",
+                         g_enter_state_path_op_orig, *g_enter_state_path_op_ptr, g_loadDisplayPath);
+   }
 
-   loading_screen_install(exe_base);
-   entity_carrier_fixes_install(exe_base);
-   fp_anim_bank_install(exe_base);
-   flyer_boost_anim_install(exe_base);
-   grapple_fix_install(exe_base);
-   DebugCommandRegistry::install(exe_base);
-   shield_channel_fix_install(exe_base);
-   lua_create_entity_hook_install(exe_base);
+   if (g_build == GameBuild::Modtools) {
+      // These installers still target raw modtools VAs / inline patch sites.
+      loading_screen_install(exe_base);
+      entity_carrier_fixes_install(exe_base);
+      fp_anim_bank_install(exe_base);
+      flyer_boost_anim_install(exe_base);
+      grapple_fix_install(exe_base);
+      DebugCommandRegistry::install(exe_base);
+      shield_channel_fix_install(exe_base);
+   }
+
+   lua_create_entity_hook_install(exe_base); // guards internally
 
    // Barrel fire origin (WeaponCannon vtable patch) installs separately via
-   // barrel_fire_origin_install() in weapon/barrel_fire_origin.cpp, called from
-   // dllmain's build-aware section so it runs on Steam too.
+   // barrel_fire_origin_install() in weapon/barrel_fire_origin.cpp.
 }
 
 void lua_hooks_uninstall()
