@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "cloth_collision_fix.hpp"
 #include "core/resolve.hpp"
+#include "core/game_build.hpp"
 
 #include <cstring>
 #include <cmath>
@@ -65,8 +66,7 @@ static bool g_firstCorrectionLogged = false;
 //   2. Height doubled (halfHeight*2) — now uses halfHeight directly
 // ---------------------------------------------------------------------------
 
-static void __fastcall hooked_EnforceCylinderCollision(
-   void* ecx, void* /*edx*/, float* mat, float halfHeight, float radius)
+static void __cdecl enforce_cylinder_impl(void* ecx, float* mat, float halfHeight, float radius)
 {
    uintptr_t self = (uintptr_t)ecx;
 
@@ -125,6 +125,34 @@ static void __fastcall hooked_EnforceCylinderCollision(
             pos[2] += (radialX * mat[2] + radialZ * mat[10]) * scale;
          }
       }
+   }
+}
+
+// Modtools (debug) entry: plain __thiscall — matrix, halfHeight, radius all
+// on the stack.
+static void __fastcall hooked_EnforceCylinderCollision(
+   void* ecx, void* /*edx*/, float* mat, float halfHeight, float radius)
+{
+   enforce_cylinder_impl(ecx, mat, halfHeight, radius);
+}
+
+// Steam (release/LTCG) entry: ECX=this, one stack arg (float* matrix, RET 4),
+// halfHeight in XMM2, radius in XMM3.  Naked thunk re-marshals to the shared
+// __cdecl impl (which preserves EBX/ESI/EDI for the LTCG caller).
+__declspec(naked) static void hooked_EnforceCylinderCollision_steam()
+{
+   __asm {
+      push ebp
+      mov  ebp, esp
+      sub  esp, 8
+      movss dword ptr [esp], xmm2      // halfHeight
+      movss dword ptr [esp + 4], xmm3  // radius
+      push dword ptr [ebp + 8]         // float* matrix
+      push ecx                         // this
+      call enforce_cylinder_impl
+      add  esp, 16
+      pop  ebp
+      ret  4
    }
 }
 
@@ -220,17 +248,39 @@ static void __fastcall hooked_SatisfyConstraints(void* ecx, void* edx,
 // Install / uninstall
 // ---------------------------------------------------------------------------
 
+static PVOID g_cylinderHook = nullptr; // build-specific entry attached to the detour
+
 void cloth_collision_fix_install(uintptr_t exe_base)
 {
-   using namespace game_addrs::modtools;
-   original_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, cloth_satisfy_constraints);
-   fn_EnforceCollisions = (fn_EnforceCollisions_t)resolve(exe_base, cloth_enforce_collisions);
-   original_EnforceCylinderCollision = (fn_EnforceCylinderCollision_t)resolve(exe_base, cloth_enforce_cylinder_coll);
+   uintptr_t satisfy = 0, enforce = 0, cylinder = 0;
+
+   switch (g_build) {
+   case GameBuild::Modtools: {
+      using namespace game_addrs::modtools;
+      satisfy  = cloth_satisfy_constraints;
+      enforce  = cloth_enforce_collisions;
+      cylinder = cloth_enforce_cylinder_coll;
+      g_cylinderHook = (PVOID)hooked_EnforceCylinderCollision;
+   } break;
+   case GameBuild::Steam: {
+      using namespace game_addrs::steam;
+      satisfy  = cloth_satisfy_constraints;
+      enforce  = cloth_enforce_collisions;
+      cylinder = cloth_enforce_cylinder_coll;
+      g_cylinderHook = (PVOID)hooked_EnforceCylinderCollision_steam;
+   } break;
+   default:
+      return; // GOG unported
+   }
+
+   original_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, satisfy);
+   fn_EnforceCollisions = (fn_EnforceCollisions_t)resolve(exe_base, enforce);
+   original_EnforceCylinderCollision = (fn_EnforceCylinderCollision_t)resolve(exe_base, cylinder);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SatisfyConstraints, hooked_SatisfyConstraints);
-   DetourAttach(&(PVOID&)original_EnforceCylinderCollision, hooked_EnforceCylinderCollision);
+   DetourAttach(&(PVOID&)original_EnforceCylinderCollision, g_cylinderHook);
    LONG rc = DetourTransactionCommit();
 
    (void)rc;
@@ -242,7 +292,7 @@ void cloth_collision_fix_uninstall()
    DetourUpdateThread(GetCurrentThread());
    if (original_SatisfyConstraints)
       DetourDetach(&(PVOID&)original_SatisfyConstraints, hooked_SatisfyConstraints);
-   if (original_EnforceCylinderCollision)
-      DetourDetach(&(PVOID&)original_EnforceCylinderCollision, hooked_EnforceCylinderCollision);
+   if (original_EnforceCylinderCollision && g_cylinderHook)
+      DetourDetach(&(PVOID&)original_EnforceCylinderCollision, g_cylinderHook);
    DetourTransactionCommit();
 }

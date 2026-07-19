@@ -792,7 +792,18 @@ namespace steam {
    constexpr uintptr_t anim_finder_add_bank     = 0x00645a00;
    constexpr uintptr_t carrier_attach_cargo     = 0x00497300;
    constexpr uintptr_t carrier_take_off         = 0x004b3c60;
-   constexpr uintptr_t cloth_enforce_collisions = 0x006569c0;
+   // NOTE: 0x6569c0 (old value of cloth_enforce_collisions) is actually
+   // TentacleSimulator::EnforceCollisions — the 0x656/0x657 "EntityCloth::"
+   // labels in the Steam Ghidra DB are misported.  The real EntityCloth sim
+   // lives at 0x458xxx-0x45bxxx (InternalUpdate 0x45adb0: frame gate +0x80 →
+   // AccumulateForces 0x45af10 → Verlet 0x45ae10 → SatisfyConstraints →
+   // ComputeNormals 0x45bd50).  Struct offsets match modtools: +0x20 pos,
+   // +0x24 oldPos, +0x114 clothData ([0]=total,[1]=fixed), +0x110 class.
+   constexpr uintptr_t cloth_enforce_collisions = 0x0045BA40;  // EntityCloth::EnforceCollisions — thiscall(matrix, hashtable), RET 8
+   constexpr uintptr_t cloth_satisfy_constraints = 0x0045BC40; // EntityCloth::SatisfyConstraints — thiscall(matrix, hashtable, iterations), RET 0xC
+   // LTCG: ECX=this, one stack arg (float* matrix, RET 4), halfHeight in
+   // XMM2, radius in XMM3 — needs the naked thunk in cloth_collision_fix.cpp.
+   constexpr uintptr_t cloth_enforce_cylinder_coll = 0x0045B7C0;
    constexpr uintptr_t load_config_real         = 0x005777e0;
    constexpr uintptr_t load_data_file_real      = 0x00577620;
    constexpr uintptr_t load_end_real            = 0x00576b90;
