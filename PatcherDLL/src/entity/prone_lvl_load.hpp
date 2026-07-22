@@ -11,7 +11,7 @@
 // alongside every ingame.lvl read.
 //
 // Hook point: the Lua "ReadDataFile" callback.  ingame.lvl isn't opened by the
-// engine directly — every mission script calls ReadDataFile("ingame.lvl"), and
+// engine directly.  Every mission script calls ReadDataFile("ingame.lvl"), and
 // the callback itself special-cases that exact name (stricmp) to run
 // FirstPerson::Init and push the game_interface script.  We piggy-back on the
 // same test: after the vanilla read completes we call LoadUtil::ReadDataFile
@@ -25,6 +25,11 @@
 //                            switched off for that mission (it is re-evaluated
 //                            on every ingame.lvl read, so a later mission that
 //                            does find the file re-enables it).
+//
+// This file also owns the low-res half of the same asset story: prone.lvl
+// carries a low-res donor bank whose prone animation is grafted into the stock
+// humanlz bank so distant soldiers don't pop to a crouch pose.  See the graft
+// section in the .cpp.
 // =============================================================================
 
 void prone_lvl_load_install(uintptr_t exe_base);

@@ -202,6 +202,10 @@ namespace modtools {
    constexpr uintptr_t lua_read_data_file          = 0x0046A790;
    constexpr uintptr_t load_util_read_data_file    = 0x004538B0;
 
+   constexpr uintptr_t lowres_postload             = 0x00586E60; // SoldierAnimatorLowResClass::PostLoad
+   constexpr uintptr_t pbl_hash_table_store        = 0x007E1A90; // PblHashTableCode::_Store(table, size, hash, value)
+   constexpr uintptr_t pbl_temp_hash               = 0x007E1C10; // PblTEMPHash
+
    // ---- Entity / Droideka DisableBallMode --------------------------------------
    // EntityDroideka::UpdatePilot is the sole roll/unroll request site (player and
    // AI both).  Struct offsets (mClass +0x450, mState +0x1A74) live with the
@@ -635,6 +639,10 @@ namespace steam {
 
    constexpr uintptr_t lua_read_data_file        = 0x0058AC50;
    constexpr uintptr_t load_util_read_data_file  = 0x00579C30;
+
+   constexpr uintptr_t lowres_postload           = 0x00647D40;
+   constexpr uintptr_t pbl_hash_table_store      = 0x00726F60;  // returns bool here
+   constexpr uintptr_t pbl_temp_hash             = 0x00726D80;
 
    // ---- Entity / Droideka DisableBallMode ------------------------------------
    // Release layout differs from modtools (mState +0x1A54 not 0x1A74, mClass

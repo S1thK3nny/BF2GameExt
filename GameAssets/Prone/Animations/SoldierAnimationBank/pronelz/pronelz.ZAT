@@ -1,0 +1,498 @@
+********************
+SKNS
+{
+	Num Skin Sets: <1>
+	SKIN
+	{
+	Model Name: <bone_pelvis>
+	Material Index: <0>
+	Num Verts: <24>
+	---First Vert: <0,32767,32767,0x8000>
+	Num Normals: <24>
+	---First Normal: <183,183,73>
+	Num VertWeights: <0>
+	Num UVs: <0>
+	Num VertColors: <0>
+	Num BoneWeightIndices: <0>
+	Bounding Box: <(-0.100000,-0.100000,-0.100000) - (0.100000,0.100000,0.100000)>
+	}
+	Num Materials: <1>
+	MATL
+	{
+	Diffuse Color (ARGB): <0x7f595959>
+	Mode flags: <0x8>
+	Flags: <0x1000>
+	Alpha flags: <0x0>
+	Test flags: <0x50002>
+	ARef: <0x0>
+	Number of textures: <0>
+	}
+	Num JointSets: <1>
+	JSET
+	{
+	Num Joints: <0>
+	Joints:
+	{
+	}
+	Num SkinSets: <1>
+	SkinSets: <0 >
+	}
+}
+********************
+SKEL
+{
+Num Joints: <14>
+Num Joints (list size): <14>
+	JONT
+	{
+	Name <dummyroot>
+	Name CRC: <0x4446e9b8>
+	Parent Name <>
+	Base Rotation: <0.000000,0.000000,0.000000,1.000000>
+	Base Trans: <0.000000,0.000000,0.000000>
+	Base Pose Matrix (LS-WS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0x0>
+	Child CRC: <0xe6e47876>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_l_calf>
+	Name CRC: <0x87019234>
+	Parent Name <bone_l_thigh>
+	Base Rotation: <0.000000,0.000000,0.132681,0.991159>
+	Base Trans: <0.480000,0.000000,0.000000>
+	Base Pose Matrix (LS-WS):
+	< 0.964792, 0.263015, 0.000000, 0.000000
+	  -0.263015, 0.964792, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.480000, 0.000000, 0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xc496176d>
+	Child CRC: <0x0>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_r_thigh>
+	Name CRC: <0xf6eff696>
+	Parent Name <bone_pelvis>
+	Base Rotation: <-0.466344,0.529362,-0.545924,0.451960>
+	Base Trans: <-0.094280,-0.104937,0.009118>
+	Base Pose Matrix (LS-WS):
+	< -0.156513, -0.987199, 0.030675, 0.000000
+	  -0.000258, -0.031017, -0.999519, 0.000000
+	  0.987676, -0.156445, 0.004600, 0.000000
+	  -0.094280, -0.104937, 0.009118, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe6e47876>
+	Child CRC: <0xb2f01cd3>
+	Sibling CRC: <0xe5b51072>
+	}
+	JONT
+	{
+	Name <bone_r_calf>
+	Name CRC: <0xb2f01cd3>
+	Parent Name <bone_r_thigh>
+	Base Rotation: <0.000000,0.000000,0.129639,0.991561>
+	Base Trans: <0.480000,-0.000000,-0.000000>
+	Base Pose Matrix (LS-WS):
+	< 0.966388, 0.257090, 0.000000, 0.000000
+	  -0.257090, 0.966388, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.480000, -0.000000, -0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xf6eff696>
+	Child CRC: <0x0>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_ribcage>
+	Name CRC: <0xe5b51072>
+	Parent Name <bone_pelvis>
+	Base Rotation: <-0.505529,-0.494408,-0.505529,-0.494408>
+	Base Trans: <-0.000000,0.321768,-0.022846>
+	Base Pose Matrix (LS-WS):
+	< 0.000000, 0.999753, 0.022241, 0.000000
+	  -0.000000, -0.022241, 0.999753, 0.000000
+	  1.000000, 0.000000, 0.000000, 0.000000
+	  -0.000000, 0.321768, -0.022846, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe6e47876>
+	Child CRC: <0x318ff0cc>
+	Sibling CRC: <0xd2afb28a>
+	}
+	JONT
+	{
+	Name <bone_r_upperarm>
+	Name CRC: <0x318ff0cc>
+	Parent Name <bone_ribcage>
+	Base Rotation: <0.684622,-0.088440,-0.719784,0.073360>
+	Base Trans: <0.167288,-0.025799,-0.228874>
+	Base Pose Matrix (LS-WS):
+	< -0.051822, -0.226703, -0.972584, 0.000000
+	  -0.015490, -0.973593, 0.227763, 0.000000
+	  -0.998536, 0.026868, 0.046942, 0.000000
+	  0.167288, -0.025799, -0.228874, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe5b51072>
+	Child CRC: <0x3dd7fd4e>
+	Sibling CRC: <0x72c896b>
+	}
+	JONT
+	{
+	Name <bone_r_forearm>
+	Name CRC: <0x3dd7fd4e>
+	Parent Name <bone_r_upperarm>
+	Base Rotation: <0.001632,0.006311,-0.250408,0.968119>
+	Base Trans: <0.240162,-0.000000,-0.000000>
+	Base Pose Matrix (LS-WS):
+	< 0.874512, -0.484828, -0.013038, 0.000000
+	  0.484869, 0.874587, 0.000000, 0.000000
+	  0.011403, -0.006322, 0.999915, 0.000000
+	  0.240162, -0.000000, -0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0x318ff0cc>
+	Child CRC: <0x2b960099>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <hp_weapons>
+	Name CRC: <0x2b960099>
+	Parent Name <bone_r_forearm>
+	Base Rotation: <-0.746485,0.086971,-0.657335,0.055742>
+	Base Trans: <0.470124,-0.066077,0.006886>
+	Base Pose Matrix (LS-WS):
+	< 0.120693, -0.203127, 0.971685, 0.000000
+	  -0.056564, -0.978658, -0.197559, 0.000000
+	  0.991077, -0.031118, -0.129607, 0.000000
+	  0.470124, -0.066077, 0.006886, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0x3dd7fd4e>
+	Child CRC: <0x0>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_l_upperarm>
+	Name CRC: <0x72c896b>
+	Parent Name <bone_ribcage>
+	Base Rotation: <-0.684622,0.088440,-0.719784,0.073360>
+	Base Trans: <0.167288,-0.025799,0.228874>
+	Base Pose Matrix (LS-WS):
+	< -0.051822, -0.226703, 0.972584, 0.000000
+	  -0.015490, -0.973593, -0.227763, 0.000000
+	  0.998536, -0.026868, 0.046942, 0.000000
+	  0.167288, -0.025799, 0.228874, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe5b51072>
+	Child CRC: <0x8e51239c>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_l_forearm>
+	Name CRC: <0x8e51239c>
+	Parent Name <bone_l_upperarm>
+	Base Rotation: <-0.001632,-0.006311,-0.250408,0.968119>
+	Base Trans: <0.240162,-0.000000,0.000000>
+	Base Pose Matrix (LS-WS):
+	< 0.874512, -0.484828, 0.013038, 0.000000
+	  0.484869, 0.874587, -0.000000, 0.000000
+	  -0.011403, 0.006322, 0.999915, 0.000000
+	  0.240162, -0.000000, 0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0x72c896b>
+	Child CRC: <0x0>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_neck>
+	Name CRC: <0xd2afb28a>
+	Parent Name <bone_pelvis>
+	Base Rotation: <-0.505529,-0.494408,-0.505529,-0.494408>
+	Base Trans: <-0.000000,0.321768,-0.022846>
+	Base Pose Matrix (LS-WS):
+	< 0.000000, 0.999753, 0.022241, 0.000000
+	  -0.000000, -0.022241, 0.999753, 0.000000
+	  1.000000, 0.000000, 0.000000, 0.000000
+	  -0.000000, 0.321768, -0.022846, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe6e47876>
+	Child CRC: <0x8afdf5e4>
+	Sibling CRC: <0xc496176d>
+	}
+	JONT
+	{
+	Name <bone_head>
+	Name CRC: <0x8afdf5e4>
+	Parent Name <bone_neck>
+	Base Rotation: <0.000000,0.000000,-0.011121,0.999938>
+	Base Trans: <0.363275,0.027743,-0.000000>
+	Base Pose Matrix (LS-WS):
+	< 0.999753, -0.022241, 0.000000, 0.000000
+	  0.022241, 0.999753, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.363275, 0.027743, -0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xd2afb28a>
+	Child CRC: <0x0>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_l_thigh>
+	Name CRC: <0xc496176d>
+	Parent Name <bone_pelvis>
+	Base Rotation: <-0.546440,0.451335,-0.466955,0.528823>
+	Base Trans: <0.094280,-0.104937,0.009118>
+	Base Pose Matrix (LS-WS):
+	< 0.156501, -0.987127, 0.032974, 0.000000
+	  0.000618, -0.033287, -0.999446, 0.000000
+	  0.987678, 0.156435, -0.004599, 0.000000
+	  0.094280, -0.104937, 0.009118, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0xe6e47876>
+	Child CRC: <0x87019234>
+	Sibling CRC: <0x0>
+	}
+	JONT
+	{
+	Name <bone_pelvis>
+	Name CRC: <0xe6e47876>
+	Parent Name <dummyroot>
+	Base Rotation: <0.000000,0.000000,0.000000,1.000000>
+	Base Trans: <0.000000,1.159374,0.000000>
+	Base Pose Matrix (LS-WS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 1.159374, 0.000000, 1.000000>
+	Inverted Base Pose Matrix (WS-LS):
+	< 1.000000, 0.000000, 0.000000, 0.000000
+	  0.000000, 1.000000, 0.000000, 0.000000
+	  0.000000, 0.000000, 1.000000, 0.000000
+	  0.000000, 0.000000, 0.000000, 1.000000>
+	Parent CRC: <0x4446e9b8>
+	Child CRC: <0xf6eff696>
+	Sibling CRC: <0x0>
+	}
+}
+********************
+PXYS
+{
+Num Collision Proxies: <0>
+Num Collision Proxies (list size): <0>
+}
+********************
+SHDS
+{
+}
+********************
+ANMS
+{
+File format version: 8.0
+comp_debug level: 0
+Num Animations: <1>
+	ANIM
+	{
+	Anim Name: <pronelz_rifle_prone_idle_emote>
+	Anim Name CRC: <0x6c4d3286>
+	Num Frames: <1>
+	Num Frames (from keys[0].quats.size) <1>
+	Num Joints: <14>
+	transBitFlags: <0x0>
+		AKEY
+		{
+		Jointname: <dummyroot>
+		Joint CRC: <0x4446e9b8>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.000000,0.000000,0.000000,1.000000> <0.000000,0.000000,0.000000>
+		}
+		AKEY
+		{
+		Jointname: <bone_pelvis>
+		Joint CRC: <0xe6e47876>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.649671,-0.084981,-0.104943,0.748126> <0.000000,0.147826,0.000000>
+		}
+		AKEY
+		{
+		Jointname: <bone_r_thigh>
+		Joint CRC: <0xf6eff696>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.232531,0.143917,-0.863868,0.423023> <-0.094280,-0.104937,0.009118>
+		}
+		AKEY
+		{
+		Jointname: <bone_r_calf>
+		Joint CRC: <0xb2f01cd3>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.000000,0.000000,0.621861,0.783128> <0.480000,-0.000000,-0.000000>
+		}
+		AKEY
+		{
+		Jointname: <bone_ribcage>
+		Joint CRC: <0xe5b51072>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.548363,-0.646185,-0.425829,-0.316879> <-0.000000,0.321768,-0.022846>
+		}
+		AKEY
+		{
+		Jointname: <bone_r_upperarm>
+		Joint CRC: <0x318ff0cc>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.549519,0.047420,0.664216,0.504575> <0.167288,-0.025799,-0.228874>
+		}
+		AKEY
+		{
+		Jointname: <bone_r_forearm>
+		Joint CRC: <0x3dd7fd4e>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.037990,0.220749,-0.760725,0.609200> <0.240162,-0.000000,-0.000000>
+		}
+		AKEY
+		{
+		Jointname: <hp_weapons>
+		Joint CRC: <0x2b960099>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.730450,0.100129,-0.582350,0.342470> <0.470124,-0.066077,0.006886>
+		}
+		AKEY
+		{
+		Jointname: <bone_l_upperarm>
+		Joint CRC: <0x72c896b>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.320221,0.062371,0.402782,0.855181> <0.167288,-0.025799,0.228874>
+		}
+		AKEY
+		{
+		Jointname: <bone_l_forearm>
+		Joint CRC: <0x8e51239c>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.017736,0.091517,-0.508155,0.856206> <0.240162,-0.000000,0.000000>
+		}
+		AKEY
+		{
+		Jointname: <bone_neck>
+		Joint CRC: <0xd2afb28a>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.456648,-0.664363,-0.461805,-0.369906> <-0.000000,0.321768,-0.022846>
+		}
+		AKEY
+		{
+		Jointname: <bone_head>
+		Joint CRC: <0x8afdf5e4>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.113415,0.139117,-0.511922,0.840071> <0.363275,0.027743,-0.000000>
+		}
+		AKEY
+		{
+		Jointname: <bone_l_thigh>
+		Joint CRC: <0xc496176d>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <-0.775535,0.567818,-0.180482,0.208696> <0.094280,-0.104937,0.009118>
+		}
+		AKEY
+		{
+		Jointname: <bone_l_calf>
+		Joint CRC: <0x87019234>
+		transBitFlag: 0
+		Compressed size: 28->24 bytes (85.7%)
+		All 1 keys <quat/pos>: 
+		-- <0.000000,0.000000,0.325311,0.945607> <0.480000,0.000000,0.000000>
+		}
+		Compression stats for this animation:
+		Uncompressed size: 392 bytes
+		Compressed size: 336 bytes (85.7%)
+	}
+	Compression stats for this set of animations:
+	Uncompressed size: 392 bytes
+	Compressed size: 336 bytes (85.7%)
+}
