@@ -265,9 +265,9 @@ void lua_hooks_install(uintptr_t exe_base)
       flyer_boost_anim_install(exe_base);
       grapple_fix_install(exe_base);
       DebugCommandRegistry::install(exe_base);
-      shield_channel_fix_install(exe_base);
    }
 
+   shield_channel_fix_install(exe_base);     // build-aware (modtools + Steam), guards internally
    fp_anim_bank_install(exe_base);           // build-aware (modtools + Steam), guards internally
    entity_carrier_fixes_install(exe_base);   // full set on modtools, bounds guards only elsewhere
    lua_create_entity_hook_install(exe_base); // guards internally

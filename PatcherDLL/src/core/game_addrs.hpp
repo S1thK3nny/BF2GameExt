@@ -562,9 +562,7 @@ namespace steam {
    constexpr uintptr_t weapon_override_aimer_thunk = 0x00677780;          // No ILT thunk in release build; same as impl
    constexpr uintptr_t weapon_zoom_first_person = 0x00677d40;
    constexpr uintptr_t weapon_update            = 0x006781B0;             // Weapon vtable (0x7b01a8) slot 1
-   // WeaponShield ctor (Steam 0x006917c0) does NOT write its own vtable — inherits Weapon's.
-   // weapon_shield_update therefore aliases weapon_update in Steam. Verify behavior before use.
-   constexpr uintptr_t weapon_shield_update     = 0x006781B0;             // Aliases weapon_update (no override in Steam build)
+   constexpr uintptr_t weapon_shield_update     = 0x00691A80;             // WeaponShield vtable (0x7b1a9c) slot 1
 
    // ---- Hashing / Texture lookup ---------------------------------------------
 

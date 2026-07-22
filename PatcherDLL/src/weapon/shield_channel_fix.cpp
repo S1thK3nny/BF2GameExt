@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "shield_channel_fix.hpp"
+#include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 #include "core/resolve.hpp"
 
 #include <detours.h>
@@ -23,14 +25,15 @@
 //      directly (state machine + sound, no shield effects).
 // =============================================================================
 
-// Weapon struct offsets
+// Weapon struct offsets — build-invariant (verified in the Steam
+// WeaponShield::Update disasm @0x691A80: [EBX+0x6c] owner, [EBX+0x74] trigger).
 static constexpr int kWeapon_mOwner   = 0x6C;  // Controllable* (= entity ptr)
 static constexpr int kWeapon_mTrigger = 0x74;  // Trigger*
 
-// Entity offsets — relative to mOwner (= entity = struct_base+0x240)
+// Entity offsets — relative to mOwner (= entity = struct_base+0x240).
+// mControlFire is invariant across builds; the weapon array / channel→slot map
+// shift by -0x10 on release, so those come from the active SoldierLayout.
 static constexpr int kEntity_mControlFire = 0x38;   // Trigger[2], 4 bytes each
-static constexpr int kEntity_WeaponArray  = 0x4F0;  // Weapon*[8]
-static constexpr int kEntity_ChannelSlots = 0x510;  // uint8[8] channel→slot
 
 // ---------------------------------------------------------------------------
 // Function types
@@ -61,11 +64,11 @@ static bool is_active_for_channel(void* weapon)
    if (channel < 0 || channel > 1) return true;  // not a soldier fire channel
    if (fireBase + channel * 4 != trigger) return true;  // misaligned
 
-   // Look up active weapon for this channel
-   uint8_t activeSlot = *(uint8_t*)(owner + kEntity_ChannelSlots + channel);
+   // Look up active weapon for this channel (mWeaponIndex[channel], 0xFF empty)
+   uint8_t activeSlot = *(uint8_t*)(owner + g_soldier->weaponIndexMap + channel);
    if (activeSlot >= 8) return true;  // safety
 
-   uintptr_t activeWpn = *(uintptr_t*)(owner + kEntity_WeaponArray + activeSlot * 4);
+   uintptr_t activeWpn = *(uintptr_t*)(owner + g_soldier->weaponArray + activeSlot * 4);
    return (activeWpn == wpn);
 }
 
@@ -87,10 +90,13 @@ static void __fastcall hooked_ShieldUpdate(void* ecx, void* /*edx*/, float dt)
 
 void shield_channel_fix_install(uintptr_t exe_base)
 {
-   using namespace game_addrs::modtools;
+   if (!g_addr->weapon_shield_update || !g_addr->weapon_update)
+      return;
+   if (g_addr->weapon_shield_update == g_addr->weapon_update)
+      return;
 
-   original_ShieldUpdate = (fn_ShieldUpdate_t)resolve(exe_base, weapon_shield_update);
-   fn_WeaponUpdate       = (fn_WeaponUpdate_t)resolve(exe_base, weapon_update);
+   original_ShieldUpdate = (fn_ShieldUpdate_t)resolve(exe_base, g_addr->weapon_shield_update);
+   fn_WeaponUpdate       = (fn_WeaponUpdate_t)resolve(exe_base, g_addr->weapon_update);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
