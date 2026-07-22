@@ -42,7 +42,13 @@
 // ---------------------------------------------------------------------------
 
 static constexpr int          kMaxCargo              = 4;
-static constexpr uintptr_t    kMCargoCount_offset    = 0x11c0; // EntityCarrierClass::mCargoCount
+
+// EntityCarrierClass::mCargoCount — per build.  The cargo-node array precedes
+// it with stride 0x10, so writing entry kMaxCargo lands exactly on the count
+// itself (modtools 0x1180 + 4*0x10 == 0x11C0; Steam 0x10A0 + 4*0x10 == 0x10E0).
+// That self-corruption is the bug hooked_SetProperty guards, and it is present
+// identically on both builds.
+static uintptr_t s_mCargoCount_offset = 0x11c0;  // Steam: 0x10E0
 static constexpr unsigned int kCargoNodeName_Hash    = 0x3e2c4da4u;
 static constexpr unsigned int kCargoNodeOffset_Hash  = 0x910a89fcu;
 
@@ -56,6 +62,20 @@ static constexpr uintptr_t kCargoSlot_ObjPtr    = 0x0C;   // slot+0xC = object p
 static constexpr uintptr_t kClass_offset        = 0x42C;  // EntityCarrierClass*
 
 static constexpr int kMaxTrackedCarriers = 8;
+
+// True only when the full carrier feature set is installed (modtools).  On the
+// release builds only the three memory-safety guards below are installed — the
+// custom flight system, render/animation override, turret patches and
+// CreateController fix all depend on addresses and struct offsets that have not
+// been derived for those builds yet.  See entity_carrier_fixes_install.
+static bool s_flightSystemActive = false;
+
+// AttachCargo's first argument is only a cargo-slot index on modtools.  Steam's
+// EntityCarrier::AttachCargo (0x497300) ignores it entirely and writes the slot
+// at a fixed offset, so bounds-checking it there rejects perfectly valid calls
+// (this is what made carriers stop appearing).  DetachCargo does index by it on
+// both builds, so its guard stays unconditional.
+static bool s_attachSlotIsIndex = false;
 
 // ---------------------------------------------------------------------------
 // Custom carrier flight system
@@ -258,8 +278,13 @@ struct CarrierFlightOverride {
 };
 static CarrierFlightOverride g_flightOverride[kMaxTrackedCarriers] = {};
 
-// Cargo slot offsets from struct_base (inner base)
-static constexpr uintptr_t kInner_mCargoSlot0Obj = 0x1DDC; // first cargo slot object ptr
+// Cargo slot offsets from struct_base (inner base).  CargoSlot is
+// { PblVector3 mOffset; PblHandle<GameObject> mObject; } = 0x14 bytes (Phantom
+// EntityCarrier::mCargoArray is CargoSlot[4]), so mObject sits at slot+0xC.
+// Stride is 0x14 on both builds; only the array base differs.  Steam:
+// DetachCargo 0x497410 computes (idx*5 + 0x767)*4 == idx*0x14 + 0x1D9C, and
+// AttachCargo 0x497300 writes that same 0x1D9C for slot 0.
+static uintptr_t s_inner_mCargoSlot0Obj = 0x1DDC; // Steam: 0x1D9C
 static constexpr uintptr_t kCargoSlotStride      = 0x14;   // stride between cargo slots
 
 // Key struct_base (inner base) offsets used by multiple hooks
@@ -321,7 +346,7 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
-      int count = *(int*)((char*)ecx + kMCargoCount_offset);
+      int count = *(int*)((char*)ecx + s_mCargoCount_offset);
       if (count >= kMaxCargo) return; // array full — silently ignore extra nodes
    }
    original_SetProperty(ecx, nullptr, hash, value);
@@ -341,8 +366,9 @@ static fn_AttachCargo_t original_AttachCargo = nullptr;
 static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
                                           int slotIdx, void* cargo)
 {
-   if ((unsigned int)slotIdx >= (unsigned int)kMaxCargo) return; // OOB slot
-   if (!cargo) return;                                            // null cargo
+   if (s_attachSlotIsIndex && (unsigned int)slotIdx >= (unsigned int)kMaxCargo)
+      return;          // OOB slot (modtools only — see s_attachSlotIsIndex)
+   if (!cargo) return; // null cargo: dereferenced via vtable+0xA0 on both builds
    original_AttachCargo(ecx, nullptr, slotIdx, cargo);
 
    // Save cargo's team and set to 0 to disable spawning while carried.
@@ -387,7 +413,7 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
    bool hadCargo = false;
    void* cargoObj = nullptr;
    __try {
-      cargoObj = *(void**)((char*)ecx + kInner_mCargoSlot0Obj + slotIdx * kCargoSlotStride);
+      cargoObj = *(void**)((char*)ecx + s_inner_mCargoSlot0Obj + slotIdx * kCargoSlotStride);
       hadCargo = (cargoObj != nullptr);
    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -416,7 +442,9 @@ static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
 
    // Activate animation override on first cargo slot drop — progress starts at 1.0
    // (fully deployed) and will be driven down toward 0.0 by the Update hook.
-   if (hadCargo && slotIdx == 0) {
+   // Flight-system-only: the render hook that consumes g_animOverride, and the
+   // class offsets read below, are modtools-only (see s_flightSystemActive).
+   if (s_flightSystemActive && hadCargo && slotIdx == 0) {
       int slot = -1;
       for (int i = 0; i < kMaxTrackedCarriers; i++) {
          if (g_animOverride[i].structBase == ecx || g_animOverride[i].structBase == nullptr) {
@@ -1416,7 +1444,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       int state = *(int*)((char*)ecx + kState_offset);
       if (state == 0) {
          for (int s = 1; s < kMaxCargo; s++) {
-            void* cargoObj = *(void**)((char*)inner + kInner_mCargoSlot0Obj + s * kCargoSlotStride);
+            void* cargoObj = *(void**)((char*)inner + s_inner_mCargoSlot0Obj + s * kCargoSlotStride);
             if (cargoObj) {
                original_DetachCargo(inner, nullptr, s);
             }
@@ -1657,7 +1685,7 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          // Slot 0 cargo was attached inside original_UpdateSpawn, before the
          // flight override existed.  Save its team and set to 0 now.
          {
-            void* cargo0 = *(void**)(carrierStructBase + kInner_mCargoSlot0Obj);
+            void* cargo0 = *(void**)(carrierStructBase + s_inner_mCargoSlot0Obj);
             if (cargo0) {
                __try {
                   int* teamBits = (int*)((char*)cargo0 + 0x234);
@@ -1678,7 +1706,7 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       // kInner_mClass (0x66C) is already from struct_base, NOT from inner
       void* carrierClass = *(void**)(carrierStructBase + kInner_mClass);
       if (!carrierClass) { if (fn) fn("[Carrier] UpdateSpawn: no carrier class\n"); return; }
-      int cargoCount = *(int*)((char*)carrierClass + kMCargoCount_offset);
+      int cargoCount = *(int*)((char*)carrierClass + s_mCargoCount_offset);
       if (cargoCount <= 1) return; // only 1 slot defined, nothing extra to do
 
       // How many slots can we fill?
@@ -1758,8 +1786,55 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Memory-safety guards only — the subset that is portable across builds.
+//
+// All three addresses were confirmed against the Phantom build (release-family,
+// real PDB), whose EntityCarrier::AttachCargo/DetachCargo bodies these match:
+// same UpdateLandedHeight + GameSound::Play tail, same bool return, RET 0x8.
+// The one behavioural difference is that Steam's AttachCargo ignores its slot
+// argument (see s_attachSlotIsIndex).
+//
+// These hooks fix out-of-bounds writes in vanilla and need nothing but the
+// three function addresses plus two struct offsets.  Everything else in this file (custom flight system,
+// render/anim override, turret fire + PILOT_SELF AI, ActivatePhysics vtable
+// patch, CreateController null check) still depends on modtools-only addresses,
+// raw inline VAs and ~40 unverified struct offsets.
+// ---------------------------------------------------------------------------
+static void carrier_bounds_guards_install(uintptr_t exe_base)
+{
+   if (!g_addr->carrier_set_property || !g_addr->carrier_attach_cargo ||
+       !g_addr->carrier_detach_cargo)
+      return;
+
+   original_SetProperty = (fn_SetProperty_t)resolve(exe_base, g_addr->carrier_set_property);
+   original_AttachCargo = (fn_AttachCargo_t)resolve(exe_base, g_addr->carrier_attach_cargo);
+   original_DetachCargo = (fn_DetachCargo_t)resolve(exe_base, g_addr->carrier_detach_cargo);
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
+   DetourAttach(&(PVOID&)original_AttachCargo, hooked_AttachCargo);
+   DetourAttach(&(PVOID&)original_DetachCargo, hooked_DetachCargo);
+   DetourTransactionCommit();
+}
+
 void entity_carrier_fixes_install(uintptr_t exe_base)
 {
+   if (g_build == GameBuild::Steam) {
+      s_mCargoCount_offset    = 0x10E0;  // EntityCarrierClass::mCargoCount
+      s_inner_mCargoSlot0Obj  = 0x1D9C;  // EntityCarrier::mCargoArray[0].mObject
+   }
+
+   if (g_build != GameBuild::Modtools) {
+      carrier_bounds_guards_install(exe_base);
+      return;
+   }
+
+   s_attachSlotIsIndex = true;
+
+   s_flightSystemActive = true;
+
    original_SetProperty    = (fn_SetProperty_t)  resolve(exe_base, game_addrs::modtools::carrier_set_property);
    original_AttachCargo    = (fn_AttachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_attach_cargo);
    original_DetachCargo    = (fn_DetachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_detach_cargo);

@@ -816,6 +816,11 @@ namespace steam {
    constexpr uintptr_t team_get_objects_in_range      = 0x006552d0; // LTCG convention: ECX=pos, EDX=out, XMM1=radius, stack=(max,team,flags,exclude) — NOT cdecl; use the aim_assist release thunk
 
    constexpr uintptr_t anim_finder_add_bank     = 0x00645a00;
+   // EntityCarrierClass::SetProperty — Ghidra-named; EntityCarrierClass vtable
+   // (0x79a2b8, from ctor 0x497610) slot 6.  Same __thiscall(this, uint hash,
+   // const char* value) shape as modtools (RET 0x8), and the cargo-node property
+   // hashes are build-invariant (0x3e2c4da4 / 0x910a89fc appear as literal CMPs).
+   constexpr uintptr_t carrier_set_property     = 0x004976b0;
    constexpr uintptr_t carrier_attach_cargo     = 0x00497300;
    constexpr uintptr_t carrier_take_off         = 0x004b3c60;
    // NOTE: 0x6569c0 (old value of cloth_enforce_collisions) is actually
