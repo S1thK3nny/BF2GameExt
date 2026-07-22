@@ -707,7 +707,11 @@ namespace steam {
    // ---- Animation (weapon/soldier) -------------------------------------------
 
    constexpr uintptr_t set_weapon_anim_map       = 0x0063f7b0;  // SetWeaponAnimationMap
-   constexpr uintptr_t anim_add_bank             = 0x0063c460;  // SoldierAnimationBank::AddBank
+   // FirstPerson::AddBank — the FP-anim-bank feature's AddBank (not
+   // SoldierAnimationBank::AddBank 0x63c460, which is a different function the
+   // old value pointed at).  Release (LTCG) passes the char* in ECX; modtools is
+   // __cdecl — see the convention switch in soldier_fp_animation_override.cpp.
+   constexpr uintptr_t anim_add_bank             = 0x00520EC0;
 
    // ---- Animation bank appending (anim_bank_append.cpp) -----------------------
 
@@ -925,6 +929,11 @@ namespace steam {
    constexpr uintptr_t fp_renderable       = 0x01E55F00;  // FirstPerson::s_pRenderable[0]
    constexpr uintptr_t fp_anim_array       = 0x01E55E30;  // FirstPerson::mAnim[48]
    constexpr uintptr_t anim_name_table     = 0x00789760;  // FirstPersonAnimName[48]
+   // FirstPersonRenderable::UpdateSoldier — found as FirstPerson::Update's
+   // TYPE_SOLDIER (case 0) callee; writes +0x15fc/+0x160c/+0x1610/+0x15f8 and
+   // reads +0x1608 (cached state) / +0x1600 (mCurrentWeapon), identical to the
+   // modtools body (FP renderable layout is build-invariant).
+   constexpr uintptr_t fp_update_soldier   = 0x0051FB70;
 
    // ---- Fog (see modtools namespace for docs) ----------------------------------
    constexpr uintptr_t red_renderer_set_fog_range  = 0x006B3640;

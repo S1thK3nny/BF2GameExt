@@ -24,7 +24,8 @@
 // FP Sprint:
 //   The engine's FP state machine has no sprint state — it uses state 1 (run)
 //   for all forward movement and just scales playback rate. Sprint is detected
-//   by reading entity+0x514 (== 3 when sprinting, set by EntitySoldier::Sprint).
+//   by reading EntitySoldier::mState (== 3 when sprinting, set by
+//   EntitySoldier::Sprint); see s_stateOffset for the per-build offset.
 //   When sprinting, the _run animation slot is temporarily swapped with a
 //   _sprint animation (e.g. humanfp_rifle_sprint) before calling UpdateSoldier.
 //   Sprint animations are optional — if absent, the engine falls back to _run.
@@ -56,8 +57,7 @@ static constexpr int kDroidekaFirstSlot   = 44;
 static constexpr int kStatesPerWeapon     = 11;
 static constexpr int kHumanWeaponClasses  = 4;
 static constexpr int kRunState            = 1;    // FP state index for run
-static constexpr uint32_t kSprintField    = 0x514; // entity + 0x514 = sprint state
-static constexpr uint32_t kSprintActive   = 3;     // value when sprinting
+static constexpr uint32_t kSprintActive   = 3;     // mState value when sprinting (build-invariant)
 
 // Suffixes appended to bank names to find sprint animations
 static const char* kSprintSuffixes[kHumanWeaponClasses] = {
@@ -66,14 +66,6 @@ static const char* kSprintSuffixes[kHumanWeaponClasses] = {
    "_tool_sprint",    // weapon class 2 (tool)
    "_tool_sprint",    // weapon class 3 (grenade — shares tool anims)
 };
-
-// ---------------------------------------------------------------------------
-// Resolved function pointers
-// ---------------------------------------------------------------------------
-
-static fn_hash_string_t   fn_hash_string   = nullptr;
-static fn_AddBank_t       fn_AddBank       = nullptr;
-static fn_FindAnimation_t fn_FindAnimation = nullptr;
 
 // ---------------------------------------------------------------------------
 // Trampolines
@@ -120,6 +112,51 @@ static int          g_bankCacheCount = 0;
 static void*  g_defaultSprintAnims[kHumanWeaponClasses] = {};
 static bool   g_defaultSprintLoaded = false;
 static bool   g_wasSprinting = false;
+
+// ---------------------------------------------------------------------------
+// Resolved function pointers
+// ---------------------------------------------------------------------------
+
+static fn_hash_string_t   fn_hash_string   = nullptr;
+
+// FirstPerson::AddBank / FindAnimation take their char* argument on the stack
+// (__cdecl) on modtools, but in ECX on the release builds (Steam/GOG, LTCG).
+// Store the resolved address plus a convention flag and marshal at the call site
+// (fn_AddBank_t / fn_FindAnimation_t above name the modtools __cdecl shape).
+static uintptr_t s_addBankAddr   = 0;
+static uintptr_t s_findAnimAddr  = 0;
+static bool      s_ecxConvention = false;  // true = arg in ECX (release builds)
+
+// Offsets of the soldier's class pointer and mState, RELATIVE to the
+// UpdateSoldier `ctrl`.  `ctrl` is the Controllable subobject at entity+0x240 on BOTH builds
+// (EntitySoldier ctor: modtools, and Steam `LEA ECX,[EDI+0x240]` @ 0x4de8ad).
+// What differs is where the class pointer and mState sit inside EntitySoldier:
+//   modtools: class = ctrl+0x218 (entity+0x458), state = ctrl+0x514
+//   Steam:    class = ctrl-0x238 (GameObject::mClass @ entity+0x8 — stored by
+//                                 the root base ctor 0x491720 `MOV [ESI+8],EAX`
+//                                 from the EntitySoldierClass* threaded down
+//                                 EntitySoldier ctor 0x4de850 -> 0x5350d0 ->
+//                                 0x4ba0f0; runtime scan confirmed the match),
+//             state = ctrl+0x504 (EntitySoldier::mState @ entity+0x744, per
+//                                 SetState 0x4ee2c0 `MOV EAX,[ESI+0x744]`).
+static intptr_t  s_classOffset = 0x218;
+static uintptr_t s_stateOffset = 0x514;
+
+static uint32_t call_add_bank(const char* name)
+{
+   if (!s_addBankAddr) return 0;
+   return s_ecxConvention
+      ? ((uint32_t(__fastcall*)(const char*))s_addBankAddr)(name)
+      : ((fn_AddBank_t)s_addBankAddr)(name);
+}
+
+static void* call_find_animation(const char* name)
+{
+   if (!s_findAnimAddr) return nullptr;
+   return s_ecxConvention
+      ? ((void*(__fastcall*)(const char*))s_findAnimAddr)(name)
+      : ((fn_FindAnimation_t)s_findAnimAddr)(name);
+}
 
 // ---------------------------------------------------------------------------
 // Resolved global pointers
@@ -170,7 +207,7 @@ static void loadSprintAnims(const char* bankName, void* out[kHumanWeaponClasses]
       memcpy(name, bankName, bankNameLen);
       memcpy(name + bankNameLen, kSprintSuffixes[wc], suffixLen + 1);
 
-      out[wc] = fn_FindAnimation(name);
+      out[wc] = call_find_animation(name);
    }
 }
 
@@ -178,9 +215,21 @@ static void loadSprintAnims(const char* bankName, void* out[kHumanWeaponClasses]
 // Hook: EntitySoldierClass::SetProperty
 // ---------------------------------------------------------------------------
 
+// Compute the property-name hash lazily on first ODF parse. It cannot be done
+// at install time: the install window runs with the exe sections marked
+// non-executable (see dllmain), so calling game code (hash_string) faults under
+// DEP on the retail builds.
+static void ensurePropHash()
+{
+   if (g_fpBankPropHash == 0 && fn_hash_string)
+      g_fpBankPropHash = fn_hash_string("FirstPersonAnimationBank");
+}
+
 static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
                                           unsigned int hash, const char* value)
 {
+   ensurePropHash();
+
    if (hash == g_fpBankPropHash && g_fpBankPropHash != 0) {
       if (!value || value[0] == '\0') return;
 
@@ -213,7 +262,7 @@ static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
 
 static void loadBankCache(FPAnimCache* cache)
 {
-   uint32_t addResult = fn_AddBank(cache->bankName);
+   uint32_t addResult = call_add_bank(cache->bankName);
    if (!(addResult & 1)) {
       get_gamelog()("[FPAnimBank] AddBank('%s') FAILED (0x%08x)\n", cache->bankName, addResult);
    }
@@ -239,7 +288,7 @@ static void loadBankCache(FPAnimCache* cache)
       memcpy(newName, cache->bankName, bankNameLen);
       memcpy(newName + bankNameLen, suffix, suffixLen + 1);
 
-      void* anim = fn_FindAnimation(newName);
+      void* anim = call_find_animation(newName);
       if (anim) {
          cache->anims[i] = anim;
       }
@@ -277,13 +326,13 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
    bool isSprinting = false;
 
    __try {
-      // Detect sprint: entity+0x514 == 3
-      uint32_t sprintState = *(uint32_t*)((uintptr_t)ctrl + kSprintField);
+      // Detect sprint: mState == 3
+      uint32_t sprintState = *(uint32_t*)((uintptr_t)ctrl + s_stateOffset);
       isSprinting = (sprintState == kSprintActive);
 
       // Look up custom bank override
       if (g_classBankCount > 0) {
-         void* entityClass = *(void**)((uintptr_t)ctrl + 0x218);
+         void* entityClass = *(void**)((intptr_t)ctrl + s_classOffset);
          if (entityClass && entityClass != (void*)0xFFFFFFFF) {
             for (int i = 0; i < g_classBankCount; i++) {
                if (g_classBanks[i].classPtr == entityClass) {
@@ -358,26 +407,44 @@ static void __fastcall hooked_UpdateSoldier(void* ecx, void* /*edx*/,
 
 void fp_anim_bank_install(uintptr_t exe_base)
 {
-   using namespace game_addrs::modtools;
-   fn_hash_string   = (fn_hash_string_t)  resolve(exe_base, hash_string);
-   fn_AddBank       = (fn_AddBank_t)      resolve(exe_base, anim_add_bank);
-   fn_FindAnimation = (fn_FindAnimation_t)resolve(exe_base, anim_find_animation);
+   // Build-aware. The FP renderable layout (mAnim[48], mCurrentWeapon +0x1600,
+   // cached state +0x1608) and the EntitySoldier fields the UpdateSoldier hook
+   // reads (mClass @ ctrl+0x218, mState @ ctrl+0x514) are build-invariant
+   // (PDB-confirmed); only the addresses and the AddBank/FindAnimation calling
+   // convention differ per build.  GOG is left unmapped (fp_update_soldier not
+   // derived there).
+   if (g_build != GameBuild::Modtools && g_build != GameBuild::Steam)
+      return;
 
-   g_mAnim         = (void**)       resolve(exe_base, fp_anim_array);
-   g_animNameTable = (const char**) resolve(exe_base, anim_name_table);
+   if (!g_addr->fp_update_soldier || !g_addr->soldier_class_set_property ||
+       !g_addr->anim_add_bank || !g_addr->anim_find_animation ||
+       !g_addr->fp_anim_array || !g_addr->anim_name_table || !g_addr->hash_string)
+      return;
 
-   g_fpBankPropHash = fn_hash_string("FirstPersonAnimationBank");
+   fn_hash_string  = (fn_hash_string_t)resolve(exe_base, g_addr->hash_string);
 
-   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, soldier_class_set_property);
-   original_UpdateSoldier = (fn_UpdateSoldier_t) resolve(exe_base, fp_update_soldier);
+   s_addBankAddr   = (uintptr_t)resolve(exe_base, g_addr->anim_add_bank);
+   s_findAnimAddr  = (uintptr_t)resolve(exe_base, g_addr->anim_find_animation);
+   s_ecxConvention = (g_build != GameBuild::Modtools);  // release passes arg in ECX
+
+   if (g_build == GameBuild::Steam) {
+      s_classOffset = -0x238;  // GameObject::mClass @ entity+0x8, ctrl @ entity+0x240
+      s_stateOffset = 0x504;   // EntitySoldier::mState @ entity+0x744
+   }
+
+   g_mAnim         = (void**)       resolve(exe_base, g_addr->fp_anim_array);
+   g_animNameTable = (const char**) resolve(exe_base, g_addr->anim_name_table);
+
+   // g_fpBankPropHash is computed lazily in hooked_SetProperty (see ensurePropHash).
+
+   original_SetProperty   = (fn_SetProperty_t)  resolve(exe_base, g_addr->soldier_class_set_property);
+   original_UpdateSoldier = (fn_UpdateSoldier_t) resolve(exe_base, g_addr->fp_update_soldier);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   LONG r1 = DetourAttach(&(PVOID&)original_SetProperty,  hooked_SetProperty);
-   LONG r2 = DetourAttach(&(PVOID&)original_UpdateSoldier, hooked_UpdateSoldier);
-   LONG rc = DetourTransactionCommit();
-
-   (void)r1; (void)r2; (void)rc;
+   DetourAttach(&(PVOID&)original_SetProperty,   hooked_SetProperty);
+   DetourAttach(&(PVOID&)original_UpdateSoldier, hooked_UpdateSoldier);
+   DetourTransactionCommit();
 }
 
 void fp_anim_bank_uninstall()

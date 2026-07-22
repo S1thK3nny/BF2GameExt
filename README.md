@@ -201,7 +201,7 @@ Make HTTP requests directly from Lua. Useful for telemetry, live configuration, 
 - **[GoG](https://www.gog.com/en/game/star_wars_battlefront_ii)** - Binary patches + ported hook features
 - **[Steam](https://store.steampowered.com/app/6060)** - Binary patches + ported hook features
 
-A runtime build-dispatch layer resolves per-build addresses, so an increasing set of hook-based features now runs on Steam and GOG in addition to the binary patches — including prone, aim assist, animation bank appending, the terrain/prop/sky fixes, the vehicle first/third-person toggle, and the cloth (cape) collision fixes. The full Lua API and the remaining hooks currently target BF2_modtools only; broader GoG/Steam coverage is ongoing.
+A runtime build-dispatch layer resolves per-build addresses, so an increasing set of hook-based features now runs on Steam and GOG in addition to the binary patches — including prone, aim assist, animation bank appending, the first-person animation banks (and FP sprint) on Steam, the terrain/prop/sky fixes, the vehicle first/third-person toggle, and the cloth (cape) collision fixes. The full Lua API and the remaining hooks currently target BF2_modtools only; broader GoG/Steam coverage is ongoing.
 
 ## Installation
 
