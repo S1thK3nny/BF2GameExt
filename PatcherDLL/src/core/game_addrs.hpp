@@ -199,6 +199,9 @@ namespace modtools {
    constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
    constexpr uintptr_t WeaponMeleeClass_vftable   = 0x00A5434C;
 
+   constexpr uintptr_t lua_read_data_file          = 0x0046A790;
+   constexpr uintptr_t load_util_read_data_file    = 0x004538B0;
+
    // ---- Entity / Droideka DisableBallMode --------------------------------------
    // EntityDroideka::UpdatePilot is the sole roll/unroll request site (player and
    // AI both).  Struct offsets (mClass +0x450, mState +0x1A74) live with the
@@ -629,6 +632,9 @@ namespace steam {
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
    constexpr uintptr_t prone_primary_stance_and  = 0x005435E4;
    constexpr uintptr_t WeaponMeleeClass_vftable  = 0x007B1534;
+
+   constexpr uintptr_t lua_read_data_file        = 0x0058AC50;
+   constexpr uintptr_t load_util_read_data_file  = 0x00579C30;
 
    // ---- Entity / Droideka DisableBallMode ------------------------------------
    // Release layout differs from modtools (mState +0x1A54 not 0x1A74, mClass

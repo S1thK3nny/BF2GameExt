@@ -18,6 +18,7 @@
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_sound_fix.hpp"
 #include "entity/soldier_prone.hpp"
+#include "entity/prone_lvl_load.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "entity/hover_pilot_null_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
@@ -218,6 +219,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    barrel_fire_origin_install(exe_base);
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
+   prone_lvl_load_install(exe_base); // must follow prone_system_install — owns g_proneEnabled
    anim_bank_append_install(exe_base);
    disguise_ext_install(exe_base);
    game_logging_install(exe_base);

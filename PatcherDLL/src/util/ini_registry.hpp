@@ -65,7 +65,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
 
    // [Features] — optional gameplay features (may require additional assets)
-   INI_ENTRY("Features", "Prone", "1", "Enable prone stance (requires prone animations in soldier banks)"),
+   INI_ENTRY("Features", "Prone", "1", "Enable prone stance. Requires data\\_lvl_pc\\prone.lvl (the human_5 animation sub-bank), which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing"),
    INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds (modtools always logs)"),
    INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code)"),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
