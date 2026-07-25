@@ -49,6 +49,11 @@ static constexpr int          kMaxCargo              = 4;
 // That self-corruption is the bug hooked_SetProperty guards, and it is present
 // identically on both builds.
 static uintptr_t s_mCargoCount_offset = 0x11c0;  // Steam: 0x10E0
+// Base of that cargo-node array (mCargoCount sits immediately after entry 3).
+// modtools 0x1180 + 4*0x10 == 0x11C0; Steam 0x10A0 + 4*0x10 == 0x10E0.  Each
+// node is { hash; PblVector3 offset; } so the offset vector is at node+4.
+static uintptr_t s_cargoNodeArrayBase = 0x1180;  // Steam: 0x10A0
+static constexpr uintptr_t kCargoNodeStride = 0x10;
 static constexpr unsigned int kCargoNodeName_Hash    = 0x3e2c4da4u;
 static constexpr unsigned int kCargoNodeOffset_Hash  = 0x910a89fcu;
 
@@ -385,6 +390,65 @@ using fn_AttachCargo_t = void(__fastcall*)(void* ecx, void* edx,
                                            int slotIdx, void* cargo);
 static fn_AttachCargo_t original_AttachCargo = nullptr;
 
+// Attach `cargo` to an arbitrary cargo slot.
+//
+// On modtools AttachCargo indexes by its slot argument, so this is a plain
+// forward.  Steam's (0x497300) is hardcoded to cargo slot 0 and class cargo
+// node 0 — it never reads the argument at all, and vanilla even passes garbage
+// there (UpdateSpawn 0066fa64 pushes a clobbered ECX).  That is why the slot
+// argument cannot simply be honoured on that build.
+//
+// Instead we let the engine do the work in the only place it knows how to:
+// present node `slot` as node 0 and an empty slot 0, call the original so it
+// runs its own placement math (including the cargo-bbox vtable[40] call), then
+// move the five dwords it wrote (offset xyz + object + generation, verified at
+// 0049737c..0049739e) into the real slot and put back what we borrowed.  The
+// rest of the function — the cargo parent link, UpdateLandedHeight and the
+// pickup sound — is slot-independent and runs exactly once either way.
+static bool attachCargoToSlot(char* structBase, int slot, void* cargo)
+{
+   if (s_attachSlotIsIndex || slot == 0) {
+      original_AttachCargo(structBase, nullptr, slot, cargo);
+      return true;
+   }
+   if ((unsigned int)slot >= (unsigned int)kMaxCargo) return false;
+
+   bool ok = false;
+   __try {
+      char* classPtr = *(char**)(structBase + s_inner_mClass);
+      if (classPtr) {
+         char* node0 = classPtr   + s_cargoNodeArrayBase;
+         char* nodeN = node0      + slot * kCargoNodeStride;
+         // s_inner_mCargoSlot0Obj points at mObject; the slot starts 0xC earlier.
+         char* slot0 = structBase + s_inner_mCargoSlot0Obj - kCargoSlot_ObjPtr;
+         char* slotN = slot0      + slot * kCargoSlotStride;
+
+         unsigned char savedNode[kCargoNodeStride];
+         unsigned char savedSlot[kCargoSlotStride];
+         memcpy(savedNode, node0, kCargoNodeStride);
+         memcpy(savedSlot, slot0, kCargoSlotStride);
+
+         // node0 lives in the CLASS, which every carrier of this type shares,
+         // so the restore has to happen even if the attach throws — otherwise
+         // one bad call would leave cargo node 0 permanently wrong for all of
+         // them.  __finally runs on the exception path too.
+         __try {
+            memcpy(node0, nodeN, kCargoNodeStride);
+            memset(slot0, 0, kCargoSlotStride);   // make slot 0 look unoccupied
+
+            original_AttachCargo(structBase, nullptr, 0, cargo);
+
+            memcpy(slotN, slot0, kCargoSlotStride);   // harvest
+            ok = true;
+         } __finally {
+            memcpy(slot0, savedSlot, kCargoSlotStride);
+            memcpy(node0, savedNode, kCargoNodeStride);
+         }
+      }
+   } __except(EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+   return ok;
+}
+
 static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
                                           int slotIdx, void* cargo)
 {
@@ -540,36 +604,80 @@ static void visJzInit() {
    }
 }
 
-// RayHit call sites inside EntityFlyer::Update.  Not located on the release
-// builds, so they stay 0 there and every rayHit* helper no-ops (they all guard
-// on s_rayHitCall1).  Consequence on Steam: carriers still get terrain-normal
-// influence near uneven ground, i.e. the vanilla swirl/wobble is not suppressed.
+// RayHit call sites inside EntityFlyer::Update (modtools 0x4fc930, Steam
+// 0x4ac460 — the function EntityCarrier::Update calls at 004971ea).  Both sites
+// are a 5-byte `CALL CollisionManager::RayHit` whose result is scaled by 1024.0
+// and stored to the instance groundDistance field (modtools +0x490, Steam
+// +0x450); a large groundDistance makes the terrain-normal block downstream be
+// skipped, which is what removes the swirl/wobble.
 static uintptr_t s_rayHitVA1 = 0x004fe8cd;  // state 1
 static uintptr_t s_rayHitVA2 = 0x004feae2;  // state 3
+
+// How the ray fraction is returned differs by build, so the 5 patch bytes do:
+//   modtools (x87)  : FLD1 + 3 NOP        — push 1.0 onto the FPU stack, the
+//                                            following FMUL 1024.0 then yields
+//                                            groundDistance = 1024.
+//   Steam/GOG (SSE) : CALL <rayHitStub>   — the fraction comes back in XMM0,
+//                                            not ST(0), so FLD1 is meaningless.
+//                                            Redirecting the CALL to our own
+//                                            stub is the same 5 bytes and keeps
+//                                            the stack balanced, because
+//                                            CollisionManager::RayHit is
+//                                            caller-cleans (the site's own
+//                                            `ADD ESP,0x18` still runs).
+static bool s_rayHitSseStub = false;
+
+// Must have real storage for the inline asm below to address it.
+static float s_rayHitOne = 1.0f;
+
+// Stands in for CollisionManager::RayHit: report "ray travelled its full
+// length" (fraction 1.0) and return WITHOUT touching the pushed arguments.
+static __declspec(naked) void rayHitStub_sse()
+{
+   __asm {
+      movss xmm0, dword ptr [s_rayHitOne]
+      ret
+   }
+}
+
+// Filled in by rayHitInit(); per-site because the Steam form encodes a
+// site-relative CALL displacement.
+static unsigned char s_rayHitPatch1[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
+static unsigned char s_rayHitPatch2[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
 
 static void rayHitInit() {
    if (!s_rayHitCall1 && s_rayHitVA1 && s_rayHitVA2) {
       uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
       s_rayHitCall1 = (unsigned char*)((s_rayHitVA1 - kUnrelocatedBase) + base);
       s_rayHitCall2 = (unsigned char*)((s_rayHitVA2 - kUnrelocatedBase) + base);
+
+      if (s_rayHitSseStub) {
+         auto makeCall = [](unsigned char* out, const unsigned char* site) {
+            const int32_t rel = (int32_t)((uintptr_t)&rayHitStub_sse -
+                                          ((uintptr_t)site + 5));
+            out[0] = 0xE8;
+            memcpy(out + 1, &rel, sizeof(rel));
+         };
+         makeCall(s_rayHitPatch1, s_rayHitCall1);
+         makeCall(s_rayHitPatch2, s_rayHitCall2);
+      }
    }
 }
 
-// Replace a 5-byte CALL with FLD1 (D9 E8) + 3×NOP.
-// FLD1 pushes 1.0 onto FPU stack so the subsequent FMUL (×1024)
-// produces a large ground distance (1024), preventing terrain normal influence.
+// Neutralise both 5-byte RayHit CALLs so groundDistance comes out at 1024,
+// which makes EntityFlyer::Update skip the terrain-normal block downstream.
+// See s_rayHitPatch1/2 for the per-build encoding.
 static void rayHitNop(unsigned char saved1[5], unsigned char saved2[5]) {
    if (!s_rayHitCall1) return;
-   static const unsigned char patch[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
    DWORD oldProt;
    if (VirtualProtect(s_rayHitCall1, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
       memcpy(saved1, s_rayHitCall1, 5);
-      memcpy(s_rayHitCall1, patch, 5);
+      memcpy(s_rayHitCall1, s_rayHitPatch1, 5);
       VirtualProtect(s_rayHitCall1, 5, oldProt, &oldProt);
    }
    if (VirtualProtect(s_rayHitCall2, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
       memcpy(saved2, s_rayHitCall2, 5);
-      memcpy(s_rayHitCall2, patch, 5);
+      memcpy(s_rayHitCall2, s_rayHitPatch2, 5);
       VirtualProtect(s_rayHitCall2, 5, oldProt, &oldProt);
    }
 }
@@ -1077,14 +1185,17 @@ static fn_ActivateChild_t g_TurretActivate    = nullptr;
 static fn_ActivateChild_t g_AimerActivate     = nullptr;
 static fn_ActivateChild_t g_PassengerActivate = nullptr;
 
-// struct_base offsets for turret/aimer/passenger data
-static constexpr uintptr_t kTurretArray_off       = 0x680;  // MountedTurret*[8]
-static constexpr uintptr_t kTurretCount_off       = 0x6A0;  // char: turret count
-static constexpr uintptr_t kAimerArray_off        = 0x6A8;  // Aimer*[] array
-static constexpr uintptr_t kPassengerArray_off    = 0x670;  // PassengerSlot*[] array
-static constexpr uintptr_t kClass_AimerCount_off  = 0xD48;  // int: aimer count (in class)
-static constexpr uintptr_t kClass_PassCount_off   = 0xE14;  // char: passenger slot count (in class)
-static constexpr uintptr_t kSubObj1D10_off        = 0x1D10; // sub-object vtable ptr
+// struct_base offsets for turret/aimer/passenger data.  Every value here was
+// read directly out of EntityFlyer::ActivatePhysics — the function this patch
+// mirrors — on each build (modtools 0x00551610, Steam 0x004b5f70).  They follow
+// the usual split: instance fields shift -0x40 on Steam, class fields -0xC8.
+static uintptr_t s_TurretArray_off       = 0x680;  // MountedTurret*[8]      Steam 0x640
+static uintptr_t s_TurretCount_off       = 0x6A0;  // char: turret count     Steam 0x660
+static uintptr_t s_AimerArray_off        = 0x6A8;  // Aimer*[] array         Steam 0x668
+static uintptr_t s_PassengerArray_off    = 0x670;  // PassengerSlot*[] array Steam 0x630
+static uintptr_t s_Class_AimerCount_off  = 0xD48;  // int  aimer count       Steam 0xC80
+static uintptr_t s_Class_PassCount_off   = 0xE14;  // char passenger count   Steam 0xD4C
+static uintptr_t s_SubObj_off            = 0x1D10; // sub-object vtable ptr  Steam 0x1CD0
 
 // Custom ActivatePhysics for EntityCarrier — replaces vtable[41]
 static void __fastcall carrier_ActivatePhysics(void* ecx, void* /*edx*/)
@@ -1099,34 +1210,34 @@ static void __fastcall carrier_ActivatePhysics(void* ecx, void* /*edx*/)
       ((fn_t)(*(void**)(vtbl + 2)))(base + 0x240, -1, 2);  // vtable[2] at byte offset 8
    }
 
-   // 2. Activate sub-object at +0x1d10 (embedded): (**(code**)(*(base+0x1d10)+8))(-15, 2)
+   // 2. Activate the embedded sub-object: (**(code**)(*(base+off)+8))(-15, 2)
    {
-      int* vtbl = *(int**)(base + kSubObj1D10_off);
+      int* vtbl = *(int**)(base + s_SubObj_off);
       typedef void (__thiscall* fn_t)(void*, int, int);
-      ((fn_t)(*(void**)(vtbl + 2)))(base + kSubObj1D10_off, -15, 2);
+      ((fn_t)(*(void**)(vtbl + 2)))(base + s_SubObj_off, -15, 2);
    }
 
    // 3. Activate aimers
    void* classPtr = *(void**)(base + s_inner_mClass);
    if (classPtr) {
-      int aimerCount = *(int*)((char*)classPtr + kClass_AimerCount_off);
-      void** aimers = (void**)(base + kAimerArray_off);
+      int aimerCount = *(int*)((char*)classPtr + s_Class_AimerCount_off);
+      void** aimers = (void**)(base + s_AimerArray_off);
       for (int i = 0; i < aimerCount; i++) {
          if (aimers[i]) g_AimerActivate(aimers[i], nullptr);
       }
    }
 
    // 4. Activate turrets
-   int turretCount = *(char*)(base + kTurretCount_off);
-   int** turrets = (int**)(base + kTurretArray_off);
+   int turretCount = *(char*)(base + s_TurretCount_off);
+   int** turrets = (int**)(base + s_TurretArray_off);
    for (int i = 0; i < turretCount; i++) {
       if (turrets[i]) g_TurretActivate(turrets[i], nullptr);
    }
 
    // 5. Activate passenger slots
    if (classPtr) {
-      int passCount = (int)*(unsigned char*)((char*)classPtr + kClass_PassCount_off);
-      void** passengers = (void**)(base + kPassengerArray_off);
+      int passCount = (int)*(unsigned char*)((char*)classPtr + s_Class_PassCount_off);
+      void** passengers = (void**)(base + s_PassengerArray_off);
       for (int i = 0; i < passCount; i++) {
          if (passengers[i]) g_PassengerActivate(passengers[i], nullptr);
       }
@@ -1801,13 +1912,13 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       int cargoCount = *(int*)((char*)carrierClass + s_mCargoCount_offset);
       if (cargoCount <= 1) return; // only 1 slot defined, nothing extra to do
 
-      // Multi-cargo spawning is modtools-only.  It calls three vtable slots
-      // (spawnClass[2] = spawn, spawned[9] = get entity, cargo[5] = activate)
-      // whose indices are only verified for modtools — on Steam one of them is
-      // null, which crashed with EXEC at address 0.  It could not work there
-      // anyway: Steam's AttachCargo ignores the slot index and always writes
-      // slot 0, and vehicle_tracker_pool is unlocated so the extra cargo would
-      // never get a VehicleTracker.  Single-cargo carriers are unaffected.
+      // Requires the three vtable slots used below (spawnClass[2] = spawn,
+      // spawned[9] = get entity, cargo[5] = activate), a VehicleTracker pool,
+      // and a way to reach cargo slots past 0.  All three now hold on Steam:
+      // the slot indices were read out of its own UpdateSpawn ([ECX+0xb0]
+      // vtable +0x8 / +0x24 / +0x14, identical to modtools), the pool is
+      // 0x01f9a278, and attachCargoToSlot() works around AttachCargo being
+      // pinned to slot 0.  Single-cargo carriers never reach this code.
       if (!s_multiCargoSpawn) return;
 
       // How many slots can we fill?
@@ -1845,7 +1956,10 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          // Original: AttachCargo → vtable[36](team) → team bits → vtable[5]
 
          // 1. Attach cargo to carrier first (original does this before team/activate)
-         original_AttachCargo(carrierStructBase, nullptr, slot, cargoEntity);
+         if (!attachCargoToSlot(carrierStructBase, slot, cargoEntity)) {
+            if (fn) fn("[Carrier]   Slot %d: attach failed\n", slot);
+            continue;
+         }
 
          // 2. cargo->vtable[36](team) — SetTeam
          void** cargoVtbl = *(void***)cargoEntity;
@@ -1965,6 +2079,20 @@ static void carrier_bounds_guards_install(uintptr_t exe_base)
       rayHitInit();
    }
 
+   // ActivatePhysics vtable[41] patch — without it the carrier's turrets are
+   // built but never activated, so they are invisible and inert ("turrets are
+   // just gone").  Needs the three child-activation functions plus the vtable.
+   const bool wantActivatePhysics = g_addr->carrier_vtable &&
+                                    g_addr->turret_activate &&
+                                    g_addr->aimer_activate &&
+                                    g_addr->passenger_activate;
+   if (wantActivatePhysics) {
+      g_carrierVtable     = resolve(exe_base, g_addr->carrier_vtable);
+      g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, g_addr->turret_activate);
+      g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, g_addr->aimer_activate);
+      g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, g_addr->passenger_activate);
+   }
+
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
@@ -1984,6 +2112,16 @@ static void carrier_bounds_guards_install(uintptr_t exe_base)
    }
    DetourTransactionCommit();
 
+   // After the Detours commit, to avoid page-protection conflicts.
+   if (wantActivatePhysics) {
+      void** vtableSlot = (void**)((char*)g_carrierVtable + kActivatePhysics_vtableOffset);
+      DWORD oldProt;
+      if (VirtualProtect(vtableSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
+         *vtableSlot = (void*)&carrier_ActivatePhysics;
+         VirtualProtect(vtableSlot, sizeof(void*), oldProt, &oldProt);
+      }
+   }
+
    s_animOverrideActive = wantRender;
 }
 
@@ -1991,17 +2129,35 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
 {
    if (g_build == GameBuild::Steam) {
       s_mCargoCount_offset    = 0x10E0;  // EntityCarrierClass::mCargoCount
+      s_cargoNodeArrayBase    = 0x10A0;  // cargo-node array (0x10A0 + 4*0x10 == 0x10E0)
       s_inner_mCargoSlot0Obj  = 0x1D9C;  // EntityCarrier::mCargoArray[0].mObject
+      s_multiCargoSpawn       = true;    // via attachCargoToSlot(); see its comment
       s_inner_mFlightState    = 0x564;
       s_inner_mClass          = 0x62C;
       s_inner_mProgress       = 0x568;
       s_inner_mRef17dc        = 0x1830;
-      s_inner_mNetAnimDelta   = 0;       // not located on Steam — write skipped
+      // Located in render 0x4AB040 at `FMUL [ESI+0x1c2c]` (004ab158), the exact
+      // analogue of modtools' `FMUL [EBX+0x1c6c]` (004f6a78) — same FLD1 /
+      // FSUBRP / flightState CMP 3 shape.  +0x94 render base => 0x1CC0.
+      s_inner_mNetAnimDelta   = 0x1CC0;
       s_class_takeoffAnim     = 0x7B4;
       s_visJzVA               = 0x004AB082;
 
       // VehicleSpawn::UpdateSpawn takes dt in XMM1 and cleans no stack here.
       s_updateSpawnRegcall    = true;
+
+      // ActivatePhysics turret/aimer/passenger fields, all read straight out of
+      // Steam's EntityFlyer::ActivatePhysics 0x004b5f70:
+      //   [ESI+0x1cd0] sub-object, [ESI+0x668] aimers, [ESI+0x660] turret count,
+      //   [ESI+0x640] turrets, [ESI+0x630] passengers,
+      //   [class+0xc80] aimer count, [class+0xd4c] passenger count.
+      s_SubObj_off            = 0x1CD0;  // instance, -0x40
+      s_AimerArray_off        = 0x668;   // instance, -0x40
+      s_TurretCount_off       = 0x660;   // instance, -0x40
+      s_TurretArray_off       = 0x640;   // instance, -0x40
+      s_PassengerArray_off    = 0x630;   // instance, -0x40
+      s_Class_AimerCount_off  = 0xC80;   // class,    -0xC8
+      s_Class_PassCount_off   = 0xD4C;   // class,    -0xC8
 
       // Flight-system instance fields, ECX-relative (ECX == structBase + 0x240
       // in EntityCarrier::Update on both builds).  Every EntityFlyer/Carrier
@@ -2024,9 +2180,13 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
       s_ClassLandingTime_off  = 0x824;  // LandingTime
       s_ClassLandedHt_off     = 0x82C;  // LandedHeight, verified
 
-      // Not located on Steam — every use site null-guards these.
-      s_rayHitVA1 = 0;
-      s_rayHitVA2 = 0;
+      // RayHit call sites in EntityFlyer::Update 0x4ac460, both `CALL
+      // CollisionManager::RayHit` (0x45e3a0) with the result scaled ×1024 into
+      // groundDistance [EDI+0x450].  Release returns the fraction in XMM0, so
+      // these take the CALL-redirect form rather than modtools' FLD1.
+      s_rayHitVA1     = 0x004ae246;
+      s_rayHitVA2     = 0x004ae478;
+      s_rayHitSseStub = true;
    }
 
    if (g_build != GameBuild::Modtools) {

@@ -837,6 +837,10 @@ namespace steam {
    // mem_pool_alloc` tracker allocation at the tail of UpdateSpawn (0066fc6a),
    // positionally identical to modtools 0x00665a50 -> pool 0x00B9A758.
    constexpr uintptr_t vehicle_tracker_pool     = 0x01f9a278;
+   // GameLoop::sPauseMode — bool, true while ESC-paused.  GameLoop::Pause
+   // 0x5334d0 / Resume 0x5334e0 are the same one-line `MOV byte [x],1` / `,0`
+   // setter pair as modtools 0x733340 / 0x733350 -> 0x00c6aae8.
+   constexpr uintptr_t gameloop_pause_mode      = 0x01e5605e;
    constexpr uintptr_t carrier_take_off         = 0x004b3c60;
    // NOTE: 0x6569c0 (old value of cloth_enforce_collisions) is actually
    // TentacleSimulator::EnforceCollisions — the 0x656/0x657 "EntityCloth::"
@@ -883,7 +887,16 @@ namespace steam {
    constexpr uintptr_t load_update_real          = 0x00576c00;  // LoadDisplay Update (adjacent to load_end_real)
    constexpr uintptr_t weapon_signal_fire        = 0x00679610;  // SignalFire (name-matched)
    constexpr uintptr_t snd_sound_play            = 0x0073a430;  // Snd::Play (gate: 7 shared callees + 2-source)
-   constexpr uintptr_t passenger_activate        = 0x004dd7c0;  // ActivatePhysics (2-source agreement)
+   // WAS 0x004dd7c0, which is EntityRemoteTerminal::ActivatePhysics — the old
+   // "2-source agreement" matched on the bare name ActivatePhysics and picked
+   // the wrong class.  0x0060fab0 is byte-identical to modtools 0x00568540
+   // (MOV EAX,[ECX+0xc] / ADD ECX,0xc / PUSH 2 / PUSH -0x14 / CALL [EAX+8]) and
+   // is the function EntityFlyer::ActivatePhysics 0x4b5f70 actually calls for
+   // each passenger slot.
+   constexpr uintptr_t passenger_activate        = 0x0060fab0;  // PassengerSlot::ActivatePhysics
+   // MountedTurret::ActivatePhysics — called per turret by EntityFlyer::
+   // ActivatePhysics 0x4b5f70 at 004b5fe6 (modtools 0x00563a90).
+   constexpr uintptr_t turret_activate           = 0x005a7b70;
    constexpr uintptr_t rumble_state_setup        = 0x006b2790;  // rumble state setup (2-source agreement)
 
    // ---- Flyer path following / engine sound --------------------------------
