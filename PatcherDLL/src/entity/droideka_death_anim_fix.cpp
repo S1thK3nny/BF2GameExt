@@ -54,6 +54,15 @@
 // that either tail-jumps to the real NextState or swallows the call with RET 4 --
 // exactly what NextState's own `RET 4` would have done. Register-transparent:
 // NextState is a __thiscall and may clobber EAX/ECX/EDX anyway.
+//
+// TODO: force the shield off when the death animation starts.
+//   Now that state 3 actually holds for the length of death01 instead of being
+//   preempted after ~16ms, the shield stays up for the whole collapse -- it used
+//   to be invisible because the state lasted a single frame. It should be
+//   dropped at the 0 -> 3 transition, i.e. in the thunk below on the first call
+//   that is NOT swallowed (mState != 3 going in, so the real NextState runs).
+//   Open questions before implementing:
+//     - use the disable function of the weapon shield fire itself, should be raise I think.
 // =============================================================================
 
 bool g_droidekaDeathAnimEnabled = true;

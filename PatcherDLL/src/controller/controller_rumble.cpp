@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "controller_rumble.hpp"
 #include "core/resolve.hpp"
+#include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -674,12 +676,14 @@ void rumble_init(uintptr_t exe_base)
 
    QueryPerformanceFrequency(&s_perfFreq);
 
-   using namespace game_addrs::modtools;
+   // Every address this needs is in the per-build table, so rumble is not
+   // modtools-only; each hook below is already individually null-guarded,
+   // so a build missing one piece just loses that piece.
 
    // Install Detours hooks on the vanilla output stubs
-   if (rumble_light_output && rumble_heavy_output) {
-      original_light_output = (fn_rumble_output)resolve(exe_base, rumble_light_output);
-      original_heavy_output = (fn_rumble_output)resolve(exe_base, rumble_heavy_output);
+   if (g_addr->rumble_light_output && g_addr->rumble_heavy_output) {
+      original_light_output = (fn_rumble_output)resolve(exe_base, g_addr->rumble_light_output);
+      original_heavy_output = (fn_rumble_output)resolve(exe_base, g_addr->rumble_heavy_output);
 
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
@@ -699,8 +703,8 @@ void rumble_init(uintptr_t exe_base)
    }
 
    // Hook the state setup stub (dispatch calls this to populate rumble from regions)
-   if (rumble_state_setup) {
-      original_state_setup = (fn_rumble_state_setup)resolve(exe_base, rumble_state_setup);
+   if (g_addr->rumble_state_setup) {
+      original_state_setup = (fn_rumble_state_setup)resolve(exe_base, g_addr->rumble_state_setup);
 
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
@@ -716,8 +720,8 @@ void rumble_init(uintptr_t exe_base)
    }
 
    // Hook Weapon::SignalFire for per-shot recoil rumble
-   if (weapon_signal_fire) {
-      original_signal_fire = (fn_signal_fire)resolve(exe_base, weapon_signal_fire);
+   if (g_addr->weapon_signal_fire) {
+      original_signal_fire = (fn_signal_fire)resolve(exe_base, g_addr->weapon_signal_fire);
 
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
@@ -733,8 +737,8 @@ void rumble_init(uintptr_t exe_base)
    }
 
    // Hook Weapon::Update for charge rumble (recoil is in SignalFire)
-   if (weapon_update) {
-      original_weapon_update = (fn_weapon_update)resolve(exe_base, weapon_update);
+   if (g_addr->weapon_update) {
+      original_weapon_update = (fn_weapon_update)resolve(exe_base, g_addr->weapon_update);
 
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
@@ -750,8 +754,8 @@ void rumble_init(uintptr_t exe_base)
    }
 
    // Resolve sGameOver global for game-over motor decay
-   if (s_game_over) {
-      s_pGameOver = (volatile BYTE*)resolve(exe_base, s_game_over);
+   if (g_addr->s_game_over) {
+      s_pGameOver = (volatile BYTE*)resolve(exe_base, g_addr->s_game_over);
    }
 
    // Reset all state

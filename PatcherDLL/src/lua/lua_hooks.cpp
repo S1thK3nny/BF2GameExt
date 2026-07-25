@@ -183,11 +183,18 @@ static void __cdecl hooked_init_state()
       register_lua_functions(g_L);
    }
 
-   if (g_build == GameBuild::Modtools) {
-      // Set up gamepad bindings + rumble hooks — must run after the game's input
-      // system is initialized (and after the CRT FP package is ready).
-      // Modtools-only until the release-build controller struct offsets
-      // (ctrlBase+0x428 / tables +0x1ACC/+0x20BC) are verified.
+   if (g_build == GameBuild::Modtools || g_build == GameBuild::Steam) {
+      // Gamepad bindings + rumble hooks — must run after the game's input system
+      // is initialized (and after the CRT FP package is ready).  Both are
+      // build-aware now: every address they need is in the per-build table, and
+      // the FLInputManager / joystick-config struct offsets they poke were
+      // verified identical on modtools and Steam (see controller_setup_bindings).
+      //
+      // GOG is deliberately excluded rather than left to the null-guards: it
+      // *does* have all three globals, so it would actively run and write into
+      // its input tables using offsets nobody has checked on that build.  It is
+      // the same release family as Steam so it will probably just work, but this
+      // code pokes struct fields directly — verify there before enabling.
       uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
       controller_setup_bindings(base);
       if (g_rumbleEnabled) rumble_init(base);

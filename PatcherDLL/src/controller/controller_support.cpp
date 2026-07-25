@@ -345,10 +345,16 @@ void controller_setup_bindings(uintptr_t exe_base)
 
    g_log = get_gamelog();
 
-   using namespace game_addrs::modtools;
+   // Build-aware.  The FLInputManager struct is byte-identical across builds:
+   // ctrlBase is controller_base_global+0x428 on both (modtools 0x00caef48 ->
+   // FLInputManager::Init 0x742870, Steam 0x1ebe078 -> 0x52a080), and six
+   // further fields in the same object land at the same deltas (0x25C8,
+   // 0x25CC, 0x25D0, 0x28A0, 0x28EC, 0x2A54) -- past both tables used below.
+   // The joystick config struct matches too (+0x30/+0x5f0/+0x638/+0xf94 and
+   // the 0x2c device stride are identical in joystick_sync on both builds).
 
    // Check if a joystick is connected
-   int* pNumJoysticks = (int*)resolve(exe_base, num_joysticks_global);
+   int* pNumJoysticks = (int*)resolve(exe_base, g_addr->num_joysticks_global);
    if (!pNumJoysticks) return;
    int numJoysticks = *pNumJoysticks;
    if (numJoysticks <= 0) {
@@ -359,11 +365,11 @@ void controller_setup_bindings(uintptr_t exe_base)
    if (g_log) g_log("[Controller] %d joystick(s) detected, setting up bindings...\n", numJoysticks);
 
    // Enable joystick input processing.
-   uintptr_t joyConfig = (uintptr_t)resolve(exe_base, joystick_config_base);
+   uintptr_t joyConfig = (uintptr_t)resolve(exe_base, g_addr->joystick_config_base);
    if (!joyConfig) return;
    *(char*)(joyConfig + 0xF94) = 1;
 
-   uintptr_t ctrlBase = (uintptr_t)resolve(exe_base, controller_base_global) + 0x428;
+   uintptr_t ctrlBase = (uintptr_t)resolve(exe_base, g_addr->controller_base_global) + 0x428;
 
    // Table pointers and constants
    constexpr int RT_ENTRIES_PER_MODE = 0x2B; // 43
@@ -447,10 +453,10 @@ void controller_setup_bindings(uintptr_t exe_base)
    }
 
    // Step 2: Call the joystick init chain (discover device + sync bindings)
-   if (joystick_discover && joystick_sync) {
+   if (g_addr->joystick_discover && g_addr->joystick_sync) {
       uintptr_t configBase = joyConfig;
-      auto discover = (fn_joystick_discover)resolve(exe_base, joystick_discover);
-      auto sync     = (fn_joystick_sync)resolve(exe_base, joystick_sync);
+      auto discover = (fn_joystick_discover)resolve(exe_base, g_addr->joystick_discover);
+      auto sync     = (fn_joystick_sync)resolve(exe_base, g_addr->joystick_sync);
       discover(configBase, nullptr);
       sync(configBase, nullptr);
       if (g_log) g_log("[Controller] Called joystick discover + sync\n");
