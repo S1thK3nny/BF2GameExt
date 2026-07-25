@@ -822,6 +822,21 @@ namespace steam {
    // hashes are build-invariant (0x3e2c4da4 / 0x910a89fc appear as literal CMPs).
    constexpr uintptr_t carrier_set_property     = 0x004976b0;
    constexpr uintptr_t carrier_attach_cargo     = 0x00497300;
+   // VehicleSpawn::UpdateSpawn — instruction-level match with modtools 0x665A50:
+   // same `[this+0xF8]` team index, `[this+EAX*4+0x90]` spawn class, vtable+0x20
+   // call and `LEA [this+0x110]`.  VehicleSpawn's own offsets are unchanged
+   // between builds (it is not in the -0x40 shifted EntityFlyer/Carrier range).
+   // VehicleSpawn::UpdateSpawn — CONVENTION DIFFERS FROM MODTOOLS.  Under LTCG
+   // this build passes dt in XMM1 with no stack argument and ends in a bare
+   // `RET` (0066fcf7), where modtools takes dt at [EBP+8] and ends `RET 4`.
+   // Hooking it with the modtools __fastcall(ecx, edx, float) shape pops 4
+   // bytes that were never pushed, corrupting ESP on every call — see the
+   // regcall thunks in flyer_carrier_fixes.cpp.
+   constexpr uintptr_t carrier_update_spawn     = 0x0066F370;
+   // VehicleTracker::sMemoryPool — the `PUSH 0x1c; MOV ECX,<pool>; CALL
+   // mem_pool_alloc` tracker allocation at the tail of UpdateSpawn (0066fc6a),
+   // positionally identical to modtools 0x00665a50 -> pool 0x00B9A758.
+   constexpr uintptr_t vehicle_tracker_pool     = 0x01f9a278;
    constexpr uintptr_t carrier_take_off         = 0x004b3c60;
    // NOTE: 0x6569c0 (old value of cloth_enforce_collisions) is actually
    // TentacleSimulator::EnforceCollisions — the 0x656/0x657 "EntityCloth::"
