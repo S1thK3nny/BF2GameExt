@@ -203,6 +203,24 @@ void lua_register_func(lua_State* L, const char* name, lua_CFunction fn)
    g_lua.settable(L, -10001);
 }
 
+void lua_set_global_bool(lua_State* L, const char* name, bool value)
+{
+   if (!g_lua.pushlstring || !g_lua.pushboolean || !g_lua.settable) return;
+
+   g_lua.pushlstring(L, name, strlen(name));
+   g_lua.pushboolean(L, value ? 1 : 0);
+   g_lua.settable(L, -10001);
+}
+
+void lua_set_global_string(lua_State* L, const char* name, const char* value)
+{
+   if (!g_lua.pushlstring || !g_lua.settable) return;
+
+   g_lua.pushlstring(L, name, strlen(name));
+   g_lua.pushlstring(L, value, strlen(value));
+   g_lua.settable(L, -10001);
+}
+
 void lua_hooks_install(uintptr_t exe_base)
 {
    // Requires the Lua VM API + init_state; no-ops on builds that lack them.
@@ -227,6 +245,8 @@ void lua_hooks_install(uintptr_t exe_base)
    g_lua.rawgeti      = (fn_lua_rawgeti)     resolve(exe_base, g_addr->lua_rawgeti);
    g_lua.settop       = (fn_lua_settop)       resolve(exe_base, g_addr->lua_settop);
    g_lua.insert       = (fn_lua_insert)       resolve(exe_base, g_addr->lua_insert);
+   if (g_addr->lua_newtable)
+      g_lua.newtable  = (fn_lua_newtable)      resolve(exe_base, g_addr->lua_newtable);
    original_init_state = (fn_init_state)resolve(exe_base, g_addr->init_state);
 
    // Character-exit-vehicle event hook — needs the exit function AND the char

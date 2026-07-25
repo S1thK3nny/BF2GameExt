@@ -111,6 +111,14 @@ static int __cdecl hooked_lua_read_data_file(lua_State* L)
    const int result = original_lua_read_data_file(L);
 
    if (isIngame && s_proneConfigured) {
+      if (gameext_is_disabled(L)) {
+         g_proneEnabled = false;
+         if (auto fn_log = get_gamelog())
+            fn_log("[Prone] GameExt.Disable set by the mod, so prone is disabled "
+                   "for this mission\n");
+         return result;
+      }
+
       const bool ok = read_data_file(kProneLvl);
       g_proneEnabled = ok;
 

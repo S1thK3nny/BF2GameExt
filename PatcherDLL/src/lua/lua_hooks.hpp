@@ -88,6 +88,11 @@ using fn_lua_settop = void(__cdecl*)(lua_State* L, int idx);
 // (the lua_setglobal macro expansion: pushstring, insert(-2), settable).
 using fn_lua_insert = void(__cdecl*)(lua_State* L, int idx);
 
+// lua_newtable(L) - allocates a fresh table AND pushes it onto the Lua stack
+// (increments top). This is the full public wrapper; both the modtools and the
+// Steam builds export it (modtools 0x7B8860, steam 0x69bdb0).
+using fn_lua_newtable = void(__cdecl*)(lua_State* L);
+
 // =============================================================================
 // Lua globals - resolved at runtime from exe base + addresses above
 // =============================================================================
@@ -110,8 +115,17 @@ struct lua_api {
    fn_lua_rawgeti      rawgeti      = nullptr;
    fn_lua_settop       settop       = nullptr;
    fn_lua_insert       insert       = nullptr;
+   fn_lua_newtable     newtable     = nullptr;   // modtools + steam
 
    int tointeger(lua_State* L, int idx) const { return static_cast<int>(tonumber(L, idx)); }
+
+   // Push a fresh empty table onto the Lua stack. Returns false on builds where
+   // lua_newtable isn't wired (e.g. GOG), so callers can fall back gracefully.
+   bool new_table(lua_State* L) const {
+      if (!newtable) return false;
+      newtable(L);                 // allocates the table AND pushes it for us
+      return true;
+   }
 };
 
 // Global API instance - populated by lua_hooks_install()
@@ -157,3 +171,19 @@ void lua_hooks_uninstall();
 
 // Register a single C function as a named Lua global.
 void lua_register_func(lua_State* L, const char* name, lua_CFunction fn);
+
+// Set a named Lua global to a boolean / string value.
+void lua_set_global_bool(lua_State* L, const char* name, bool value);
+void lua_set_global_string(lua_State* L, const char* name, const char* value);
+
+// Anti-tamper master switch. Returns true if a mod has set `GameExt.disable`
+// truthy in Lua (typically from a map's ScriptPreInit, before ReadDataFile).
+// Intrusive gameplay features should consult this at activation time and skip.
+// Safe to call any time: returns false unless the GameExt table was built.
+// Pass the live Lua state from the current C callback (NOT the cached g_L).
+bool gameext_is_disabled(lua_State* L);
+
+// Version string exposed to Lua as GameExt.version. Tracked independently of
+// Resource.rc's FILEVERSION (currently 1.0.0.1) — this is the API version
+// scripts branch on, so bump it only when the Lua surface changes.
+#define GAMEEXT_VERSION_STRING "1.0.0"

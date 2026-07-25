@@ -21,6 +21,7 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
   - [Additional Debug Commands](#additional-debug-commands)
   - [Controller Support](#controller-support)
 - [Lua API](#lua-api)
+- [Detection](#detection)
 - [Supported Executables](#supported-executables)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -129,6 +130,34 @@ Extra commands for the in-game console in the ModTools (`~`):
 ## Lua API
 
 All functions below are registered globally and callable from any mission, ScriptInit, or shell script. BF2_modtools only.
+
+### Detection
+
+Set alongside the function registrations, so scripts can degrade gracefully when the extension isn't installed (`GameExt` is simply `nil` in vanilla).
+
+| Field | Description |
+|-------|-------------|
+| `GameExt` | A table when BF2GameExt is loaded; `nil` otherwise. |
+| `GameExt.version` | Version string, e.g. `"1.0.0"`. |
+| `GameExt.build` | Which executable is being patched: `"modtools"`, `"steam"`, `"gog"` or `"unknown"`. |
+| `GameExt.disable` | Write-only opt-out. Set it truthy to disable BF2GameExt's intrusive gameplay features for a mission (see below). |
+
+```lua
+if GameExt then
+    print("BF2GameExt " .. GameExt.version .. " on " .. GameExt.build)
+    SetFogEnable(1)
+end
+```
+
+**Opting out (`GameExt.disable`)** - A mod that wants the extension's fixes and Lua API but *not* its gameplay-altering features can set `GameExt.disable = true`. Set it in your mission's `ScriptPreInit`, before the `ReadDataFile("ingame.lvl")` calls, so it takes effect for that mission:
+
+```lua
+function ScriptPreInit()
+    if GameExt then GameExt.disable = true end   -- e.g. suppress prone
+end
+```
+
+Currently this gates the **Prone** feature (the only feature that modifies mod content — it grafts a pose into the soldier animation banks). It leaves bug-fix patches and the Lua API untouched. Future intrusive features will honor the same switch.
 
 ### Character & Weapon Queries
 

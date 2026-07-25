@@ -196,7 +196,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
-      g_rumbleEnabled = cfg.get_bool("Controller", "Rumble", true);
+      g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
       deadBodyAllFactions = cfg.get_bool("Features", "DeadBodyShootingAllFactions", false);
       controller_set_ini_path(ini_path);

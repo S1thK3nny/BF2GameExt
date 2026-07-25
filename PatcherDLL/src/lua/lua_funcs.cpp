@@ -1611,8 +1611,100 @@ static const lua_func_entry custom_functions[] = {
    { nullptr, nullptr }
 };
 
+// True once register_lua_functions() has built the GameExt table. Until then
+// _G.GameExt may be nil or (on the flat-global fallback) a boolean, so indexing
+// it for the Disable field would be unsafe.
+static bool s_gameExtTableBuilt = false;
+
+bool gameext_is_disabled(lua_State* L)
+{
+   if (!s_gameExtTableBuilt) return false;
+
+   // Must operate on the CALLER's live Lua state, not the cached global g_L:
+   // during a C callback the engine may be running a different thread/state, and
+   // pushing onto a stale state's stack faults and corrupts the VM.
+   if (!L || !g_lua.pushlstring || !g_lua.gettable ||
+       !g_lua.toboolean || !g_lua.gettop || !g_lua.settop)
+      return false;
+
+   bool disabled = false;
+   const int top = g_lua.gettop(L);         // snapshot before we borrow the stack
+   __try {
+      g_lua.pushlstring(L, "GameExt", 7);
+      g_lua.gettable(L, -10001);            // _G.GameExt (our table)
+      g_lua.pushlstring(L, "disable", 7);
+      g_lua.gettable(L, -2);                // GameExt.disable
+      disabled = g_lua.toboolean(L, -1) != 0;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      disabled = false;
+   }
+   g_lua.settop(L, top);                     // always restore, even if a call faulted
+   return disabled;
+}
+
 void register_lua_functions(lua_State* L)
 {
    for (const lua_func_entry* entry = custom_functions; entry->name; ++entry)
       lua_register_func(L, entry->name, entry->func);
+
+   // Detection table for scripts. GameExt is a table (still truthy, so the
+   // classic `if GameExt then ... end` presence check keeps working) that
+   // namespaces the metadata fields:
+   //   if GameExt then ... end             -- extension present
+   //   print(GameExt.version)              -- "1.0.0.1"
+   //   if GameExt.build == "steam" then    -- which exe we're patching
+   //   GameExt.disable = true              -- opt out of intrusive features
+   const char* buildName = "unknown";
+   switch (g_build) {
+      case GameBuild::Modtools: buildName = "modtools"; break;
+      case GameBuild::Steam:    buildName = "steam";    break;
+      case GameBuild::GOG:      buildName = "gog";      break;
+      default: break;
+   }
+
+   // IMPORTANT: this runs on every init_state, several times per mission load.
+   // If _G.GameExt already exists (we built it on an earlier init_state for this
+   // same Lua state), leave it completely alone — rebuilding it would wipe any
+   // GameExt.disable a mission script has already set. On a genuinely new Lua
+   // state (new mission) GameExt is nil again, so it rebuilds and disable resets.
+   bool alreadyPresent = false;
+   if (g_lua.pushlstring && g_lua.gettable && g_lua.toboolean &&
+       g_lua.gettop && g_lua.settop) {
+      const int top = g_lua.gettop(L);
+      g_lua.pushlstring(L, "GameExt", 7);
+      g_lua.gettable(L, -10001);                    // _G.GameExt (nil on a fresh state)
+      alreadyPresent = g_lua.toboolean(L, -1) != 0; // any table is truthy
+      g_lua.settop(L, top);
+   }
+
+   const bool canBuildTable = g_lua.newtable &&
+                              g_lua.pushlstring && g_lua.settable;
+   if (alreadyPresent) {
+      s_gameExtTableBuilt = true;                    // table persists; reader can index it
+   } else if (canBuildTable) {
+      // Build _G.GameExt = { version = ..., build = ... }. Push the global key
+      // first, then the table; set each field with settable(-3) (which leaves
+      // the table on top), then settable(-10001) writes _G["GameExt"] = table.
+      g_lua.pushlstring(L, "GameExt", 7);          // [K]
+      if (g_lua.new_table(L)) {                     // [K, T]
+         auto set_field = [&](const char* key, const char* value) {
+            g_lua.pushlstring(L, key, strlen(key));
+            g_lua.pushlstring(L, value, strlen(value));
+            g_lua.settable(L, -3);
+         };
+         set_field("version", GAMEEXT_VERSION_STRING);
+         set_field("build",   buildName);
+         g_lua.settable(L, -10001);                 // _G.GameExt = T
+         s_gameExtTableBuilt = true;                // enables gameext_is_disabled()
+      } else if (g_lua.settop) {
+         g_lua.settop(L, -2);                        // drop the dangling key
+      }
+   }
+
+   // If the table couldn't be built (a build where Lua is wired but table
+   // creation isn't — shouldn't happen in practice), fall back to a plain
+   // truthy GameExt so `if GameExt then` still works. No flat GameExtVersion /
+   // GameExtBuild globals: scripts read GameExt.version / GameExt.build.
+   if (!s_gameExtTableBuilt)
+      lua_set_global_bool(L, "GameExt", true);
 }

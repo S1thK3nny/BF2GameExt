@@ -36,11 +36,12 @@ namespace modtools {
    constexpr uintptr_t lua_touserdata    = 0x7B8440;
    constexpr uintptr_t lua_pushlightuserdata = 0x7B8750;
    constexpr uintptr_t lua_isnumber      = 0x7B8070;
-   constexpr uintptr_t lua_gettable      = 0x7B89A0;
+   constexpr uintptr_t lua_gettable      = 0x7B8770;  // calls luaV_gettable. NOTE: Ghidra mislabels 0x7B89A0 "lua_gettable" but that is lua_rawset (calls luaH_set + pops 2) — using it underflowed the Lua stack and spun the VM.
    constexpr uintptr_t lua_pcall         = 0x7B8B60;
    constexpr uintptr_t lua_rawgeti       = 0x7B8810;
    constexpr uintptr_t lua_settop        = 0x7B7E70;
    constexpr uintptr_t lua_insert        = 0x7B7F20;
+   constexpr uintptr_t lua_newtable      = 0x7B8860;
 
    // Stock Lua callback: CreateEntity(class, matrix, name). Detoured to apply
    // VehicleSpawn-style post-create fixup (team + activate) so vehicles
@@ -553,6 +554,7 @@ namespace steam {
    constexpr uintptr_t lua_rawgeti       = 0x69c1a0;
    constexpr uintptr_t lua_settop        = 0x69c400;
    constexpr uintptr_t lua_insert        = 0x69bc00;
+   constexpr uintptr_t lua_newtable      = 0x69bdb0;
 
    // ---- Aimer / Weapon -------------------------------------------------------
 
