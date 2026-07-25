@@ -734,6 +734,36 @@ namespace steam {
    // [ESI+0x7b4] and the alternate [ESI+0x7b8] from two AnimBankFind calls, same
    // PUSH 0x800 bank size / RET 4 / XOR AL,AL early-out as modtools 0x004F6560.
    constexpr uintptr_t flyer_init_animations     = 0x004b9720;
+   // ---- Carrier turret fire ------------------------------------------------
+   // MountedTurret::Update 0x005a5f50 (Ghidra had it as OrdnanceTowCable::
+   // Update; it matches modtools 0x00565630 instruction for instruction —
+   // same [this-0xC] parent, vtable+0x24 call, 2-arg cdecl helper, TEST AL,AL).
+   // The fire gate is encoded differently here than on modtools, so the patch
+   // length differs (18 vs 17) and the site had to be found by byte scan:
+   //   005a64df 8B06           MOV EAX,[ESI]
+   //   005a64e1 8BCE           MOV ECX,ESI
+   //   005a64e3 8B4024         MOV EAX,[EAX+0x24]
+   //   005a64e6 FFD0           CALL EAX
+   //   005a64e8 83B864050000 00 CMP [EAX+0x564],0    (modtools: MOV/TEST 0x5A4)
+   //   005a64ef 7529           JNZ +0x29
+   constexpr uintptr_t turret_fire_check         = 0x005a64df;
+   constexpr uintptr_t turret_fire_allow         = 0x005a64f1;  // check + 18
+   constexpr uintptr_t turret_fire_block         = 0x005a651a;  // allow + 0x29
+   // MountedTurret::UpdateIndirect — found by vtable slot alignment: it is
+   // slot 49 of the MountedTurret sub-object vtable (modtools base 0x00a43360,
+   // Steam base 0x007aa650), and slot 1 is Update on both (modtools thunk
+   // 0x41370a -> 0x565630, Steam 0x5a5f50).  Body confirms it: [EDI+0xc8] AI,
+   // LEA ESI,[EAX+0x2c4], same [ESI+0x50/54/5c/64] reads, and it writes the
+   // heading controls to [EDI+0x88]/[EDI+0x8c] exactly like modtools.
+   // dt is on the stack (MOVSS XMM1,[EBP+8]) and it ends RET 4, so the
+   // bool __fastcall(ecx, edx, float) shape is correct here.
+   constexpr uintptr_t turret_update_indirect    = 0x005a82d0;
+   // The weapon fire state machine. CONVENTION DIFFERS: modtools 0x00562dd0 is
+   // __thiscall(trigger, float dt, char fire) / RET 8, but this build has NO dt
+   // parameter at all — __thiscall(trigger, char fire), fire at [EBP+8], RET 4.
+   // The bitfield body is otherwise byte-identical (AND 0x1f / CMP 0x1c /
+   // AND 0xffffffe1 / OR 1), which is how it was matched.
+   constexpr uintptr_t trigger_update            = 0x0043a950;
    // ZephyrPoseDyn<32>::SetAnimTime and the global identity matrix, both read
    // out of EntityFlyer::Render 0x4AB040 at the points where modtools' Render
    // 0x4f6970 calls 0x0082A9C0 (004f6b2c) and pushes 0x00CF6830 (004f6b75).

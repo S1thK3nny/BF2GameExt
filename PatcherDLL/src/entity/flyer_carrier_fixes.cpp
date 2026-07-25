@@ -739,12 +739,18 @@ static void* g_carrierVtable = nullptr;
 //   7526           JNZ short 0x565c83
 // ---------------------------------------------------------------------------
 
-static constexpr size_t    kTurretFirePatch_len  = 17;
+// The gate is encoded differently per build, so both the patched length and
+// the flight-state offset vary:
+//   modtools 0x565c4c, 17 bytes, MOV ECX,[EAX+0x5A4] / TEST ECX,ECX / JNZ
+//   Steam    0x5a64df, 18 bytes, CMP [EAX+0x564],0            / JNZ
+static constexpr size_t    kTurretFirePatch_max  = 18;   // buffer size
+static size_t              s_turretFirePatchLen  = 17;
+static uintptr_t           s_turretFireStateOff  = 0x5A4;  // Steam 0x564
 
 static unsigned char* s_turretFirePatchAddr = nullptr;
 static uintptr_t      s_turretFireAllowJmp  = 0;
 static uintptr_t      s_turretFireBlockJmp  = 0;
-static unsigned char   s_turretFireSaved[kTurretFirePatch_len] = {};
+static unsigned char   s_turretFireSaved[kTurretFirePatch_max] = {};
 
 // Code cave — entered via JMP from 0x565c4c.
 // At entry: ESI = MountedTurret parent ptr (EBX-0xC). We are inside the
@@ -762,8 +768,9 @@ static __declspec(naked) void turretFire_cave()
       cmp  ecx, dword ptr [g_carrierVtable]
       je   _allow                     // carrier → skip state check
 
-      // Not a carrier — original state check
-      mov  ecx, [eax + 0x5A4]         // ECX = EntityFlyer state
+      // Not a carrier — original state check (offset differs per build)
+      mov  ecx, dword ptr [s_turretFireStateOff]
+      mov  ecx, [eax + ecx]           // ECX = EntityFlyer state
       test ecx, ecx
       jnz  _block                     // state != 0 → block fire
 
@@ -777,27 +784,39 @@ static __declspec(naked) void turretFire_cave()
 
 static void turretFireInit()
 {
+   if (!g_addr->turret_fire_check || !g_addr->turret_fire_allow ||
+       !g_addr->turret_fire_block)
+      return;                       // unmapped on this build
+
    uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   s_turretFirePatchAddr = (unsigned char*)((game_addrs::modtools::turret_fire_check - kUnrelocatedBase) + base);
-   s_turretFireAllowJmp  = (game_addrs::modtools::turret_fire_allow - kUnrelocatedBase) + base;
-   s_turretFireBlockJmp  = (game_addrs::modtools::turret_fire_block - kUnrelocatedBase) + base;
+   s_turretFirePatchAddr = (unsigned char*)((g_addr->turret_fire_check - kUnrelocatedBase) + base);
+   s_turretFireAllowJmp  = (g_addr->turret_fire_allow - kUnrelocatedBase) + base;
+   s_turretFireBlockJmp  = (g_addr->turret_fire_block - kUnrelocatedBase) + base;
+
+   // The patched region must end exactly where the "allow" path resumes,
+   // otherwise the NOP fill would eat live instructions.
+   s_turretFirePatchLen = (size_t)(g_addr->turret_fire_allow - g_addr->turret_fire_check);
+   if (s_turretFirePatchLen < 5 || s_turretFirePatchLen > kTurretFirePatch_max) {
+      s_turretFirePatchAddr = nullptr;   // refuse to patch on a bad address pair
+      return;
+   }
 }
 
 static void turretFireInstall()
 {
    if (!s_turretFirePatchAddr) return;
    DWORD oldProt;
-   if (VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len,
+   if (VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen,
                       PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_turretFireSaved, s_turretFirePatchAddr, kTurretFirePatch_len);
+      memcpy(s_turretFireSaved, s_turretFirePatchAddr, s_turretFirePatchLen);
       // Write JMP rel32 to code cave
       s_turretFirePatchAddr[0] = 0xE9;
       uintptr_t rel = (uintptr_t)&turretFire_cave
                      - ((uintptr_t)s_turretFirePatchAddr + 5);
       memcpy(s_turretFirePatchAddr + 1, &rel, 4);
       // NOP remaining bytes
-      memset(s_turretFirePatchAddr + 5, 0x90, kTurretFirePatch_len - 5);
-      VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len, oldProt, &oldProt);
+      memset(s_turretFirePatchAddr + 5, 0x90, s_turretFirePatchLen - 5);
+      VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen, oldProt, &oldProt);
    }
 }
 
@@ -805,10 +824,10 @@ static void turretFireUninstall()
 {
    if (!s_turretFirePatchAddr) return;
    DWORD oldProt;
-   if (VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len,
+   if (VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen,
                       PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_turretFirePatchAddr, s_turretFireSaved, kTurretFirePatch_len);
-      VirtualProtect(s_turretFirePatchAddr, kTurretFirePatch_len, oldProt, &oldProt);
+      memcpy(s_turretFirePatchAddr, s_turretFireSaved, s_turretFirePatchLen);
+      VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen, oldProt, &oldProt);
    }
 }
 
@@ -912,11 +931,29 @@ static void createCtrlNullCheckUninstall()
 
 
 using fn_TurretUpdateIndirect_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
-// FUN_00562dd0: __thiscall(uint32_t* fireTrigger, float dt, char fire)
-using fn_FireStateMachine_t = void(__fastcall*)(void* ecx, void* edx, float dt, char fire);
+
+// The fire state machine's signature is NOT the same on both builds:
+//   modtools 0x00562dd0 : __thiscall(uint32_t* trigger, float dt, char fire)  RET 8
+//   Steam    0x0043a950 : __thiscall(uint32_t* trigger, char fire)            RET 4
+// The release build has no dt parameter at all (it reads fire straight from
+// [EBP+8]).  Calling it with the modtools shape would push an extra dword and
+// leave the stack 4 bytes off on return — the same failure mode as the
+// UpdateSpawn bug — so the call site picks the shape per build.
+using fn_FireStateMachine_t     = void(__fastcall*)(void* ecx, void* edx, float dt, char fire);
+using fn_FireStateMachineNoDt_t = void(__fastcall*)(void* ecx, void* edx, char fire);
 
 static fn_TurretUpdateIndirect_t original_TurretUpdateIndirect = nullptr;
 static fn_FireStateMachine_t g_FireStateMachine = nullptr;
+static bool s_fireStateMachineHasDt = true;   // false on Steam
+
+static inline void fireStateMachine(void* trigger, float dt, char fire)
+{
+   if (!g_FireStateMachine) return;
+   if (s_fireStateMachineHasDt)
+      g_FireStateMachine(trigger, nullptr, dt, fire);
+   else
+      ((fn_FireStateMachineNoDt_t)g_FireStateMachine)(trigger, nullptr, fire);
+}
 
 static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, float dt)
 {
@@ -998,7 +1035,7 @@ static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, flo
 
       if (onTarget) {
          // Set fire trigger and pump weapon to enter/stay in FIRING state
-         g_FireStateMachine(turretFire, nullptr, dt, 1);
+         fireStateMachine(turretFire, dt, 1);
 
          if (wpnPtr) {
             using fn_WeaponUpdate_t = bool(__thiscall*)(void* thisWeapon, float dt);
@@ -1018,7 +1055,7 @@ static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, flo
          }
       } else {
          // Clear fire trigger and force weapon back to IDLE
-         g_FireStateMachine(turretFire, nullptr, dt, 0);
+         fireStateMachine(turretFire, dt, 0);
 
          if (wpnPtr) {
             uint32_t* wpnState = (uint32_t*)((char*)wpnPtr + 0xB0);
@@ -2093,11 +2130,29 @@ static void carrier_bounds_guards_install(uintptr_t exe_base)
       g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, g_addr->passenger_activate);
    }
 
+   // Carrier turret fire patch — lets carrier turrets fire while airborne.
+   // turretFireInit() no-ops if the site is unmapped on this build.
+   turretFireInit();
+   turretFireInstall();
+
+   // PILOT_SELF turret AI — autonomous aiming + firing for turrets that have
+   // no UnitController of their own.
+   const bool wantTurretAI = g_addr->turret_update_indirect && g_addr->trigger_update &&
+                             g_addr->carrier_vtable;
+   if (wantTurretAI) {
+      original_TurretUpdateIndirect =
+         (fn_TurretUpdateIndirect_t)resolve(exe_base, g_addr->turret_update_indirect);
+      g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, g_addr->trigger_update);
+      g_carrierVtable    = resolve(exe_base, g_addr->carrier_vtable);
+   }
+
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
    DetourAttach(&(PVOID&)original_AttachCargo, hooked_AttachCargo);
    DetourAttach(&(PVOID&)original_DetachCargo, hooked_DetachCargo);
+   if (wantTurretAI)
+      DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
    if (wantRender)
       DetourAttach(&(PVOID&)original_FlyerRender, hooked_FlyerRender);
    if (wantFlight) {
@@ -2158,6 +2213,13 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
       s_PassengerArray_off    = 0x630;   // instance, -0x40
       s_Class_AimerCount_off  = 0xC80;   // class,    -0xC8
       s_Class_PassCount_off   = 0xD4C;   // class,    -0xC8
+
+      // Carrier turret fire gate: CMP [EAX+0x564],0 (18 bytes) rather than
+      // modtools' MOV [EAX+0x5A4] / TEST (17 bytes).
+      s_turretFireStateOff    = 0x564;
+
+      // The fire state machine here takes no dt parameter (RET 4, not RET 8).
+      s_fireStateMachineHasDt = false;
 
       // Flight-system instance fields, ECX-relative (ECX == structBase + 0x240
       // in EntityCarrier::Update on both builds).  Every EntityFlyer/Carrier
