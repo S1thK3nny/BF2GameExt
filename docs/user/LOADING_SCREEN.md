@@ -1,0 +1,30 @@
+# Loading Screen System
+
+The vanilla game reads its loading screen configuration from a munged `load.cfg`,
+which cannot be overridden without replacing the base `data\_lvl_pc\load\load.lvl` file. BF2GameExt hooks
+the loading screen config parser and renderer to add new parameters that work alongside the vanilla ones.
+
+Modders can also redirect the entire loading screen to a custom `load.cfg` from
+Lua with `SetLoadDisplayLevel(path)`. See the [Lua API](LUA_API.md).
+
+To check for what builds these are available on, see the [compatibility table](../../README.md#compatibility).
+
+## Custom Parameters
+
+| Parameter | Syntax | Description |
+|-----------|--------|-------------|
+| `EnableBF1` | `EnableBF1(1/0)` | Master switch for the BF1-style zoom animation sequence |
+| `PlanetLevel` | `PlanetLevel(index, texName, x, y, w, h)` | Per-level planet texture at a normalized screen rect. Place inside `PC()` or `Map()` |
+| `AnimatedTextures` | `AnimatedTextures(baseName, count, fps [, x, y, w, h])` | Frame-sequence animation overlay. Frames named `baseName0`..`baseName(count-1)` |
+| `ScanLineTexture` | `ScanLineTexture(texName [, f1, f2, f3])` | Full-screen scanline overlay drawn on top of everything |
+| `ZoomSelectorTextures` | `ZoomSelectorTextures(horz, vert, corner)` | Texture strips for the 16-quad crosshair frame around the zoom target |
+| `ZoomSelectorTileSize` | `ZoomSelectorTileSize(halfW [, halfH])` | Half-dimensions of each crosshair tile in normalized screen space |
+| `XTrackingSound` | `XTrackingSound(soundName)` | Looping sound during horizontal band convergence |
+| `YTrackingSound` | `YTrackingSound(soundName)` | Looping sound during vertical band convergence |
+| `ZoomSound` | `ZoomSound(soundName)` | One-shot sound on zoom-in phase |
+| `TransitionSound` | `TransitionSound(soundName)` | One-shot sound on planet transition |
+| `BarSound` | `BarSound(soundName)` | Periodic sound when no planet animation is active |
+| `BarSoundInterval` | `BarSoundInterval(seconds)` | Seconds between BarSound replays |
+| `LoadSoundLVL` | `LoadSoundLVL(lvlPath)` | Path to an .lvl containing sound definitions for the above |
+| `RemoveToolTips` | `RemoveToolTips(1/0)` | Hides the tips box and text. Works independently of EnableBF1 |
+| `RemoveLoadingBar` | `RemoveLoadingBar(1/0)` | Hides the progress bar. Works independently of EnableBF1 |
