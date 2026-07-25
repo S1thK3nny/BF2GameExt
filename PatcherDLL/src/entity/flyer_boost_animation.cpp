@@ -2,6 +2,7 @@
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 
 #include <cstring>
 #include <detours.h>
@@ -20,22 +21,28 @@
 // Offsets (from struct_base = renderThis - 0x94)
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kSB_FlightState = 0x5A4;
-static constexpr uintptr_t kSB_Progress    = 0x5A8;
-static constexpr uintptr_t kSB_Flags       = 0x5F4;
-static constexpr uintptr_t kSB_ClassPtr    = 0x66C;
+// Per build.  Every Steam value below was read out of the disassembly, not
+// inferred: the struct_base ones from EntityFlyer::TakeOff 0x4b3c60 and
+// EntityCarrier::UpdateLandedHeight 0x4974b0, and the renderThis / class ones
+// from EntityFlyer::Render 0x4AB040 at the exact points modtools' Render
+// 0x4f6970 touches the corresponding field.  They happen to follow the usual
+// split (instance -0x40, class -0xC8) but that was the check, not the source.
+static uintptr_t kSB_FlightState = 0x5A4;   // Steam 0x564  Land/TakeOff cmp 2/1/3
+static uintptr_t kSB_Progress    = 0x5A8;   // Steam 0x568  render [ESI+0x4d4]+0x94
+static uintptr_t kSB_Flags       = 0x5F4;   // Steam 0x5B4  TakeOff TEST [EDI+0x5b4],8
+static uintptr_t kSB_ClassPtr    = 0x66C;   // Steam 0x62C  render [ESI+0x598]+0x94
 
 // Offsets from renderThis
-static constexpr uintptr_t kRT_AnimGate    = 0x5B8;   // int: if 0, skip animation
-static constexpr uintptr_t kRT_ClassPtr    = 0x5D8;   // EntityFlyerClass*
-static constexpr uintptr_t kRT_Skeleton    = 0x64C;   // ZephyrSkeleton<32>
-static constexpr uintptr_t kRT_PoseDyn     = 0xE5C;   // ZephyrPoseDyn<32>
-static constexpr uintptr_t kRT_Ref17dc     = 0x17DC;  // void*: anim ref (for nFrames)
-static constexpr uintptr_t kRT_RedPose     = 0x180C;  // RedPose output
+static uintptr_t kRT_AnimGate    = 0x5B8;   // Steam 0x578   CMP [ESI+0x578],0 @004ab0d3
+static uintptr_t kRT_ClassPtr    = 0x5D8;   // Steam 0x598   MOV EDX,[ESI+0x598] @004ab088
+static uintptr_t kRT_Skeleton    = 0x64C;   // Steam 0x60C   ADD ESI,0x60c @004ab256
+static uintptr_t kRT_PoseDyn     = 0xE5C;   // Steam 0xE1C   LEA EDI,[ESI+0xe1c] @004ab20a
+static uintptr_t kRT_Ref17dc     = 0x17DC;  // Steam 0x179C  MOV EAX,[ESI+0x179c] @004ab225
+static uintptr_t kRT_RedPose     = 0x180C;  // Steam 0x17CC  LEA ECX,[ESI+0x17cc] @004ab45d
 
 // Class offsets
-static constexpr uintptr_t kCls_AnimObj     = 0x878;
-static constexpr uintptr_t kCls_TakeoffAnim = 0x87C;
+static uintptr_t kCls_AnimObj     = 0x878;  // Steam 0x7B0  MOV [ESI+0x7b0],EDI @004b9748
+static uintptr_t kCls_TakeoffAnim = 0x87C;  // Steam 0x7B4  MOV [ESI+0x7b4],EAX @004b9780
 
 static constexpr float kTransitionTime = 0.6f;
 static constexpr uintptr_t kRenderThisToBase = 0x94;
@@ -313,23 +320,47 @@ void flyer_boost_anim_render_restore(char* structBase)
 
 void flyer_boost_anim_install(uintptr_t exe_base)
 {
-   using namespace game_addrs::modtools;
+   if (g_build == GameBuild::Steam) {
+      kSB_FlightState  = 0x564;
+      kSB_Progress     = 0x568;
+      kSB_Flags        = 0x5B4;
+      kSB_ClassPtr     = 0x62C;
+      kRT_AnimGate     = 0x578;
+      kRT_ClassPtr     = 0x598;
+      kRT_Skeleton     = 0x60C;
+      kRT_PoseDyn      = 0xE1C;
+      kRT_Ref17dc      = 0x179C;
+      kRT_RedPose      = 0x17CC;
+      kCls_AnimObj     = 0x7B0;
+      kCls_TakeoffAnim = 0x7B4;
+   }
 
-   fn_AnimBankFind         = (fn_AnimBankFind_t)    resolve(exe_base, zephyr_anim_bank_find);
-   original_InitAnimations = (fn_InitAnimations_t)  resolve(exe_base, flyer_init_animations);
+   // Everything this feature needs is in the per-build table; bail on any build
+   // where a piece is unmapped rather than resolving a zero into a call target.
+   if (!g_addr->zephyr_anim_bank_find || !g_addr->flyer_init_animations ||
+       !g_addr->zephyr_pose_dyn_set_anim || !g_addr->zephyr_pose_dyn_set_time ||
+       !g_addr->zephyr_pose_static_ctor || !g_addr->zephyr_pose_static_dtor ||
+       !g_addr->zephyr_skeleton_open || !g_addr->zephyr_pose_static_open ||
+       !g_addr->zephyr_pose_static_set || !g_addr->zephyr_pose_static_blend ||
+       !g_addr->zephyr_skeleton_finalize || !g_addr->red_pose_convert_skel32 ||
+       !g_addr->g_identity_matrix || !g_addr->gameloop_pause_mode)
+      return;
 
-   fn_SetAnimation     = (fn_SetAnimation_t)    resolve(exe_base, zephyr_pose_dyn_set_anim);
-   fn_SetAnimTime      = (fn_SetAnimTime_t)     resolve(exe_base, zephyr_pose_dyn_set_time);
-   fn_PoseStaticCtor   = (fn_PoseStaticCtor_t)  resolve(exe_base, zephyr_pose_static_ctor);
-   fn_PoseStaticDtor   = (fn_PoseStaticDtor_t)  resolve(exe_base, zephyr_pose_static_dtor);
-   fn_SkeletonOpen     = (fn_SkeletonOpen_t)    resolve(exe_base, zephyr_skeleton_open);
-   fn_PoseStaticOpen   = (fn_PoseStaticOpen_t)  resolve(exe_base, zephyr_pose_static_open);
-   fn_PoseStaticSet    = (fn_PoseStaticSet_t)   resolve(exe_base, zephyr_pose_static_set);
-   fn_PoseStaticBlend  = (fn_PoseStaticBlend_t) resolve(exe_base, zephyr_pose_static_blend);
-   fn_SkeletonFinalize = (fn_SkeletonFinalize_t)resolve(exe_base, zephyr_skeleton_finalize);
-   fn_ConvertPose      = (fn_ConvertPose_t)     resolve(exe_base, red_pose_convert_skel32);
-   g_identityMatrix    = (void*)                resolve(exe_base, g_identity_matrix);
-   g_pauseMode         = (uint8_t*)             resolve(exe_base, gameloop_pause_mode);
+   fn_AnimBankFind         = (fn_AnimBankFind_t)    resolve(exe_base, g_addr->zephyr_anim_bank_find);
+   original_InitAnimations = (fn_InitAnimations_t)  resolve(exe_base, g_addr->flyer_init_animations);
+
+   fn_SetAnimation     = (fn_SetAnimation_t)    resolve(exe_base, g_addr->zephyr_pose_dyn_set_anim);
+   fn_SetAnimTime      = (fn_SetAnimTime_t)     resolve(exe_base, g_addr->zephyr_pose_dyn_set_time);
+   fn_PoseStaticCtor   = (fn_PoseStaticCtor_t)  resolve(exe_base, g_addr->zephyr_pose_static_ctor);
+   fn_PoseStaticDtor   = (fn_PoseStaticDtor_t)  resolve(exe_base, g_addr->zephyr_pose_static_dtor);
+   fn_SkeletonOpen     = (fn_SkeletonOpen_t)    resolve(exe_base, g_addr->zephyr_skeleton_open);
+   fn_PoseStaticOpen   = (fn_PoseStaticOpen_t)  resolve(exe_base, g_addr->zephyr_pose_static_open);
+   fn_PoseStaticSet    = (fn_PoseStaticSet_t)   resolve(exe_base, g_addr->zephyr_pose_static_set);
+   fn_PoseStaticBlend  = (fn_PoseStaticBlend_t) resolve(exe_base, g_addr->zephyr_pose_static_blend);
+   fn_SkeletonFinalize = (fn_SkeletonFinalize_t)resolve(exe_base, g_addr->zephyr_skeleton_finalize);
+   fn_ConvertPose      = (fn_ConvertPose_t)     resolve(exe_base, g_addr->red_pose_convert_skel32);
+   g_identityMatrix    = (void*)                resolve(exe_base, g_addr->g_identity_matrix);
+   g_pauseMode         = (uint8_t*)             resolve(exe_base, g_addr->gameloop_pause_mode);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

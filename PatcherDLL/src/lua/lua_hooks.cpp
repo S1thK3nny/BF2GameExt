@@ -282,10 +282,11 @@ void lua_hooks_install(uintptr_t exe_base)
    if (g_build == GameBuild::Modtools) {
       // These installers still target raw modtools VAs / inline patch sites.
       loading_screen_install(exe_base);
-      flyer_boost_anim_install(exe_base);
       grapple_fix_install(exe_base);
       DebugCommandRegistry::install(exe_base);
    }
+
+   flyer_boost_anim_install(exe_base);        // build-aware (modtools + Steam), guards internally
 
    shield_channel_fix_install(exe_base);     // build-aware (modtools + Steam), guards internally
    fp_anim_bank_install(exe_base);           // build-aware (modtools + Steam), guards internally

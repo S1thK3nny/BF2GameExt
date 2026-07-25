@@ -729,6 +729,16 @@ namespace steam {
    // NOTE: no red_find_animation on Steam (inlined; standalone body stripped) —
    // anim_bank_append branches on that field being 0.
    constexpr uintptr_t zephyr_anim_bank_find     = 0x0072BA40;
+   // ---- Flyer boost animation ----------------------------------------------
+   // EntityFlyerClass::InitAnimations — writes mAnimObj [ESI+0x7b0], takeoffAnim
+   // [ESI+0x7b4] and the alternate [ESI+0x7b8] from two AnimBankFind calls, same
+   // PUSH 0x800 bank size / RET 4 / XOR AL,AL early-out as modtools 0x004F6560.
+   constexpr uintptr_t flyer_init_animations     = 0x004b9720;
+   // ZephyrPoseDyn<32>::SetAnimTime and the global identity matrix, both read
+   // out of EntityFlyer::Render 0x4AB040 at the points where modtools' Render
+   // 0x4f6970 calls 0x0082A9C0 (004f6b2c) and pushes 0x00CF6830 (004f6b75).
+   constexpr uintptr_t zephyr_pose_dyn_set_time  = 0x0072d650;
+   constexpr uintptr_t g_identity_matrix         = 0x009caee0;
 
    // ---- Hashing (thiscall wrapper) -------------------------------------------
 
