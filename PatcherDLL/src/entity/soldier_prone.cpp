@@ -527,8 +527,19 @@ void prone_system_install(uintptr_t exe_base)
     // Index 2 (prone) uses "rifle_crouch_idle_takeknee" which doesn't exist
     // in the shipped lowres banks, so it falls back to crouch.  Patch the
     // table pointer to use "rifle_prone_idle_emote" instead.
+    //
+    // Gated on the INI value, unlike the rest of this installer.  Everything
+    // else here funnels through our own hooks, which re-check g_proneEnabled at
+    // runtime and no-op when prone is off; this table is read by engine code we
+    // do not hook, so leaving it patched with Prone=0 makes PostLoad warn
+    // ("Can't find lowres animation ..., using CROUCH") for every lowres bank
+    // that lacks the prone clip.
+    //
+    // g_proneEnabled still holds the configured value here: it is the *live*
+    // per-mission flag, and prone_lvl_load_install — which captures it into
+    // s_proneConfigured and then clears it — runs on the NEXT line of dllmain.
     // -----------------------------------------------------------------------
-    if (g_addr->lowres_prone_anim_name_ptr) {
+    if (g_proneEnabled && g_addr->lowres_prone_anim_name_ptr) {
         g_lowresProneNamePtr = (const char**)resolve(exe_base, g_addr->lowres_prone_anim_name_ptr);
         g_lowresProneNameOrig = *g_lowresProneNamePtr;
         *g_lowresProneNamePtr = g_lowresProneAnimName;
@@ -547,22 +558,26 @@ void prone_system_install(uintptr_t exe_base)
     //   Steam (0x648ff0): a byte map (0x649368) routes state 2 to its OWN
     //   dedicated case @0x6491C9 = "MOV EBX,1; JMP merge" — no other state
     //   maps there, so just patch the MOV immediate 1 -> 2.
+    //
+    // Skipped with the name-table patch above when prone is off: pointing prone
+    // at pose slot 2 only means anything once slot 2 holds the prone clip name.
     // -----------------------------------------------------------------------
-    if (g_build == GameBuild::Modtools &&
-        g_addr->lowres_prone_jump_entry && g_addr->lowres_prone_jump_target) {
-        g_lowresProneJumpEntry = (uint32_t*)resolve(exe_base, g_addr->lowres_prone_jump_entry);
-        g_lowresProneJumpOrig = *g_lowresProneJumpEntry;
-        uintptr_t target = (uintptr_t)resolve(exe_base, g_addr->lowres_prone_jump_target);
-        *g_lowresProneJumpEntry = (uint32_t)target;
-    }
-    else if (g_addr->lowres_prone_case_imm) {
-        uint8_t* p = (uint8_t*)resolve(exe_base, g_addr->lowres_prone_case_imm);
-        if (*p == 0x01) {
-            *p = 0x02;
-            g_lowresProneCaseImmPtr = p;
+    if (g_proneEnabled) {
+        if (g_build == GameBuild::Modtools &&
+            g_addr->lowres_prone_jump_entry && g_addr->lowres_prone_jump_target) {
+            g_lowresProneJumpEntry = (uint32_t*)resolve(exe_base, g_addr->lowres_prone_jump_entry);
+            g_lowresProneJumpOrig = *g_lowresProneJumpEntry;
+            uintptr_t target = (uintptr_t)resolve(exe_base, g_addr->lowres_prone_jump_target);
+            *g_lowresProneJumpEntry = (uint32_t)target;
+        }
+        else if (g_addr->lowres_prone_case_imm) {
+            uint8_t* p = (uint8_t*)resolve(exe_base, g_addr->lowres_prone_case_imm);
+            if (*p == 0x01) {
+                *p = 0x02;
+                g_lowresProneCaseImmPtr = p;
+            }
         }
     }
-
 }
 
 void prone_system_uninstall()

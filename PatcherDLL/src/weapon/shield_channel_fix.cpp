@@ -23,6 +23,11 @@
 //      check whether this weapon is the active weapon for its fire channel.
 //      If not, skip the shield-specific logic and call base Weapon::Update
 //      directly (state machine + sound, no shield effects).
+//
+// NOTE: diverting to Weapon::Update also skips the shield-OFF path, so anything
+//      already up stays up.  Harmless for the case above (the effect is never
+//      created while deselected), but it means this hook must never divert an
+//      owner whose layout it cannot actually read — see is_active_for_channel.
 // =============================================================================
 
 // Weapon struct offsets — build-invariant (verified in the Steam
@@ -47,6 +52,20 @@ static fn_WeaponUpdate_t fn_WeaponUpdate       = nullptr;
 
 // ---------------------------------------------------------------------------
 // Channel-active check
+//
+// Every offset past mControlFire comes from SoldierLayout, i.e. it is only valid
+// when the owner really is an EntitySoldier.  WeaponShield is not soldier-only:
+// EntityDroideka owns one too, and there the soldier offsets land in unrelated
+// memory (mZephyrSkeleton starts at +0x484, while weaponIndexMap is +0x510 and
+// weaponArray +0x4F0).  Reading a byte there and treating it as a weapon slot
+// could yield a bogus "some other weapon is active" and route the call away from
+// the shield logic entirely — which would break the shield for that owner.
+//
+// Rather than add an RTTI probe, the layout validates itself: locate this very
+// weapon inside the mWeapon[] array first.  A shield that is genuinely in the
+// array proves the layout applies to this owner, and gives its slot index for
+// free; not finding it means the offsets do not describe this entity, so allow
+// the stock behaviour instead of guessing.
 // ---------------------------------------------------------------------------
 static bool is_active_for_channel(void* weapon)
 {
@@ -56,7 +75,8 @@ static bool is_active_for_channel(void* weapon)
 
    if (!owner || !trigger) return true;  // safety: allow
 
-   // Derive channel from trigger pointer position within mControlFire[2]
+   // Derive channel from trigger pointer position within mControlFire[2].
+   // mControlFire is a Controllable field, so this part is owner-agnostic.
    uintptr_t fireBase = owner + kEntity_mControlFire;
    if (trigger < fireBase) return true;
 
@@ -64,12 +84,18 @@ static bool is_active_for_channel(void* weapon)
    if (channel < 0 || channel > 1) return true;  // not a soldier fire channel
    if (fireBase + channel * 4 != trigger) return true;  // misaligned
 
-   // Look up active weapon for this channel (mWeaponIndex[channel], 0xFF empty)
+   // Positive-ID the soldier layout: this weapon must appear in mWeapon[8].
+   int ownSlot = -1;
+   for (int i = 0; i < 8; ++i) {
+      if (*(uintptr_t*)(owner + g_soldier->weaponArray + i * 4) == wpn) { ownSlot = i; break; }
+   }
+   if (ownSlot < 0) return true;  // not an EntitySoldier layout — allow
+
+   // Active weapon for this channel (mWeaponIndex[channel], 0xFF = empty)
    uint8_t activeSlot = *(uint8_t*)(owner + g_soldier->weaponIndexMap + channel);
    if (activeSlot >= 8) return true;  // safety
 
-   uintptr_t activeWpn = *(uintptr_t*)(owner + g_soldier->weaponArray + activeSlot * 4);
-   return (activeWpn == wpn);
+   return (activeSlot == (uint8_t)ownSlot);
 }
 
 // ---------------------------------------------------------------------------
