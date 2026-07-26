@@ -56,12 +56,29 @@ namespace modtools {
    // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70)
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
 
+   // Same slot on WeaponLauncher (vtable 0xA53AE8), which derives from WeaponCannon
+   // but carries its own vtable.  It overrides seven slots, none of them Fire — it
+   // inherits WeaponCannon::Fire (0x626490) — so the same hook applies unchanged.
+   constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0xA53B58;
+
    // Weapon::OverrideAimer implementation and thunk
    constexpr uintptr_t weapon_override_aimer_impl  = 0x61CEE0;
    constexpr uintptr_t weapon_override_aimer_thunk = 0x4068DE;
 
    // Weapon::ZoomFirstPerson() — returns true if weapon is in first-person zoom
    constexpr uintptr_t weapon_zoom_first_person = 0x61B640;
+
+   // ScopeDisplay* — one-element array indexed by camera (PC only ever uses 0).
+   // instance+0x4C9 is the bool ScopeDisplay::Update maintains for "scope texture
+   // is on screen"; ScopeDisplay::Hide (0x683CB0) clears it.
+   constexpr uintptr_t scope_display_instance = 0x00BA36D8;
+
+   // float __cdecl CollisionManager::RayHit(PblVector3* start, PblVector3* dir,
+   //     float maxDist, CollisionObject** outHit, PblVector3* outNormal,
+   //     GameObject** exclude, int excludeCount, int flags, bool);
+   // Returns the hit fraction of maxDist (1.0 = nothing hit).  Debug build: plain
+   // cdecl, result in ST(0).  ILT thunk 0x407581.
+   constexpr uintptr_t collision_manager_ray_hit = 0x0042E230;
 
    // ---- Loading Screen (LoadDisplay) -----------------------------------------
 
@@ -560,9 +577,21 @@ namespace steam {
 
    constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b05ec; // WeaponCannon vftable (0x7b057c) + slot 28*4
+   constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b1314; // WeaponLauncher vftable (0x7b12a4) + 0x70
    constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
    constexpr uintptr_t weapon_override_aimer_thunk = 0x00677780;          // No ILT thunk in release build; same as impl
    constexpr uintptr_t weapon_zoom_first_person = 0x00677d40;
+
+   // ScopeDisplay* — same +0x4C9 visible flag as modtools (the instance is 0x500
+   // here vs 0x520 in the debug build, but only the trailing GameSound members
+   // differ; ScopeDisplay::Hide 0x633B30 reads the same offset).
+   constexpr uintptr_t scope_display_instance = 0x01EAF020;
+
+   // CollisionManager::RayHit — same 9 arguments as modtools, but LTCG-custom:
+   //   ECX = start, EDX = dir, XMM2 = maxDist, and the remaining six on the stack
+   //   (outHit, outNormal, exclude, excludeCount, flags, bool), caller-cleans,
+   //   result in XMM0.  Call it through rayhit_release_thunk(), never directly.
+   constexpr uintptr_t collision_manager_ray_hit = 0x0045E3A0;
    constexpr uintptr_t weapon_update            = 0x006781B0;             // Weapon vtable (0x7b01a8) slot 1
    constexpr uintptr_t weapon_shield_update     = 0x00691A80;             // WeaponShield vtable (0x7b1a9c) slot 1
 

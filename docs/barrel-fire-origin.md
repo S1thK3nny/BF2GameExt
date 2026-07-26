@@ -8,8 +8,9 @@ chest-level aimer position (`sEyePointOffset`).
 
 Controlled at runtime via Lua: `SetBarrelFireOrigin(1)` / `SetBarrelFireOrigin(0)`.
 
-Currently scoped to **WeaponCannon only** via vtable patching. Can be extended to
-other weapon classes (WeaponLaser, WeaponLauncher, etc.) by patching their vtables.
+Scoped to **WeaponCannon and WeaponLauncher** via vtable patching. See
+[Patched classes](#patched-classes) for why those two and what it would take to add
+more.
 
 ---
 
@@ -24,11 +25,10 @@ other weapon classes (WeaponLaser, WeaponLauncher, etc.) by patching their vtabl
   5 units, Y is clamped to `rootPos - 2.7` (approximate barrel offset)
 - Writes corrected position to both `mFirePos` AND `mFirePointMatrix` trans (muzzle
   flash reads mFirePos; projectile system may read the matrix directly)
-- Zoom detection — reverts to vanilla aimer during first-person zoom only:
-  - `mIsAiming` at `Controllable+0x160` detects runtime zoom state
-  - `mIsFirstPersonView` at `Controllable+0x34` (mTracker ptr) → `Tracker+0x14`
-    detects first-person camera mode
-  - Third-person zoom keeps barrel fire origin active
+- Direction convergence while zoomed — the barrel origin stays active at every zoom
+  level, and `Aimer::mDirection` is re-aimed at the point the vanilla ray would hit,
+  found with `CollisionManager::RayHit` (see below)
+- First-person zoom still reverts to the vanilla aimer (`mFirePointMatrix` goes stale)
 
 **Known Issues:**
 - **Water reflection — projectile origin:** Muzzle flash is correct (reads mFirePos)
@@ -48,7 +48,7 @@ other weapon classes (WeaponLaser, WeaponLauncher, etc.) by patching their vtabl
 
 ## Architecture
 
-### Hook Mechanism — WeaponCannon vtable patch
+### Hook Mechanism — vtable patch
 
 `Weapon::OverrideAimer` is a virtual method at vtable slot `0x70` (byte offset in
 vtable). The base implementation at `0x61CEE0` simply returns `false`. No vanilla
@@ -56,15 +56,40 @@ weapon subclass overrides it except `WeaponMelee` (which adjusts direction, not
 position). The method is called by the engine once per frame per weapon during the
 aimer update cycle.
 
-At DLL load, `lua_hooks_install()` patches the WeaponCannon vtable entry to point to
-our `hooked_cannon_OverrideAimer`. On toggle off, `SetBarrelFireOrigin(0)` swaps it
-back to the vanilla pointer via `VirtualProtect`.
+At DLL load, `barrel_fire_origin_install()` walks a small table of vtable slots,
+checks each still holds the vanilla implementation, and swaps in
+`hooked_cannon_OverrideAimer` via `VirtualProtect`, remembering what it displaced.
 
 **Why vtable patch instead of Detours on SetSoldierInfo:**
 We tried Detouring `Aimer::SetSoldierInfo` (`0x5EE9D0`) — this intercepts at the
 exact moment `mFirePos` is written and can't be overwritten afterward. However, it
 hooks **all** aimers globally (every weapon type, every AI unit, vehicles, turrets),
-which caused regressions. The vtable approach is scoped to WeaponCannon only.
+which caused regressions. The vtable approach stays scoped to chosen classes.
+
+### Patched classes
+
+| Class | ClassLabel | modtools vtable | slot `+0x70` | Steam vtable | slot `+0x70` |
+|-------|-----------|-----------------|--------------|--------------|--------------|
+| WeaponCannon | `cannon` | `0xA52468` | `0xA524D8` | `0x7B057C` | `0x7B05EC` |
+| WeaponLauncher | `launcher` | `0xA53AE8` | `0xA53B58` | `0x7B12A4` | `0x7B1314` |
+
+`WeaponLauncher` derives from `WeaponCannon` — its constructor (modtools
+`0x62F6B0`) chains straight into the `WeaponCannon` constructor — but the compiler
+still emits it a separate vtable, so the cannon patch does not reach it.
+
+Diffing the two vtables, `WeaponLauncher` overrides seven slots: the destructor plus
+`+0x14`, `+0x18`, `+0x1C`, `+0x2C`, `+0x30`, `+0x34`. Neither `OverrideAimer`
+(`+0x70`) nor `Fire` is among them — there is no `WeaponLauncher::Fire` in the
+binary at all, so launchers reach `WeaponCannon::Fire` (modtools `0x626490`), which
+builds the ordnance through `Aimer::GetMatrix` on the same aimer the hook writes.
+The hook therefore needed no changes for launchers; only a second slot in the table.
+
+**Adding more classes is not automatic.** `WeaponLaser` (vtable `0xA538D0`) and
+`WeaponGrenade` both derive from `Weapon` directly rather than from `WeaponCannon`,
+and `WeaponGrenade`, `WeaponDispenser`, `WeaponMeleeThrow`, `WeaponRemote` and
+`WeaponRepair` each define their own `Fire`. Before patching any of them, confirm
+that its fire path actually reads the aimer's `mFirePos` — otherwise the patch is
+a no-op at best.
 
 ### Data Flow
 
@@ -255,16 +280,221 @@ a wide byte range at `owner+0x100..+0x300` for struct exploration.
 
 ```
 weapon + 0x6C                → Controllable* (mOwner)
-Controllable + 0x160         → bool mIsAiming (runtime zoom state)
+Controllable + 0x160/+0x15C  → bool TargetInfo::mIsAiming (zoom toggle)
+weapon + 0xBC                → float Weapon::mZoom        (current magnification)
+weapon + 0x64 → +0xA0/+0xA4  → float WeaponClass::mZoomMin / mZoomMax
 Controllable + 0x34          → Tracker* (via Trackable::mTracker)
 Tracker + 0x14               → bool mIsFirstPersonView
 ```
 
-Both must be true to skip barrel fire origin. This means:
-- Third-person unzoomed → barrel fire
-- Third-person zoomed → barrel fire
-- First-person unzoomed → barrel fire
-- First-person zoomed → vanilla aimer (mFirePointMatrix freezes in FP)
+Behaviour:
+- Scope texture on screen → vanilla aimer, fix fully off
+- Unzoomed, any camera → barrel fire origin, vanilla direction
+- Zoomed without a scope texture → barrel fire origin + converged direction
+- First-person zoom → vanilla aimer (`mFirePointMatrix` goes stale)
+
+`mIsAiming` doubles as the "is this the local player" test: `CheckForZoom` returns
+early for AI, so the raycast below runs once or twice a frame at most, however many
+WeaponCannons the level holds.
+
+### Scope texture detection
+
+Convergence puts the shot on target but cannot fix how it *looks*: the bolt still
+leaves from wherever the idle animation is holding the muzzle, so under a scope you
+see a diagonal streak to the target instead of a line down the barrel. Since the
+barrel origin buys nothing while you are looking through a scope, the hook switches
+off entirely whenever the scope texture is up.
+
+The condition is read from the engine, not rebuilt. `ScopeDisplay::Update`
+(modtools `0x683D80`) computes visibility from five terms:
+
+```
+CameraManager::IsChaseMode(cameraId)
+&& (EntityClass+0x1FC >> 3) & 1
+&& Controllable::mIsAiming
+&& (Weapon::ZoomFirstPerson(weapon) || Tracker::IsFirstPersonView(tracker))
+&& RedCamera::_fZoom > 1.0
+```
+
+and stores the result in a bool on the instance. Reimplementing that predicate has
+misfired twice in this file already — the `bit 3` test missed SniperScope weapons,
+and the raw `Tracker+0x14` read ignores the class camera-mode override — so the
+hook reads the engine's own answer instead.
+
+| Build | `ScopeDisplay*` global | Visible flag | Hide |
+|-------|------------------------|--------------|------|
+| modtools | `0x00BA36D8` | instance `+0x4C9` | `0x683CB0` |
+| Steam | `0x01EAF020` | instance `+0x4C9` | `0x633B30` |
+
+The global is a one-element array indexed by camera; PC never allocates past index
+0. The instance is `0x520` bytes on modtools and `0x500` on Steam, but only the
+trailing `GameSound` members differ — `+0x4C9` and the `BinocularSound` at `+0x4CC`
+sit at the same offsets on both.
+
+Note the `mIsAiming` term: `ScopeDisplay::Update` reads it as
+`*(byte*)(controllable + 0x58*4)` = `Controllable+0x160`, independently confirming
+the modtools offset.
+
+### The zoom stages (Weapon::CycleZoom)
+
+`EntitySoldier::CheckForZoom` (modtools `0x528E00`) is the only writer of
+`mIsAiming`, and it just stores what `Weapon::CycleZoom` (modtools `0x61B570`,
+Phantom `0x7AD4E0`) returns. That makes zoom a three-state toggle:
+
+| Press | mIsAiming | mZoom | Note |
+|-------|-----------|-------|------|
+| 1 | true | `mZoomMin` | stage 1 |
+| 2 | true | `mZoomMax` | stage 2, only if `mZoomRate == 0` and `mZoomMin != mZoomMax` |
+| 3 | false | `mZoomMin` | zoom off |
+
+So `mZoom > mZoomMin` identifies the sniper's second scope stage exactly. When
+`mZoomRate != 0` the weapon ramps smoothly instead (`Weapon::UpdateZoom`, driven
+by `mControlMove`). Gating the fix on that test was an intermediate step, since the
+error scales with magnification and stage 2 is where it screams; the raycast below
+replaced it, because the error is present at *every* magnification.
+
+`CheckForZoom` also returns early for AI (`mPlayerId < 0`) and clears `mIsAiming`
+for any weapon with `mZoomMax <= 1.0`.
+
+Zoom field offsets are identical on modtools, Steam and Phantom: `Weapon::mZoom`
+`+0xBC`, `WeaponClass::mZoomMin/mZoomMax/mZoomRate` `+0xA0/+0xA4/+0xA8`.
+
+### Direction convergence (2026-07-26)
+
+```
+O = Aimer::mRootPos   (+0x70)  vanilla fire position, untouched by us
+D = Aimer::mDirection (+0x48)  vanilla direction
+B = hp_fire world position (the new origin)
+
+t = RayHit(O + D*1, D, 500, ...)      -> fraction of 500
+P = O + D * (1 + t*500)               -> what the vanilla shot hits
+Aimer::mDirection = normalize(P - B)
+```
+
+`mRootPos` is the clean source for `O`: `Aimer::SetSoldierInfo` writes `mFirePos`
+and `mRootPos` from the same value and the hook only overwrites `mFirePos`.
+
+The ray starts one unit forward so it clears the shooter's own collision volume,
+which is cheaper and less fragile than building an exclude list (that would need the
+`GameObject*` behind the `Controllable`, i.e. the unverified `-0x240` arithmetic).
+The engine's own aim ray does the same thing, starting at
+`mAimStart + eyeDir * (cameraTrackOffset.z + 2)`.
+
+Guards, all of which fall back to "leave the direction alone" rather than throwing
+the shot somewhere arbitrary: NaN or out-of-range fraction, hit distance under 2
+units (muzzle contact, nothing to correct), degenerate `P - B`, and a correction
+larger than ~25 degrees (`dot < 0.9`), which can only mean an input was garbage.
+
+Two cheaper convergence targets were considered and rejected:
+
+- **The reticle.** `ReticuleDisplay::Update` (modtools `0x683270`) draws the
+  crosshair at the projection of `mAimStart + aimDir*1024`, not at a raycast. At
+  1024 units the angular correction is `barrelOffset/1024`, i.e. nothing. Reading
+  those fields in the fire path also produced wildly wrong directions (shots into
+  the ground) — they are not a reliable per-frame eye ray there.
+- **`TargetInfo::mAimPoint`.** The engine's own third-person convergence target,
+  written by `UpdateWeaponAndAimer` in the same frame just before this hook runs,
+  but `RayHit` caps it at 60 units from the camera. Converging there fixes close
+  range and over-corrects past it, error growing as `barrelOffset * (dist/60 - 1)`
+   — worse than doing nothing beyond ~120 units, which is exactly sniper range.
+
+#### CollisionManager::RayHit
+
+```
+float RayHit(PblVector3* start, PblVector3* dir, float maxDist,
+             CollisionObject** outHit, PblVector3* outNormal,
+             GameObject** exclude, int excludeCount, int flags, bool)
+```
+
+Returns the hit fraction of `maxDist`; `1.0` means nothing was hit. `outHit` is
+written on entry, so it must never be null. `flags == 0` is replaced with `0xBE`.
+
+| Build | Address | Convention |
+|-------|---------|------------|
+| modtools | `0x42E230` (ILT thunk `0x407581`) | plain `__cdecl`, all nine on the stack, result in `ST(0)` |
+| Steam | `0x45E3A0` | LTCG: `ECX` = start, `EDX` = dir, `XMM2` = maxDist, other six pushed, caller-cleans, result in `XMM0` |
+
+Calling the release build through the debug signature shifts every stack argument
+by one slot — the exact mistake behind the old aim-assist crash — so Steam goes
+through `rayhit_release_thunk`, a naked marshaller.
+
+Flag bits, as far as they are known: `0x80` = terrain, `0x100` = water, and the
+per-object categories are filtered inside the TreeGrid callback. Observed masks:
+`0x9A` for the engine's aim ray, `0x90` for `Ordnance::Update`'s world sweep,
+`0xBE` as `RayHit`'s own default. The hook uses **`0x9A`** — the same mask the
+engine uses to resolve `mAimPoint`, since that answers the same question. Anything
+the mask does not see (a soldier may be one) converges on the geometry behind it,
+which leaves a fraction of the barrel offset rather than all of it.
+
+### Why the intermediate bail keyed on zoom level (2026-07-26)
+
+Sniper shots landed far from the crosshair while scoped, worst when zooming
+straight out of an idle pose and fine from a firing pose.
+
+`EntitySoldier::UpdateWeaponAndAimer` (modtools `0x52C980`, Phantom `0x58AD80`)
+takes its "direct aim" path only when
+
+```
+TargetInfo::mIsAiming && weapon && (Weapon::ZoomFirstPerson(weapon) ||
+                                    Tracker::IsFirstPersonView(tracker))
+```
+
+Otherwise it uses the third-person camera path, which derives the aim direction
+by **converging the fire position onto the aim point**:
+
+```
+TargetInfo::mAimPoint = <camera ray, CollisionManager::RayHit capped at 60u>
+dir = normalize(mAimPoint - firePos)      // firePos = eye point + stance offset
+Aimer::SetSoldierInfo(aimer, firePos, dir)
+```
+
+The hook then relocates only the **origin** to `hp_fire`, leaving that direction
+untouched, so the shot becomes a ray parallel to the vanilla one, displaced by
+the whole barrel-to-eyepoint vector. That displacement is large in an idle/hip
+pose (rifle held low and to the side) and small in an aim/fire pose — matching
+the reported symptom exactly. Unzoomed the offset is invisible; scope
+magnification makes it obvious.
+
+The old gate mirrored the engine's zoom condition, testing
+`WeaponClass+0x2B0 bit 3` (`mZoomFirstPerson`). A sniper rifle typically sets
+`SniperScope` (**bit 4**, `0x10`) and not `ZoomFirstPerson` (bit 3, `0x08`), so in
+third person neither half of the engine condition held, the hook stayed active,
+and it wrote an animation-driven origin under a converged direction.
+
+Bit layout of `WeaponClass+0x2B0` (from the Phantom PDB):
+
+| Bits | Field |
+|------|-------|
+| 0-1 | mFireAnim |
+| 2 | mTriggerSingle |
+| 3 | mZoomFirstPerson |
+| 4 | mSniperScope |
+| 5 | mMaxRangeDefault |
+| 6 | mInstantPlayFireAnim |
+| 7 | mIsOffhand |
+
+The displacement is a fixed distance in world units, so what decides whether it
+shows is magnification, not the fact of being zoomed. Two gates were tried and
+superseded before the raycast:
+
+1. Bail on `mIsAiming` alone — gave up the barrel origin from the first zoom press
+   onward, which on a scoped weapon is most of the time it is aimed.
+2. Bail on `mZoom > mZoomMin` — kept stage 1 and dropped only the deep scope, but
+   stage 1 still magnifies, so the error was still visible there. Never fixed, only
+   made smaller.
+
+Both were treating a symptom. The origin move is what breaks the shot, at every
+magnification, so the direction has to move with it.
+
+Caveat on the first-person check: `Tracker::IsFirstPersonView` is not a plain
+field read. It first consults the tracked object's class (`[cls+0x14C]`,
+1 = forced third person, 2 = forced first person) and only falls back to
+`Tracker::mIsFirstPersonView`. The hook still reads the raw `Tracker+0x14` field,
+so it can disagree with the engine on objects that force a camera mode.
+
+**Still open (unzoomed):** the parallel-offset error is still there when not
+zoomed, since convergence is gated on `mIsAiming` to keep the raycast off every AI
+weapon in the level. At 1x it is far below what anyone can see.
 
 **PDB struct shift note:** The PDB places `mTargetInfo` at Controllable+0x144, putting
 `mIsAiming` at +0x15C. In the modtools binary, there's an extra 4 bytes at +0x144
@@ -463,10 +693,9 @@ now lives in its own `weapon/` module.
    - Fixed offset from rootPos along aim direction (consistent but less realistic)
    - Accept as cosmetic (current approach)
 
-3. **Per-weapon-class control:** Currently only patches WeaponCannon. To extend:
-   - Find vtable addresses for WeaponLaser, WeaponLauncher, etc. in Ghidra
-   - Add their OverrideAimer vtable slots to `lua_addrs`
-   - Patch each vtable in `lua_hooks_install()`
+3. **Per-weapon-class control:** Patches WeaponCannon and WeaponLauncher. See
+   [Patched classes](#patched-classes) — extending further needs a check that the
+   class's `Fire` reads the aimer, not just a vtable address.
 
 4. **Slight aiming offset:** The barrel position is ~0.5 units from the aimer
    position. At close range this causes a small parallax between crosshair and impact.
