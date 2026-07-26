@@ -6,6 +6,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts (for modders)
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters (for modders)
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
+- **[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
 
 ## Goal
 
