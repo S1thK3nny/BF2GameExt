@@ -67,6 +67,10 @@ entries are inferred rather than verified. Needs a pass that actually exercises 
 commands, corrects the inferred descriptions, and marks the ones confirmed to be dead
 no-ops.
 
+## Debugging
+
+**Add warnings before crashing due to missing chunks** - The engine will crash if a chunk is missing from the map, but it does not log a warning at all. There's no real reason to do this, except it caught me off guard a few times and I want my revenge on the engine. The warning should include the chunk details.
+
 ## Will not do
 
 **Splitscreen.** For anyone reading this: no, splitscreen will not be a thing.
