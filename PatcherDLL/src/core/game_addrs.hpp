@@ -241,6 +241,12 @@ namespace modtools {
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004EF2FA;
 
+   // The PblHash value WeaponShield::Update pushes into EntityDroideka::IsA at
+   // its RTTI check (@0x63f3e8: MOV ECX,[0xb7d934]; PUSH ECX; CALL [vtable+0]).
+   // Read as a dword; entity/droideka_death_anim_fix.cpp reuses it to tell
+   // droideka shield owners apart from soldier ones.
+   constexpr uintptr_t entity_droideka_rtti_hash = 0x00B7D934;
+
    // ---- Entity / Soldier override textures (OverrideTexture3..5) ---------------
    // See entity/soldier_override_texture.cpp. Extends the stock 2-slot soldier
    // override_texture system to 5. Stock reads two class fields (+0x988/+0x98C)
@@ -697,6 +703,10 @@ namespace steam {
    // the call.  Guard above it: CMP [EBX+0x1a54],4 @0x4a4ae0 (mState==dead).
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004A4B94;
+
+   // Same EntityDroideka RTTI hash value, read at WeaponShield::Update 0x691af9
+   // (PUSH dword ptr [0x1ebbc58]).
+   constexpr uintptr_t entity_droideka_rtti_hash = 0x01EBBC58;
 
    // Lowres name table entry [2] ("rifle_crouch_idle_takeknee" @ 0x7AE7F8);
    // 8-byte entries {name*, flag} based 0x7E99D0.
