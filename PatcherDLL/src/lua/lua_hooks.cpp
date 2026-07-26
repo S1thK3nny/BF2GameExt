@@ -183,18 +183,18 @@ static void __cdecl hooked_init_state()
       register_lua_functions(g_L);
    }
 
-   if (g_build == GameBuild::Modtools || g_build == GameBuild::Steam) {
+   if (g_build != GameBuild::Unknown) {
       // Gamepad bindings + rumble hooks — must run after the game's input system
       // is initialized (and after the CRT FP package is ready).  Both are
-      // build-aware now: every address they need is in the per-build table, and
-      // the FLInputManager / joystick-config struct offsets they poke were
-      // verified identical on modtools and Steam (see controller_setup_bindings).
+      // build-aware: every address they need is in the per-build table, and the
+      // FLInputManager / joystick-config struct offsets they poke were verified
+      // identical on all three builds (see controller_setup_bindings).
       //
-      // GOG is deliberately excluded rather than left to the null-guards: it
-      // *does* have all three globals, so it would actively run and write into
-      // its input tables using offsets nobody has checked on that build.  It is
-      // the same release family as Steam so it will probably just work, but this
-      // code pokes struct fields directly — verify there before enabling.
+      // GOG was held back while its offsets were unchecked.  They are checked
+      // now: FLInputManager::Init is instruction-identical to Steam's and its
+      // `MOV ECX, controller_base_global+0x428` lands on the ported global
+      // exactly, as do the +0x29f0..+0x2cc8 neighbours, and joystick_sync /
+      // joystick_discover / rumble_dispatch compare with zero differences.
       uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
       controller_setup_bindings(base);
       if (g_rumbleEnabled) rumble_init(base);
@@ -293,11 +293,11 @@ void lua_hooks_install(uintptr_t exe_base)
       DebugCommandRegistry::install(exe_base);
    }
 
-   flyer_boost_anim_install(exe_base);        // build-aware (modtools + Steam), guards internally
+   flyer_boost_anim_install(exe_base);        // build-aware (all three), guards internally
 
-   shield_channel_fix_install(exe_base);     // build-aware (modtools + Steam), guards internally
+   shield_channel_fix_install(exe_base);     // build-aware, guards internally
    droideka_shield_tracker_install(exe_base); // must follow the line above (outer hook)
-   fp_anim_bank_install(exe_base);           // build-aware (modtools + Steam), guards internally
+   fp_anim_bank_install(exe_base);           // build-aware (all three), guards internally
    entity_carrier_fixes_install(exe_base);   // full set on modtools, bounds guards only elsewhere
    lua_create_entity_hook_install(exe_base); // guards internally
 

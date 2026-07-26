@@ -47,14 +47,14 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Engine limit extensions | ✅ | ✅ | ✅ |
 | Engine and rendering fixes | ✅ | ✅ | ✅ |
 | Retail-only fixes (screenshot, error dialog, game logging) | n/a | ✅ | ✅ |
-| Lua API | ✅ | ✅ | ❌ |
-| Prone stance | ✅ | ✅ | ❌ |
-| First-person animation banks and FP sprint | ✅ | ✅ | ❌ |
-| Soldier and weapon systems | ✅ | ✅ | ❌ |
-| Vehicle fixes (carrier, droideka, hover, view toggle) | ✅ | ✅ | ❌ |
-| Flyer boost animation | ✅ | ✅ | ❌ |
-| Aim assist | ✅ | ✅ | ❌ |
-| Gamepad bindings and rumble | ✅ | ✅ | ❌ |
+| Lua API | ✅ | ✅ | ✅ |
+| Prone stance | ✅ | ✅ | ✅ |
+| First-person animation banks and FP sprint | ✅ | ✅ | ✅ |
+| Soldier and weapon systems | ✅ | ✅ | ✅ |
+| Vehicle fixes (carrier, droideka, hover, view toggle) | ✅ | ✅ | ✅ |
+| Flyer boost animation | ✅ | ✅ | ✅ |
+| Aim assist | ✅ | ✅ | ✅ |
+| Gamepad bindings and rumble | ✅ | ✅ | ✅ |
 | Loading screen system | ✅ | ❌ | ❌ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |

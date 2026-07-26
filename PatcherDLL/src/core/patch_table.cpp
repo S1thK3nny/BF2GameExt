@@ -799,7 +799,33 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Matrix/Item Pool Limit Extension",
                .patches =
                   {
-                     // GOG addresses not yet identified — empty patch set
+                     // Ported from the Steam set below with tools/port_gog.py.
+                     // The four low sites (0x6992/0x6997/0x6a80/0x6ab0) are in
+                     // the shift-0 range so their file offsets are unchanged;
+                     // the RedRenderer sites move by +0x1080/+0x1090.  GOG's
+                     // matrixPool lives at 0x8c03f0 (Steam 0x8bef50), and the
+                     // 0xbf6/0xbf5/0x320/0x200 immediates and the 0xCC-padded
+                     // code cave at 0x6ad3 are all present unchanged.
+                     // matrixPool address redirects
+                     patch{0x2b0702 + 0x1, 0x8c03f0, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x2b076f + 0x2, 0x8c03f0, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x2b8e37 + 0x2, 0x8c03f0, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     patch{0x6992 + 0x1,   0x8c03f0, matrixPool_address, {.file_offset = true, .expected_is_va = true}},
+                     // matrixPool size
+                     patch{0x2b070a + 0x2, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     patch{0x2b0778 + 0x1, 0xbf6, matrixPool_size, {.file_offset = true}},
+                     patch{0x6997 + 0x1,   0xbf5, matrixPool_size - 1, {.file_offset = true}},
+                     // transparentItemsSize: 800 -> 204800
+                     patch{0x6b10 + 0x1, 0x320, 0x32000, {.file_offset = true}},
+                     // postTransparentItemSize: 512 -> 131072
+                     patch{0x6a80 + 0x1, 0x200, 0x20000, {.file_offset = true}},
+                     // preShadowTransparentItemSize code cave: PUSH 100 -> PUSH 25600
+                     patch{0x6ab0,       0x6a, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP +0x21
+                     patch{0x6ab0 + 0x1, 0x64, 0x21, {.file_offset = true, .values_are_8bit = true}},       // JMP offset
+                     patch{0x6ad3,       0xcc, 0x68, {.file_offset = true, .values_are_8bit = true}},       // PUSH imm32 opcode
+                     patch{0x6ad3 + 0x1, 0xcccccccc, 0x6400, {.file_offset = true}},                        // PUSH 0x6400
+                     patch{0x6ad8,       0xcc, 0xeb, {.file_offset = true, .values_are_8bit = true}},       // JMP short back
+                     patch{0x6ad8 + 0x1, 0xcc, 0xd8, {.file_offset = true, .values_are_8bit = true}},       // JMP offset (-0x28)
                   },
             },
 

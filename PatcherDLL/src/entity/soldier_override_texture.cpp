@@ -84,7 +84,9 @@ struct OverrideLayout {
    uint32_t elementClassOff;
 };
 static constexpr OverrideLayout kLayoutModtools = {0x3C4, 0x130};
-static constexpr OverrideLayout kLayoutSteam    = {0x3AC, 0x130};
+// Shared by both retail builds: EntitySoldier::Render and SoldierElement::
+// RenderUsingContext are instruction-identical between Steam and GOG.
+static constexpr OverrideLayout kLayoutRelease  = {0x3AC, 0x130};
 
 static OverrideLayout s_layout = kLayoutModtools;
 
@@ -289,8 +291,9 @@ void soldier_override_texture_install(uintptr_t exe_base)
 {
    switch (g_build) {
    case GameBuild::Modtools: s_layout = kLayoutModtools; break;
-   case GameBuild::Steam:    s_layout = kLayoutSteam;    break;
-   default: return; // GOG / unknown: offsets not derived
+   case GameBuild::Steam:
+   case GameBuild::GOG:      s_layout = kLayoutRelease;  break;
+   default: return; // unknown build
    }
 
    if (g_addr->hash_string == 0 || g_addr->soldier_class_set_property == 0 ||

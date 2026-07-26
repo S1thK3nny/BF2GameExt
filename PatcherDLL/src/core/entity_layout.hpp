@@ -67,7 +67,13 @@ constexpr SoldierLayout kSoldierModtools = {
 // +0x750, class arrays +0x748/+0x768/+0x788/+0x790 (all minus the 0x240
 // Controllable base below).  slot0Cache inferred from the uniform -0x10 shift
 // (write is compare-guarded, so a miss is a no-op, not a corruption).
-constexpr SoldierLayout kSoldierSteam = {
+//
+// Shared by both retail builds.  Steam and GOG are the same source through the
+// same toolchain, so only code addresses move between them, never field
+// offsets: whole-function comparisons of the EntitySoldier ctor, SetState,
+// Crouch/Stand, Render, SoldierElement::RenderUsingContext (316 instructions)
+// and the FP renderable update found zero differing displacements.
+constexpr SoldierLayout kSoldierRelease = {
    /* mState */ 0x504, /* weaponIndex */ 0x502, /* weaponArray */ 0x4E0,
    /* soundPos2 */ 0x29C, /* foleyProne */ 0x60, /* aiHeightBaseRm */ 7 /* EDI */,
    /* classPtr */ 0x200, /* aimer */ 0x2C0, /* dualWieldFlag */ 0x232,

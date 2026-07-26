@@ -269,8 +269,16 @@ void cloth_collision_fix_install(uintptr_t exe_base)
       cylinder = cloth_enforce_cylinder_coll;
       g_cylinderHook = (PVOID)hooked_EnforceCylinderCollision_steam;
    } break;
+   case GameBuild::GOG: {
+      using namespace game_addrs::gog;
+      satisfy  = cloth_satisfy_constraints;
+      enforce  = cloth_enforce_collisions;
+      cylinder = cloth_enforce_cylinder_coll;
+      // Same release/LTCG codegen as Steam, so the same naked thunk applies.
+      g_cylinderHook = (PVOID)hooked_EnforceCylinderCollision_steam;
+   } break;
    default:
-      return; // GOG unported
+      return; // unknown build
    }
 
    original_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, satisfy);

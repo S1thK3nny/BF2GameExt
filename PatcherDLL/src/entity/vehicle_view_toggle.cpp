@@ -15,32 +15,25 @@ static int       g_slot_count = 0;
 
 void vehicle_view_toggle_install(uintptr_t exe_base)
 {
-   uintptr_t return_false_thunk = 0;
+   // Every address here is in the per-build table, so there is nothing
+   // build-specific left to branch on — the slot layout (hover / walker and
+   // their Command* twins, each patched to the const-false thunk) is the same
+   // on all three builds.
+   if (g_build == GameBuild::Unknown) return;
 
-   switch (g_build) {
-   case GameBuild::Modtools: {
-      using namespace game_addrs::modtools;
-      g_slots[0] = { veh_view_hover_vtable_3c_slot,      veh_view_hover_3c_orig_thunk,  nullptr, 0 };
-      g_slots[1] = { veh_view_walker_vtable_3c_slot,     veh_view_walker_3c_orig_thunk, nullptr, 0 };
-      g_slots[2] = { veh_view_cmd_hover_vtable_3c_slot,  veh_view_hover_3c_orig_thunk,  nullptr, 0 };
-      g_slots[3] = { veh_view_cmd_walker_vtable_3c_slot, veh_view_walker_3c_orig_thunk, nullptr, 0 };
-      g_slot_count = 4;
-      return_false_thunk = veh_view_return_false_thunk;
-   } break;
-   case GameBuild::Steam: {
-      using namespace game_addrs::steam;
-      g_slots[0] = { veh_view_hover_vtable_3c_slot,      veh_view_hover_3c_orig_thunk,  nullptr, 0 };
-      g_slots[1] = { veh_view_walker_vtable_3c_slot,     veh_view_walker_3c_orig_thunk, nullptr, 0 };
-      g_slots[2] = { veh_view_cmd_hover_vtable_3c_slot,  veh_view_hover_3c_orig_thunk,  nullptr, 0 };
-      g_slots[3] = { veh_view_cmd_walker_vtable_3c_slot, veh_view_walker_3c_orig_thunk, nullptr, 0 };
-      g_slot_count = 4;
-      return_false_thunk = veh_view_return_false_thunk;
-   } break;
-   default:
-      return; // GOG unported
-   }
+   if (!g_addr->veh_view_hover_vtable_3c_slot || !g_addr->veh_view_walker_vtable_3c_slot ||
+       !g_addr->veh_view_cmd_hover_vtable_3c_slot || !g_addr->veh_view_cmd_walker_vtable_3c_slot ||
+       !g_addr->veh_view_hover_3c_orig_thunk || !g_addr->veh_view_walker_3c_orig_thunk ||
+       !g_addr->veh_view_return_false_thunk)
+      return;
 
-   const uint32_t new_value = (uint32_t)(uintptr_t)resolve(exe_base, return_false_thunk);
+   g_slots[0] = { g_addr->veh_view_hover_vtable_3c_slot,      g_addr->veh_view_hover_3c_orig_thunk,  nullptr, 0 };
+   g_slots[1] = { g_addr->veh_view_walker_vtable_3c_slot,     g_addr->veh_view_walker_3c_orig_thunk, nullptr, 0 };
+   g_slots[2] = { g_addr->veh_view_cmd_hover_vtable_3c_slot,  g_addr->veh_view_hover_3c_orig_thunk,  nullptr, 0 };
+   g_slots[3] = { g_addr->veh_view_cmd_walker_vtable_3c_slot, g_addr->veh_view_walker_3c_orig_thunk, nullptr, 0 };
+   g_slot_count = 4;
+
+   const uint32_t new_value = (uint32_t)(uintptr_t)resolve(exe_base, g_addr->veh_view_return_false_thunk);
 
    for (int i = 0; i < g_slot_count; i++) {
       SlotPatch& s = g_slots[i];

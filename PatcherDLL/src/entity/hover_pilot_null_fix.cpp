@@ -101,8 +101,13 @@ static void install_updateindirect_shim(uintptr_t exe_base)
       getterVA   = game_addrs::steam::controllable_get_active_pilot;
       idiom = kIdiomSteam; idiomLen = sizeof(kIdiomSteam);
       break;
+   case GameBuild::GOG:
+      callSiteVA = game_addrs::gog::hover_updateindirect_pilot_call;
+      getterVA   = game_addrs::gog::controllable_get_active_pilot;
+      idiom = kIdiomSteam; idiomLen = sizeof(kIdiomSteam); // same codegen as Steam
+      break;
    default:
-      return; // GOG / unknown: addresses not derived yet
+      return; // unknown build
    }
    if (callSiteVA == 0 || getterVA == 0) return;
 
@@ -198,8 +203,14 @@ static void install_command_guard(uintptr_t exe_base)
       kSite = kSiteSteam; kPrev = kPrevSteam;
       guard = (void*)&hover_cmd_null_guard_steam;
       break;
+   case GameBuild::GOG:
+      siteVA = game_addrs::gog::hover_command_crash_site;
+      skipVA = game_addrs::gog::hover_command_skip_target;
+      kSite = kSiteSteam; kPrev = kPrevSteam; // identical codegen to Steam
+      guard = (void*)&hover_cmd_null_guard_steam;
+      break;
    default:
-      return; // GOG / unknown: not derived
+      return; // unknown build
    }
    if (siteVA == 0 || skipVA == 0) return;
 
@@ -223,12 +234,88 @@ static void install_command_guard(uintptr_t exe_base)
 }
 
 // -----------------------------------------------------------------------------
+// Guard 3: cargo-activation mPilot deref (release builds only).
+//
+// Despite the file name this is the same engine bug as the two above — an
+// unguarded Controllable::mPilot deref — just reached from a different place,
+// so it lives with the other two rather than in its own module.
+//
+// EntityCarrier cargo activation calls cargo vtable[5] (0x500410), which walks
+// the object's children and virtual-calls each one via `CALL [EAX+0x7c]`
+// (0x500592).  That callee (0x5005c0) takes the "has a pilot" branch whenever
+// [ESI+0xd4] >= 0 and then dereferences mPilot with no null check:
+//     00500634  MOV  EAX,[ESI+0xd0]      ; mPilot -> NULL for carried cargo
+//     0050063a  PUSH [EAX+0xd4]          ; access violation
+// Its sibling branch (0x500647) checks mPilot and jumps to 0x5006dd when null,
+// so that is exactly where this guard sends the null case — the engine's own
+// no-pilot route, reached at the same block-level ESP.
+//
+// Release-only: the byte pair does not occur anywhere in the modtools .text.
+// Without the guard the fault is merely contained by the __try in
+// flyer_carrier_fixes.cpp, which means ActivatePhysics aborts partway and the
+// cargo is left only partially activated.
+static void*    s_actContinue  = nullptr; // crash_site + 12 (non-null path)
+static void*    s_actSkip      = nullptr; // engine's own no-pilot convergence
+static uint8_t* s_actSite      = nullptr;
+static uint8_t  s_actOrig[12]  = {};
+
+__declspec(naked) static void activate_pilot_null_guard()
+{
+   __asm {
+      mov  eax, [esi + 0xd0]        // original overwritten instruction 1
+      test eax, eax
+      jz   skip
+      push dword ptr [eax + 0xd4]   // original overwritten instruction 2
+      jmp  [s_actContinue]
+   skip:
+      jmp  [s_actSkip]              // block-level ESP, same as the engine's path
+   }
+}
+
+static void install_activate_guard(uintptr_t exe_base)
+{
+   // Release-only; modtools does not emit this shape at all.
+   if (g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
+
+   const uintptr_t siteVA = g_addr->activate_pilot_crash_site;
+   const uintptr_t skipVA = g_addr->activate_pilot_skip_target;
+   if (siteVA == 0 || skipVA == 0) return;
+
+   uint8_t* site = (uint8_t*)resolve(exe_base, siteVA);
+   uint8_t* skip = (uint8_t*)resolve(exe_base, skipVA);
+
+   // Positive-ID: the 12-byte deref pair, the `LEA ECX,[ESI+0x18]` that precedes
+   // it, and `MOV ECX,ESI` at the skip target.  Bail (no-op) on any mismatch.
+   static const uint8_t kSite[] = {0x8B, 0x86, 0xD0, 0x00, 0x00, 0x00,
+                                   0xFF, 0xB0, 0xD4, 0x00, 0x00, 0x00};
+   static const uint8_t kPrev[] = {0x8D, 0x4E, 0x18};   // LEA ECX,[ESI+0x18]
+   static const uint8_t kSkip[] = {0x8B, 0xCE};         // MOV ECX,ESI
+
+   if (std::memcmp(site, kSite, sizeof(kSite)) != 0) return;
+   if (std::memcmp(site - 3, kPrev, sizeof(kPrev)) != 0) return;
+   if (std::memcmp(skip, kSkip, sizeof(kSkip)) != 0) return;
+
+   s_actContinue = (void*)(site + sizeof(kSite));
+   s_actSkip     = skip;
+   s_actSite     = site;
+   std::memcpy(s_actOrig, site, sizeof(s_actOrig));
+
+   // E9 rel32 to the guard over bytes 0..4, NOP the remaining 7.  .text is RW
+   // during install.
+   const int32_t rel = (int32_t)((uintptr_t)&activate_pilot_null_guard - ((uintptr_t)site + 5));
+   site[0] = 0xE9;
+   *(int32_t*)(site + 1) = rel;
+   std::memset(site + 5, 0x90, sizeof(kSite) - 5);
+}
+
+// -----------------------------------------------------------------------------
 // Public install / uninstall.
 // -----------------------------------------------------------------------------
 void hover_pilot_null_fix_install(uintptr_t exe_base)
 {
    install_updateindirect_shim(exe_base);
    install_command_guard(exe_base);
+   install_activate_guard(exe_base);
 }
 
 void hover_pilot_null_fix_uninstall()
@@ -248,5 +335,13 @@ void hover_pilot_null_fix_uninstall()
          VirtualProtect(s_cmdSite, sizeof(s_cmdOrig), oldProt, &oldProt);
       }
       s_cmdSite = nullptr;
+   }
+   if (s_actSite) {
+      DWORD oldProt;
+      if (VirtualProtect(s_actSite, sizeof(s_actOrig), PAGE_EXECUTE_READWRITE, &oldProt)) {
+         std::memcpy(s_actSite, s_actOrig, sizeof(s_actOrig));
+         VirtualProtect(s_actSite, sizeof(s_actOrig), oldProt, &oldProt);
+      }
+      s_actSite = nullptr;
    }
 }

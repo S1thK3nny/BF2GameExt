@@ -411,9 +411,8 @@ void fp_anim_bank_install(uintptr_t exe_base)
    // cached state +0x1608) and the EntitySoldier fields the UpdateSoldier hook
    // reads (mClass @ ctrl+0x218, mState @ ctrl+0x514) are build-invariant
    // (PDB-confirmed); only the addresses and the AddBank/FindAnimation calling
-   // convention differ per build.  GOG is left unmapped (fp_update_soldier not
-   // derived there).
-   if (g_build != GameBuild::Modtools && g_build != GameBuild::Steam)
+   // convention differ per build.
+   if (g_build == GameBuild::Unknown)
       return;
 
    if (!g_addr->fp_update_soldier || !g_addr->soldier_class_set_property ||
@@ -427,7 +426,7 @@ void fp_anim_bank_install(uintptr_t exe_base)
    s_findAnimAddr  = (uintptr_t)resolve(exe_base, g_addr->anim_find_animation);
    s_ecxConvention = (g_build != GameBuild::Modtools);  // release passes arg in ECX
 
-   if (g_build == GameBuild::Steam) {
+   if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) {
       s_classOffset = -0x238;  // GameObject::mClass @ entity+0x8, ctrl @ entity+0x240
       s_stateOffset = 0x504;   // EntitySoldier::mState @ entity+0x744
    }

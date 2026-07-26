@@ -385,8 +385,19 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       scopeVA = game_addrs::steam::scope_display_instance;
       s_misAimingOff = 0x15C;
       break;
+
+   case GameBuild::GOG:
+      cannonVA   = game_addrs::gog::weapon_cannon_vftable_override_aimer;
+      launcherVA = game_addrs::gog::weapon_launcher_vftable_override_aimer;
+      implVA     = game_addrs::gog::weapon_override_aimer_impl;
+      thunkVA    = game_addrs::gog::weapon_override_aimer_thunk;
+      rayHitVA   = game_addrs::gog::collision_manager_ray_hit;
+      rayHitIsRelease = true;    // same LTCG RayHit convention as Steam
+      scopeVA = game_addrs::gog::scope_display_instance;
+      s_misAimingOff = 0x15C;    // shared release layout
+      break;
    default:
-      return; // GOG / unknown: addresses not derived yet
+      return; // unknown build
    }
 
    // Direction convergence is optional: if RayHit is missing the hook still

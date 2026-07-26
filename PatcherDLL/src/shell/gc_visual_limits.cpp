@@ -349,7 +349,7 @@ static bool verify_and_apply(uintptr_t exe_base, const gc_patch* list, int count
 void gc_visual_limits_install(uintptr_t exe_base)
 {
     if (!g_gcVisualLimitsEnabled) return;
-    if (g_build != GameBuild::Modtools && g_build != GameBuild::Steam) return; // GOG unported
+    if (g_build == GameBuild::Unknown) return;
 
     g_log = get_gamelog(); // runtime-only — must not be called during install
 
@@ -370,12 +370,27 @@ void gc_visual_limits_install(uintptr_t exe_base)
             patches[n++] = { addr, kVanillaParticleCountOff, kNewParticleCountOff, false };
         patches[n++] = { gc_beam_alloc_size_op,     0x00000B20, kNewBeamAllocSize,     false };
         patches[n++] = { gc_particle_alloc_size_op, 0x00000E20, kNewParticleAllocSize, false };
-    } else {
+    } else if (g_build == GameBuild::Steam) {
         using namespace game_addrs::steam;
         g_beamLimit = kSteamBeamLimit;
 
         // Pure byte patches: the LTCG Add functions keep their code, just
         // with bigger limit immediates and count offsets.
+        for (uintptr_t addr : gc_beam_count_patches)
+            patches[n++] = { addr, kVanillaBeamCountOff, kSteamBeamCountOff, false };
+        for (uintptr_t addr : gc_particle_count_patches)
+            patches[n++] = { addr, kVanillaParticleCountOff, kNewParticleCountOff, false };
+        patches[n++] = { gc_beam_limit_imm8_op,      0x40,       kSteamBeamLimit,       true  };
+        patches[n++] = { gc_particle_limit_imm32_op, 0x00000080, kNewParticleLimit,     false };
+        patches[n++] = { gc_beam_alloc_size_op,      0x00000B20, kSteamBeamAllocSize,   false };
+        patches[n++] = { gc_particle_alloc_size_op,  0x00000E20, kNewParticleAllocSize, false };
+    } else {
+        // GOG: identical code shape to Steam (same imm8 beam CMP, same vanilla
+        // 0xB1C/0xE1C count offsets and 0xB20/0xE20 allocation sizes), only the
+        // addresses move.  verify_and_apply() still checks every site.
+        using namespace game_addrs::gog;
+        g_beamLimit = kSteamBeamLimit;
+
         for (uintptr_t addr : gc_beam_count_patches)
             patches[n++] = { addr, kVanillaBeamCountOff, kSteamBeamCountOff, false };
         for (uintptr_t addr : gc_particle_count_patches)

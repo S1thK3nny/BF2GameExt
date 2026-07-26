@@ -2,6 +2,7 @@
 #include "flyer_carrier_fixes.hpp"
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
+#include "util/crash_logger.hpp"
 
 #include <cmath>
 #include <detours.h>
@@ -2018,12 +2019,32 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          }
 
          // 4. cargo->vtable[5]() — activation (in own __try so tracker still created)
+         //
+         // This faults by design on the release builds and is expected: the
+         // engine's activation path reads Controllable::mPilot (+0xd0) and
+         // dereferences it at +0xd4 with no null check on that branch, and
+         // carried cargo has no pilot.  Verified byte-identical on Steam and
+         // GOG (same VA, same instructions), so it is engine behaviour, not a
+         // build-specific port error.  Marked expected so the first-chance VEH
+         // doesn't file a crash report for something we already contain.
+         crash_logger_begin_expected_fault();
          __try {
             typedef void (__thiscall* Activate_t)(void* entity);
             ((Activate_t)cargoVtbl[5])(cargoEntity);
          } __except(EXCEPTION_EXECUTE_HANDLER) {
-            if (fn) fn("[Carrier]   Slot %d: vtable[5] exception (non-fatal)\n", slot);
+            // With the guard in hover_pilot_null_fix.cpp installed this should
+            // never fire.  If it does, that guard declined to patch (byte
+            // mismatch on an unrecognised build), so say so once rather than
+            // once per cargo attach — the activation is then still aborting
+            // partway and the cargo is only partially activated.
+            static bool reported = false;
+            if (fn && !reported) {
+               reported = true;
+               fn("[Carrier] cargo vtable[5] faulted (slot %d) — the mPilot guard did not "
+                  "install on this build, so cargo activation is incomplete\n", slot);
+            }
          }
+         crash_logger_end_expected_fault();
 
          // 5. Create VehicleTracker (runs even if activation failed)
          CreateTracker(vs, cargoEntity);
@@ -2182,7 +2203,13 @@ static void carrier_bounds_guards_install(uintptr_t exe_base)
 
 void entity_carrier_fixes_install(uintptr_t exe_base)
 {
-   if (g_build == GameBuild::Steam) {
+   // Both retail builds: identical struct layout AND, for this subsystem,
+   // identical code addresses — EntityFlyer::Render and ::Update sit in the
+   // shift-0 range, so the visibility JZ (0f 84 14 07 00 00) and the two RayHit
+   // CALLs (e8 55 01 fb ff / e8 23 ff fa ff) are byte-for-byte at the same VAs
+   // on GOG.  Leaving GOG on the modtools defaults previously pointed visJzInit
+   // at a modtools-only address.
+   if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) {
       s_mCargoCount_offset    = 0x10E0;  // EntityCarrierClass::mCargoCount
       s_cargoNodeArrayBase    = 0x10A0;  // cargo-node array (0x10A0 + 4*0x10 == 0x10E0)
       s_inner_mCargoSlot0Obj  = 0x1D9C;  // EntityCarrier::mCargoArray[0].mObject

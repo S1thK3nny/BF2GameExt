@@ -210,8 +210,13 @@ void droideka_shield_tracker_install(uintptr_t exe_base)
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::steam::entity_droideka_rtti_hash);
       s_mStateOff   = 0x1A54;
       break;
+   case GameBuild::GOG:
+      updVA = game_addrs::gog::weapon_shield_update;
+      s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::gog::entity_droideka_rtti_hash);
+      s_mStateOff   = 0x1A54; // same release layout as Steam
+      break;
    default:
-      return; // GOG / unknown: not derived
+      return; // unknown build
    }
    if (!updVA || !s_rttiHashPtr) return;
 
@@ -316,8 +321,14 @@ void droideka_death_anim_install(uintptr_t exe_base)
       kSite = kSiteSteam; kPrev = kPrevSteam;
       s_mStateOff = 0x1A54;
       break;
+   case GameBuild::GOG:
+      siteVA = game_addrs::gog::droideka_update_nextstate_call;
+      // Byte-identical call site and lead-in on GOG (verified against the exe).
+      kSite = kSiteSteam; kPrev = kPrevSteam;
+      s_mStateOff = 0x1A54;
+      break;
    default:
-      return; // GOG / unknown: not derived
+      return; // unknown build
    }
    if (siteVA == 0) return;
 

@@ -67,9 +67,30 @@ static void appendf(char* buf, size_t cap, size_t& len, const char* fmt, ...)
     len += (size_t)n;
 }
 
+// Expected-fault suppression (see expected_fault_scope in the header).
+static volatile LONG  s_expectDepth  = 0;
+static volatile DWORD s_expectThread = 0;
+
+void crash_logger_begin_expected_fault()
+{
+    s_expectThread = GetCurrentThreadId();
+    InterlockedIncrement(&s_expectDepth);
+}
+
+void crash_logger_end_expected_fault()
+{
+    if (InterlockedDecrement(&s_expectDepth) <= 0)
+        s_expectThread = 0;
+}
+
 static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
 {
     const DWORD code = xp->ExceptionRecord->ExceptionCode;
+
+    // A fault inside a guarded probe is expected and already handled by the
+    // __try around it — don't report a crash the game is going to survive.
+    if (s_expectDepth > 0 && s_expectThread == GetCurrentThreadId())
+        return EXCEPTION_CONTINUE_SEARCH;
 
     // Only fatal-looking codes. Skip C++ exceptions (0xE06D7363), debug
     // breaks, guard pages and other routine first-chance noise.

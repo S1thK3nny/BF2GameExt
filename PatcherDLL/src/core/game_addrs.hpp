@@ -653,6 +653,20 @@ namespace steam {
    constexpr uintptr_t hover_command_crash_site  = 0x004ece30;
    constexpr uintptr_t hover_command_skip_target = 0x004ecb1e;
 
+   // Third unguarded Controllable::mPilot deref, this one release-only (the
+   // byte pair does not occur anywhere in the modtools .text).  Reached from
+   // EntityCarrier cargo activation: cargo vtable[5] (0x500410) walks its
+   // children and virtual-calls each via `CALL [EAX+0x7c]` @0x500592; the
+   // callee 0x5005c0 then does
+   //     00500634  8B 86 D0 00 00 00   MOV EAX,[ESI+0xd0]     ; mPilot
+   //     0050063a  FF B0 D4 00 00 00   PUSH [EAX+0xd4]        ; AV when null
+   // on the branch taken when [ESI+0xd4] >= 0, with no null check — while the
+   // sibling branch at 0x500647 checks mPilot properly and jumps to 0x5006dd.
+   // Carried cargo has no pilot, so the guard mirrors the engine's own handling
+   // and jumps to that same convergence point.
+   constexpr uintptr_t activate_pilot_crash_site  = 0x00500634;
+   constexpr uintptr_t activate_pilot_skip_target = 0x005006dd;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
@@ -1148,6 +1162,296 @@ namespace gog {
    constexpr uintptr_t hud_screen_width             = 0x0093F944;
    constexpr uintptr_t hud_screen_height            = 0x0093F948;
    constexpr uintptr_t hud_reticle_mulss_patch      = 0x00631996;
+
+   // =========================================================================
+   // Ported from the Steam namespace with tools/port_gog.py (2026-07-26).
+   //
+   // The two retail exes are the same source built with the same toolchain, so
+   // GOG .text is Steam .text shifted by a piecewise-constant amount (0 in the
+   // low ranges, ~+0x1000 above 0x63xxxx) and the globals move with .data.
+   // Every address below was predicted from that shift map and then verified by
+   // comparing the two builds instruction by instruction: mnemonics, registers
+   // and struct displacements must match exactly, only relocated VAs may differ.
+   //
+   // The same pass re-derived all 48 hand-mapped addresses that already existed
+   // in this namespace and reproduced 47 of them exactly, with no contradiction
+   // (pc_logging_enabled has no literal code reference to ride on, so the tool
+   // abstains rather than disagreeing).
+   //
+   // Calling conventions are inherited from Steam unchanged -- GOG is the same
+   // release/LTCG build, so every naked thunk written for Steam applies here.
+   // =========================================================================
+
+   // ---- Lua VM ------------------------------------------------------------------
+
+   constexpr uintptr_t init_state                     = 0x005a1c90;
+   constexpr uintptr_t g_lua_state_ptr                = 0x01e58e50;
+   constexpr uintptr_t lua_pushcclosure               = 0x0069cfc0;
+   constexpr uintptr_t lua_pushlstring                = 0x0069d090;
+   constexpr uintptr_t lua_settable                   = 0x0069d460;
+   constexpr uintptr_t lua_tolstring                  = 0x0069d640;
+   constexpr uintptr_t lua_pushnumber                 = 0x0069d0f0;
+   constexpr uintptr_t lua_tonumber                   = 0x0069d5a0;
+   constexpr uintptr_t lua_gettop                     = 0x0069cc30;
+   constexpr uintptr_t lua_pushnil                    = 0x0069d0d0;
+   constexpr uintptr_t lua_pushboolean                = 0x0069cfa0;
+   constexpr uintptr_t lua_toboolean                  = 0x0069d560;
+   constexpr uintptr_t lua_touserdata                 = 0x0069d6d0;
+   constexpr uintptr_t lua_pushlightuserdata          = 0x0069d070;
+   constexpr uintptr_t lua_isnumber                   = 0x0069cd10;
+   constexpr uintptr_t lua_gettable                   = 0x0069cbf0;
+   constexpr uintptr_t lua_pcall                      = 0x0069cf40;
+   constexpr uintptr_t lua_rawgeti                    = 0x0069d230;
+   constexpr uintptr_t lua_settop                     = 0x0069d490;
+   constexpr uintptr_t lua_insert                     = 0x0069cc90;
+   constexpr uintptr_t lua_newtable                   = 0x0069ce40;
+
+   // ---- Aimer / Weapon ----------------------------------------------------------
+
+   constexpr uintptr_t aimer_set_soldier_info         = 0x0043d280;
+   constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b1564;
+   constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b228c;
+   constexpr uintptr_t weapon_override_aimer_impl     = 0x00678820;
+   constexpr uintptr_t weapon_override_aimer_thunk    = 0x00678820;
+   constexpr uintptr_t weapon_zoom_first_person       = 0x00678de0;
+   constexpr uintptr_t scope_display_instance         = 0x01eb04d4;
+   constexpr uintptr_t collision_manager_ray_hit      = 0x0045e3a0;
+   constexpr uintptr_t weapon_update                  = 0x00679250;
+   constexpr uintptr_t weapon_shield_update           = 0x00692b10;
+
+   // ---- Hashing / Texture lookup ------------------------------------------------
+
+   constexpr uintptr_t hash_string                    = 0x00727f20;
+
+   // ---- EntityHover self-piloted crash fix (see modtools notes) -----------------
+
+   constexpr uintptr_t hover_updateindirect_pilot_call = 0x004c7036;
+   constexpr uintptr_t controllable_get_active_pilot  = 0x0043aac0;
+   constexpr uintptr_t hover_command_crash_site       = 0x004ece30;
+   constexpr uintptr_t hover_command_skip_target      = 0x004ecb1e;
+   // Same VAs as Steam and byte-identical (see the steam namespace for the
+   // full note); this whole region is in the shift-0 range.
+   constexpr uintptr_t activate_pilot_crash_site      = 0x00500634;
+   constexpr uintptr_t activate_pilot_skip_target     = 0x005006dd;
+
+   // ---- Memory heap management --------------------------------------------------
+
+   constexpr uintptr_t red_set_current_heap           = 0x006c4ca0;
+
+   // ---- Entity / Soldier Prone --------------------------------------------------
+
+   constexpr uintptr_t EntitySoldier_prone            = 0x0079df6c;
+   constexpr uintptr_t EntitySoldier_crouch           = 0x004ed550;
+   constexpr uintptr_t EntitySoldier_stand            = 0x004ed080;
+   constexpr uintptr_t EntitySoldier_SetState         = 0x004ee2c0;
+   constexpr uintptr_t FoleyFXCollider_GetFoleyFX     = 0x004e7bf0;
+   constexpr uintptr_t prone_anim_accessor            = 0x0063d370;
+   constexpr uintptr_t SoldierAnimator_SetAction      = 0x0063fe00;
+   constexpr uintptr_t prone_guard_jnz                = 0x004e8968;
+   constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
+   constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
+   constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;
+   constexpr uintptr_t prone_primary_stance_and       = 0x00544334;
+   constexpr uintptr_t WeaponMeleeClass_vftable       = 0x007b24ac;
+   constexpr uintptr_t lua_read_data_file             = 0x0058bc00;
+   constexpr uintptr_t load_util_read_data_file       = 0x0057a9a0;
+   constexpr uintptr_t lowres_postload                = 0x00648de0;
+   constexpr uintptr_t pbl_hash_table_store           = 0x00728030;
+   constexpr uintptr_t pbl_temp_hash                  = 0x00727e50;
+
+   // ---- Entity / Droideka DisableBallMode ---------------------------------------
+
+   constexpr uintptr_t droideka_class_set_property    = 0x004a82a0;
+   constexpr uintptr_t droideka_update_pilot          = 0x004a2030;
+   constexpr uintptr_t droideka_class_derive          = 0x004a8180;
+
+   // ---- Entity / Soldier override textures (OverrideTexture3..5) ----------------
+
+   constexpr uintptr_t soldier_class_set_property     = 0x004f82e0;
+   constexpr uintptr_t soldier_render                 = 0x004e23d0;
+   constexpr uintptr_t soldier_element_render_ctx     = 0x0048dc90;
+   constexpr uintptr_t shading_pose_create_state      = 0x006ee5a0;
+   constexpr uintptr_t shading_state_get_int_param    = 0x006ee6c0;
+
+   // ---- Entity / Droideka death animation fix -----------------------------------
+
+   constexpr uintptr_t droideka_update_nextstate_call = 0x004a4b94;
+   constexpr uintptr_t entity_droideka_rtti_hash      = 0x01ebd06c;
+   constexpr uintptr_t lowres_prone_anim_name_ptr     = 0x007ea9e0;
+   constexpr uintptr_t lowres_prone_case_imm          = 0x0064a26a;
+
+   // ---- Entity / Vehicle (Carrier/Flyer) ----------------------------------------
+
+   constexpr uintptr_t carrier_vtable                 = 0x0079b2ec;
+   constexpr uintptr_t carrier_update                 = 0x004971d0;
+   constexpr uintptr_t carrier_kill                   = 0x00497110;
+   constexpr uintptr_t flyer_render                   = 0x004ab040;
+
+   // ---- Debug / Visualization ---------------------------------------------------
+
+   constexpr uintptr_t freecam_update                 = 0x0052d7b0;
+
+   // ---- Vehicle view toggle (FP/TP) ---------------------------------------------
+
+   constexpr uintptr_t veh_view_hover_vtable_3c_slot  = 0x0079cb80;
+   constexpr uintptr_t veh_view_walker_vtable_3c_slot = 0x0079ea64;
+   constexpr uintptr_t veh_view_cmd_hover_vtable_3c_slot = 0x007993f4;
+   constexpr uintptr_t veh_view_cmd_walker_vtable_3c_slot = 0x007997bc;
+   // The two "original" slot thunks are read straight out of the GOG vtable
+   // slots above, which is authoritative: both hold B0 01 C3 (MOV AL,1; RET),
+   // and return_false_thunk holds 32 C0 C3 (XOR AL,AL; RET), same as Steam.
+   constexpr uintptr_t veh_view_hover_3c_orig_thunk   = 0x00478db0;
+   constexpr uintptr_t veh_view_walker_3c_orig_thunk  = 0x0047fc70;
+   constexpr uintptr_t veh_view_return_false_thunk    = 0x004774c0;
+
+   // ---- Weapon / Grappling Hook -------------------------------------------------
+
+   constexpr uintptr_t grapple_dtor                   = 0x00600400;
+
+   // ---- Animation (weapon/soldier) ----------------------------------------------
+
+   constexpr uintptr_t set_weapon_anim_map            = 0x00640850;
+   constexpr uintptr_t anim_add_bank                  = 0x00520ec0;
+
+   // ---- Animation bank appending (anim_bank_append.cpp) -------------------------
+
+   constexpr uintptr_t anim_finder_resolve            = 0x00646080;
+   constexpr uintptr_t anim_class_find_in_banks       = 0x00645340;
+   constexpr uintptr_t anim_hash_table                = 0x0099fcac;
+   constexpr uintptr_t zephyr_anim_bank_find          = 0x0072cb10;
+
+   // ---- Flyer boost animation ---------------------------------------------------
+
+   constexpr uintptr_t flyer_init_animations          = 0x004b9720;
+
+   // ---- Carrier turret fire -----------------------------------------------------
+
+   constexpr uintptr_t turret_fire_check              = 0x005a748f;
+   constexpr uintptr_t turret_fire_allow              = 0x005a74a1;
+   constexpr uintptr_t turret_fire_block              = 0x005a74ca;
+   constexpr uintptr_t turret_update_indirect         = 0x005a9280;
+   constexpr uintptr_t trigger_update                 = 0x0043a940;
+   constexpr uintptr_t zephyr_pose_dyn_set_time       = 0x0072e720;
+   constexpr uintptr_t g_identity_matrix              = 0x009cc380;
+
+   // ---- Hashing (thiscall wrapper) ----------------------------------------------
+
+   constexpr uintptr_t hash_string_thiscall           = 0x00727df0;
+
+   // ---- Debug / Logging ---------------------------------------------------------
+
+   constexpr uintptr_t game_log                       = 0x006f80c0;
+
+   // ---- Shell / GC Visual Limits ------------------------------------------------
+
+   constexpr uintptr_t gc_beam_add                    = 0x00580cf0;
+   constexpr uintptr_t gc_particle_add                = 0x00581050;
+   constexpr uintptr_t gc_beam_count_patches[]      = {
+       0x00580cfc, 0x00580d19, 0x00580950, 0x00580cba, 0x00580cc8, 0x00580cd9, 0x0058132e,
+   };
+   constexpr uintptr_t gc_particle_count_patches[]  = {
+       0x00581062, 0x0058108c, 0x00580f52, 0x00581029, 0x00581037, 0x005812da,
+   };
+   constexpr uintptr_t gc_beam_limit_imm8_op          = 0x00580d02;
+   constexpr uintptr_t gc_particle_limit_imm32_op     = 0x00581068;
+   constexpr uintptr_t gc_particle_alloc_size_op      = 0x005812a5;
+   constexpr uintptr_t gc_beam_alloc_size_op          = 0x005812f3;
+
+   // ---- RedParticleRenderer (see modtools namespace for docs) -------------------
+
+   constexpr uintptr_t rpr_submit_particle            = 0x006d4440;
+   constexpr uintptr_t rpr_current_cache              = 0x00967654;
+   constexpr uintptr_t rpr_cache_index                = 0x00967658;
+   constexpr uintptr_t rpr_setcache_base_operand      = 0x006d43a6;
+   constexpr uintptr_t rpr_setcache_limit_imm8_op     = 0x006d438a;
+
+   // ---- Aim Assist --------------------------------------------------------------
+
+   constexpr uintptr_t anim_finder_add_bank           = 0x00646aa0;
+   constexpr uintptr_t carrier_set_property           = 0x004976b0;
+   constexpr uintptr_t carrier_attach_cargo           = 0x00497300;
+   constexpr uintptr_t carrier_update_spawn           = 0x00670410;
+   constexpr uintptr_t vehicle_tracker_pool           = 0x01f9b720;
+   constexpr uintptr_t gameloop_pause_mode            = 0x01e574f6;
+   constexpr uintptr_t carrier_take_off               = 0x004b3c60;
+   constexpr uintptr_t cloth_enforce_collisions       = 0x0045ba40;
+   constexpr uintptr_t cloth_satisfy_constraints      = 0x0045bc40;
+   constexpr uintptr_t cloth_enforce_cylinder_coll    = 0x0045b7c0;
+   constexpr uintptr_t load_config_real               = 0x00578560;
+   constexpr uintptr_t load_data_file_real            = 0x005783a0;
+   constexpr uintptr_t load_end_real                  = 0x00577910;
+   constexpr uintptr_t mem_pool_alloc                 = 0x006dd410;
+   constexpr uintptr_t pbl_read_next_data             = 0x00728f00;
+   constexpr uintptr_t pbl_read_next_scope            = 0x00728f80;
+   constexpr uintptr_t progress_set_all_on            = 0x00579980;
+   constexpr uintptr_t GameSound_play                 = 0x00538d80;
+   constexpr uintptr_t red_pose_convert_skel32        = 0x006debd0;
+   constexpr uintptr_t snd_engine_update              = 0x00735680;
+   constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
+   constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
+   constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;
+   constexpr uintptr_t zephyr_skeleton_open           = 0x0072dd10;
+   constexpr uintptr_t anim_add_skeleton_bank         = 0x00645610;
+   constexpr uintptr_t carrier_initiate_landing       = 0x004b3d50;
+   constexpr uintptr_t draw_line_3d                   = 0x006f2360;
+   constexpr uintptr_t draw_sphere                    = 0x006f1b30;
+   constexpr uintptr_t pbl_config_copy_ctor           = 0x00728eb0;
+   constexpr uintptr_t spline_build                   = 0x0072b7f0;
+   constexpr uintptr_t zephyr_pose_static_blend       = 0x0072ed50;
+   constexpr uintptr_t zephyr_pose_static_dtor        = 0x0072ebe0;
+   constexpr uintptr_t zephyr_pose_static_set         = 0x0072f0a0;
+   constexpr uintptr_t zephyr_skeleton_finalize       = 0x0072cd00;
+   constexpr uintptr_t anim_find_animation            = 0x00520f50;
+   constexpr uintptr_t carrier_detach_cargo           = 0x00497410;
+   constexpr uintptr_t console_add_variable           = 0x0041fe50;
+   constexpr uintptr_t disguise_raise                 = 0x00683fa0;
+   constexpr uintptr_t load_update_real               = 0x00577980;
+   constexpr uintptr_t weapon_signal_fire             = 0x0067a6b0;
+   constexpr uintptr_t snd_sound_play                 = 0x0073b510;
+   constexpr uintptr_t passenger_activate             = 0x00610b50;
+   constexpr uintptr_t turret_activate                = 0x005a8b20;
+   constexpr uintptr_t rumble_state_setup             = 0x006b3820;
+
+   // ---- Flyer path following / engine sound -------------------------------------
+
+   constexpr uintptr_t aimer_activate                 = 0x0043e370;
+   constexpr uintptr_t get_weapon_anim_map            = 0x0063da10;
+   constexpr uintptr_t snd_find_by_hash_id            = 0x00737b80;
+   constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
+   constexpr uintptr_t disguise_drop                  = 0x00684100;
+   constexpr uintptr_t load_render_real               = 0x00577c90;
+   constexpr uintptr_t render_screen_real             = 0x00578000;
+   constexpr uintptr_t platform_render_texture        = 0x00423950;
+   constexpr uintptr_t disguise_set_property          = 0x006844a0;
+   constexpr uintptr_t game_model_table               = 0x01ec26b4;
+
+   // ---- Lua core / character system (ported 2026-07-20) -------------------------
+
+   constexpr uintptr_t char_exit_vehicle              = 0x004f1380;
+   constexpr uintptr_t char_array_base                = 0x01e317d4;
+   constexpr uintptr_t max_chars                      = 0x01e317d0;
+   constexpr uintptr_t team_array_base                = 0x007eaaa0;
+   constexpr uintptr_t class_def_list                 = 0x007ed4f0;
+   constexpr uintptr_t aimer_set_weapon               = 0x0043e3f0;
+   constexpr uintptr_t lua_create_entity              = 0x0058fac0;
+   constexpr uintptr_t enter_state_path_op            = 0x005783e1;
+   constexpr uintptr_t net_in_shell                   = 0x007e9007;
+   constexpr uintptr_t net_enabled                    = 0x01e64359;
+   constexpr uintptr_t net_enabled_next               = 0x01e64358;
+
+   // ---- First person (from FirstPerson::Init 0x521000) --------------------------
+
+   constexpr uintptr_t fp_renderable                  = 0x01e573a8;
+   constexpr uintptr_t fp_anim_array                  = 0x01e572e0;
+   constexpr uintptr_t anim_name_table                = 0x0078a710;
+   constexpr uintptr_t fp_update_soldier              = 0x0051fb70;
+
+   // ---- Fog (see modtools namespace for docs) -----------------------------------
+
+   constexpr uintptr_t red_renderer_set_fog_range     = 0x006b46d0;
+   constexpr uintptr_t red_renderer_set_fog_enable    = 0x006b46b0;
+   constexpr uintptr_t fl_fog_start                   = 0x008f825c;
+   constexpr uintptr_t fl_fog_end                     = 0x008f8260;
 
 } // namespace gog
 

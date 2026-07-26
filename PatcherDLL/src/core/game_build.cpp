@@ -17,8 +17,8 @@ void game_build_select(GameBuild build)
 {
    g_build = build;
    switch (build) {
-   case GameBuild::Steam: g_addr = &kAddrsSteam; g_soldier = &kSoldierSteam; break;
-   case GameBuild::GOG:   g_addr = &kAddrsGOG;   /* prone unported on GOG; layout unused */ break;
+   case GameBuild::Steam: g_addr = &kAddrsSteam; g_soldier = &kSoldierRelease; break;
+   case GameBuild::GOG:   g_addr = &kAddrsGOG;   g_soldier = &kSoldierRelease; break;
    case GameBuild::Modtools:
    default:               g_addr = &kAddrsModtools; g_soldier = &kSoldierModtools; break;
    }

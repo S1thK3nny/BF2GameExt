@@ -101,7 +101,8 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
       log.printf("Identified executable as: %s\nApplying patches.\n", exe_list.name);
 
       // Select the runtime address table for the detour-based hooks installed later.
-      game_build_select(build_from_name(exe_list.name));
+      const GameBuild build = build_from_name(exe_list.name);
+      game_build_select(build);
 
       for (const patch_set& set : exe_list.patches) {
          // exe_patch_list::patches is a fixed PATCH_COUNT array; lists with fewer
@@ -140,10 +141,14 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
       // hash global that sits right after the old table in BSS. The class name differs
       // per build due to different BSS layouts.
       if (cfg.get_bool("LimitIncreases", "ObjectLimitIncrease", true)) {
+         // Keyed off the build enum, not the list name: the GOG list is spelled
+         // "…exe GoG" while this compared against "…exe GOG", so GOG silently
+         // fell through to the modtools sentinel and the relocated mIdMap
+         // iterator had the wrong end-of-iteration value.
          const char* sentinel_class = "Entity"; // modtools default
-         if (strcmp(exe_list.name, "BattlefrontII.exe Steam") == 0)
+         if (build == GameBuild::Steam)
             sentinel_class = "EntityBuilding";
-         else if (strcmp(exe_list.name, "BattlefrontII.exe GOG") == 0)
+         else if (build == GameBuild::GOG)
             sentinel_class = "EntityBuildingClass";
          init_object_limit_sentinel(sentinel_class);
          log.printf("Object limit sentinel initialized (PblHash(\"%s\"))\n", sentinel_class);

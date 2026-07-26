@@ -88,8 +88,32 @@ using fn_ConvertPose_t = void(__fastcall*)(void* ecx, void* edx, void* skeleton)
 // EntityFlyerClass::InitAnimations
 using fn_InitAnimations_t = int(__fastcall*)(void* ecx, void* edx, const char* bankName);
 
-// ZephyrAnimBank::Find
-using fn_AnimBankFind_t = void*(__fastcall*)(void* ecx, void* edx, const char* name);
+// Animation-bank lookup.  THE TWO BUILDS EXPOSE DIFFERENT LAYERS OF THIS CALL,
+// so both the `this` pointer and the key differ:
+//
+//   modtools 0x803750 is the WRAPPER — __thiscall(RedAnimation*, const char*).
+//     It does `[this+0x14]` to reach the ZephyrAnimBank and hashes the name
+//     itself (`call 0x7e1c10`) before delegating to the real find (0x85c300).
+//
+//   Steam 0x72ba40 / GOG 0x72cb10 are the INNER find — __thiscall(
+//     ZephyrAnimBank*, uint32 hash).  Release inlined the wrapper away, so the
+//     caller must do the +0x14 step AND pre-hash the name.  Confirmed straight
+//     out of EntityFlyerClass::InitAnimations itself, which looks up "takeoff"
+//     and "fins" as:
+//         push <name>; call pbl_temp_hash; mov ecx,[edi+0x14]; push eax; call find
+//
+// Getting either half wrong just returns null, silently, with no error — the
+// feature then no-ops.  anim_bank_append.cpp already does both correctly
+// (kRA_ZephyrAnimBank = 0x14 plus a hash), which is the model followed here.
+using fn_AnimBankFindName_t = void*(__fastcall*)(void* ecx, void* edx, const char* name);
+using fn_AnimBankFindHash_t = void*(__fastcall*)(void* ecx, void* edx, uint32_t hash);
+
+// RedAnimation -> ZephyrAnimBank (same constant as anim_bank_append.cpp).
+static constexpr int kRA_ZephyrAnimBank = 0x14;
+
+// PblHash temp-hash helper — __cdecl(const char*), hash returned in EAX.
+// This is the exact function InitAnimations uses for its own lookups.
+using fn_TempHash_t = uint32_t(__cdecl*)(const char*);
 
 // ---------------------------------------------------------------------------
 // Resolved function pointers
@@ -106,7 +130,13 @@ static fn_PoseStaticBlend_t fn_PoseStaticBlend = nullptr;
 static fn_SkeletonFinalize_t fn_SkeletonFinalize = nullptr;
 static fn_ConvertPose_t     fn_ConvertPose     = nullptr;
 static fn_InitAnimations_t  original_InitAnimations = nullptr;
-static fn_AnimBankFind_t    fn_AnimBankFind    = nullptr;
+static void*                fn_AnimBankFind    = nullptr;
+static fn_TempHash_t        fn_TempHash        = nullptr;
+
+// true on Steam/GOG: fn_AnimBankFind is the inner find (ZephyrAnimBank + hash).
+static bool                 s_bankFindIsInner  = false;
+// Hash of "boost", computed lazily — see note at the use site.
+static uint32_t             s_boostHash = 0;
 
 // ---------------------------------------------------------------------------
 // Class sidecar
@@ -181,7 +211,23 @@ static int __fastcall hooked_InitAnimations(void* ecx, void* edx, const char* ba
    void* bank = *(void**)((char*)ecx + kCls_AnimObj);
    if (!bank) return ret;
 
-   void* boostAnim = fn_AnimBankFind(bank, nullptr, "boost");
+   void* boostAnim = nullptr;
+   if (s_bankFindIsInner) {
+      // Release: do what the modtools wrapper did internally — step to the
+      // ZephyrAnimBank, then look up a pre-computed hash.
+      void* zephyrBank = *(void**)((char*)bank + kRA_ZephyrAnimBank);
+      if (!zephyrBank || !fn_TempHash) return ret;
+
+      // Hash lazily, never at install: install runs from dllmain with the exe
+      // sections mapped PAGE_READWRITE (non-executable), so calling a game
+      // function there faults under DEP.  This hook only runs at runtime.
+      if (s_boostHash == 0) s_boostHash = fn_TempHash("boost");
+
+      boostAnim = ((fn_AnimBankFindHash_t)fn_AnimBankFind)(zephyrBank, nullptr, s_boostHash);
+   }
+   else {
+      boostAnim = ((fn_AnimBankFindName_t)fn_AnimBankFind)(bank, nullptr, "boost");
+   }
    if (!boostAnim) return ret;
 
    BoostClassEntry* entry = findClass(ecx);
@@ -320,7 +366,8 @@ void flyer_boost_anim_render_restore(char* structBase)
 
 void flyer_boost_anim_install(uintptr_t exe_base)
 {
-   if (g_build == GameBuild::Steam) {
+   // Both retail builds share these offsets (same source, same toolchain).
+   if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) {
       kSB_FlightState  = 0x564;
       kSB_Progress     = 0x568;
       kSB_Flags        = 0x5B4;
@@ -346,7 +393,17 @@ void flyer_boost_anim_install(uintptr_t exe_base)
        !g_addr->g_identity_matrix || !g_addr->gameloop_pause_mode)
       return;
 
-   fn_AnimBankFind         = (fn_AnimBankFind_t)    resolve(exe_base, g_addr->zephyr_anim_bank_find);
+   fn_AnimBankFind         = (void*)                resolve(exe_base, g_addr->zephyr_anim_bank_find);
+
+   // Release builds expose the inner find (ZephyrAnimBank* + hash) rather than
+   // modtools' name-taking wrapper, so they also need the temp-hash helper.
+   s_bankFindIsInner = (g_build != GameBuild::Modtools);
+   s_boostHash       = 0;
+   if (s_bankFindIsInner) {
+      if (!g_addr->pbl_temp_hash) return;
+      fn_TempHash = (fn_TempHash_t)resolve(exe_base, g_addr->pbl_temp_hash);
+   }
+
    original_InitAnimations = (fn_InitAnimations_t)  resolve(exe_base, g_addr->flyer_init_animations);
 
    fn_SetAnimation     = (fn_SetAnimation_t)    resolve(exe_base, g_addr->zephyr_pose_dyn_set_anim);

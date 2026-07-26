@@ -64,7 +64,9 @@ struct DroidekaLayout {
    int mState;
 };
 static constexpr DroidekaLayout kLayoutModtools = {0x450, 0x1A74};
-static constexpr DroidekaLayout kLayoutSteam    = {0x438, 0x1A54};
+// Both retail builds share it — UpdatePilot/SetProperty/Derive compare
+// instruction-for-instruction between Steam and GOG, displacements included.
+static constexpr DroidekaLayout kLayoutRelease  = {0x438, 0x1A54};
 
 static DroidekaLayout s_layout = kLayoutModtools;
 
@@ -217,8 +219,9 @@ void droideka_ball_mode_install(uintptr_t exe_base)
 {
    switch (g_build) {
    case GameBuild::Modtools: s_layout = kLayoutModtools; break;
-   case GameBuild::Steam:    s_layout = kLayoutSteam;    break;
-   default: return; // GOG / unknown: offsets not derived yet
+   case GameBuild::Steam:
+   case GameBuild::GOG:      s_layout = kLayoutRelease;  break;
+   default: return; // unknown build
    }
 
    if (g_addr->hash_string == 0 || g_addr->droideka_class_set_property == 0 ||
