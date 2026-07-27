@@ -33,26 +33,6 @@ These work on any loading screen. They do not need `EnableBF1`.
 | `RemoveModeName` | `RemoveModeName(1/0)` | Hides the game mode name (top right) |
 | `LoadSoundLVL` | `LoadSoundLVL(lvlPath)` | Loads an extra .lvl for its sound definitions, so custom sounds are registered before the first frame renders |
 
-Each `Remove*` parameter hides exactly one element and is independent of the
-others. Combine them for a fully blank screen:
-
-```
-RemoveToolTips(1)
-RemoveLoadingBar(1)
-RemoveLoadingText(1)
-RemoveMissionName(1)
-RemoveModeName(1)
-```
-
-> **Changed behaviour.** `RemoveLoadingBar` used to hide the game's four corner
-> screen groups, which between them also hold the map name, the mode name and the
-> "Loading" caption. It now hides only the progress bar, as its name and this
-> table always said. If you were relying on the old behaviour, add the three new
-> parameters above.
-
-`LoadSoundLVL` is listed here because it is a general-purpose hook, but in
-practice the only consumers today are the BF1 sound parameters below.
-
 ### BF1 Sequence
 
 The BF1-style zoom animation: a planet is framed by a crosshair selector, the
