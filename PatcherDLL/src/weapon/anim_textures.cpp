@@ -174,10 +174,6 @@ static void register_anim_texture(void* weaponMeleeClass, int frameSlot, const c
    auto& entry = s_animTextures[baseTex];
    entry.frames[0] = baseTex;
    entry.frames[frameSlot] = animHash;
-
-   if (g_log)
-      g_log("[AnimTex] Registered AnimTexture%d: base=0x%08X anim=0x%08X (\"%s\")\n",
-            frameSlot, baseTex, animHash, textureName);
 }
 
 static void __fastcall hooked_SetProperty(void* thisPtr, void* /*edx*/, uint32_t propHash, const char* value)

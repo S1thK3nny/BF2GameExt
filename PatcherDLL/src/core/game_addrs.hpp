@@ -172,7 +172,13 @@ namespace modtools {
    constexpr uintptr_t snd_find_by_hash_id       = 0x0088c500;
    constexpr uintptr_t snd_sound_play            = 0x0088cc10;
    constexpr uintptr_t gamesound_controllable_play = 0x0074dd30;
+   // Despite the name this is GameSoundControllable::ReleaseVoice — thiscall on
+   // the CONTROLLABLE (handle at +0, flags at +2), not Snd::Sound::VoiceVirtualRelease.
    constexpr uintptr_t voice_virtual_release       = 0x0074d440;
+   // GameSoundControllable::Stop(bool hardStop) — __thiscall, RET 4.  The engine's
+   // own teardown: ReleaseVoice then Snd::VoiceVirtual::Stop.  Use this instead of
+   // poking Voice+0x80, which only imitates part of what VoiceVirtual::Stop does.
+   constexpr uintptr_t gamesound_controllable_stop = 0x0074d470;
    constexpr uintptr_t voice_to_handle             = 0x0088b5d0;
    constexpr uintptr_t snd_engine_update           = 0x008827b0;
 
@@ -201,6 +207,9 @@ namespace modtools {
    // context the bf2log formatter prints as "Message Severity: N ... file(line)".
    // Severity 3 = RED_SEVERITY_ERROR, what the engine uses for real errors.
    constexpr uintptr_t red_warning_set_log_data    = 0x007E37A0;
+   // RedWarning::g_bFormatted (byte). When zero, LogMessage skips the
+   // "Message Severity: N / file(line)" header and prints the raw text.
+   constexpr uintptr_t log_formatted_flag          = 0x00CF6910;
    // DownloadableContent::GetContentDirectory() — __cdecl(void) -> char*, NULL
    // when no addon is active.  Returns the addon directory, e.g. "addon\\VTR".
    constexpr uintptr_t dlc_get_content_directory   = 0x00449400;
@@ -848,6 +857,7 @@ namespace steam {
 
    constexpr uintptr_t game_log                    = 0x006f6ff0; // RedWarning::LogMessage
    constexpr uintptr_t red_warning_set_log_data    = 0x006F71A0; // 5-arg formatted overload
+   constexpr uintptr_t log_formatted_flag          = 0x009C8490;
    constexpr uintptr_t dlc_get_content_directory   = 0x0048EBA0; // returns addmeDirectory
 
    // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
@@ -1373,6 +1383,7 @@ namespace gog {
    // field-for-field (same order, same g_bFormatted=1, same NULL fallbacks);
    // GetContentDirectory sits at the SAME address as Steam.
    constexpr uintptr_t red_warning_set_log_data       = 0x006F8270;
+   constexpr uintptr_t log_formatted_flag             = 0x009C9930;
    constexpr uintptr_t dlc_get_content_directory      = 0x0048EBA0;
 
    // ---- Shell / GC Visual Limits ------------------------------------------------

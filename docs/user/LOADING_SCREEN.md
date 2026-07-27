@@ -35,9 +35,7 @@ These work on any loading screen. They do not need `EnableBF1`.
 
 ### BF1 Sequence
 
-The BF1-style zoom animation: a planet is framed by a crosshair selector, the
-view zooms into it, and the next planet takes over. Everything in this section
-requires `EnableBF1(1)`; without it these parameters are parsed and discarded.
+Through a lot of trial and error, the BF1 loading screen was reverse engineered to a point where it can be reproduced in BF2. The sequence is a series of zooms into a planet, into the atmosphere, further into the surface and finally into the map itself. The sequence is controlled by a set of parameters in the `load.cfg` file, which define the planets, their textures, and the sounds that play during the zooms. Everything in this section requires `EnableBF1()`; without it, these parameters are parsed and discarded.
 
 | Parameter | Syntax | Description |
 |-----------|--------|-------------|

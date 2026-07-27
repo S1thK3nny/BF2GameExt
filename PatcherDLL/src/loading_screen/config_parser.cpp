@@ -211,7 +211,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     s_lastAnimPhase  = -1;             // reset phase tracking for sound triggers
     s_lastAnimCycle  = -1;
     s_nextBarSoundMs = 0;
-    tracking_sound_stop();             // stop any stale tracking sound from previous load
+    loading_screen_stop_all_sounds();  // clear anything still playing from a previous load
 
     // Current level hashes stored in the LoadDisplay object (ecx+4 = world hash, ecx+8 = map hash).
     const uint32_t lvlHash1 = *(const uint32_t*)((const uint8_t*)ecx + 4);

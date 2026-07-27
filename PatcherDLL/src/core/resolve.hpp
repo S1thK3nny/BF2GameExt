@@ -49,13 +49,15 @@ inline void protected_write(void* dst, const void* src, size_t len)
 // Game's printf-style debug logger
 typedef void (__cdecl* GameLog_t)(const char* fmt, ...);
 
-inline GameLog_t get_gamelog()
+// The engine's RedWarning::LogMessage, unwrapped. Prefer get_gamelog() below
+// unless you specifically want whatever RedWarning header context is currently set.
+inline GameLog_t get_gamelog_raw()
 {
    if (g_addr->game_log == 0) return nullptr;
    return (GameLog_t)resolve(g_addr->game_log);
 }
 
-// RedWarning severity levels, as passed to RedWarning::SetLogData.  The bf2log
+// RedWarning severity levels, as passed to RedWarning::SetLogData. The bf2log
 // formatter prints the number in the "Message Severity: N" header.
 enum RedSeverity {
    RED_SEVERITY_INFO    = 1,
@@ -65,6 +67,12 @@ enum RedSeverity {
 
 // __cdecl(severity, file, line, compileDate, compileTime)
 typedef void (__cdecl* SetLogData_t)(int, const char*, int, const char*, const char*);
+
+inline SetLogData_t get_set_log_data()
+{
+   if (g_addr->red_warning_set_log_data == 0) return nullptr;
+   return (SetLogData_t)resolve(g_addr->red_warning_set_log_data);
+}
 
 // MSBuild expands __FILE__ to an absolute path, which puts the build machine's
 // directory layout into every log line a modder sees. Trim it to the last
@@ -86,9 +94,57 @@ constexpr const char* trim_src_path(const char* p)
       if (*s == 'P' && src_marker_at(s)) best = s;
    return best;
 }
+
+// Call-site context captured by the get_gamelog() macro just below, so the shim
+// can stamp the caller's own file and line rather than inheriting whatever the
+// last engine warning left in the RedWarning globals. Single-threaded game.
+inline const char* g_logFile = "PatcherDLL";
+inline int         g_logLine = 0;
 } // namespace detail
 
 #define SRC_FILE (detail::trim_src_path(__FILE__))
+
+// Log a line in the engine's own format:
+//
+//     Message Severity: 1
+//     PatcherDLL\src\controller\controller_support.cpp(210)
+//     [Controller] 1 joystick(s) detected, setting up bindings...
+//
+// The header is built by the bf2log formatter from RedWarning's globals, which
+// nothing ever resets — so a bare LogMessage call inherits whatever the previous
+// engine warning left behind. That is why our lines used to come out stamped
+// "pcRedTexture.cpp(553)" or "[NULL](0)". Setting the context first makes them
+// ours; severity defaults to 1 (info) since most of our output is informational.
+inline void __cdecl scheme_gamelog(const char* fmt, ...)
+{
+   GameLog_t fn_log = get_gamelog_raw();
+   if (!fn_log) return;
+
+   char msg[1024];
+   va_list ap;
+   va_start(ap, fmt);
+   _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
+   va_end(ap);
+
+   if (SetLogData_t set_log_data = get_set_log_data()) {
+      set_log_data(RED_SEVERITY_INFO, detail::g_logFile, detail::g_logLine,
+                   __DATE__, __TIME__);
+   }
+   fn_log("%s", msg);
+}
+
+inline GameLog_t get_gamelog_at(const char* file, int line)
+{
+   detail::g_logFile = file;
+   detail::g_logLine = line;
+   return &scheme_gamelog;
+}
+
+// Default logger for BF2GameExt code. Existing callers are unchanged --
+// `auto fn_log = get_gamelog(); fn_log("...", ...)` still works -- but the macro
+// captures each call site so the header carries that file and line.
+// Use warn_gamelog() when a line needs a severity other than info.
+#define get_gamelog() get_gamelog_at(SRC_FILE, __LINE__)
 
 // Log one line to the bf2log with an explicit RedWarning severity, matching what
 // the engine's own RWASSERT/RedWarning macros emit:
@@ -107,7 +163,7 @@ constexpr const char* trim_src_path(const char* p)
 inline void warn_gamelog(int severity, const char* srcFile, int srcLine,
                          const char* fmt, ...)
 {
-   GameLog_t fn_log = get_gamelog();
+   GameLog_t fn_log = get_gamelog_raw();
    if (!fn_log) return;
 
    char msg[1024];
@@ -116,9 +172,7 @@ inline void warn_gamelog(int severity, const char* srcFile, int srcLine,
    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
    va_end(ap);
 
-   if (g_addr->red_warning_set_log_data != 0) {
-      ((SetLogData_t)resolve(g_addr->red_warning_set_log_data))(
-         severity, srcFile, srcLine, __DATE__, __TIME__);
-   }
+   if (SetLogData_t set_log_data = get_set_log_data())
+      set_log_data(severity, srcFile, srcLine, __DATE__, __TIME__);
    fn_log("%s", msg);
 }

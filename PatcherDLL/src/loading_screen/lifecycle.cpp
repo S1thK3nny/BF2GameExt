@@ -19,43 +19,60 @@ static bool g_inRealEnd = false;
 // Sound helpers
 // =============================================================================
 
-// TODO: Sound cuts off abruptly — needs a short fade-out to avoid being harsh on the ears.
-// TODO: If the player alt-tabs at a specific moment, the sound
-//       doesn't get stopped (tracking_sound_stop is likely skipped or the voice handle is stale).
+// One-shot sounds are owned rather than fired and forgotten, so that
+// loading_screen_stop_all_sounds() can silence them when the screen ends. Without
+// this a ZoomSound or BarSound started late keeps playing into the match — most
+// visibly when the player alt-tabs and the load stalls mid-sequence.
+static constexpr int          kMaxOneShots = 16;
+static GameSoundControllable  g_oneShots[kMaxOneShots] = {};
+static int                    g_oneShotNext = 0;
 
-// Stop the current tracking sound (if any is playing).
+// Stop one owned sound.
 //
-// Stop sequence:
-//   1. VoiceVirtualRelease — clears loop-restart callback at +0xc0/+0xc4
-//   2. Set Voice->field_0x80 |= 2 — triggers SW resampler stop on next Update
-//   3. Tick audio engine — Voice::Update processes the stop
+// GameSoundControllable::Stop(hardStop=true) is the engine's own teardown:
+// ReleaseVoice, then Snd::VoiceVirtual::Stop, which clears the state bits on both
+// the VoiceVirtual and its Voice, unlinks it from the manager and fires the
+// inactive callback.
+//
+// This replaces an older hand-rolled sequence that released the voice and then
+// OR'd bit 1 into Voice+0x80. That address was not even the play-state word —
+// Snd::VoiceVirtual::Stop shows the real one at Voice+0x6c on both modtools and
+// Phantom — so the old poke was setting a bit in an unrelated field.
+//
+// The stop is abrupt, because it cuts the voice mid-waveform. Retiring the voice
+// gently instead needs the source's looping flag cleared so it plays its current
+// pass out, and the offset of that flag in this build is not yet known. Until it
+// is, an abrupt stop that definitely works beats a soft one that does not.
+static void snd_ctrl_stop(GameSoundControllable* ctrl)
+{
+    if (!ctrl) return;
+    if (ctrl->mVoiceVirtualHandle != 0 && g_snd_ctrl_stop)
+        g_snd_ctrl_stop(ctrl, nullptr, 1);   // hardStop
+    memset(ctrl, 0, sizeof(*ctrl));
+}
+
+// Stop the current tracking sound, if any is playing.
 void tracking_sound_stop()
 {
-    if (!g_trackActive) return;
-
-    if (g_trackVoice && g_vvrelease && g_voice_to_handle) {
-        uint8_t* pVV = (uint8_t*)g_trackVoice;
-
-        uint16_t handle = (uint16_t)g_voice_to_handle(g_trackVoice);
-        g_trackCtrl.mVoiceVirtualHandle = handle;
-        g_vvrelease(&g_trackCtrl, nullptr);
-
-        void* pVoice = *(void**)(pVV + 0xa0);
-        if (pVoice) {
-            uint8_t* v = (uint8_t*)pVoice;
-            v[0x80] |= 0x02;
-        }
-
-        if (g_snd_update) {
-            g_snd_update(0.016f, 1);
-            g_snd_update(0.016f, 1);
-        }
-
-        g_trackVoice = nullptr;
-    }
-
-    memset(&g_trackCtrl, 0, sizeof(g_trackCtrl));
+    snd_ctrl_stop(&g_trackCtrl);
+    g_trackVoice  = nullptr;
     g_trackActive = false;
+
+    // Let Voice::Update observe the stop before we return.
+    if (g_snd_update) g_snd_update(0.016f, 1);
+}
+
+// Release everything this module started. Called on the way out of the loading
+// screen, on every path, so no loop can survive into the match.
+void loading_screen_stop_all_sounds()
+{
+    tracking_sound_stop();
+
+    for (int i = 0; i < kMaxOneShots; ++i)
+        snd_ctrl_stop(&g_oneShots[i]);
+    g_oneShotNext = 0;
+
+    if (g_snd_update) g_snd_update(0.016f, 1);
 }
 
 // Start a looping/controllable tracking sound.
@@ -87,18 +104,31 @@ void tracking_sound_start(uint32_t hash)
     g_trackActive = true;
 }
 
-// Play a one-shot sound by its hash.
+// Play a one-shot sound by its hash, keeping ownership so it can be stopped.
 void loading_screen_play_sound(uint32_t sound_hash)
 {
-    if (!g_find_by_hash || !g_snd_play || !sound_hash) return;
+    if (!g_find_by_hash || !g_snd_play_ex || !sound_hash) return;
     void* props = g_find_by_hash(sound_hash);
     if (!props) {
-        auto fn_log = get_gamelog();
-        fn_log("[BF1Ext] ERROR: loading_screen_play_sound — sound hash %08x not found\n", sound_hash);
+        warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                     "[BF1Ext] loading_screen_play_sound - sound hash %08x not found\n",
+                     sound_hash);
         return;
     }
+
+    // Recycle the oldest slot. Retiring first matters: reusing a slot whose handle
+    // is still live would orphan that voice with no way to reach it. Retiring is
+    // soft, so an older one-shot still playing is left to finish.
+    GameSoundControllable* ctrl = &g_oneShots[g_oneShotNext];
+    g_oneShotNext = (g_oneShotNext + 1) % kMaxOneShots;
+    snd_ctrl_stop(ctrl);
+
+    // Reset nextAllowedTime cooldown so Play always proceeds.
     *(float*)((uint8_t*)props + 0x68) = 0.0f;
-    g_snd_play(0, props, 0, 0, 0);
+
+    void* voice = g_snd_play_ex(nullptr, props, (void*)0x0040360c, ctrl, 0);
+    if (voice && g_voice_to_handle)
+        ctrl->mVoiceVirtualHandle = (uint16_t)g_voice_to_handle(voice);
 }
 
 // =============================================================================
@@ -175,6 +205,10 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
 
 void __fastcall hooked_load_end(void* ecx, void* edx)
 {
+    // Before the g_endProcessed gate, not after: if End is reached twice, the
+    // second call must still be able to silence anything left running.
+    loading_screen_stop_all_sounds();
+
     if (g_endProcessed) return;
 
     if (g_loadScreenCfg.bf1Enabled && g_animStartMs != 0 && g_orig_load_update) {
@@ -239,7 +273,10 @@ void __fastcall hooked_load_end(void* ecx, void* edx)
         }
     }
 
-    tracking_sound_stop();
+    // Again after the spin loop, which plays sounds of its own as the animation
+    // finishes.
+    loading_screen_stop_all_sounds();
+
     g_endProcessed = true;
     g_inRealEnd = true;
     g_orig_load_end(ecx, edx);
@@ -263,6 +300,7 @@ void loading_screen_install(uintptr_t exe_base)
     g_snd_play_ex     = (fn_snd_play_ex_t)     resolve(exe_base, snd_sound_play);
     g_voice_to_handle = (fn_voice_to_handle_t) resolve(exe_base, voice_to_handle);
     g_vvrelease       = (fn_vvrelease_t)       resolve(exe_base, voice_virtual_release);
+    g_snd_ctrl_stop   = (fn_snd_ctrl_stop_t)   resolve(exe_base, gamesound_controllable_stop);
     g_snd_update      = (fn_snd_eng_update_t)  resolve(exe_base, snd_engine_update);
     g_lastSndUpdateMs = GetTickCount();
     g_prt            = (fn_prt_t)           resolve(exe_base, platform_render_texture);

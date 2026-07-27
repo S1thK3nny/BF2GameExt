@@ -23,6 +23,8 @@ typedef void  (__cdecl* fn_snd_play_t)(int src3D, void* props, int cb, int userd
 typedef void* (__cdecl* fn_snd_play_ex_t)(void* src3D, void* props, void* cb, void* userdata, int param5);
 typedef uint32_t (__cdecl* fn_voice_to_handle_t)(void* voice);
 typedef void (__fastcall* fn_vvrelease_t)(void* ecx, void* edx);
+// GameSoundControllable::Stop(bool hardStop) — __thiscall, mirrored as __fastcall.
+typedef void (__fastcall* fn_snd_ctrl_stop_t)(void* ecx, void* edx, int hardStop);
 typedef void (__cdecl* fn_snd_eng_update_t)(float dt, char full);
 
 typedef void (__stdcall* fn_prt_t)(
@@ -59,6 +61,7 @@ inline fn_snd_play_t       g_snd_play        = nullptr;
 inline fn_snd_play_ex_t    g_snd_play_ex     = nullptr;
 inline fn_voice_to_handle_t g_voice_to_handle = nullptr;
 inline fn_vvrelease_t      g_vvrelease       = nullptr;
+inline fn_snd_ctrl_stop_t  g_snd_ctrl_stop   = nullptr;
 inline fn_snd_eng_update_t g_snd_update      = nullptr;
 inline DWORD               g_lastSndUpdateMs = 0;
 inline fn_prt_t            g_prt             = nullptr;
@@ -201,6 +204,9 @@ inline uint32_t hash_name(const char* name) {
 void loading_screen_play_sound(uint32_t sound_hash);
 void tracking_sound_start(uint32_t hash);
 void tracking_sound_stop();
+// Stops every sound this module started, tracking and one-shot alike. Safe to
+// call repeatedly and when nothing is playing.
+void loading_screen_stop_all_sounds();
 
 // =============================================================================
 // Hook function forward declarations (for install/uninstall in lifecycle.cpp)
