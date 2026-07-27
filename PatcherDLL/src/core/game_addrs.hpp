@@ -92,6 +92,16 @@ namespace modtools {
    constexpr uintptr_t load_update_qpc_stamp     = 0x00ba2f60;
    constexpr uintptr_t platform_render_texture   = 0x004165fe;
 
+   // LoadDataChunk and the four callees it dispatches to.  Detoured by
+   // loading_screen/data_guard.cpp to bounds-check the fixed m_models[10] /
+   // m_textures[50] / m_skeletons[10] arrays, which the stock loop appends to
+   // with no checks at all.  See docs/LoadDisplaySystem.md.
+   constexpr uintptr_t load_data_chunk_real      = 0x0067dea0;
+   constexpr uintptr_t pbl_chunk_read_next_child = 0x007e4350;  // __thiscall(dst), RET 4
+   constexpr uintptr_t red_model_read            = 0x007fa910;  // __cdecl(chunk) -> RedModel*
+   constexpr uintptr_t red_texture_read          = 0x007fcec0;  // __cdecl(chunk) -> RedTexture*
+   constexpr uintptr_t red_skeleton_read         = 0x00832d00;  // __cdecl(chunk) -> RedSkeleton*
+
    // ---- PblConfig (config file parser) ---------------------------------------
 
    constexpr uintptr_t pbl_config_ctor           = 0x00821000;
@@ -187,6 +197,13 @@ namespace modtools {
 
    // GameLog(fmt, ...) — printf-style debug logger, __cdecl
    constexpr uintptr_t game_log                    = 0x007E3D50;
+   // RedWarning::SetLogData(severity, file, line, date, time) — __cdecl.  Sets the
+   // context the bf2log formatter prints as "Message Severity: N ... file(line)".
+   // Severity 3 = RED_SEVERITY_ERROR, what the engine uses for real errors.
+   constexpr uintptr_t red_warning_set_log_data    = 0x007E37A0;
+   // DownloadableContent::GetContentDirectory() — __cdecl(void) -> char*, NULL
+   // when no addon is active.  Returns the addon directory, e.g. "addon\\VTR".
+   constexpr uintptr_t dlc_get_content_directory   = 0x00449400;
 
    // ---- Debug Drawing (RedCommandConsole / 3D overlay) -----------------------
 
@@ -830,6 +847,8 @@ namespace steam {
    // ---- Debug / Logging ------------------------------------------------------
 
    constexpr uintptr_t game_log                    = 0x006f6ff0; // RedWarning::LogMessage
+   constexpr uintptr_t red_warning_set_log_data    = 0x006F71A0; // 5-arg formatted overload
+   constexpr uintptr_t dlc_get_content_directory   = 0x0048EBA0; // returns addmeDirectory
 
    // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
    // builds ship RedWarning file logging compiled but disabled.  After
@@ -950,6 +969,15 @@ namespace steam {
    constexpr uintptr_t load_config_real         = 0x005777e0;
    constexpr uintptr_t load_data_file_real      = 0x00577620;
    constexpr uintptr_t load_end_real            = 0x00576b90;
+   // LoadDataChunk + callees.  Derived 2026-07-27 from the Steam decompile of
+   // LoadDisplay::LoadDataChunk; the struct offsets it uses (0x14dc/0x1504/
+   // 0x15cc/0x15f4/0x15f8/0x15fc) are byte-identical to modtools.  Not yet
+   // wired: the loading_screen module is still Modtools-gated.
+   constexpr uintptr_t load_data_chunk_real      = 0x005776e0;
+   constexpr uintptr_t pbl_chunk_read_next_child = 0x0072aa30;
+   constexpr uintptr_t red_model_read            = 0x006c43f0;
+   constexpr uintptr_t red_texture_read          = 0x006ba2d0;
+   constexpr uintptr_t red_skeleton_read         = 0x006e88c0;
    constexpr uintptr_t mem_pool_alloc           = 0x006dc370;
    constexpr uintptr_t pbl_read_next_data       = 0x00727e30;
    constexpr uintptr_t pbl_read_next_scope      = 0x00727eb0;
@@ -1341,6 +1369,11 @@ namespace gog {
    // ---- Debug / Logging ---------------------------------------------------------
 
    constexpr uintptr_t game_log                       = 0x006f80c0;
+   // Both confirmed by decompile 2026-07-27.  SetLogData matches Steam's body
+   // field-for-field (same order, same g_bFormatted=1, same NULL fallbacks);
+   // GetContentDirectory sits at the SAME address as Steam.
+   constexpr uintptr_t red_warning_set_log_data       = 0x006F8270;
+   constexpr uintptr_t dlc_get_content_directory      = 0x0048EBA0;
 
    // ---- Shell / GC Visual Limits ------------------------------------------------
 

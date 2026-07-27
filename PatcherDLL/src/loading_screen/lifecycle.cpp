@@ -155,7 +155,7 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
 
     if (g_qpc_stamp && *g_qpc_stamp != qpc_before) {
         g_lastRenderMs = GetTickCount();
-    } else if (ecx && *(const uint8_t*)ecx != 0
+    } else if (ecx && *load_display::at<uint8_t>(ecx, load_display::kBDisplay) != 0
                && GetTickCount() - g_lastRenderMs >= 33u) {
         g_lastRenderMs = GetTickCount();
         {
@@ -189,7 +189,8 @@ void __fastcall hooked_load_end(void* ecx, void* edx)
             const DWORD deadline = GetTickCount() + 30000u;
 
             if (g_orig_set_all_on && ecx)
-                g_orig_set_all_on((uint8_t*)ecx + 0xd30, nullptr);
+                g_orig_set_all_on(load_display::at<uint8_t>(ecx, load_display::kProgressBar),
+                                  nullptr);
 
             DWORD lastUpdateMs = 0;
             while (GetTickCount() - g_animStartMs < required) {
@@ -301,10 +302,16 @@ void loading_screen_install(uintptr_t exe_base)
     DetourAttach(&(PVOID&)g_orig_load_end,       hooked_load_end);
     DetourAttach(&(PVOID&)g_orig_load_update,    hooked_load_update);
     DetourTransactionCommit();
+
+    // Must follow the LoadConfig detour: the guard calls LoadConfig's raw entry
+    // point so hooked_load_config stays in the chain, exactly as vanilla does.
+    load_data_guard_install(exe_base);
 }
 
 void loading_screen_uninstall()
 {
+    load_data_guard_uninstall();
+
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
     if (g_orig_load_data_file) DetourDetach(&(PVOID&)g_orig_load_data_file, hooked_load_data_file);

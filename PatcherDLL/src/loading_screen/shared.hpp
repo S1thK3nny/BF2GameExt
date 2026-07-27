@@ -3,6 +3,7 @@
 // Internal shared header for loading_screen — not for external inclusion.
 
 #include "loading_screen.hpp"
+#include "load_display.hpp"
 #include "core/resolve.hpp"
 
 #include <cstring>
@@ -201,6 +202,10 @@ void tracking_sound_stop();
 // =============================================================================
 // Hook function forward declarations (for install/uninstall in lifecycle.cpp)
 // =============================================================================
+
+// LoadDataChunk bounds guard (data_guard.cpp) — installed by loading_screen_install.
+void load_data_guard_install(uintptr_t exe_base);
+void load_data_guard_uninstall();
 
 void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh);
 void __fastcall hooked_render_screen(void* ecx, void* edx);

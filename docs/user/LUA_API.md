@@ -61,7 +61,16 @@ Register Lua callbacks that fire when soldiers dismount vehicles. All registrati
 
 | Function | Description |
 |----------|-------------|
-| `SetLoadDisplayLevel(path)` | Redirects the loading screen to a custom `load.cfg`. Call from script root or ScriptPreInit. |
+| `SetLoadDisplayLevel(path)` | Redirects the loading screen to a custom load lvl. Call from script root or ScriptPreInit. |
+
+`SetLoadDisplayLevel` resolves its path the same way `ReadDataFile` does, minus
+the sublevel suffix. The trailing `.lvl` is optional.
+
+| Form | Resolves to |
+|------|-------------|
+| `SetLoadDisplayLevel("LOAD\\load.lvl")` | `data\_lvl_pc\LOAD\load.lvl` |
+| `SetLoadDisplayLevel("dc:LOAD\\load.lvl")` | `<addon dir>\Data\_lvl_pc\LOAD\load.lvl`, e.g. `addon\VTR\Data\_lvl_pc\LOAD\load.lvl` |
+| `SetLoadDisplayLevel("..\\..\\addon\\VTR\\data\\_LVL_PC\\LOAD\\load")` | raw path relative to `data\_lvl_pc\` (the original form, still supported) |
 
 ## Rendering
 

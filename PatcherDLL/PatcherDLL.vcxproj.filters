@@ -115,6 +115,9 @@
     <ClInclude Include="src\util\slim_vector.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\loading_screen\load_display.hpp">
+      <Filter>loading_screen</Filter>
+    </ClInclude>
     <ClInclude Include="src\loading_screen\loading_screen.hpp">
       <Filter>loading_screen</Filter>
     </ClInclude>
@@ -253,6 +256,9 @@
       <Filter>loading_screen</Filter>
     </ClCompile>
     <ClCompile Include="src\loading_screen\renderer.cpp">
+      <Filter>loading_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\loading_screen\data_guard.cpp">
       <Filter>loading_screen</Filter>
     </ClCompile>
     <ClCompile Include="src\loading_screen\lifecycle.cpp">

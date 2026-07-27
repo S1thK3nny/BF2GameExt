@@ -5,7 +5,18 @@ which cannot be overridden without replacing the base `data\_lvl_pc\load\load.lv
 the loading screen config parser and renderer to add new parameters that work alongside the vanilla ones.
 
 Modders can also redirect the entire loading screen to a custom `load.cfg` from
-Lua with `SetLoadDisplayLevel(path)`. See the [Lua API](LUA_API.md).
+Lua with `SetLoadDisplayLevel(path)`, which resolves paths like `ReadDataFile`
+does (including the `dc:` prefix for the active addon). See the
+[Lua API](LUA_API.md).
+
+## Capacity limits
+
+The loading screen holds at most **10 models, 50 textures and 10 skeletons** from
+its load lvl. Stock BF2 appends past those arrays without checking, which
+corrupts the loading screen object and crashes later in the load. BF2GameExt
+caps the appends instead and writes a severity-3 line to the bf2log naming what
+it dropped, so an oversized `load.lvl` costs you the extra art rather than the
+session.
 
 To check for what builds these are available on, see the [compatibility table](../../README.md#compatibility).
 

@@ -1334,16 +1334,106 @@ static int lua_ReleaseCEV(lua_State* L)
    return 0;
 }
 
-// SetLoadDisplayLevel(path) - overrides the level loaded by LoadDisplay::EnterState.
-// The default is "Load\\load" (vanilla load screen level).
-// Call from Script root or ScriptPreInit
-// Example: SetLoadDisplayLevel("relative path to custom load.lvl")
-// E.g. SetLoadDisplayLevel("..\\..\\addon\\995\\data\\_LVL_PC\\Load")
+// SetLoadDisplayLevel(path) - overrides the lvl the loading screen loads.
+// The default is "Load\\load" (the vanilla load screen level).
+// Call from Script root or ScriptPreInit.
+//
+// Paths resolve the same way ReadDataFile's do, minus the sublevel suffix:
+//
+//   SetLoadDisplayLevel("LOAD\\load.lvl")
+//       -> data\_lvl_pc\LOAD\load.lvl
+//   SetLoadDisplayLevel("dc:LOAD\\load.lvl")
+//       -> <addon dir>\Data\_lvl_pc\LOAD\load.lvl  (e.g. addon\VTR\Data\_lvl_pc\...)
+//   SetLoadDisplayLevel("..\\..\\addon\\VTR\\data\\_LVL_PC\\LOAD\\load")
+//       -> raw path relative to data\_lvl_pc\, the original form, still supported
+//
+// The trailing ".lvl" is optional: LoadDisplay::LoadDataFile appends it via
+// LoadUtil::MakeFullName, so we strip it here and let the engine put it back.
+//
+// If the resolved file does not exist the call is rejected with a severity-3
+// RedWarning and the previous load level is kept, so the modder gets a log line
+// naming the path instead of a loading screen that silently renders nothing.
+typedef const char* (__cdecl* GetContentDirectory_t)();
+
 static int lua_SetLoadDisplayLevel(lua_State* L)
 {
    const char* path = g_lua.tolstring(L, 1, nullptr);
-   if (path)
-      strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), path, _TRUNCATE);
+   if (!path || !*path) return 0;
+
+   const bool wantDC = (_strnicmp(path, "dc:", 3) == 0);
+
+   char work[260];
+   strncpy_s(work, sizeof(work), wantDC ? path + 3 : path, _TRUNCATE);
+
+   const size_t len = strlen(work);
+   if (len > 4 && _stricmp(work + len - 4, ".lvl") == 0)
+      work[len - 4] = '\0';
+
+   if (!work[0]) {
+      warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+         "SetLoadDisplayLevel(\"%s\"): empty path. Keeping \"%s\".\n",
+         path, g_loadDisplayPath);
+      return 0;
+   }
+
+   char resolved[260];
+   if (wantDC) {
+      const char* dir = nullptr;
+      if (g_addr->dlc_get_content_directory)
+         dir = ((GetContentDirectory_t)resolve(g_addr->dlc_get_content_directory))();
+
+      if (!dir || !*dir) {
+         warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+            "SetLoadDisplayLevel(\"%s\"): no addon content is active, so the "
+            "\"dc:\" prefix cannot be resolved. Keeping \"%s\".\n",
+            path, g_loadDisplayPath);
+         return 0;
+      }
+
+      // GetContentDirectory returns an ABSOLUTE path on real installs, e.g.
+      // "D:\...\GameData\AddOn\VTR". ReadDataFile can use that as-is because it
+      // prepends nothing, but LoadDataFile always runs the name through
+      // MakeFullName, which glues "data\_lvl_pc\" on the front. So make the
+      // addon directory relative to the working directory (always GameData, the
+      // dir every "data\_lvl_pc\..." path is already resolved against) and then
+      // climb back out with "..\..\".
+      const char* rel = dir;
+      char  cwd[MAX_PATH];
+      DWORD cwdLen = GetCurrentDirectoryA(sizeof(cwd), cwd);
+
+      if (cwdLen > 0 && cwdLen < sizeof(cwd) && _strnicmp(dir, cwd, cwdLen) == 0) {
+         rel = dir + cwdLen;
+         while (*rel == '\\' || *rel == '/') ++rel;
+      } else if (dir[0] && dir[1] == ':') {
+         warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+            "SetLoadDisplayLevel(\"%s\"): addon directory \"%s\" is outside the "
+            "working directory \"%s\", so it cannot be reached from the loading "
+            "screen's data path. Keeping \"%s\".\n",
+            path, dir, cwd, g_loadDisplayPath);
+         return 0;
+      }
+
+      _snprintf_s(resolved, sizeof(resolved), _TRUNCATE,
+                  "..\\..\\%s\\Data\\_lvl_pc\\%s", rel, work);
+   } else {
+      strncpy_s(resolved, sizeof(resolved), work, _TRUNCATE);
+   }
+
+   // Verify against the exact name LoadUtil::MakeFullName will build. PblFile's
+   // own Exists is just FindFirstFileA, so a plain attribute query matches it and
+   // keeps this build-agnostic.
+   char full[300];
+   _snprintf_s(full, sizeof(full), _TRUNCATE, "data\\_lvl_pc\\%s.lvl", resolved);
+
+   const DWORD attrs = GetFileAttributesA(full);
+   if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+      warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+         "SetLoadDisplayLevel(\"%s\"): \"%s\" not found. Keeping \"%s\".\n",
+         path, full, g_loadDisplayPath);
+      return 0;
+   }
+
+   strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), resolved, _TRUNCATE);
    return 0;
 }
 

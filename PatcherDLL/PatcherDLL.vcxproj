@@ -137,6 +137,7 @@
     <ClInclude Include="src\util\cfile.hpp" />
     <ClInclude Include="src\util\ini_config.hpp" />
     <ClInclude Include="src\util\slim_vector.hpp" />
+    <ClInclude Include="src\loading_screen\load_display.hpp" />
     <ClInclude Include="src\loading_screen\loading_screen.hpp" />
     <ClInclude Include="src\loading_screen\shared.hpp" />
     <ClInclude Include="src\shell\gc_visual_limits.hpp" />
@@ -201,6 +202,7 @@
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
     <ClCompile Include="src\loading_screen\renderer.cpp" />
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />
+    <ClCompile Include="src\loading_screen\data_guard.cpp" />
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
     <ClCompile Include="src\controller\controller_support.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
