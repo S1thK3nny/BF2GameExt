@@ -158,6 +158,15 @@ static void parse_bf1_entry(const uint32_t* data_buf)
     else if (kHash_RemoveLoadingBar && hash == kHash_RemoveLoadingBar) {
         g_loadScreenCfg.removeLoadingBar = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
     }
+    else if (kHash_RemoveLoadingText && hash == kHash_RemoveLoadingText) {
+        g_loadScreenCfg.removeLoadingText = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
+    }
+    else if (kHash_RemoveMissionName && hash == kHash_RemoveMissionName) {
+        g_loadScreenCfg.removeMissionName = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
+    }
+    else if (kHash_RemoveModeName && hash == kHash_RemoveModeName) {
+        g_loadScreenCfg.removeModeName = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
+    }
     // Known-but-unimplemented / BF2-native params — silently ignored.
     else if (hash == kHash_TeamModel
           || hash == kHash_TeamModelRotationSpeed

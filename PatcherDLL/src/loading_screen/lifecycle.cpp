@@ -281,8 +281,11 @@ void loading_screen_install(uintptr_t exe_base)
         kHash_PC               = g_hash_string("PC");
         kHash_PS2              = g_hash_string("PS2");
         kHash_XBOX             = g_hash_string("XBOX");
-        kHash_RemoveToolTips   = g_hash_string("RemoveToolTips");
-        kHash_RemoveLoadingBar = g_hash_string("RemoveLoadingBar");
+        kHash_RemoveToolTips    = g_hash_string("RemoveToolTips");
+        kHash_RemoveLoadingBar  = g_hash_string("RemoveLoadingBar");
+        kHash_RemoveLoadingText = g_hash_string("RemoveLoadingText");
+        kHash_RemoveMissionName = g_hash_string("RemoveMissionName");
+        kHash_RemoveModeName    = g_hash_string("RemoveModeName");
     }
 
     g_orig_load_data_file = (fn_load_data_file_t)resolve(exe_base, load_data_file_real);

@@ -158,6 +158,9 @@ inline uint32_t kHash_ZoomSelectorTileSize = 0;
 inline uint32_t kHash_LoadSoundLVL         = 0;
 inline uint32_t kHash_RemoveToolTips       = 0;
 inline uint32_t kHash_RemoveLoadingBar     = 0;
+inline uint32_t kHash_RemoveLoadingText    = 0;
+inline uint32_t kHash_RemoveMissionName    = 0;
+inline uint32_t kHash_RemoveModeName       = 0;
 
 // =============================================================================
 // PblConfig helpers

@@ -64,9 +64,13 @@ struct LoadScreenConfig {
     PlanetEntry planets[kMaxPlanets];
     int         planetCount;
 
-    // UI suppression flags
-    bool removeToolTips;
-    bool removeLoadingBar;
+    // UI suppression flags — each hides exactly one element, independent of
+    // EnableBF1.  See docs/user/LOADING_SCREEN.md.
+    bool removeToolTips;     // m_groupLoadingTips (tips box + text)
+    bool removeLoadingBar;   // m_progressBar only
+    bool removeLoadingText;  // m_textLoading — the blinking "Loading" caption
+    bool removeMissionName;  // m_textMissionName — top-left map name
+    bool removeModeName;     // m_textModeName — top-right game mode name
 
     void reset() { memset(this, 0, sizeof(*this)); }
 };

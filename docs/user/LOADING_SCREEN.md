@@ -22,6 +22,43 @@ To check for what builds these are available on, see the [compatibility table](.
 
 ## Custom Parameters
 
+These work on any loading screen. They do not need `EnableBF1`.
+
+| Parameter | Syntax | Description |
+|-----------|--------|-------------|
+| `RemoveToolTips` | `RemoveToolTips(1/0)` | Hides the tips box and text |
+| `RemoveLoadingBar` | `RemoveLoadingBar(1/0)` | Hides the progress bar |
+| `RemoveLoadingText` | `RemoveLoadingText(1/0)` | Hides the blinking "Loading" caption (bottom left) |
+| `RemoveMissionName` | `RemoveMissionName(1/0)` | Hides the map name (top left) |
+| `RemoveModeName` | `RemoveModeName(1/0)` | Hides the game mode name (top right) |
+| `LoadSoundLVL` | `LoadSoundLVL(lvlPath)` | Loads an extra .lvl for its sound definitions, so custom sounds are registered before the first frame renders |
+
+Each `Remove*` parameter hides exactly one element and is independent of the
+others. Combine them for a fully blank screen:
+
+```
+RemoveToolTips(1)
+RemoveLoadingBar(1)
+RemoveLoadingText(1)
+RemoveMissionName(1)
+RemoveModeName(1)
+```
+
+> **Changed behaviour.** `RemoveLoadingBar` used to hide the game's four corner
+> screen groups, which between them also hold the map name, the mode name and the
+> "Loading" caption. It now hides only the progress bar, as its name and this
+> table always said. If you were relying on the old behaviour, add the three new
+> parameters above.
+
+`LoadSoundLVL` is listed here because it is a general-purpose hook, but in
+practice the only consumers today are the BF1 sound parameters below.
+
+### BF1 Sequence
+
+The BF1-style zoom animation: a planet is framed by a crosshair selector, the
+view zooms into it, and the next planet takes over. Everything in this section
+requires `EnableBF1(1)`; without it these parameters are parsed and discarded.
+
 | Parameter | Syntax | Description |
 |-----------|--------|-------------|
 | `EnableBF1` | `EnableBF1(1/0)` | Master switch for the BF1-style zoom animation sequence |
@@ -36,6 +73,3 @@ To check for what builds these are available on, see the [compatibility table](.
 | `TransitionSound` | `TransitionSound(soundName)` | One-shot sound on planet transition |
 | `BarSound` | `BarSound(soundName)` | Periodic sound when no planet animation is active |
 | `BarSoundInterval` | `BarSoundInterval(seconds)` | Seconds between BarSound replays |
-| `LoadSoundLVL` | `LoadSoundLVL(lvlPath)` | Path to an .lvl containing sound definitions for the above |
-| `RemoveToolTips` | `RemoveToolTips(1/0)` | Hides the tips box and text. Works independently of EnableBF1 |
-| `RemoveLoadingBar` | `RemoveLoadingBar(1/0)` | Hides the progress bar. Works independently of EnableBF1 |

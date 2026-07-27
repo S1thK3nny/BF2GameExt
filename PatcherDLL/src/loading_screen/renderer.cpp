@@ -21,35 +21,34 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         *pHash = 0;
     }
 
-    // RemoveToolTips: hide m_groupLoadingTips so the original RenderScreen skips
-    // the tips box and text.
-    if (g_loadScreenCfg.removeToolTips && ecx) {
-        set_element_visible(ecx, kGroupLoadingTips, false);
-    }
+    // Element suppression flags.  Each one hides exactly the element it names —
+    // they are deliberately independent, because the engine's screen groups do
+    // not line up with what a modder thinks of as one piece of UI.  In
+    // particular m_groupBottomLeft holds BOTH the "Loading" caption and the
+    // progress bar, so hiding the group could never mean "hide the bar".
+    if (ecx) {
+        if (g_loadScreenCfg.removeToolTips)
+            set_element_visible(ecx, kGroupLoadingTips, false);
+        if (g_loadScreenCfg.removeLoadingText)
+            set_element_visible(ecx, kTextLoading, false);
+        if (g_loadScreenCfg.removeMissionName)
+            set_element_visible(ecx, kTextMissionName, false);
+        if (g_loadScreenCfg.removeModeName)
+            set_element_visible(ecx, kTextModeName, false);
 
-    // RemoveLoadingBar: blank the LEDs, then hide the four corner screen groups.
-    //
-    // NOTE: those four groups are m_groupTopLeft / TopRight / BottomLeft /
-    // BottomRight, which between them hold the mission name, the mode name, the
-    // "Loading" text and the team icons as well as the bar itself.  So this flag
-    // currently clears far more than its name and documentation promise.  Kept
-    // as-is deliberately; narrowing it to m_progressBar alone is a behaviour
-    // change that needs a play-test first.
-    if (g_loadScreenCfg.removeLoadingBar && ecx) {
-        // m_pIntensity is the per-LED intensity array, not an alpha array, and
-        // ProgressIndicator::Update rewrites it every tick.  Zeroing works only
-        // because RenderScreen runs after that update inside the same 50 ms block.
-        int    numLEDs   = *at<int>(ecx, bar(pi::kNumLEDs));
-        float* intensity = *at<float*>(ecx, bar(pi::kPIntensity));
-        if (intensity && numLEDs > 0 && numLEDs < 200) {
-            for (int i = 0; i < numLEDs; ++i)
-                intensity[i] = 0.0f;
+        if (g_loadScreenCfg.removeLoadingBar) {
+            set_element_visible(ecx, kProgressBar, false);
+            // Belt and braces: also blank the LEDs.  m_pIntensity is the per-LED
+            // intensity array (not alpha), and ProgressIndicator::Update rewrites
+            // it every tick — this only sticks because RenderScreen runs after
+            // that update inside the same 50 ms block.
+            int    numLEDs   = *at<int>(ecx, bar(pi::kNumLEDs));
+            float* intensity = *at<float*>(ecx, bar(pi::kPIntensity));
+            if (intensity && numLEDs > 0 && numLEDs < 200) {
+                for (int i = 0; i < numLEDs; ++i)
+                    intensity[i] = 0.0f;
+            }
         }
-        static constexpr uintptr_t kCornerGroups[] = {
-            kGroupTopLeft, kGroupTopRight, kGroupBottomLeft, kGroupBottomRight
-        };
-        for (uintptr_t off : kCornerGroups)
-            set_element_visible(ecx, off, false);
     }
 
     g_orig_render_screen(ecx, edx);
