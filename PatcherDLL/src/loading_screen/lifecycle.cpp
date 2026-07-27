@@ -23,43 +23,50 @@ static bool g_inRealEnd = false;
 // loading_screen_stop_all_sounds() can silence them when the screen ends. Without
 // this a ZoomSound or BarSound started late keeps playing into the match — most
 // visibly when the player alt-tabs and the load stalls mid-sequence.
-static constexpr int          kMaxOneShots = 16;
-static GameSoundControllable  g_oneShots[kMaxOneShots] = {};
-static int                    g_oneShotNext = 0;
+static constexpr int kMaxOneShots = 16;
+struct OwnedSound {
+    GameSoundControllable ctrl;
+    void*                 vv;   // VoiceVirtual* as returned by Play
+};
+static OwnedSound g_oneShots[kMaxOneShots] = {};
+static int        g_oneShotNext = 0;
 
-// Stop one owned sound.
+// Retire one owned sound.
 //
-// GameSoundControllable::Stop(hardStop=true) is the engine's own teardown:
-// ReleaseVoice, then Snd::VoiceVirtual::Stop, which clears the state bits on both
-// the VoiceVirtual and its Voice, unlinks it from the manager and fires the
-// inactive callback.
+// The gentle path clears the VoiceVirtual's looping flag and then releases
+// ownership without stopping anything. Snd::VoiceVirtual::Update notices the flag
+// is clear once the play position passes the end of the sample and calls Stop
+// itself, so the sound finishes the pass it is already playing instead of being
+// cut off mid-waveform, and the FireForget callback installed by ReleaseVoice
+// frees it afterwards. See the note on kVoiceVirtual_LoopByte in shared.hpp.
 //
-// This replaces an older hand-rolled sequence that released the voice and then
-// OR'd bit 1 into Voice+0x80. That address was not even the play-state word —
-// Snd::VoiceVirtual::Stop shows the real one at Voice+0x6c on both modtools and
-// Phantom — so the old poke was setting a bit in an unrelated field.
-//
-// The stop is abrupt, because it cuts the voice mid-waveform. Retiring the voice
-// gently instead needs the source's looping flag cleared so it plays its current
-// pass out, and the offset of that flag in this build is not yet known. Until it
-// is, an abrupt stop that definitely works beats a soft one that does not.
-static void snd_ctrl_stop(GameSoundControllable* ctrl)
+// hardStop instead runs GameSoundControllable::Stop(true) -> Snd::VoiceVirtual::Stop,
+// which silences the voice on the spot. Only for cases where a sound genuinely
+// must be quiet this instant.
+static void snd_ctrl_retire(GameSoundControllable* ctrl, void* vv, bool hardStop = false)
 {
     if (!ctrl) return;
+
+    // Staleness guard: the pointer must still map back to the handle we hold,
+    // otherwise the voice was recycled and vv now belongs to somebody else.
+    if (!hardStop && vv && ctrl->mVoiceVirtualHandle != 0 && g_voice_to_handle
+        && (uint16_t)g_voice_to_handle(vv) == ctrl->mVoiceVirtualHandle) {
+        uint8_t* loop = (uint8_t*)vv + kVoiceVirtual_LoopByte;
+        *loop &= (uint8_t)~kVoiceVirtual_LoopBit;
+    }
+
     if (ctrl->mVoiceVirtualHandle != 0 && g_snd_ctrl_stop)
-        g_snd_ctrl_stop(ctrl, nullptr, 1);   // hardStop
+        g_snd_ctrl_stop(ctrl, nullptr, hardStop ? 1 : 0);
+
     memset(ctrl, 0, sizeof(*ctrl));
 }
 
 // Stop the current tracking sound, if any is playing.
 void tracking_sound_stop()
 {
-    snd_ctrl_stop(&g_trackCtrl);
+    snd_ctrl_retire(&g_trackCtrl, g_trackVoice);
     g_trackVoice  = nullptr;
     g_trackActive = false;
-
-    // Let Voice::Update observe the stop before we return.
-    if (g_snd_update) g_snd_update(0.016f, 1);
 }
 
 // Release everything this module started. Called on the way out of the loading
@@ -68,11 +75,11 @@ void loading_screen_stop_all_sounds()
 {
     tracking_sound_stop();
 
-    for (int i = 0; i < kMaxOneShots; ++i)
-        snd_ctrl_stop(&g_oneShots[i]);
+    for (int i = 0; i < kMaxOneShots; ++i) {
+        snd_ctrl_retire(&g_oneShots[i].ctrl, g_oneShots[i].vv);
+        g_oneShots[i].vv = nullptr;
+    }
     g_oneShotNext = 0;
-
-    if (g_snd_update) g_snd_update(0.016f, 1);
 }
 
 // Start a looping/controllable tracking sound.
@@ -119,16 +126,18 @@ void loading_screen_play_sound(uint32_t sound_hash)
     // Recycle the oldest slot. Retiring first matters: reusing a slot whose handle
     // is still live would orphan that voice with no way to reach it. Retiring is
     // soft, so an older one-shot still playing is left to finish.
-    GameSoundControllable* ctrl = &g_oneShots[g_oneShotNext];
+    OwnedSound* slot = &g_oneShots[g_oneShotNext];
     g_oneShotNext = (g_oneShotNext + 1) % kMaxOneShots;
-    snd_ctrl_stop(ctrl);
+    snd_ctrl_retire(&slot->ctrl, slot->vv);
+    slot->vv = nullptr;
 
     // Reset nextAllowedTime cooldown so Play always proceeds.
     *(float*)((uint8_t*)props + 0x68) = 0.0f;
 
-    void* voice = g_snd_play_ex(nullptr, props, (void*)0x0040360c, ctrl, 0);
+    void* voice = g_snd_play_ex(nullptr, props, (void*)0x0040360c, &slot->ctrl, 0);
     if (voice && g_voice_to_handle)
-        ctrl->mVoiceVirtualHandle = (uint16_t)g_voice_to_handle(voice);
+        slot->ctrl.mVoiceVirtualHandle = (uint16_t)g_voice_to_handle(voice);
+    slot->vv = voice;
 }
 
 // =============================================================================

@@ -559,5 +559,12 @@ Used by `hooked_load_config` to read the level's `LoadConfig` block.
 | `Snd::Sound::Properties::FindByHashID(hash)` | `0x0088c500` | `__cdecl(uint32_t) → Properties*` |
 | `Snd::Sound::Play(entity, props, p3, p4, p5)` | `0x0088cc10` | `__cdecl` |
 
-Sounds are played by hash: `FindByHashID` → `Snd::Sound::Play(0, props, 0, 0, 0)`.
-Used for the BF1 exit-sequence sound triggered at the start of `hooked_load_end`.
+Sounds are played by hash: `FindByHashID` then `Snd::Sound::Play`, whose return
+value is a `VoiceVirtual*`. Every sound the loading screen starts is kept in a
+`GameSoundControllable` so it stays reachable, one-shots included, and
+`loading_screen_stop_all_sounds()` retires them on every exit path.
+
+Retiring clears the VoiceVirtual's loop flag rather than cutting the voice off, so
+sounds finish the pass they are playing instead of clicking. See
+[SoundSystem.md](SoundSystem.md) for the ownership model, the stop paths, and why
+the same flag on `Voice` is a copy that gets overwritten every tick.

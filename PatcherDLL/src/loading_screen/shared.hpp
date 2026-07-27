@@ -86,6 +86,28 @@ inline DWORD*              g_qpc_stamp           = nullptr;
 inline DWORD               g_lastRenderMs        = 0;
 
 // =============================================================================
+// Snd::VoiceVirtual looping flag
+// =============================================================================
+// Bit 0x10 of the byte at VoiceVirtual+0x34 is the authoritative looping flag.
+// Read straight out of modtools Snd::VoiceVirtual::Update (0x00894c50), which
+// treats the virtual voice as byte** and does:
+//
+//     if (((uint)vv[0xd] & 0x10) == 0)   // vv[0xd] == byte offset 0x34
+//         Stop(vv);                      // past the end and not looping -> stop
+//     else
+//         pos -= sampleEnd;              // looping -> wrap
+//
+// The same function calls VoiceBase::CopyParameters(vv->mVoice, vv, false) every
+// tick, which pushes this flag down onto the real Voice. That is why clearing it
+// on the Voice (Voice+0x34, which Snd::Voice::Update genuinely does read) had no
+// effect: the VoiceVirtual copied it straight back on the next update.
+//
+// Clearing it here means the engine retires the voice by itself, at the end of
+// the pass it is already playing, using its own Stop path.
+inline constexpr uintptr_t kVoiceVirtual_LoopByte = 0x34;
+inline constexpr uint8_t   kVoiceVirtual_LoopBit  = 0x10;
+
+// =============================================================================
 // Sound helper types
 // =============================================================================
 
