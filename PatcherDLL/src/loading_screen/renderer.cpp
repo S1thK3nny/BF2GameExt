@@ -57,7 +57,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         *at<uint32_t>(ecx, kBackDropHash) = savedBackdropHash;
 
 
-    if (!g_loadScreenCfg.bf1Enabled || !g_prt || !g_color_ptr)
+    if (!g_loadScreenCfg.bf1Enabled || !g_prt)
         return;
 
     // One-shot texture probe: log errors for any BF1 textures that aren't in

@@ -2,6 +2,7 @@
 #include "prone_lvl_load.hpp"
 #include "soldier_prone.hpp"
 #include "core/resolve.hpp"
+#include "core/lvl_read.hpp"
 #include "lua/lua_hooks.hpp"
 
 #pragma warning(disable: 4996) // _snprintf deprecation
@@ -42,8 +43,6 @@ static const char kDonorBank[]  = "pronelz";
 static const char kProneAnim[]  = "rifle_prone_idle_emote";
 
 using fn_lua_cb_t = int(__cdecl*)(lua_State* L);
-using fn_read_data_file_mt_t =
-    bool(__cdecl*)(const char* name, int a2, int a3, void* a4, unsigned a5, void* a6);
 using fn_PostLoad_t  = void  (__cdecl*)(void);
 using fn_PblHash_t   = void  (__thiscall*)(uint32_t* outHash, const char* str);
 using fn_TempHash_t  = uint32_t(__cdecl*)(const char* str);
@@ -51,7 +50,6 @@ using fn_HashFind_t  = void* (__cdecl*)(void* table, int size, uint32_t hash);
 using fn_HashStore_t = int   (__cdecl*)(void* table, int size, uint32_t hash, void* value);
 
 static fn_lua_cb_t original_lua_read_data_file = nullptr;
-static uintptr_t   s_read_data_file            = 0;   // LoadUtil::ReadDataFile
 
 static fn_PostLoad_t  original_PostLoad = nullptr;
 static fn_PblHash_t   fn_pblHash        = nullptr;
@@ -65,37 +63,8 @@ static void*          g_animHashTable   = nullptr;
 // to be remembered separately to allow a later mission to re-enable prone.
 static bool s_proneConfigured = false;
 
-// ---------------------------------------------------------------------------
-// LoadUtil::ReadDataFile, per-build call shims
-// ---------------------------------------------------------------------------
-
-__declspec(naked) static bool __cdecl call_read_data_file_steam(const char* /*name*/)
-{
-   __asm {
-      push ebp
-      mov  ebp, esp
-      push 0                          // lvlNames
-      push 0                          // lvlCount
-      push 0                          // hashes
-      push 0                          // (unused by the callee)
-      mov  ecx, [ebp + 8]             // name
-      call dword ptr [s_read_data_file]
-      add  esp, 16                    // caller-cleaned
-      mov  esp, ebp
-      pop  ebp
-      ret
-   }
-}
-
-static bool read_data_file(const char* name)
-{
-   if (!s_read_data_file) return false;
-
-   if (g_build == GameBuild::Modtools)
-      return ((fn_read_data_file_mt_t)s_read_data_file)(name, 0, 0, nullptr, 0, nullptr);
-
-   return call_read_data_file_steam(name);
-}
+// The per-build call shim now lives in core/lvl_read.cpp, so this module and the
+// loading screen share one copy of that ABI.
 
 // ---------------------------------------------------------------------------
 // hooked_lua_read_data_file reads prone.lvl on the heels of every ingame.lvl
@@ -119,7 +88,7 @@ static int __cdecl hooked_lua_read_data_file(lua_State* L)
          return result;
       }
 
-      const bool ok = read_data_file(kProneLvl);
+      const bool ok = lvl_read_data_file(kProneLvl);
       g_proneEnabled = ok;
 
       if (!ok) {
@@ -318,7 +287,9 @@ void prone_lvl_load_install(uintptr_t exe_base)
    if (!s_proneConfigured) return;
    g_proneEnabled = false;
 
-   s_read_data_file = (uintptr_t)resolve(exe_base, g_addr->load_util_read_data_file);
+   // LoadUtil::ReadDataFile itself is resolved on first use inside
+   // lvl_read_data_file; the g_addr gate above is what keeps this module off a
+   // build where it is unmapped.
    original_lua_read_data_file =
        (fn_lua_cb_t)resolve(exe_base, g_addr->lua_read_data_file);
 

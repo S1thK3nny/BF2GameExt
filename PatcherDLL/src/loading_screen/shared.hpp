@@ -75,6 +75,20 @@ inline void*               g_tex_table       = nullptr;
 inline fn_hash_string_t    g_hash_string     = nullptr;
 
 // Hook trampolines
+//
+// `LoadDisplay::LoadDataFile` is `__thiscall(const char*)` — RET 4 — on all
+// three builds, so one trampoline shape covers them.  The retail builds inlined
+// the "Load\\load" literal into the body and never read the argument, which is
+// what made it look like they had dropped it; they still declare and pop it.
+//
+// Do not "simplify" it to a no-argument hook.  A RET 0 detour here leaves four
+// bytes on `LoadDisplay::LoadData`'s stack, because LoadData omits the cleanup
+// for its preceding `__cdecl RedSetCurrentHeap` call and relies on LoadDataFile
+// to pop it (steam 0x005773a5 PUSH / 0x005773c9 CALL / 0x005773d9 CALL).
+// LoadData then pops its saved registers and its return address off by one slot
+// and returns into the LoadDisplay object.  It reproduces on the first loading
+// screen of the session — which is during startup, since GameState::PreStateInit
+// calls LoadDisplay::Begin -> LoadData -> LoadDataFile.
 inline fn_load_data_file_t g_orig_load_data_file = nullptr;
 inline fn_load_config_t    g_orig_load_config    = nullptr;
 inline fn_render_screen_t  g_orig_render_screen  = nullptr;
@@ -104,8 +118,24 @@ inline DWORD               g_lastRenderMs        = 0;
 //
 // Clearing it here means the engine retires the voice by itself, at the end of
 // the pass it is already playing, using its own Stop path.
+// Verified identical on Steam: VoiceVirtual::Update 0x007380b0 makes the same
+// `param_1[0xd] & 0x10` test, byte for byte.
 inline constexpr uintptr_t kVoiceVirtual_LoopByte = 0x34;
 inline constexpr uint8_t   kVoiceVirtual_LoopBit  = 0x10;
+
+// =============================================================================
+// Snd::Properties field offsets — build-dependent, filled in by install()
+// =============================================================================
+// Unlike VoiceVirtual, Properties is NOT laid out the same on debug and release:
+// everything from +0x18 on sits 4 bytes lower on retail.  Values come from
+// g_addr (see the snd_props_* entries in game_addrs.hpp).
+
+inline uintptr_t g_propsLoopByte    = 0x1c;  // bit 0x10 = looping
+inline uintptr_t g_propsNextAllowed = 0x68;  // float, replay cooldown
+
+// GameSoundControllable::StolenCallback, resolved for the active build. Passed
+// to Snd::Play so a stolen voice is retired through the engine's own path.
+inline void* g_snd_stolen_callback = nullptr;
 
 // =============================================================================
 // Sound helper types
@@ -136,6 +166,11 @@ inline bool  s_sndLvlLoaded   = false;
 inline int   s_lastAnimPhase  = -1;
 inline int   s_lastAnimCycle  = -1;
 inline DWORD s_nextBarSoundMs = 0;
+
+// Set when load_data_guard_install could not resolve one of the callees it
+// reimplements. Reported from hooked_load_config, which runs long after the
+// install window where calling into the game would fault.
+inline bool  g_guardUnresolved = false;
 
 // =============================================================================
 // Animation constants and easing
@@ -178,7 +213,8 @@ inline uint32_t kHash_PC   = 0;
 inline uint32_t kHash_PS2  = 0;
 inline uint32_t kHash_XBOX = 0;
 
-// Extension-only hashes (computed at runtime in install())
+// Extension-only hashes. Filled in by loading_screen_init_hashes() on the first
+// LoadConfig, not at install time — see the note on that function.
 inline uint32_t kHash_ZoomSelectorTileSize = 0;
 inline uint32_t kHash_LoadSoundLVL         = 0;
 inline uint32_t kHash_RemoveToolTips       = 0;
@@ -198,6 +234,20 @@ inline bool pbl_has_more(const void* pblcfg) {
     const uint32_t  aligned = ((0u - pos) & 3u) + pos;
     return (int)aligned < (int)size;
 }
+
+// Size of the buffer handed to PblConfig::ReadNextData, in dwords.
+//
+// ReadNextData writes the entry's argument dwords AND its whole string blob
+// into that buffer, taking the blob length straight from the file with no bound
+// of its own. The engine's own LoadConfig gives it a 1896-byte frame buffer
+// (auStack_768 on modtools). Ours used to be 512, which a stock retail
+// load.cfg overruns on its longer entries — and since the PblConfig objects
+// live next to it on our stack, the overrun lands on the parent-chunk pointer
+// (+0x14) and file pointer (+0x28) that drive every subsequent read.
+//
+// 8 KB, generous rather than merely sufficient: the real bound lives in the
+// data file, so there is nothing here to derive it from.
+inline constexpr int kPblDataDwords = 0x800;
 
 inline const char* pbl_get_str(const uint32_t* data_buf, int i) {
     const int32_t off = (int32_t)data_buf[2 + i];
@@ -229,6 +279,11 @@ void tracking_sound_stop();
 // Stops every sound this module started, tracking and one-shot alike. Safe to
 // call repeatedly and when nothing is playing.
 void loading_screen_stop_all_sounds();
+
+// Hash the extension's own config keys with the engine's PblHash::calcHash.
+// Idempotent. Must be called from a hook, never from install — see the
+// definition in lifecycle.cpp.
+void loading_screen_init_hashes();
 
 // =============================================================================
 // Hook function forward declarations (for install/uninstall in lifecycle.cpp)

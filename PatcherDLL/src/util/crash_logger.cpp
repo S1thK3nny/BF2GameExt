@@ -25,6 +25,12 @@ static constexpr LONG kMaxReports = 16;
 
 // Resolve an address to "module.dll+0xOFFSET". Returns false if the address
 // is not inside any loaded module.
+//
+// For the game executable it also prints the UNRELOCATED address
+// (offset + 0x400000), because that is the form every address in
+// game_addrs.hpp and every Ghidra database uses. Without it each report needs
+// hand arithmetic against a base nobody recorded, which is exactly how a
+// report ends up unreadable.
 static bool format_module_offset(uintptr_t addr, char* out, size_t outLen)
 {
     HMODULE mod = nullptr;
@@ -39,9 +45,25 @@ static bool format_module_offset(uintptr_t addr, char* out, size_t outLen)
     for (const char* p = path; *p; ++p)
         if (*p == '\\' || *p == '/') name = p + 1;
 
-    _snprintf(out, outLen, "%s+0x%X", name, (unsigned)(addr - (uintptr_t)mod));
+    const unsigned off = (unsigned)(addr - (uintptr_t)mod);
+    if (mod == GetModuleHandleW(nullptr))
+        _snprintf(out, outLen, "%s+0x%X (va %08X)", name, off, off + 0x400000u);
+    else
+        _snprintf(out, outLen, "%s+0x%X", name, off);
     out[outLen - 1] = '\0';
     return true;
+}
+
+// Is [addr, addr+size) committed and readable? Used to keep the frame walk
+// from faulting inside the exception handler.
+static bool mem_readable(uintptr_t addr, size_t size)
+{
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (!VirtualQuery((void*)addr, &mbi, sizeof(mbi))) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+    const uintptr_t end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+    return addr >= (uintptr_t)mbi.BaseAddress && addr + size <= end;
 }
 
 static void append_log(const char* buf, size_t len)
@@ -109,7 +131,7 @@ static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
     if (InterlockedIncrement(&s_reports) > kMaxReports)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    char buf[4096];
+    char buf[16384];
     size_t len = 0;
     CONTEXT* c = xp->ContextRecord;
 
@@ -134,12 +156,39 @@ static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
             (unsigned)c->Eax, (unsigned)c->Ebx, (unsigned)c->Ecx, (unsigned)c->Edx,
             (unsigned)c->Esi, (unsigned)c->Edi, (unsigned)c->Ebp, (unsigned)c->Esp);
 
-    // Stack scan: any dword in the next 0x400 bytes that lands in a module.
-    // Clamp the scan to the committed, readable region containing ESP.
+    // Frame walk via the EBP chain. This is the call stack proper — the raw
+    // scan below is only a fallback, because it cannot tell a live return
+    // address from a dead one left over by an earlier call at the same depth.
+    // Frame-pointer-omitted frames end the walk early; that is still far more
+    // than the scan alone tells you.
+    {
+        appendf(buf, sizeof(buf), len, "    frames (EBP chain):\r\n");
+        uintptr_t ebp = c->Ebp;
+        int shown = 0;
+        for (int i = 0; i < 40 && shown < 32; ++i) {
+            if (!mem_readable(ebp, 8)) break;
+            const uintptr_t next = ((const uintptr_t*)ebp)[0];
+            const uintptr_t ret  = ((const uintptr_t*)ebp)[1];
+
+            char sym[MAX_PATH + 48];
+            if (ret >= 0x10000 && format_module_offset(ret, sym, sizeof(sym))) {
+                appendf(buf, sizeof(buf), len, "      #%02d  %s\r\n", shown, sym);
+                ++shown;
+            }
+            // The chain must ascend, or we are following garbage in a loop.
+            if (next <= ebp) break;
+            ebp = next;
+        }
+        if (shown == 0)
+            appendf(buf, sizeof(buf), len, "      (no usable frame pointer)\r\n");
+    }
+
+    // Raw stack scan: any dword in the next 0x800 bytes that lands in a
+    // module. Includes stale values from returned calls — treat as hints only.
     {
         MEMORY_BASIC_INFORMATION mbi = {};
         uintptr_t esp = c->Esp;
-        size_t scanBytes = 0x400;
+        size_t scanBytes = 0x800;
         if (VirtualQuery((void*)esp, &mbi, sizeof(mbi)) &&
             (mbi.State == MEM_COMMIT) &&
             !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
@@ -149,18 +198,18 @@ static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
             scanBytes = 0;
         }
 
-        appendf(buf, sizeof(buf), len, "    stack:");
+        appendf(buf, sizeof(buf), len, "    stack scan:\r\n");
         const uintptr_t* sp = (const uintptr_t*)esp;
         int shown = 0;
-        for (size_t i = 0; i < scanBytes / 4 && shown < 12; ++i) {
+        for (size_t i = 0; i < scanBytes / 4 && shown < 40; ++i) {
             uintptr_t v = sp[i];
-            char sym[MAX_PATH + 32];
+            char sym[MAX_PATH + 48];
             if (v >= 0x10000 && format_module_offset(v, sym, sizeof(sym))) {
-                appendf(buf, sizeof(buf), len, " [esp+%X]=%s", (unsigned)(i * 4), sym);
+                appendf(buf, sizeof(buf), len, "      [esp+%03X] %s\r\n",
+                        (unsigned)(i * 4), sym);
                 ++shown;
             }
         }
-        appendf(buf, sizeof(buf), len, "\r\n");
     }
 
     append_log(buf, len);

@@ -117,6 +117,7 @@
     <ClInclude Include="src\core\apply_patches.hpp" />
     <ClInclude Include="src\core\patch_table.hpp" />
     <ClInclude Include="src\core\game_addrs.hpp" />
+    <ClInclude Include="src\core\lvl_read.hpp" />
     <ClInclude Include="src\entity\flyer_carrier_fixes.hpp" />
     <ClInclude Include="src\entity\soldier_prone.hpp" />
     <ClInclude Include="src\entity\prone_lvl_load.hpp" />
@@ -168,6 +169,7 @@
     <ClCompile Include="src\core\dllmain.cpp" />
     <ClCompile Include="src\core\apply_patches.cpp" />
     <ClCompile Include="src\core\game_build.cpp" />
+    <ClCompile Include="src\core\lvl_read.cpp" />
     <ClCompile Include="src\core\patch_table.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />

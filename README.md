@@ -55,7 +55,7 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Flyer boost animation | ✅ | ✅ | ✅ |
 | Aim assist | ✅ | ✅ | ✅ |
 | Gamepad bindings and rumble | ✅ | ✅ | ✅ |
-| Loading screen system | ✅ | ❌ | ❌ |
+| Loading screen system | ✅ | ✅ | ❌ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |
 

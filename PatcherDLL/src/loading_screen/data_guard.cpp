@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "shared.hpp"
 #include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
 
 #include <detours.h>
 
@@ -145,28 +146,33 @@ void __fastcall hooked_load_data_chunk(void* ecx, void* edx, PblFileChunk* chunk
 
 void load_data_guard_install(uintptr_t exe_base)
 {
-    using namespace game_addrs::modtools;
+    const GameAddrs& a = *g_addr;
+    auto at = [exe_base](uintptr_t va) -> void* {
+        return va ? resolve(exe_base, va) : nullptr;
+    };
 
-    g_read_next_child   = (fn_read_next_child_t)  resolve(exe_base, pbl_chunk_read_next_child);
-    g_read_model        = (fn_chunk_read_t)       resolve(exe_base, red_model_read);
-    g_read_texture      = (fn_chunk_read_t)       resolve(exe_base, red_texture_read);
-    g_read_skeleton     = (fn_chunk_read_t)       resolve(exe_base, red_skeleton_read);
-    g_load_config_entry = (fn_load_config_entry_t)resolve(exe_base, load_config_real);
+    g_read_next_child   = (fn_read_next_child_t)  at(a.pbl_chunk_read_next_child);
+    g_read_model        = (fn_chunk_read_t)       at(a.red_model_read);
+    g_read_texture      = (fn_chunk_read_t)       at(a.red_texture_read);
+    g_read_skeleton     = (fn_chunk_read_t)       at(a.red_skeleton_read);
+    g_load_config_entry = (fn_load_config_entry_t)at(a.load_config_real);
 
     // Reimplementing the loop means every callee must be present; if any one is
     // missing, leave the stock function alone rather than half-processing files.
+    // The complaint is deferred rather than logged here: install runs from
+    // dllmain while the exe sections are still non-executable, so calling the
+    // game's logger would fault (see lua_hooks_install).
     if (!g_read_next_child || !g_read_model || !g_read_texture
         || !g_read_skeleton || !g_load_config_entry) {
-        warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
-               "[LoadDisplay] data guard not installed - unresolved callee "
-               "(child=%p modl=%p tex=%p skel=%p cfg=%p)\n",
-               (void*)g_read_next_child, (void*)g_read_model, (void*)g_read_texture,
-               (void*)g_read_skeleton, (void*)g_load_config_entry);
+        g_guardUnresolved = true;
         return;
     }
 
-    g_orig_load_data_chunk = (fn_load_data_chunk_t)resolve(exe_base, load_data_chunk_real);
-    if (!g_orig_load_data_chunk) return;
+    g_orig_load_data_chunk = (fn_load_data_chunk_t)at(a.load_data_chunk_real);
+    if (!g_orig_load_data_chunk) {
+        g_guardUnresolved = true;
+        return;
+    }
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

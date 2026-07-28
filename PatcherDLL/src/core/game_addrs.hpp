@@ -179,8 +179,20 @@ namespace modtools {
    // own teardown: ReleaseVoice then Snd::VoiceVirtual::Stop.  Use this instead of
    // poking Voice+0x80, which only imitates part of what VoiceVirtual::Stop does.
    constexpr uintptr_t gamesound_controllable_stop = 0x0074d470;
+   // GameSoundControllable::StolenCallback — the completion callback Snd::Play
+   // stores on the voice, so an owned one-shot is retired properly when the
+   // engine steals its voice.  This is the ILT thunk; body at 0x0074d4c0.
+   constexpr uintptr_t gamesound_stolen_callback   = 0x0040360c;
+   // Snd::Sound::VoiceVirtualToVoiceVirtualHandle — __cdecl(VoiceVirtual*) ->
+   // handle, i.e. (voice - smVoiceVirtuals) / 200 + 1.
    constexpr uintptr_t voice_to_handle             = 0x0088b5d0;
    constexpr uintptr_t snd_engine_update           = 0x008827b0;
+
+   // ---- Snd::Properties field offsets (NOT addresses) --------------------------
+   // Debug and release disagree by -4 from Properties+0x18 onward; see the steam
+   // namespace for the release values and loading_screen/shared.hpp for use.
+   constexpr uintptr_t snd_props_loop_byte       = 0x1c;  // bit 0x10 = looping
+   constexpr uintptr_t snd_props_next_allowed    = 0x68;  // float, replay cooldown
 
    // GameSoundEngine::gEnableSoundWarnings — bool gating the "GameSound::SetID -
    // Unable to find sound property" RedWarning (and the sibling "not loaded"
@@ -981,8 +993,7 @@ namespace steam {
    constexpr uintptr_t load_end_real            = 0x00576b90;
    // LoadDataChunk + callees.  Derived 2026-07-27 from the Steam decompile of
    // LoadDisplay::LoadDataChunk; the struct offsets it uses (0x14dc/0x1504/
-   // 0x15cc/0x15f4/0x15f8/0x15fc) are byte-identical to modtools.  Not yet
-   // wired: the loading_screen module is still Modtools-gated.
+   // 0x15cc/0x15f4/0x15f8/0x15fc) are byte-identical to modtools.
    constexpr uintptr_t load_data_chunk_real      = 0x005776e0;
    constexpr uintptr_t pbl_chunk_read_next_child = 0x0072aa30;
    constexpr uintptr_t red_model_read            = 0x006c43f0;
@@ -992,6 +1003,47 @@ namespace steam {
    constexpr uintptr_t pbl_read_next_data       = 0x00727e30;
    constexpr uintptr_t pbl_read_next_scope      = 0x00727eb0;
    constexpr uintptr_t progress_set_all_on      = 0x00578c00;
+
+   // ---- Loading screen, completed 2026-07-27 -----------------------------------
+   // The seven symbols the loading_screen module still needed on retail, plus the
+   // Play completion callback it used to pass as a raw modtools VA.
+   //
+   // PblConfig::PblConfig(PblFileChunk*) — sits directly ahead of the copy ctor,
+   // same body as modtools 0x821000 minus the release-stripped 'NAME' assert.
+   constexpr uintptr_t pbl_config_ctor          = 0x00727da0;
+   // LoadDisplay::Update's QueryPerformanceCounter stamp (LowPart; HighPart at
+   // +4).  Read to tell whether the engine repainted since our last injected
+   // frame.  From LoadDisplay::Update 0x00576c00.
+   constexpr uintptr_t load_update_qpc_stamp    = 0x01faaa70;
+   // s_loadHeap — the heap index LoadDisplay::Update switches to.  Same site.
+   constexpr uintptr_t s_loadheap_global        = 0x01f9c2e4;
+   // GameMemory::RunTimeHeap — the "Runtime" heap created by GameMemory::
+   // BuildHeaps 0x00533bc0 and made current there.
+   constexpr uintptr_t runtime_heap_global      = 0x01e56160;
+   // NOTE: color_ptr_global has no retail counterpart.  PlatformRenderTexture
+   // args 6 (RedColor*) and 7 (alphaBlend) survive in the signature — the
+   // release build still RETs 0x34 for 13 stack dwords — but the body never
+   // reads either slot, and LoadDisplay::RenderScreen 0x00577280 does not even
+   // bother storing them.  Left undefined (0) on purpose.
+   //
+   // Snd::Sound::VoiceVirtualToVoiceVirtualHandle — __cdecl, (voice -
+   // smVoiceVirtuals 0x01e2b4c0) / 200 + 1, the exact inverse of 0x0073af60.
+   constexpr uintptr_t voice_to_handle          = 0x0073afb0;
+   constexpr uintptr_t voice_virtual_release    = 0x00538630;
+   // GameSoundControllable::Stop(bool hardStop) — __thiscall, RET 4; identical
+   // body to modtools 0x0074d470.
+   constexpr uintptr_t gamesound_controllable_stop = 0x00538660;
+   // GameSoundControllable::StolenCallback — __cdecl(voice, controllable).  No
+   // ILT thunk on retail, so this is the body itself.
+   constexpr uintptr_t gamesound_stolen_callback   = 0x00538730;
+
+   // ---- Snd::Properties field offsets (NOT addresses) --------------------------
+   // Release drops 4 bytes somewhere before Properties+0x18, so every field from
+   // there on sits 4 lower than on modtools.  Both derived from the same two
+   // sites: Snd::Sound::Play's `*(byte*)(props + loop) >> 4 & 1` and the replay
+   // gate it calls, whose float[3] is nextAllowedTime.
+   constexpr uintptr_t snd_props_loop_byte      = 0x18;
+   constexpr uintptr_t snd_props_next_allowed   = 0x64;
 
    constexpr uintptr_t GameSound_play           = 0x00538010;
    constexpr uintptr_t red_pose_convert_skel32  = 0x006ddb30;
@@ -1038,7 +1090,22 @@ namespace steam {
 
    constexpr uintptr_t aimer_activate            = 0x0043e380;  // Aimer::ActivatePhysics (decompile-identical)
    constexpr uintptr_t get_weapon_anim_map       = 0x0063c970;  // SoldierAnimationBank::FindMap (decompile-identical table scan)
-   constexpr uintptr_t snd_find_by_hash_id       = 0x00736a90;  // Properties::FindByHashID (decompile-identical list scan)
+   // Snd::Sound::Properties::FindByHashID — __cdecl(hash).
+   //
+   // FindByHashID is a template: the Phantom PDB has 32 of them, one per Snd
+   // config class, and they decompile identically. 0x00736a90 was picked by
+   // shape and is the WRONG sibling: it walks the list at 0x007e3584, whose
+   // nodes are built by 0x007366f0 (reached from the 0x2e93ef4c/0x4ca38b31
+   // chunk reader). Sound properties never appear in it, so every lookup
+   // returned null while the lvl itself loaded perfectly — the loading screen's
+   // "sound hash %08x not found".
+   //
+   // The right one walks 0x007e36f8, which is where the SoundProperties ctor
+   // 0x00739b70 links each object (node at obj+0x84), and which Sound::Play
+   // 0x0073a430 consumes: it reads props+0x58 and props+0x80, exactly the fields
+   // that ctor initialises. Field shapes agree too — hash at node-0x80 = obj+4,
+   // object base at node-0x84.
+   constexpr uintptr_t snd_find_by_hash_id       = 0x00739d90;
    constexpr uintptr_t carrier_update_landed_ht  = 0x004974b0;  // EntityCarrier::UpdateLandedHeight (unique name + bridge agree; adjacent to carrier_detach_cargo)
    constexpr uintptr_t disguise_drop             = 0x00683090;  // WeaponDisguise::FinishDroppingDisguise (diff + independent label; adjacent to disguise_raise)
    constexpr uintptr_t load_render_real          = 0x00576f10;  // LoadDisplay::Render (bridge + LoadDisplay CU cluster with load_update_real/load_end_real)
@@ -1460,7 +1527,17 @@ namespace gog {
 
    constexpr uintptr_t aimer_activate                 = 0x0043e370;
    constexpr uintptr_t get_weapon_anim_map            = 0x0063da10;
-   constexpr uintptr_t snd_find_by_hash_id            = 0x00737b80;
+   // Same wrong-sibling mistake as steam had, one shift over: 0x00737b80 walks
+   // 0x007e4584, the list Sound::Play never touches. The Sound one walks
+   // 0x007e46f8 and is byte-identical to steam 0x00739d90. See the steam entry.
+   constexpr uintptr_t snd_find_by_hash_id            = 0x0073ae70;
+
+   // ---- Snd::Properties field offsets (NOT addresses) ---------------------------
+   // Release layout, identical to steam; see the steam namespace for how they
+   // were derived. Without these the table falls back to the modtools values
+   // (0x1c / 0x68), which are 4 too high for a release build.
+   constexpr uintptr_t snd_props_loop_byte            = 0x18;
+   constexpr uintptr_t snd_props_next_allowed         = 0x64;
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;
    constexpr uintptr_t load_render_real               = 0x00577c90;

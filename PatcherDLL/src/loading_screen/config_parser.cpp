@@ -53,7 +53,7 @@ static void pbl_parse_bf1_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
     g_pbl_copy_ctor(child, nullptr, sr, 1);
 
     while (pbl_has_more(child)) {
-        memset(scratch, 0, 0x80 * sizeof(uint32_t));
+        memset(scratch, 0, kPblDataDwords * sizeof(uint32_t));
         g_pbl_read_data(child, nullptr, scratch);
 
         if (scratch[0] == kHash_PlanetLevel)
@@ -185,11 +185,26 @@ static void parse_bf1_entry(const uint32_t* data_buf)
 
 void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
 {
+    // First point at which calling into the engine is safe; the installer runs
+    // too early to hash anything.
+    loading_screen_init_hashes();
+
     // Snapshot the 5-uint FileHandle before the original call advances fh[3] (position).
     uint32_t fh_saved[5];
     if (fh) memcpy(fh_saved, fh, sizeof(fh_saved));
 
     g_orig_load_config(ecx, edx, fh);
+
+    if (g_guardUnresolved) {
+        g_guardUnresolved = false;
+        warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+               "[LoadDisplay] LoadDataChunk bounds guard not installed - one of "
+               "its callees is missing from this build's address table. Loading "
+               "screens still work, but a load lvl with more than %d models, %d "
+               "textures or %d skeletons will corrupt the LoadDisplay object.\n",
+               load_display::kMaxModels, load_display::kMaxTextures,
+               load_display::kMaxSkeletons);
+    }
 
     if (!g_pbl_ctor || !g_pbl_read_data || !g_pbl_read_scope || !g_pbl_copy_ctor || !fh) {
         auto fn_log = get_gamelog();
@@ -217,13 +232,16 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     const uint32_t lvlHash1 = *(const uint32_t*)((const uint8_t*)ecx + 4);
     const uint32_t lvlHash2 = *(const uint32_t*)((const uint8_t*)ecx + 8);
 
-    // PblConfig stack buffers — 0x300 bytes each, matches the game's auStack_768 allocation.
+    // PblConfig objects — 0x300 bytes each; the object itself only reaches +0x2c.
     uint8_t  outer_buf[0x300];
     uint8_t  scope_buf[0x300];
     uint8_t  map_buf  [0x300];
     uint8_t  temp_buf [0x300];
-    uint32_t root_data[0x80];
-    uint32_t data_buf [0x80];
+    // ReadNextData output. Must be kPblDataDwords — see the note in shared.hpp;
+    // these are NOT free to shrink, and an overrun here lands on the PblConfig
+    // objects above.
+    uint32_t root_data[kPblDataDwords];
+    uint32_t data_buf [kPblDataDwords];
 
     memset(outer_buf, 0, sizeof(outer_buf));
     memset(scope_buf, 0, sizeof(scope_buf));

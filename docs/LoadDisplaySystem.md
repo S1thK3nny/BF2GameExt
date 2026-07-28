@@ -4,7 +4,17 @@ Everything reverse-engineered about SWBF2's loading screen subsystem.
 
 Field names in this document come from the Phantom build's real PDB
 (`LoadDisplay`, 65 fields, 7504 bytes). Addresses default to the modtools build
-unless stated.
+unless stated; Steam addresses are given where the extension needs them.
+
+The extension's loading screen module runs on **modtools and Steam**. GOG has
+the hook addresses but not yet the `PblConfig` quartet, and
+`loading_screen_install` is all-or-nothing, so it stays on stock behaviour until
+that table is filled in.
+
+> The startup crash that briefly gated retail out of this module was our own
+> bug, not an engine divergence: `LoadDataFile` was hooked as a no-argument
+> function. See its section below - that ABI detail is the one thing here you
+> cannot get wrong.
 
 ---
 
@@ -79,13 +89,15 @@ Verified 2026-07-27 at six independent points on modtools disassembly
 
 ## Globals
 
-| Symbol | Address | Notes |
-|--------|---------|-------|
-| `s_loadHeap` | `0x00ba111c` | Heap index saved by `LoadDisplay::Create` at the time of creation (= TempLoadHeap = 3 normally). `Update()` calls `_RedSetCurrentHeap(s_loadHeap)` before rendering. |
-| `prevTicks` (QPC stamp) | `0x00ba2f60` | Low word of the QPC counter. Written by `Update()` when the 50 ms throttle passes and `Render()` fires, **and also** by the `m_firstUpdate` branch, which sits outside the gate. Readable before/after `g_orig_load_update` to detect whether Update rendered, with one false positive on the first `Update()` after `Begin()`. |
-| `LoadDisplay::sInstance` | see `Create` | The single global instance. `ScriptCB_ShowLoadDisplay` calls `Begin`/`End` on it. |
-| `sTipsDatabase` / `sLVLDatabase` | - | `IDDatabase` globals. Both are re-initialised by `Begin()`, so tips do not accumulate across level loads. |
-| `RedModel::pc_shareBuffers` | mt `0x00ae2454` | Cleared for the duration of `LoadData`. |
+| Symbol | modtools | Steam | Notes |
+|--------|----------|-------|-------|
+| `s_loadHeap` | `0x00ba111c` | `0x01f9c2e4` | Heap index saved by `LoadDisplay::Create` at the time of creation (= TempLoadHeap = 3 normally). `Update()` calls `_RedSetCurrentHeap(s_loadHeap)` before rendering. |
+| `prevTicks` (QPC stamp) | `0x00ba2f60` | `0x01faaa70` | Low word of the QPC counter (high word at `+4`). Written by `Update()` when the 50 ms throttle passes and `Render()` fires, **and also** by the `m_firstUpdate` branch, which sits outside the gate. Readable before/after `g_orig_load_update` to detect whether Update rendered, with one false positive on the first `Update()` after `Begin()`. |
+| `GameMemory::RunTimeHeap` | `0x00b30220` | `0x01e56160` | The "Runtime" heap. Both identified from `GameMemory::BuildHeaps` (steam `0x00533bc0`), which creates it by that name and makes it current. |
+| `g_bNoRender` | - | `0x01ead47b` | Gates `Update`, `End` and `Begin`. On a norender build `m_redCamera` stays NULL, so an injected `Render` outside the gate would deref it. |
+| `LoadDisplay::sInstance` | see `Create` | - | The single global instance. `ScriptCB_ShowLoadDisplay` calls `Begin`/`End` on it. |
+| `sTipsDatabase` / `sLVLDatabase` | - | - | `IDDatabase` globals. Both are re-initialised by `Begin()`, so tips do not accumulate across level loads. |
+| `RedModel::pc_shareBuffers` | `0x00ae2454` | - | Cleared for the duration of `LoadData`. |
 
 ---
 
@@ -114,15 +126,102 @@ lazy "pick one backdrop of N" path.
 
 ---
 
-### `LoadDisplay::LoadDataFile` - `0x0067e2b0`
+### `LoadDisplay::LoadDataFile` - mt `0x0067e2b0`, steam `0x00577620`
 
 ```c
-// __thiscall (mirrored as __fastcall)
+// __thiscall (mirrored as __fastcall), RET 4 on all three builds
 void LoadDisplay::LoadDataFile(const char* lvlPath);
 ```
 
 `MakeFullName` then `PblFile::Exists` then `PblFile::Open` then
 `LoadDataChunk` on the root chunk.
+
+> **The argument is dead on retail but must still be there.** Modtools reads it
+> (`MOV ECX,[ESP+0x130]` at `0x0067e2c2`, straight into `MakeFullName`). The
+> retail builds inlined the `"Load\\load"` literal into the body instead - on
+> Steam the `MOV ECX, imm32` at `0x00577660`, whose operand is
+> `enter_state_path_op` `0x00577661` - and never touch the slot. They do still
+> declare and pop it: `0x005776d5` is `RET 4`, GOG `0x00578455` likewise.
+>
+> **And the caller depends on that pop.** `LoadData` leaves the argument of its
+> preceding `__cdecl RedSetCurrentHeap` call on the stack and lets `LoadDataFile`
+> clean it up:
+>
+> ```
+> 005773a5  PUSH [___RedTempHeap]     ; arg for RedSetCurrentHeap
+> 005773c9  CALL RedSetCurrentHeap    ; __cdecl - no ADD ESP,4 here
+> 005773ce  MOV ECX,ESI
+> 005773d9  CALL LoadDataFile         ; its RET 4 cleans it
+> ```
+>
+> So a `RET 0` detour leaves `LoadData` four bytes low: its `POP EDI/ESI/ECX`
+> shift by one slot and its `RET` jumps to whatever the `PUSH ECX` local held -
+> the `LoadDisplay` instance pointer. That is what crashed Steam at startup, and
+> it looked like a shader bug because `GameState::PreStateInit` ->
+> `LoadDisplay::Begin` (`0x00576660`, returning to `0x0053B5C3`) -> `LoadData` is
+> the *first* loading screen of the session, so the wreckage lands in the middle
+> of `Begin`'s shader and texture setup.
+>
+> One consequence for `LoadSoundLVL`'s second lvl load. On modtools the
+> extension just calls the trampoline again with a different path. On retail
+> there is no live path argument, so it swaps the contents of
+> `g_loadDisplayPath` - the buffer that imm32 already points at, courtesy of the
+> `SetLoadDisplayLevel` patch - for the duration of the second call. No image
+> write is involved.
+>
+> **But that call is only good for art.** See the section below - sounds need a
+> different loader entirely.
+
+---
+
+### `LoadDataFile` cannot load sounds - use `LoadUtil::ReadDataFile`
+
+`LoadDataChunk` dispatches exactly four chunk ids (`modl`, `tex_`, `skel`,
+`load`) on **both** builds, so a lvl opened through `LoadDisplay::LoadDataFile`
+never registers `Snd::Properties`, whatever is inside it. The symptom is
+"sound hash not found" from the play helpers, far from the cause.
+
+The engine's own reader is what dispatches every chunk type:
+
+```
+LoadUtil::ReadDataFile  mt 0x004538b0 / steam 0x00579c30 / gog 0x0057a9a0
+  └─ ReadDataFileOnHeap                steam 0x00579930
+       └─ chunk dispatcher             steam 0x00579210
+            └─ Snd chunk reader        steam 0x00734170
+                 └─ SoundProperties ctor steam 0x00739b70 (links into 0x007e36f8)
+                      └─ field reader    steam 0x0073a750
+```
+
+`Snd::Sound::Properties::FindByHashID` (steam `0x00739d90`, gog `0x0073ae70`)
+walks the circular list anchored at `0x007e36f8`, comparing `node-0x80` (the
+name hash, i.e. object+4) and returning `node-0x84` (the object base).
+
+> **`FindByHashID` is a template with 32 instantiations** - the Phantom PDB
+> names that many, and they all decompile identically. The retail tables used to
+> point at `steam 0x00736a90` / `gog 0x00737b80`, which walk a *sibling* class's
+> list (`0x007e3584` / `0x007e4584`, built by `0x007366f0` off the
+> `0x2e93ef4c`/`0x4ca38b31` chunk readers). Sound properties never land in that
+> list, so every lookup returned null even though the lvl loaded perfectly - the
+> symptom was `sound hash %08x not found` for every `LoadConfig` sound on retail
+> while modtools worked.
+>
+> The discriminator, when porting one of these: find the ctor that links objects
+> into the list, then check that `Snd::Sound::Play` (steam `0x0073a430`) reads
+> the fields that ctor initialises. Play dereferences `props+0x58` and
+> `props+0x80`; `0x00739b70` sets exactly those (`+0x16` and `+0x20` dwords).
+
+So `loading_screen/lifecycle.cpp` reads the `LoadSoundLVL` lvl **twice**, on
+purpose: once through `LoadUtil::ReadDataFile` for the sounds, and once through
+`LoadDisplay::LoadDataFile` so any art in that same lvl still reaches the
+`m_models` / `m_textures` / `m_skeletons` arrays. The shared per-build call shim
+for `ReadDataFile` lives in `core/lvl_read.cpp` (it is `__cdecl` with six stack
+args on modtools, and LTCG with the name in `ECX` plus four caller-cleaned stack
+args on the release builds).
+
+The name handed to `ReadDataFile` must include the `.lvl` extension and is
+relative to the working directory, i.e. `data\_lvl_pc\<LoadSoundLVL>.lvl` -
+which is exactly the name `MakeFullName` builds for `LoadDataFile`, since
+`fileType 0` appends the extension.
 
 ---
 
@@ -393,7 +492,7 @@ FUN_00734040 (level load body)
 
 ---
 
-## `PlatformRenderTexture` - `0x004165fe` (thunk → `0x006d0650`)
+## `PlatformRenderTexture` - mt `0x004165fe` (thunk → `0x006d0650`), steam `0x00423980`
 
 ```c
 // __stdcall - 15 arguments
@@ -406,6 +505,17 @@ void PlatformRenderTexture(
     float    r, float g, float b, float a       // always (1,1,0,0) for standard draws
 );
 ```
+
+> **Retail passes the same fifteen arguments differently.** Steam/GOG keep the
+> signature but hand `x0` in `XMM2` and `y0` in `XMM3`, leaving thirteen dwords
+> on the stack (`RET 0x34` rather than `RET 0x3c`). `loading_screen/lifecycle.cpp`
+> installs a naked thunk that reshapes the frame so callers keep one call shape.
+>
+> **`colorPtr` and `alphaBlend` are dead on retail.** The body never reads
+> either slot - Steam's `LoadDisplay::RenderScreen` `0x00577280` does not even
+> store them, and the render state they used to select is inlined as constants
+> (`0x9caee0`, `0x7de144`, `0x7de154`, `0x210004`). There is no retail
+> counterpart to `color_ptr_global`; null is the correct thing to pass.
 
 - Coordinates are normalized: `(0,0,1,1)` = full screen. Confirmed from
   disasm: the game's own `RenderScreen` pushes `0x3f800000` (= `1.0f`) for
@@ -422,12 +532,12 @@ void PlatformRenderTexture(
 
 ### Global texture table
 
-| Symbol | Address | Notes |
-|--------|---------|-------|
-| `tex_hash_table` | `0x00d4f994` | Pointer to the flat hash table |
-| Table size | `0x2000` | Passed to every `_Find` call |
+| Symbol | modtools | Steam | Notes |
+|--------|----------|-------|-------|
+| `tex_hash_table` | `0x00d4f994` | `0x008eed8c` | Pointer to the flat hash table |
+| Table size | `0x2000` | `0x2000` | Passed to every `_Find` call |
 
-### `PblHashTableCode::_Find` - `0x007e1a40`
+### `PblHashTableCode::_Find` - mt `0x007e1a40`, steam `0x00726e00`
 
 ```c
 // __cdecl
@@ -437,7 +547,7 @@ void* _Find(void* tablePtr, uint32_t tableSize, uint32_t hash);
 Returns a pointer to the found entry, or NULL if the hash is not registered.
 Used inside `PlatformRenderTexture` (observed call at `0x006d07ea`).
 
-### `HashString` - `0x007e1b70`
+### `HashString` / `PblHash::calcHash` - mt `0x007e1b70`, steam `0x00726e50`
 
 ```c
 // __cdecl - inner function (no ECX indirection)
@@ -454,16 +564,16 @@ it in EAX - correct for direct calls.
 
 ## Hooks Applied by `bf1_load_ext`
 
-| Function | Hook type | Purpose |
-|----------|-----------|---------|
-| `LoadDisplay::LoadDataChunk` (`0x0067dea0`) | Detour (loop reimplemented) | Bounds-check the `m_models[10]` / `m_textures[50]` / `m_skeletons[10]` appends. `loading_screen/data_guard.cpp` |
-| `LoadDisplay::LoadDataFile` (`0x0067e2b0`) | Detour | Log texture counts; inject second lvl load for BF1 custom textures |
-| `LoadDisplay::LoadConfig` (`0x0067c650`) | Detour | Parse `LoadConfig` block for BF1Ext config (EnableBF1, textures, sounds, etc.) |
-| `LoadDisplay::RenderScreen` (`0x0067a1b0`) | Detour | Suppress vanilla backdrop; draw BF1 overlay elements |
-| `LoadDisplay::End` (`0x0067de10`) | Detour | Delay teardown until BF1 end animation completes |
-| `LoadDisplay::Update` (`0x0067c1d0`) | Detour | Inject extra render calls (up to ~30 fps); redirect s_loadHeap |
-| `LoadDisplay::Render` (`0x00402b71`) | **Not hooked** - called directly | Used directly to inject frames at controlled times |
-| `ProgressIndicator::SetAllOn` (`0x0040786f`) | **Not hooked** - called directly | Called once at the start of the `hooked_load_end` spin-loop |
+| Function | modtools | Steam | Hook type | Purpose |
+|----------|----------|-------|-----------|---------|
+| `LoadDisplay::LoadDataChunk` | `0x0067dea0` | `0x005776e0` | Detour (loop reimplemented) | Bounds-check the `m_models[10]` / `m_textures[50]` / `m_skeletons[10]` appends. `loading_screen/data_guard.cpp` |
+| `LoadDisplay::LoadDataFile` | `0x0067e2b0` | `0x00577620` | Detour (`RET 4` - see above) | Inject second lvl load for `LoadSoundLVL` |
+| `LoadDisplay::LoadConfig` | `0x0067c650` | `0x005777e0` | Detour | Parse `LoadConfig` block for BF1Ext config (EnableBF1, textures, sounds, etc.) |
+| `LoadDisplay::RenderScreen` | `0x0067a1b0` | `0x00577280` | Detour | Suppress vanilla backdrop; draw BF1 overlay elements |
+| `LoadDisplay::End` | `0x0067de10` | `0x00576b90` | Detour | Delay teardown until BF1 end animation completes |
+| `LoadDisplay::Update` | `0x0067c1d0` | `0x00576c00` | Detour | Inject extra render calls (up to ~30 fps); redirect s_loadHeap |
+| `LoadDisplay::Render` | `0x00402b71` | `0x00576f10` | **Not hooked** - called directly | Used directly to inject frames at controlled times |
+| `ProgressIndicator::SetAllOn` | `0x0040786f` | `0x00578c00` | **Not hooked** - called directly | Called once at the start of the `hooked_load_end` spin-loop |
 
 ---
 
@@ -545,19 +655,44 @@ Used by `hooked_load_config` to read the level's `LoadConfig` block.
 
 | Function | Address | Signature |
 |----------|---------|-----------|
-| `PblConfig::PblConfig(fh)` | `0x00821000` | ctor, RETN 4 |
-| `PblConfig::PblConfig(parent, share)` | `0x00821080` | copy ctor, RETN 8 |
-| `PblConfig::ReadNextData(buf)` | `0x008210f0` | writes hash/argc/args into buf, RETN 4 |
-| `PblConfig::ReadNextScope(buf)` | `0x00821140` | enters next scope, returns buf ptr, RETN 4 |
+| Function | modtools | Steam | Signature |
+|----------|----------|-------|-----------|
+| `PblConfig::PblConfig(fh)` | `0x00821000` | `0x00727da0` | ctor, RETN 4 |
+| `PblConfig::PblConfig(parent, share)` | `0x00821080` | `0x00727de0` | copy ctor, RETN 8 |
+| `PblConfig::ReadNextData(buf)` | `0x008210f0` | `0x00727e30` | writes hash/argc/args into buf, RETN 4 |
+| `PblConfig::ReadNextScope(buf)` | `0x00821140` | `0x00727eb0` | enters next scope, returns buf ptr, RETN 4 |
+
+The Steam ctor is the same body minus the release-stripped
+`m_CurrentChild.GetId() == _ID('N','A','M','E')` assert, and the object layout
+is unchanged: five dwords copied from the file handle, parent at `+0x14`, the
+current child chunk at `+0x18`, the sub-reader at `+0x2c`.
 
 ---
 
 ## Sound Integration
 
-| Function | Address | Signature |
-|----------|---------|-----------|
-| `Snd::Sound::Properties::FindByHashID(hash)` | `0x0088c500` | `__cdecl(uint32_t) → Properties*` |
-| `Snd::Sound::Play(entity, props, p3, p4, p5)` | `0x0088cc10` | `__cdecl` |
+| Function | modtools | Steam | Signature |
+|----------|----------|-------|-----------|
+| `Snd::Sound::Properties::FindByHashID(hash)` | `0x0088c500` | `0x00736a90` | `__cdecl(uint32_t) → Properties*` |
+| `Snd::Sound::Play(entity, props, p3, p4, p5)` | `0x0088cc10` | `0x0073a430` | `__cdecl` |
+| `GameSoundControllable::Stop(hardStop)` | `0x0074d470` | `0x00538660` | `__thiscall`, RETN 4 |
+| `GameSoundControllable::StolenCallback` | `0x0040360c` (ILT) | `0x00538730` | `__cdecl(voice, controllable)` |
+| `Snd::Sound::VoiceVirtualRelease` | `0x0074d440` | `0x00538630` | `__thiscall` |
+| `Snd::Sound::VoiceVirtualToVoiceVirtualHandle` | `0x0088b5d0` | `0x0073afb0` | `__cdecl(VoiceVirtual*) → handle` |
+
+> **`Snd::Properties` is not laid out the same on debug and release.** Release
+> drops four bytes somewhere ahead of `+0x18`, so every field from there on sits
+> four lower. Two matter here, both read straight out of `Snd::Sound::Play` and
+> the replay gate it calls:
+>
+> | Field | modtools | Steam |
+> |-------|----------|-------|
+> | looping flag byte (bit `0x10`) | `+0x1c` | `+0x18` |
+> | `nextAllowedTime` (float) | `+0x68` | `+0x64` |
+>
+> `VoiceVirtual` by contrast **is** identical - `VoiceVirtual::Update` makes the
+> same `+0x34 & 0x10` looping test on both, and the array stride is 200 bytes
+> either way.
 
 Sounds are played by hash: `FindByHashID` then `Snd::Sound::Play`, whose return
 value is a `VoiceVirtual*`. Every sound the loading screen starts is kept in a
