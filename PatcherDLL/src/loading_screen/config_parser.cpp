@@ -107,16 +107,47 @@ static void parse_bf1_entry(const uint32_t* data_buf)
         const float aw = (argc >= 6) ? pbl_get_float(data_buf, 5) : 0.0f;
         const float ah = (argc >= 7) ? pbl_get_float(data_buf, 6) : 0.0f;
         if (base && cnt > 0) {
-            if (cnt > LoadScreenConfig::kMaxAnimFrames) cnt = LoadScreenConfig::kMaxAnimFrames;
+            // Each AnimatedTextures adds an overlay; it does NOT replace the
+            // previous one.  Overlays draw in config order.
+            if (g_loadScreenCfg.animSlotCount >= LoadScreenConfig::kMaxAnims) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] WARNING: AnimatedTextures '%s' ignored - already at the "
+                       "%d overlay limit\n", base, LoadScreenConfig::kMaxAnims);
+                return;
+            }
+            if (cnt > LoadScreenConfig::kMaxAnimFrames) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] WARNING: AnimatedTextures count %d exceeds the %d frame limit - "
+                       "only %s0..%s%d will be used\n",
+                       cnt, LoadScreenConfig::kMaxAnimFrames,
+                       base, base, LoadScreenConfig::kMaxAnimFrames - 1);
+                cnt = LoadScreenConfig::kMaxAnimFrames;
+            }
+            if (fps <= 0.0f) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] WARNING: AnimatedTextures '%s' fps %f is not positive - "
+                       "the overlay will hold on frame 0\n", base, fps);
+            }
+            // x/y/w/h only place the overlay as a complete rect.  Giving one of
+            // w/h without the other used to honour half the placement and draw
+            // the rest off-screen, so it now falls back to full screen.
+            if ((aw > 0.0f) != (ah > 0.0f)) {
+                auto fn_log = get_gamelog();
+                fn_log("[BF1Ext] WARNING: AnimatedTextures '%s' needs both w and h to place the "
+                       "overlay (got w=%f h=%f) - drawing full screen instead\n", base, aw, ah);
+            }
+
+            LoadScreenConfig::AnimEntry& a =
+                g_loadScreenCfg.anims[g_loadScreenCfg.animSlotCount++];
             for (int i = 0; i < cnt; ++i) {
                 char nm[256];
                 snprintf(nm, sizeof(nm), "%s%d", base, i);
-                g_loadScreenCfg.animHashes[i] = hash_name(nm);
+                a.hashes[i] = hash_name(nm);
             }
-            g_loadScreenCfg.animCount = cnt;
-            g_loadScreenCfg.animFPS   = fps;
-            g_loadScreenCfg.animX = ax; g_loadScreenCfg.animY = ay;
-            g_loadScreenCfg.animW = aw; g_loadScreenCfg.animH = ah;
+            a.count = cnt;
+            a.fps   = fps;
+            a.x = ax; a.y = ay;
+            a.w = aw; a.h = ah;
         } else if (!base) {
             auto fn_log = get_gamelog();
             fn_log("[BF1Ext] ERROR: AnimatedTextures base name is null\n");

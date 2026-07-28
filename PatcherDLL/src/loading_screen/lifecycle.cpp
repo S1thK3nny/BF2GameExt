@@ -373,7 +373,7 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
     // progress tick, which can be seconds apart, so without this the frames
     // advance in visible jumps. ScanLineTexture is static and needs no such help.
     if (!g_orig_load_render) return;
-    if (!g_loadScreenCfg.bf1Enabled && g_loadScreenCfg.animCount == 0) return;
+    if (!g_loadScreenCfg.bf1Enabled && g_loadScreenCfg.animSlotCount == 0) return;
 
     if (g_qpc_stamp && *g_qpc_stamp != qpc_before) {
         g_lastRenderMs = GetTickCount();

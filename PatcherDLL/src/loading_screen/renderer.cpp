@@ -5,6 +5,19 @@
 // RenderScreen hook
 // =============================================================================
 // Coordinates are normalized 0-1 screen space, confirmed from BF1 Ghidra analysis.
+//
+// TODO: no aspect correction anywhere in this file.  Every rect is taken
+// literally in normalized space, so w and h scale against different pixel
+// counts and a modder has to hand-compute h = w * screenAspect to keep a square
+// texture square.  Anything tuned for 16:9 draws stretched at 4:3 or 16:10.
+// This applies to all three consumers:
+//   - AnimatedTextures (AnimEntry x/y/w/h)
+//   - the PlanetLevel zoom sequence (PlanetEntry x/y/w/h -> zx0..zy1)
+//   - the ZoomSelector tiles, where zoomTileHalfH defaults to zoomTileHalfW and
+//     so is never actually square on screen
+// Fixing it needs the backbuffer dimensions at render time plus an opt-in config
+// flag, since existing configs are authored against the raw behaviour and would
+// all shift if correction were applied unconditionally.
 
 void __fastcall hooked_render_screen(void* ecx, void* edx)
 {
@@ -65,7 +78,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
     if (!g_prt)
         return;
     if (!g_loadScreenCfg.bf1Enabled
-        && g_loadScreenCfg.animCount == 0
+        && g_loadScreenCfg.animSlotCount == 0
         && !g_loadScreenCfg.scanLineTexHash)
         return;
 
@@ -82,8 +95,11 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         check("ScanLineTexture", g_loadScreenCfg.scanLineTexHash);
         for (int i = 0; i < g_loadScreenCfg.zoomSelCount; ++i)
             check("ZoomSelectorTextures", g_loadScreenCfg.zoomSelHashes[i]);
-        for (int i = 0; i < g_loadScreenCfg.animCount; ++i)
-            check("AnimatedTextures", g_loadScreenCfg.animHashes[i]);
+        for (int s = 0; s < g_loadScreenCfg.animSlotCount; ++s) {
+            const auto& an = g_loadScreenCfg.anims[s];
+            for (int i = 0; i < an.count; ++i)
+                check("AnimatedTextures", an.hashes[i]);
+        }
         for (int pi = 0; pi < g_loadScreenCfg.planetCount; ++pi)
             check("PlanetLevel", g_loadScreenCfg.planets[pi].texHash);
     }
@@ -95,21 +111,43 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
     if (g_set_current_heap && g_runtime_heap_idx)
         prevHeap = g_set_current_heap(*g_runtime_heap_idx);
 
-    // --- AnimatedTextures: cycle frames at animFPS ---
-    if (g_loadScreenCfg.animCount > 0 && g_loadScreenCfg.animFPS > 0.0f) {
-        const DWORD ms_per_frame = (DWORD)(1000.0f / g_loadScreenCfg.animFPS);
-        const int frame = (ms_per_frame > 0)
-                        ? (int)(GetTickCount() / ms_per_frame) % g_loadScreenCfg.animCount
+    // --- AnimatedTextures: cycle each overlay's frames at its own fps ---
+    // Drawn in config order, so a later AnimatedTextures layers over an earlier
+    // one.  All overlays share g_animStartMs, so equal-length sequences stay in
+    // lockstep with each other.
+    for (int s = 0; s < g_loadScreenCfg.animSlotCount; ++s) {
+        const LoadScreenConfig::AnimEntry& an = g_loadScreenCfg.anims[s];
+        if (an.count <= 0)
+            continue;
+
+        // Phase is measured from the start of THIS loading screen (g_animStartMs
+        // is re-stamped in LoadConfig), so a sequence with a distinct first frame
+        // actually begins on it instead of wherever system uptime happens to land.
+        const DWORD elapsed = GetTickCount() - g_animStartMs;
+        // fps <= 0 means "hold on frame 0", not "hide the overlay".  The index is
+        // computed as elapsed*fps rather than elapsed/(1000/fps) so high rates do
+        // not truncate the period to zero and freeze.
+        const int frame = (an.fps > 0.0f)
+                        ? (int)(((uint64_t)((double)elapsed * (double)an.fps / 1000.0))
+                                % (uint64_t)an.count)
                         : 0;
-        if (g_loadScreenCfg.animHashes[frame]) {
-            const float ax = g_loadScreenCfg.animW > 0.0f ? g_loadScreenCfg.animX : 0.0f;
-            const float ay = g_loadScreenCfg.animW > 0.0f ? g_loadScreenCfg.animY : 0.0f;
-            const float aw = g_loadScreenCfg.animW > 0.0f ? g_loadScreenCfg.animW : 1.0f;
-            const float ah = g_loadScreenCfg.animH > 0.0f ? g_loadScreenCfg.animH : 1.0f;
-            g_prt(g_loadScreenCfg.animHashes[frame],
-                  ax, ay, ax + aw, ay + ah, g_color_ptr, 0,
-                  0,0,1,1,  1,1,0,0);
-        }
+        if (!an.hashes[frame])
+            continue;
+
+        // No aspect correction here — see the file-header TODO.
+        //
+        // The rect is all-or-nothing: w and h are both needed to place the
+        // overlay, so a partial rect falls back to full screen rather than
+        // honouring half the placement and drawing off the edge.  The mismatch
+        // is reported once at parse time.
+        const bool  haveRect = an.w > 0.0f && an.h > 0.0f;
+        const float ax = haveRect ? an.x : 0.0f;
+        const float ay = haveRect ? an.y : 0.0f;
+        const float aw = haveRect ? an.w : 1.0f;
+        const float ah = haveRect ? an.h : 1.0f;
+        g_prt(an.hashes[frame],
+              ax, ay, ax + aw, ay + ah, g_color_ptr, 0,
+              0,0,1,1,  1,1,0,0);
     }
 
     // --- BF1 zoom-sequence animation ---

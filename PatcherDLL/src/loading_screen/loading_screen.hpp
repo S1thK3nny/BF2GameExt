@@ -31,12 +31,23 @@ struct LoadScreenConfig {
 
     // AnimatedTextures: baseName, count, fps[, x, y, w, h]
     // Frames are named <baseName>0 .. <baseName>(count-1).
-    // Screen rect in normalized 0-1; w==0 → full screen (0,0,1,1).
+    // Screen rect in normalized 0-1; a rect needs BOTH w and h > 0, otherwise the
+    // overlay falls back to full screen (0,0,1,1).
+    //
+    // Repeating the param adds another independent overlay rather than replacing
+    // the previous one, so a config can run several animations at once with their
+    // own frame set, rate and rect.  They draw in config order, so a later entry
+    // layers on top of an earlier one.
     static constexpr int kMaxAnimFrames = 64;
-    uint32_t animHashes[kMaxAnimFrames];
-    int      animCount;
-    float    animFPS;
-    float    animX, animY, animW, animH; // optional rect; w==0 means full-screen
+    static constexpr int kMaxAnims      = 8;
+    struct AnimEntry {
+        uint32_t hashes[kMaxAnimFrames];
+        int      count;            // frames in this overlay
+        float    fps;
+        float    x, y, w, h;       // normalized 0-1 screen rect
+    };
+    AnimEntry anims[kMaxAnims];
+    int       animSlotCount;       // overlays configured, NOT a frame count
 
     // Sound hashes (play on specific loading screen events)
     uint32_t xTrackSoundHash;
