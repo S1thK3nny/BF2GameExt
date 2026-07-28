@@ -33,3 +33,41 @@
 // the engine tears down its PblFile and returns, no dialog.
 
 bool lvl_read_data_file(const char* name);
+
+// =============================================================================
+// Modder-facing lvl path resolution
+// =============================================================================
+// Normalizes a path a modder typed — in a Lua call or a LoadConfig key — into a
+// single stem relative to `data\_lvl_pc\`, and confirms the file is there.
+//
+// Three accepted forms, all collapsing to that one stem:
+//
+//   "LOAD\\load.lvl"                        -> LOAD\load
+//   "dc:LOAD\\load.lvl"                     -> ..\..\<addon>\Data\_lvl_pc\LOAD\load
+//   "..\\..\\addon\\VTR\\data\\_LVL_PC\\LOAD\\load"  -> unchanged
+//
+// The trailing ".lvl" is optional and stripped when present, because every
+// consumer of the stem appends it again.
+//
+// The `dc:` form is rewritten as a relative climb rather than passed through,
+// even though ReadDataFileOnHeap understands `dc:` natively. Two reasons: the
+// other consumer, `LoadDisplay::LoadDataFile`, goes through LoadUtil::MakeFullName
+// and understands no prefixes at all; and one stem for both readers means one
+// resolution per config key, not two that can disagree.
+//
+// On failure `outReason` receives a finished sentence naming the cause — callers
+// supply their own prefix, severity and consequence, since "keep the previous
+// value" and "skip this load" want different wording. Every out parameter is
+// optional; `outFull` is only filled once the on-disk name is known.
+enum class LvlPathStatus {
+    Ok = 0,
+    Empty,             // nothing left after stripping the prefix and extension
+    NoContentDir,      // "dc:" given but no addon content is active
+    OutsideWorkingDir, // addon dir is not under the working directory
+    NotFound,          // resolved name is not on disk
+};
+
+LvlPathStatus lvl_resolve_data_path(const char* path,
+                                    char* outStem,   size_t stemSize,
+                                    char* outFull,   size_t fullSize,
+                                    char* outReason, size_t reasonSize);

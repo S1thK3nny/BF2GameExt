@@ -224,6 +224,31 @@ relative to the working directory, i.e. `data\_lvl_pc\<LoadSoundLVL>.lvl` -
 which is exactly the name `MakeFullName` builds for `LoadDataFile`, since
 `fileType 0` appends the extension.
 
+Both readers prepending `data\_lvl_pc\` is what lets one resolved stem feed both.
+`lvl_resolve_data_path` (`core/lvl_read.hpp`) produces it, shared with
+`SetLoadDisplayLevel`, so `LoadSoundLVL` accepts the same three path forms - bare,
+`dc:`, and a raw `..\..\` climb - with the `.lvl` extension optional. The `dc:`
+case is rewritten as the relative climb rather than passed through: only
+`ReadDataFileOnHeap` understands the prefix natively, `MakeFullName` understands
+no prefixes at all, and resolving one config key two different ways is how the two
+reads end up disagreeing about which file they opened.
+
+The `;group` selector is split off *before* resolution and re-appended only to the
+`ReadDataFile` name - `MakeFullName` would paste the semicolon into the middle of
+the filename.
+
+> **The five BF1 load sounds are stock and always resident**, so `LoadSoundLVL`
+> is only ever needed for custom names. `assets\common\sound\global.snd` in the
+> modtools defines `load_zoom`, `load_transition`, `load_xtracking`,
+> `load_ytracking` and `load_bar` under a `// Load display` comment, and that
+> bank munges into `data\_lvl_pc\sound\global.lvl`, which retail loads at startup
+> and never unloads. Every mod-side `BF1Load.snd` floating around is a
+> byte-for-byte copy of that block.
+>
+> This is not greppable from the shipped data: munged sound lvls store property
+> ids, not names. `load_xtracking` appears zero times as a string inside a
+> `bf1load.lvl` that defines it. Search the `.snd` sources, not the lvls.
+
 ---
 
 ### `LoadDisplay::LoadDataChunk` - mt `0x0067dea0`, steam `0x005776e0`
@@ -587,14 +612,20 @@ redirect s_loadHeap → RunTimeHeap
 call g_orig_load_update(ecx, edx)
 restore s_loadHeap
 
-if (bf1Enabled && orig rendered naturally):
+if (!bf1Enabled && animCount == 0) return   ← nothing needs a forced repaint
+
+if (orig rendered naturally):
     record g_lastRenderMs
 
-else if (bf1Enabled && ≥33 ms since last render && LoadDisplay still active):
+else if (≥33 ms since last render && LoadDisplay still active):
     switch __RedCurrHeap → RunTimeHeap
     g_orig_load_render(ecx)
     restore __RedCurrHeap
 ```
+
+`AnimatedTextures` takes the same path as BF1 mode: it is a timed animation, and
+without the injected renders it advances only when the loader reports progress.
+`ScanLineTexture` is static and stays out of the condition.
 
 The `g_qpc_stamp` (`0x00ba2f60`) read before/after `g_orig_load_update` detects
 whether Update's internal 50 ms throttle fired. If it did, `Update()` already

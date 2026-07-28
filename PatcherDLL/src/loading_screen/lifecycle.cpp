@@ -165,10 +165,13 @@ static bool want_sound_lvl()
     if (s_sndLvlLoaded) return false;
 
     if (!g_loadScreenCfg.loadSoundLvl[0]) {
-        // Legitimate when the sounds already live in the loading screen's own
-        // lvl, so this is informational - but naming sounds with no LoadSoundLVL
-        // is also exactly what a missing or misspelled key looks like, and that
-        // is otherwise invisible until the sounds report "not found".
+        // Legitimate two ways over: the sounds may live in the loading screen's
+        // own lvl, and the five stock BF1 load names (load_zoom, load_transition,
+        // load_xtracking, load_ytracking, load_bar) are already in the always
+        // resident sound\global.lvl, which needs nothing at all. So this is
+        // informational - but naming sounds with no LoadSoundLVL is also exactly
+        // what a missing or misspelled key looks like, and that is otherwise
+        // invisible until the sounds report "not found".
         const bool namedSounds = g_loadScreenCfg.barSoundHash
                               || g_loadScreenCfg.xTrackSoundHash
                               || g_loadScreenCfg.yTrackSoundHash
@@ -178,8 +181,11 @@ static bool want_sound_lvl()
             s_sndLvlLoaded = true;   // report once per loading screen
             warn_gamelog(RED_SEVERITY_INFO, SRC_FILE, __LINE__,
                    "[BF1Ext] This LoadConfig names sounds but has no LoadSoundLVL "
-                   "entry, so they must already be in the loading screen's own "
-                   "lvl. If they are not, they will report \"not found\".\n");
+                   "entry, so they must already be registered - either in the "
+                   "loading screen's own lvl, or in the stock sound\\global.lvl, "
+                   "which already holds the five original BF1 load sounds "
+                   "(load_zoom, load_transition, load_xtracking, load_ytracking, "
+                   "load_bar). If neither, they will report \"not found\".\n");
         }
         return false;
     }
@@ -242,17 +248,17 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
 
     // Both engine calls below resolve a bare name under data\_lvl_pc\ - MakeFullName
     // with fileType 0 (steam 0x005790a0) and ReadDataFileOnHeap (steam 0x00579ac1)
-    // each prepend it - so the on-disk check needs that prefix and neither call
-    // wants it. This is also the exact name the engine will look for.
-    char full[512];
-    _snprintf_s(full, sizeof(full), _TRUNCATE, "data\\_lvl_pc\\%s.lvl", lvlPart);
-    const DWORD attrs = GetFileAttributesA(full);
-    if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+    // each prepend it - so neither wants that prefix, and one stem serves both.
+    // The shared resolver accepts the same forms SetLoadDisplayLevel does,
+    // including "dc:" and an optional trailing ".lvl", and confirms the file is
+    // on disk; `full` comes back as the exact name the engine will look for.
+    char stem[260], full[300], reason[512];
+    if (lvl_resolve_data_path(lvlPart, stem, sizeof(stem), full, sizeof(full),
+                              reason, sizeof(reason)) != LvlPathStatus::Ok) {
         warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
-               "[BF1Ext] LoadSoundLVL \"%s\": \"%s\" does not exist, so no BF1 "
-               "sound is loaded and every LoadConfig sound name will report "
-               "\"not found\" later. Path is relative to the game's working "
-               "directory.\n", want, full);
+               "[BF1Ext] LoadSoundLVL \"%s\": %s No BF1 sound is loaded and every "
+               "LoadConfig sound name will report \"not found\" later.\n",
+               want, reason);
         return;
     }
 
@@ -266,14 +272,14 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
     //    Retail cannot be told which lvl to load through the argument - the body
     //    ignores it and reads the inlined literal - so it goes through the buffer
     //    that literal's imm32 was repointed at.
-    //    It gets lvlPart, never the selector: MakeFullName would paste a ';' into
+    //    It gets the stem, never the selector: MakeFullName would paste a ';' into
     //    the middle of the filename.
     if (g_build == GameBuild::Modtools) {
-        g_orig_load_data_file(ecx, edx, lvlPart);
+        g_orig_load_data_file(ecx, edx, stem);
     } else if (path_buffer_live()) {
         char saved[sizeof(g_loadDisplayPath)];
         memcpy(saved, g_loadDisplayPath, sizeof(saved));
-        strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), lvlPart, _TRUNCATE);
+        strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), stem, _TRUNCATE);
         g_orig_load_data_file(ecx, edx, lvlPath);   // path comes from the buffer
         memcpy(g_loadDisplayPath, saved, sizeof(saved));
     } else {
@@ -296,9 +302,9 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
     //    handing it `full` would ask for data\_lvl_pc\data\_lvl_pc\...
     char lvlName[512];
     if (group)
-        _snprintf_s(lvlName, sizeof(lvlName), _TRUNCATE, "%s.lvl;%s", lvlPart, group);
+        _snprintf_s(lvlName, sizeof(lvlName), _TRUNCATE, "%s.lvl;%s", stem, group);
     else
-        _snprintf_s(lvlName, sizeof(lvlName), _TRUNCATE, "%s.lvl", lvlPart);
+        _snprintf_s(lvlName, sizeof(lvlName), _TRUNCATE, "%s.lvl", stem);
 
     if (!lvl_read_data_file(lvlName)) {
         warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
@@ -362,7 +368,12 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
         g_lastSndUpdateMs = now;
     }
 
-    if (!g_loadScreenCfg.bf1Enabled || !g_orig_load_render) return;
+    // The forced repaint below is not BF1-only: AnimatedTextures needs it just as
+    // much. The engine draws the loading screen only when the loader hands it a
+    // progress tick, which can be seconds apart, so without this the frames
+    // advance in visible jumps. ScanLineTexture is static and needs no such help.
+    if (!g_orig_load_render) return;
+    if (!g_loadScreenCfg.bf1Enabled && g_loadScreenCfg.animCount == 0) return;
 
     if (g_qpc_stamp && *g_qpc_stamp != qpc_before) {
         g_lastRenderMs = GetTickCount();

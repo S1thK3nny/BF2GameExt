@@ -57,7 +57,16 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         *at<uint32_t>(ecx, kBackDropHash) = savedBackdropHash;
 
 
-    if (!g_loadScreenCfg.bf1Enabled || !g_prt)
+    // AnimatedTextures and ScanLineTexture are plain overlays that depend on
+    // nothing in the zoom sequence, so they draw with or without EnableBF1.  The
+    // rest of this function is already self-disabling without it: the post-parse
+    // gate in config_parser.cpp zeroes planetCount, zoomSelCount and every sound
+    // hash, so the zoom block and all its sound triggers never run.
+    if (!g_prt)
+        return;
+    if (!g_loadScreenCfg.bf1Enabled
+        && g_loadScreenCfg.animCount == 0
+        && !g_loadScreenCfg.scanLineTexHash)
         return;
 
     // One-shot texture probe: log errors for any BF1 textures that aren't in
