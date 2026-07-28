@@ -6,10 +6,11 @@ Field names in this document come from the Phantom build's real PDB
 (`LoadDisplay`, 65 fields, 7504 bytes). Addresses default to the modtools build
 unless stated; Steam addresses are given where the extension needs them.
 
-The extension's loading screen module runs on **modtools and Steam**. GOG has
-the hook addresses but not yet the `PblConfig` quartet, and
-`loading_screen_install` is all-or-nothing, so it stays on stock behaviour until
-that table is filled in.
+The extension's loading screen module runs on **modtools, Steam and GOG**. GOG
+was gated out by `loading_screen_install`'s all-or-nothing check until
+2026-07-28, when the last thirteen addresses it was missing (`PblConfig::
+PblConfig`, the `LoadDataChunk` guard's callees, the heap globals and the voice
+ownership quartet) were ported with `tools/port_gog.py auto`.
 
 > The startup crash that briefly gated retail out of this module was our own
 > bug, not an engine divergence: `LoadDataFile` was hooked as a no-argument
@@ -564,16 +565,16 @@ it in EAX - correct for direct calls.
 
 ## Hooks Applied by `bf1_load_ext`
 
-| Function | modtools | Steam | Hook type | Purpose |
-|----------|----------|-------|-----------|---------|
-| `LoadDisplay::LoadDataChunk` | `0x0067dea0` | `0x005776e0` | Detour (loop reimplemented) | Bounds-check the `m_models[10]` / `m_textures[50]` / `m_skeletons[10]` appends. `loading_screen/data_guard.cpp` |
-| `LoadDisplay::LoadDataFile` | `0x0067e2b0` | `0x00577620` | Detour (`RET 4` - see above) | Inject second lvl load for `LoadSoundLVL` |
-| `LoadDisplay::LoadConfig` | `0x0067c650` | `0x005777e0` | Detour | Parse `LoadConfig` block for BF1Ext config (EnableBF1, textures, sounds, etc.) |
-| `LoadDisplay::RenderScreen` | `0x0067a1b0` | `0x00577280` | Detour | Suppress vanilla backdrop; draw BF1 overlay elements |
-| `LoadDisplay::End` | `0x0067de10` | `0x00576b90` | Detour | Delay teardown until BF1 end animation completes |
-| `LoadDisplay::Update` | `0x0067c1d0` | `0x00576c00` | Detour | Inject extra render calls (up to ~30 fps); redirect s_loadHeap |
-| `LoadDisplay::Render` | `0x00402b71` | `0x00576f10` | **Not hooked** - called directly | Used directly to inject frames at controlled times |
-| `ProgressIndicator::SetAllOn` | `0x0040786f` | `0x00578c00` | **Not hooked** - called directly | Called once at the start of the `hooked_load_end` spin-loop |
+| Function | modtools | Steam | GOG | Hook type | Purpose |
+|----------|----------|-------|-----|-----------|---------|
+| `LoadDisplay::LoadDataChunk` | `0x0067dea0` | `0x005776e0` | `0x00578460` | Detour (loop reimplemented) | Bounds-check the `m_models[10]` / `m_textures[50]` / `m_skeletons[10]` appends. `loading_screen/data_guard.cpp` |
+| `LoadDisplay::LoadDataFile` | `0x0067e2b0` | `0x00577620` | `0x005783a0` | Detour (`RET 4` - see above) | Inject second lvl load for `LoadSoundLVL` |
+| `LoadDisplay::LoadConfig` | `0x0067c650` | `0x005777e0` | `0x00578560` | Detour | Parse `LoadConfig` block for BF1Ext config (EnableBF1, textures, sounds, etc.) |
+| `LoadDisplay::RenderScreen` | `0x0067a1b0` | `0x00577280` | `0x00578000` | Detour | Suppress vanilla backdrop; draw BF1 overlay elements |
+| `LoadDisplay::End` | `0x0067de10` | `0x00576b90` | `0x00577910` | Detour | Delay teardown until BF1 end animation completes |
+| `LoadDisplay::Update` | `0x0067c1d0` | `0x00576c00` | `0x00577980` | Detour | Inject extra render calls (up to ~30 fps); redirect s_loadHeap |
+| `LoadDisplay::Render` | `0x00402b71` | `0x00576f10` | `0x00577c90` | **Not hooked** - called directly | Used directly to inject frames at controlled times |
+| `ProgressIndicator::SetAllOn` | `0x0040786f` | `0x00578c00` | `0x00579980` | **Not hooked** - called directly | Called once at the start of the `hooked_load_end` spin-loop |
 
 ---
 

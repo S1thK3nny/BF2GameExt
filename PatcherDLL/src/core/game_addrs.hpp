@@ -1538,6 +1538,35 @@ namespace gog {
    // (0x1c / 0x68), which are 4 too high for a release build.
    constexpr uintptr_t snd_props_loop_byte            = 0x18;
    constexpr uintptr_t snd_props_next_allowed         = 0x64;
+
+   // ---- Loading screen + Snd voice ownership (ported 2026-07-28) ----------------
+   // tools/port_gog.py auto, every one score 1.00 on the lockstep disassembly
+   // compare (or 3+ agreeing reference sites for the globals). These were the
+   // last gap keeping GOG out of the loading-screen module's all-or-nothing
+   // install gate; with pbl_config_ctor present it now runs there too.
+   //
+   // Five of them cross-confirm each other in one decompile: LoadDataChunk
+   // 0x00578460 calls 0x0072bb10 (ReadNextChild) then dispatches 'modl' to
+   // 0x006c5480, 'tex_' to 0x006bb360, 'skel' to 0x006e9960 and 'load' to
+   // 0x00578560 (= load_config_real, already in this table).
+   constexpr uintptr_t load_data_chunk_real           = 0x00578460;
+   constexpr uintptr_t pbl_chunk_read_next_child      = 0x0072bb10;
+   constexpr uintptr_t red_model_read                 = 0x006c5480;
+   constexpr uintptr_t red_texture_read               = 0x006bb360;
+   constexpr uintptr_t red_skeleton_read              = 0x006e9960;
+   // PblConfig::PblConfig — byte-identical to steam 0x00727da0, and adjacent to
+   // pbl_config_copy_ctor 0x00728eb0 exactly as the pair sits on steam.
+   constexpr uintptr_t pbl_config_ctor                = 0x00728e70;
+   constexpr uintptr_t load_update_qpc_stamp          = 0x01fabf20;
+   constexpr uintptr_t s_loadheap_global              = 0x01f9d798;
+   constexpr uintptr_t runtime_heap_global            = 0x01e57610;
+   // Snd::Sound::VoiceVirtualToVoiceVirtualHandle — (voice - smVoiceVirtuals
+   // 0x01e2c960) / 200 + 1, same reciprocal-multiply body as steam 0x0073afb0.
+   constexpr uintptr_t voice_to_handle                = 0x0073c0a0;
+   constexpr uintptr_t voice_virtual_release          = 0x005393a0;
+   constexpr uintptr_t gamesound_controllable_stop    = 0x005393d0;
+   constexpr uintptr_t gamesound_stolen_callback      = 0x005394a0;
+
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;
    constexpr uintptr_t load_render_real               = 0x00577c90;

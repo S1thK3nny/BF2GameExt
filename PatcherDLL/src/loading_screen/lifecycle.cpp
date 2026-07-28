@@ -615,8 +615,8 @@ void loading_screen_install(uintptr_t exe_base)
     // extended config readable at all — a build missing any of them would
     // otherwise sit there logging a parse failure on every loading screen while
     // still holding live detours.  This is also the gate that keeps a
-    // half-ported build out: GOG has the hooks but not yet PblConfig::PblConfig,
-    // so it stays on stock behaviour until its table is filled in.
+    // half-ported build out; GOG used to fail it on PblConfig::PblConfig alone,
+    // and passes as of the 2026-07-28 port.
     //
     // No diagnostic here: install runs from dllmain with the exe sections still
     // non-executable, so calling into the game's logger would fault.
