@@ -474,9 +474,39 @@ Note that `End()` already performs `SetAllOn` + `Render` itself, so a hook that
 wants a full bar during a delayed teardown does not need to call `SetAllOn` again
 unless it renders *before* handing off to the original.
 
-`DeleteData` frees the `m_textures[]` entries but leaves `m_models[]` untouched.
-Both are allocated on `__RedTempHeap`, which is released wholesale at level exit,
-so the models are reclaimed there rather than leaked.
+`DeleteData` frees the `m_textures[]` entries but leaves `m_models[]` untouched
+and only nulls `m_skeletons[]`.
+
+> **This is not harmless, and an earlier revision of this document said it was.**
+> Reading a `modl` chunk registers objects in *process-global* renderer lists
+> that far outlive `__RedTempHeap`:
+>
+> ```
+> RedModel::Read -> RedSegment::Read (mt 0x0085b370)
+>   -> pcRedPrimitive::pcRedPrimitive (phantom 0x00884ae0)
+>        -> pcRedVertexFormat::Create (phantom 0x008ed0d0)
+>             operator new(0x28) from __RedCurrHeap, linked into the permanent
+>             RVF-keyed cache s_vertexFormatList
+>        -> vertex buffer create (mt 0x00800f80)
+>             operator new(0x48) from __RedCurrHeap, linked into a permanent list
+> ```
+>
+> The format cache is shared with the whole game, so a game model using the same
+> RVF is handed the load screen's temp-heap object. After
+> `GameMemory::ReleaseTempHeap` paints `0xDE` over the block, that object's
+> `m_pVertexDeclaration` reads `0xDEDEDEDE` and `RedRenderer::pcLoadFormat`
+> (mt `0x008060d0`) passes it to `IDirect3DDevice9::SetVertexDeclaration`
+> (vtbl `+0x15C`) - an access violation inside `d3d9.dll` on the first frame
+> after loading. Putting **any** msh in `load.req` reproduces it.
+>
+> The engine half-anticipated the lifetime problem: `LoadData` clears
+> `RedModel::pc_shareBuffers` so a load-screen model will not sub-allocate out
+> of the shared vertex-buffer pool. But `pcRedPrimitive`'s constructor calls
+> `pcRedVertexFormat::Create` unconditionally, with no equivalent guard.
+>
+> `loading_screen/data_guard.cpp` now reads `modl` and `skel` with
+> `RunTimeHeap` current. `tex_` is deliberately left alone - `DeleteData` does
+> free it, and does so with the temp heap current, so that pairing is correct.
 
 Called via the thunk at `0x0041451f` (unconditional JMP), which is what we hook.
 

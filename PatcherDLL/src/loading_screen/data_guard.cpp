@@ -23,6 +23,49 @@
 //
 // Reimplemented rather than post-clamped because the writes are what corrupt
 // memory; there is nothing to repair after the fact.
+//
+// -----------------------------------------------------------------------------
+// Second job: keep 'modl' / 'skel' off the temp load heap.
+// -----------------------------------------------------------------------------
+// LoadDisplay::LoadData switches __RedCurrHeap to __RedTempHeap for the whole
+// of LoadDataFile, so everything a load.lvl allocates comes off the 2 MB
+// TempLoadHeap.  GameMemory::ReleaseTempHeap then does
+// memset(gTempHeapBlock, 0xDE, 0x200000) and hands the block back.
+//
+// That is fine for anything whose lifetime ends with the heap.  It is not fine
+// for objects that register themselves in *process-global* renderer lists,
+// which is exactly what reading a model does:
+//
+//   RedModel::Read -> RedSegment::Read -> pcRedPrimitive::pcRedPrimitive
+//     -> pcRedVertexFormat::Create   : operator new(0x28) from the current
+//                                      heap, linked into the permanent
+//                                      RVF-sorted cache s_vertexFormatList
+//     -> pcRedVertexBuffer create    : operator new(0x48) from the current
+//                                      heap, linked into a permanent list
+//
+// The format cache is keyed by RVF and shared with the rest of the game, so a
+// *game* model that happens to use the same RVF is handed the load screen's
+// temp-heap object.  After ReleaseTempHeap that object reads 0xDEDEDEDE, and
+// RedRenderer::pcLoadFormat feeds it straight to
+// IDirect3DDevice9::SetVertexDeclaration -> access violation inside d3d9 on
+// the first frame after loading.  Symptom: "adding any msh to load.req crashes
+// the moment the level finishes loading".
+//
+// The engine half-anticipated this: LoadData clears RedModel::pc_shareBuffers
+// so a load-screen model will not sub-allocate out of the shared vertex-buffer
+// pool.  But pcRedPrimitive's constructor calls pcRedVertexFormat::Create
+// unconditionally, with no equivalent guard.
+//
+// Rule applied here: *chunk types DeleteData does not free must not be
+// allocated on the temp heap.*  DeleteData frees m_textures[] (and does it with
+// the temp heap current, so tex_ is correctly paired and is left alone), but it
+// only nulls m_skeletons[] and never touches m_models[] at all.  So modl and
+// skel are read with RunTimeHeap current instead.
+//
+// Cost: those two are then genuinely leaked rather than reclaimed wholesale
+// with the heap - bounded by kMaxModels + kMaxSkeletons per level load.  That
+// is the price of not leaving dangling nodes in global renderer state; every
+// non-load-screen model in the game already allocates this way.
 
 namespace {
 
@@ -70,6 +113,21 @@ int g_droppedModels    = 0;
 int g_droppedTextures  = 0;
 int g_droppedSkeletons = 0;
 
+// Runs one of the chunk readers with RunTimeHeap current, so whatever it links
+// into a global renderer list outlives ReleaseTempHeap.  See the header note.
+// Falls through to a plain call if the heap globals were not resolved - the
+// stock behaviour, i.e. no worse than vanilla.
+void* read_on_runtime_heap(fn_chunk_read_t read, PblFileChunk* child)
+{
+    if (!g_set_current_heap || !g_runtime_heap_idx)
+        return read(child);
+
+    const int prevHeap = g_set_current_heap(*g_runtime_heap_idx);
+    void* const result = read(child);
+    g_set_current_heap(prevHeap);
+    return result;
+}
+
 void __fastcall hooked_load_data_chunk(void* ecx, void* edx, PblFileChunk* chunk)
 {
     (void)edx;
@@ -97,7 +155,7 @@ void __fastcall hooked_load_data_chunk(void* ecx, void* edx, PblFileChunk* chunk
         case kChunkModl: {
             if (*numModels >= kMaxModels) { ++g_droppedModels; break; }
             if (!g_read_model) break;
-            models[(*numModels)++] = g_read_model(&child);
+            models[(*numModels)++] = read_on_runtime_heap(g_read_model, &child);
             break;
         }
         case kChunkTex: {
@@ -116,7 +174,7 @@ void __fastcall hooked_load_data_chunk(void* ecx, void* edx, PblFileChunk* chunk
         case kChunkSkel: {
             if (*numSkeletons >= kMaxSkeletons) { ++g_droppedSkeletons; break; }
             if (!g_read_skeleton) break;
-            skeletons[(*numSkeletons)++] = g_read_skeleton(&child);
+            skeletons[(*numSkeletons)++] = read_on_runtime_heap(g_read_skeleton, &child);
             break;
         }
         case kChunkLoad: {
