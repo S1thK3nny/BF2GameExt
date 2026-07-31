@@ -188,6 +188,21 @@ namespace modtools {
    constexpr uintptr_t voice_to_handle             = 0x0088b5d0;
    constexpr uintptr_t snd_engine_update           = 0x008827b0;
 
+   // Snd::SoundStream::Init() — clears the per-stream fire-and-forget state on
+   // every engine open/close.  It unrolls its six smPlayingProps stores and six
+   // smQueue flag ORs, so slots added by the Audio Stream Limit Increase patches
+   // need the same treatment applied from outside (see audio_stream_limit.cpp).
+   constexpr uintptr_t snd_soundstream_init        = 0x0088a450;
+
+   // The `cmp reg, 6` immediate in Snd::EngineBase::GetFreeStream.  Read at
+   // runtime to tell whether the Audio Stream Limit Increase patch set applied
+   // (it may be off in the INI, or have failed verification).
+   constexpr uintptr_t snd_stream_slot_count_imm8  = 0x008828cd;
+
+   // Snd::EngineBase::GetFreeStream() — the ONLY allocator of a stream slot, and
+   // reached from exactly one caller (the Lua OpenAudioStream callback).
+   constexpr uintptr_t snd_engine_get_free_stream  = 0x008828b0;
+
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
    // Debug and release disagree by -4 from Properties+0x18 onward; see the steam
    // namespace for the release values and loading_screen/shared.hpp for use.
@@ -1048,6 +1063,9 @@ namespace steam {
    constexpr uintptr_t GameSound_play           = 0x00538010;
    constexpr uintptr_t red_pose_convert_skel32  = 0x006ddb30;
    constexpr uintptr_t snd_engine_update        = 0x00734590;
+   constexpr uintptr_t snd_soundstream_init     = 0x00736b40;
+   constexpr uintptr_t snd_stream_slot_count_imm8 = 0x0073409c;
+   constexpr uintptr_t snd_engine_get_free_stream = 0x00734080;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -1498,6 +1516,9 @@ namespace gog {
    constexpr uintptr_t GameSound_play                 = 0x00538d80;
    constexpr uintptr_t red_pose_convert_skel32        = 0x006debd0;
    constexpr uintptr_t snd_engine_update              = 0x00735680;
+   constexpr uintptr_t snd_soundstream_init           = 0x00737c30;
+   constexpr uintptr_t snd_stream_slot_count_imm8     = 0x0073518c;
+   constexpr uintptr_t snd_engine_get_free_stream     = 0x00735170;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;

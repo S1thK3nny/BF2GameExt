@@ -11,6 +11,9 @@ Automatic binary patches applied on load:
 - **DLC Mission Limit** - Increases from 500 to 4096, allowing more mods installed simultaneously
 - **Sound Layer Limit** - Prevents crashes on maps with many flyers or entities using EngineSound
 - **Sound Memory Limit** - Increases sound RAM from 32 MB to 256 MB
+- **Audio Stream Limit** - Raises the number of audio streams that can be open at once from 6 to 12, removing the `Maximum number of open audio streams exceeded` failure when a mission script calls `OpenAudioStream` more than six times. Each stream carries its own ~3.4 MB of decode buffers, so the 12-slot array reserves about 40 MB of *virtual address space*. Turn this off if a heavy mod is running out of address space. INI: `[LimitIncreases] AudioStreamLimit=1`
+
+  **Caveat:** the shared fire-and-forget request pool stays at 24 entries, so a script queueing sounds on all 12 streams at once can still hit that older limit. Exceeding it drops the queued request rather than failing the stream.
 - **Particle Cache** - Increases the cached particle limit from 300 to 1200
 - **Object Limit** - Doubles the active object table from 1024 to 2048 slots, raising how many objects a map can have alive at once
 - **Combo Animation Limit** - Increases from 30 to 90 entries, with an expanded animation index range

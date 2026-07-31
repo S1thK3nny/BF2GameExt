@@ -49,6 +49,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Increase network timer count",                        "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
    INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
+   INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise the concurrent OpenAudioStream limit from 6 to 12. Each stream needs 3.4 MB of contiguous buffers, so this reserves 40 MB of the 32-bit process's 2 GB of virtual address space (RAM use is lower - pages are only committed as streams are actually used)", "Audio Stream Limit Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
 
    // [Fixes] — bug-fix patches

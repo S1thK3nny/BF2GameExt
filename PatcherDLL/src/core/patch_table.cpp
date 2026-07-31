@@ -60,6 +60,32 @@ static const uint32_t modtools_sCaches_va = game_addrs::modtools::s_caches;
 static const uint32_t steam_sCaches_va = game_addrs::steam::s_caches;
 static const uint32_t gog_sCaches_va = game_addrs::gog::s_caches;
 
+// Audio stream limit increase: 6 -> AUDIO_STREAM_SLOTS concurrent OpenAudioStream
+// handles.  Snd::Stream is 0x3611BC bytes (mostly the 8 stream buffers plus the
+// 3x8 ADPCM packet buffers, 110592 bytes each), so each extra slot costs ~3.4 MB.
+// The stock 6-slot BSS array stays reserved in the exe's image either way, but
+// is never faulted in once smStreams points here, so the extra *committed* cost
+// is (AUDIO_STREAM_SLOTS - 6) slots even though the reservation is all of them.
+char snd_stream_storage[AUDIO_STREAM_SLOTS * AUDIO_STREAM_SIZE] = {};
+static const uint32_t snd_stream_storage_address = (uint32_t)&snd_stream_storage[0];
+
+// Snd::SoundStream's per-slot arrays, relocated so slot 6+ has somewhere to live.
+// smQueue elements are PblListDoubleSorted (12 bytes); the game's CRT vector
+// ctor/dtor iterators construct them, so they only need the space.
+static char snd_playing_props_storage[AUDIO_STREAM_SLOTS * 4] = {};
+static char snd_stream_count_storage[AUDIO_STREAM_SLOTS * 4] = {};
+static char snd_playing_pos_storage[AUDIO_STREAM_SLOTS * 12] = {};
+static char snd_playing_vel_storage[AUDIO_STREAM_SLOTS * 12] = {};
+static const uint32_t snd_playing_props_address = (uint32_t)&snd_playing_props_storage[0];
+static const uint32_t snd_stream_count_address  = (uint32_t)&snd_stream_count_storage[0];
+static const uint32_t snd_playing_pos_address   = (uint32_t)&snd_playing_pos_storage[0];
+static const uint32_t snd_playing_vel_address   = (uint32_t)&snd_playing_vel_storage[0];
+
+char snd_stream_queue_storage[AUDIO_STREAM_SLOTS * 12] = {};
+static const uint32_t snd_stream_queue_address = (uint32_t)&snd_stream_queue_storage[0];
+
+char* audio_stream_playing_props() { return snd_playing_props_storage; }
+
 // FNV-1a hash with forced lowercase — matches PblHash::calcHash in the game engine.
 static uint32_t pbl_hash(const char* str)
 {
@@ -480,6 +506,90 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x006c23b1, 0x00ba45cc, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],ECX operand -> 4-byte NOP
                   },
             },
+            // Raise the concurrent Lua OpenAudioStream limit from 6 to
+            // AUDIO_STREAM_SLOTS.  Snd::EngineBase::smStreams is a *pointer* to a
+            // 6-element BSS array of 0x3611BC-byte Snd::Stream objects, so the
+            // array itself relocates cleanly to a DLL buffer; the engine's own
+            // ctor/dtor loops in EngineBase::Open/Close then construct and destroy
+            // all AUDIO_STREAM_SLOTS of them.  Most loops express the limit as a
+            // byte bound (6 * 0x3611BC = 0x1446A68) rather than a count.
+            //
+            // Snd::SoundStream keeps five arrays indexed by the same slot index
+            // (smPlayingProps / smCount / smPlayingPos / smPlayingVel / smQueue),
+            // packed into BSS with no slack, so those relocate alongside it -
+            // otherwise slot 6+ would write over its neighbour.
+            //
+            // The `cmp reg, 6` sites listed here are the stream-index bounds only.
+            // Several neighbouring `cmp reg, 6` / `cmp reg, 5` in the same Lua
+            // callbacks are lua_gettop() argument-count checks and must NOT move.
+            patch_set{
+               .name = "Audio Stream Limit Increase",
+               .patches =
+                  {
+                     patch{0x482D0D, 0xEEA618, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+
+                     patch{0x34F066, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0074F064
+                     patch{0x356EC2, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00756EC1
+                     patch{0x482846, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00882844
+                     patch{0x48297F, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0088297D
+                     patch{0x4829EE, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x008829EC
+                     patch{0x482BC6, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00882BC4
+                     patch{0x482D70, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00882D6E
+                     patch{0x4861C8, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x008861C6
+
+                     patch{0x7EB8F, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // StopAudioStream: stream handle bound
+                     patch{0x7F0F5, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // AudioStreamAppendSegments: handle bound (warn path)
+                     patch{0x7F126, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // AudioStreamAppendSegments: handle bound
+                     patch{0x8160F, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // AudioStreamComplete: stream scan bound
+                     patch{0x4828CD, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // EngineBase::GetFreeStream
+                     patch{0x48B044, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::UpdateAll
+                     // SoundStream::StopAll counts *bytes* into smQueue and compares with
+                     // `cmp reg, 0x48` — opcode 83, whose imm8 is SIGN-extended.  12 slots
+                     // would need 0x90, which reads back as -112 and makes the unsigned JB
+                     // loop forever off the end of the array.  The counter is never
+                     // dereferenced (smQueue/smCount have their own pointers), so count
+                     // slots instead of bytes and both immediates stay small.
+                     patch{0x48A410, 0x0C, 1, {.file_offset = true, .values_are_8bit = true}},  // SoundStream::StopAll: ADD EBP,0xC -> ADD EBP,1
+                     patch{0x48A419, 0x48, AUDIO_STREAM_SLOTS, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::StopAll: CMP EBP,72 -> CMP EBP,slots
+
+                     patch{0x6225AB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
+                     patch{0x6280C6, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
+
+                     patch{0x48A459, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x48A45F, 0x233A134, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
+                     patch{0x48A465, 0x233A138, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
+                     patch{0x48A46B, 0x233A13C, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
+                     patch{0x48A471, 0x233A140, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
+                     patch{0x48A477, 0x233A144, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
+                     patch{0x48ADEA, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x48AE3A, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x48AF3E, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+
+                     patch{0x489BF7, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x489C6F, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x48A3B5, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x48A565, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x48A5BA, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x48A5C7, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x48A608, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+
+                     patch{0x48ADFA, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x48AE64, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x48AF64, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x48AFE8, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+
+                     patch{0x489C3B, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x489C42, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x48A3BA, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x48A4FD, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x6225AF, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x6280CA, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+
+                     patch{0x48AE01, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x48AE48, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x48AF44, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                  },
+            },
 
          },
    },
@@ -859,6 +969,89 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x00639e68, 0x40, 0x66, {.values_are_8bit = true}},   // INC EAX -> NOP (66 90)
                      patch{0x00639e69, 0xa3, 0x90, {.values_are_8bit = true}},
                      patch{0x00639e6a, 0x01eb051c, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],EAX operand -> 4-byte NOP
+                  },
+            },
+            // Raise the concurrent Lua OpenAudioStream limit from 6 to
+            // AUDIO_STREAM_SLOTS.  Snd::EngineBase::smStreams is a *pointer* to a
+            // 6-element BSS array of 0x3611BC-byte Snd::Stream objects, so the
+            // array itself relocates cleanly to a DLL buffer; the engine's own
+            // ctor/dtor loops in EngineBase::Open/Close then construct and destroy
+            // all AUDIO_STREAM_SLOTS of them.  Most loops express the limit as a
+            // byte bound (6 * 0x3611BC = 0x1446A68) rather than a count.
+            //
+            // Snd::SoundStream keeps five arrays indexed by the same slot index
+            // (smPlayingProps / smCount / smPlayingPos / smPlayingVel / smQueue),
+            // packed into BSS with no slack, so those relocate alongside it -
+            // otherwise slot 6+ would write over its neighbour.
+            //
+            // The `cmp reg, 6` sites listed here are the stream-index bounds only.
+            // Several neighbouring `cmp reg, 6` / `cmp reg, 5` in the same Lua
+            // callbacks are lua_gettop() argument-count checks and must NOT move.
+            patch_set{
+               .name = "Audio Stream Limit Increase",
+               .patches =
+                  {
+                     patch{0x3349BC, 0x9E40C0, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+
+                     patch{0x138C64, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00539862
+                     patch{0x3320DB, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00732CD9
+                     patch{0x334476, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00735074
+                     patch{0x3344E0, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x007350DE
+                     patch{0x33460A, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00735208
+                     patch{0x334A0F, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0073560D
+                     patch{0x334B20, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0073571E
+
+                     patch{0x19BEB3, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // StopAudioStream: stream handle bound
+                     patch{0x19C23F, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // PlayAudioStreamUsingProperties: handle bound
+                     patch{0x19C475, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // AudioStreamComplete: stream scan bound
+                     patch{0x33458C, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // EngineBase::GetFreeStream
+                     patch{0x337E2D, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::UpdateAll
+                     // SoundStream::StopAll counts *bytes* into smQueue and compares with
+                     // `cmp reg, 0x48` — opcode 83, whose imm8 is SIGN-extended.  12 slots
+                     // would need 0x90, which reads back as -112 and makes the unsigned JB
+                     // loop forever off the end of the array.  The counter is never
+                     // dereferenced (smQueue/smCount have their own pointers), so count
+                     // slots instead of bytes and both immediates stay small.
+                     patch{0x337CD3, 0x0C, 1, {.file_offset = true, .values_are_8bit = true}},  // SoundStream::StopAll: ADD EBX,0xC -> ADD EBX,1
+                     patch{0x337CDF, 0x48, AUDIO_STREAM_SLOTS, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::StopAll: CMP EBX,72 -> CMP EBX,slots
+
+                     patch{0xAD68, 5, 11, {.file_offset = true}}, // smPlayingPos vector ctor count
+                     patch{0xAD88, 5, 11, {.file_offset = true}}, // smPlayingVel vector ctor count
+                     patch{0xADBB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
+                     patch{0x36A9F6, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
+
+                     patch{0x336D66, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336DD1, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336DD8, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336E1B, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336FEB, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x337C07, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+
+                     patch{0x337074, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x33707E, 0x1E2AC5C, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
+                     patch{0x337088, 0x1E2AC60, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
+                     patch{0x337092, 0x1E2AC64, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
+                     patch{0x33709C, 0x1E2AC68, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
+                     patch{0x3370A6, 0x1E2AC6C, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
+                     patch{0x337551, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x3375A8, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x337D69, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+
+                     patch{0xAD63, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x337567, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x3375B4, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x337D6F, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+
+                     patch{0xADBF, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x336D00, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x336FBD, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x337C12, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x36A9FA, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+
+                     patch{0xAD83, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x33755F, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x3375AE, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x337D5F, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
                   },
             },
 
@@ -1244,6 +1437,89 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x00638dc8, 0x40, 0x66, {.values_are_8bit = true}},   // INC EAX -> NOP (66 90)
                      patch{0x00638dc9, 0xa3, 0x90, {.values_are_8bit = true}},
                      patch{0x00638dca, 0x01eaf068, 0x00401f0f, {.expected_is_va = true}}, // MOV [count],EAX operand -> 4-byte NOP
+                  },
+            },
+            // Raise the concurrent Lua OpenAudioStream limit from 6 to
+            // AUDIO_STREAM_SLOTS.  Snd::EngineBase::smStreams is a *pointer* to a
+            // 6-element BSS array of 0x3611BC-byte Snd::Stream objects, so the
+            // array itself relocates cleanly to a DLL buffer; the engine's own
+            // ctor/dtor loops in EngineBase::Open/Close then construct and destroy
+            // all AUDIO_STREAM_SLOTS of them.  Most loops express the limit as a
+            // byte bound (6 * 0x3611BC = 0x1446A68) rather than a count.
+            //
+            // Snd::SoundStream keeps five arrays indexed by the same slot index
+            // (smPlayingProps / smCount / smPlayingPos / smPlayingVel / smQueue),
+            // packed into BSS with no slack, so those relocate alongside it -
+            // otherwise slot 6+ would write over its neighbour.
+            //
+            // The `cmp reg, 6` sites listed here are the stream-index bounds only.
+            // Several neighbouring `cmp reg, 6` / `cmp reg, 5` in the same Lua
+            // callbacks are lua_gettop() argument-count checks and must NOT move.
+            patch_set{
+               .name = "Audio Stream Limit Increase",
+               .patches =
+                  {
+                     patch{0x3338CC, 0x9E2C20, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+
+                     patch{0x137EF4, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00538AF2
+                     patch{0x33100B, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00731C09
+                     patch{0x333386, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00733F84
+                     patch{0x3333F0, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00733FEE
+                     patch{0x33351A, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00734118
+                     patch{0x33391F, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0073451D
+                     patch{0x333A30, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0073462E
+
+                     patch{0x19AF03, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // StopAudioStream: stream handle bound
+                     patch{0x19B28F, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // PlayAudioStreamUsingProperties: handle bound
+                     patch{0x19B4C5, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // AudioStreamComplete: stream scan bound
+                     patch{0x33349C, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // EngineBase::GetFreeStream
+                     patch{0x336D3D, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::UpdateAll
+                     // SoundStream::StopAll counts *bytes* into smQueue and compares with
+                     // `cmp reg, 0x48` — opcode 83, whose imm8 is SIGN-extended.  12 slots
+                     // would need 0x90, which reads back as -112 and makes the unsigned JB
+                     // loop forever off the end of the array.  The counter is never
+                     // dereferenced (smQueue/smCount have their own pointers), so count
+                     // slots instead of bytes and both immediates stay small.
+                     patch{0x336BE3, 0x0C, 1, {.file_offset = true, .values_are_8bit = true}},  // SoundStream::StopAll: ADD EBX,0xC -> ADD EBX,1
+                     patch{0x336BEF, 0x48, AUDIO_STREAM_SLOTS, {.file_offset = true, .values_are_8bit = true}}, // SoundStream::StopAll: CMP EBX,72 -> CMP EBX,slots
+
+                     patch{0xAD68, 5, 11, {.file_offset = true}}, // smPlayingPos vector ctor count
+                     patch{0xAD88, 5, 11, {.file_offset = true}}, // smPlayingVel vector ctor count
+                     patch{0xADBB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
+                     patch{0x369746, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
+
+                     patch{0x335C76, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x335CE1, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x335CE8, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x335D2B, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x335EFB, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336B17, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+
+                     patch{0x335F84, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x335F8E, 0x1E297BC, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
+                     patch{0x335F98, 0x1E297C0, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
+                     patch{0x335FA2, 0x1E297C4, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
+                     patch{0x335FAC, 0x1E297C8, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
+                     patch{0x335FB6, 0x1E297CC, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
+                     patch{0x336461, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x3364B8, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x336C79, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+
+                     patch{0xAD63, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x336477, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x3364C4, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x336C7F, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+
+                     patch{0xADBF, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x335C10, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x335ECD, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x336B22, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x36974A, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+
+                     patch{0xAD83, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x33646F, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x3364BE, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x336C6F, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
                   },
             },
 

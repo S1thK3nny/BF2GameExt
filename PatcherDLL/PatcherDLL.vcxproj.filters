@@ -160,6 +160,9 @@
     <ClInclude Include="src\util\error_dialog_fix.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\audio_stream_limit.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\enable_sound_warnings.hpp">
       <Filter>util</Filter>
     </ClInclude>
@@ -295,6 +298,9 @@
       <Filter>controller</Filter>
     </ClCompile>
     <ClCompile Include="src\util\error_dialog_fix.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\audio_stream_limit.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\util\enable_sound_warnings.cpp">

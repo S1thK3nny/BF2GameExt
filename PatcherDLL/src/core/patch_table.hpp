@@ -55,6 +55,20 @@ extern char g_sCaches_storage[];
 // The RTTI class name differs per build (different BSS layouts after mIdMap).
 void init_object_limit_sentinel(const char* rtti_class_name);
 
+// Concurrent Lua OpenAudioStream slots, raised from the stock 6 by the "Audio
+// Stream Limit Increase" binary patches.  Each slot is a 0x3611BC-byte
+// Snd::Stream living in snd_stream_storage, which Snd::EngineBase::smStreams is
+// repointed at.  Raising this costs ~3.4 MB of address space per extra slot.
+static constexpr uint32_t AUDIO_STREAM_SLOTS = 12;
+static constexpr uint32_t AUDIO_STREAM_SLOTS_STOCK = 6;
+static constexpr uint32_t AUDIO_STREAM_SIZE = 0x3611BC; // sizeof(Snd::Stream)
+
+extern char snd_stream_storage[];
+extern char snd_stream_queue_storage[]; // PblListDoubleSorted[AUDIO_STREAM_SLOTS], 12 bytes each
+
+// smPlayingProps[], relocated alongside the stream array.
+char* audio_stream_playing_props();
+
 // Relocated EntityEx::mIdMap buffer (N=2048).
 // Layout: [uint32 count] [uint32 keys[2048]] [uint32 values[2048]]
 // values[i] are EntityEx* pointers (0 = empty slot).

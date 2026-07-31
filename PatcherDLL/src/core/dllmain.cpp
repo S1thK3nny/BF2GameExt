@@ -28,6 +28,7 @@
 #include "shell/dlc_mission_init_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
+#include "util/audio_stream_limit.hpp"
 #include "util/enable_sound_warnings.hpp"
 #include "util/error_dialog_fix.hpp"
 #include "util/game_logging.hpp"
@@ -235,6 +236,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
+   audio_stream_limit_install(exe_base);
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
    soldier_override_texture_install(exe_base);
