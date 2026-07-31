@@ -56,6 +56,16 @@ static bool verify_patch(const patch& patch, const uintptr_t exe_base,
    return memeq(patch_address, cmp_size, &expected_value, cmp_size);
 }
 
+// The value a patch actually writes. A patch with a replacement_base is
+// late-bound: its buffer is allocated by the set's prepare(), so the base is
+// only known now, and replacement_value is an offset into it.
+static uint32_t patch_replacement(const patch& patch)
+{
+   if (patch.replacement_base) return *patch.replacement_base + patch.replacement_value;
+
+   return patch.replacement_value;
+}
+
 // Write a patch's replacement value (caller must have verify_patch'd it first).
 static void write_patch(const patch& patch, const uintptr_t exe_base,
                         const slim_vector<section_info>& sections)
@@ -64,9 +74,10 @@ static void write_patch(const patch& patch, const uintptr_t exe_base,
                             ? resolve_file_address(patch.address, sections)
                             : (char*)resolve(exe_base, patch.address);
 
-   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(patch.replacement_value);
+   const uint32_t replacement_value = patch_replacement(patch);
+   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(replacement_value);
 
-   memcpy(patch_address, &patch.replacement_value, cmp_size);
+   memcpy(patch_address, &replacement_value, cmp_size);
 }
 
 // patch_set → INI section+key mapping now lives in ini_registry.hpp
@@ -113,6 +124,16 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
          auto [ini_section, ini_key] = ini_lookup_patch_set(set.name);
          if (ini_section && ini_key && !cfg.get_bool(ini_section, ini_key, true)) {
             log.printf("Skipping patch set (disabled in INI): %s\n", set.name);
+            continue;
+         }
+
+         // Allocate any late-bound relocation buffers this set needs. Deferred
+         // until after the INI check on purpose: a buffer named directly by the
+         // table has to be a DLL global, and a DLL global costs its address space
+         // at load whether the set is enabled or not.
+         if (set.prepare && !set.prepare()) {
+            log.printf("Skipping patch set (prepare failed, likely out of address space): %s\n",
+                       set.name);
             continue;
          }
 

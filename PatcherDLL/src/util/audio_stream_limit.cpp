@@ -130,8 +130,11 @@ void audio_stream_limit_install(uintptr_t exe_base)
    if (!g_addr->snd_soundstream_init || !g_addr->snd_stream_slot_count_imm8) return;
 
    // Only hook if the patch set actually landed — it is INI-toggleable, and
-   // apply_patches skips a whole set whose sites fail verification.  Without it
-   // the game still owns the original 6-slot arrays and our buffers are unused.
+   // apply_patches skips a whole set whose sites fail verification or whose
+   // prepare() could not allocate.  Without it the game still owns the original
+   // 6-slot arrays, and our buffers are null because prepare() never ran.
+   if (!snd_stream_storage || !snd_stream_queue_storage) return;
+
    const uint8_t slots =
       *reinterpret_cast<uint8_t*>(resolve(exe_base, g_addr->snd_stream_slot_count_imm8));
    if (slots != AUDIO_STREAM_SLOTS) return;

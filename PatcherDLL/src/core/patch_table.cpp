@@ -62,29 +62,75 @@ static const uint32_t gog_sCaches_va = game_addrs::gog::s_caches;
 
 // Audio stream limit increase: 6 -> AUDIO_STREAM_SLOTS concurrent OpenAudioStream
 // handles.  Snd::Stream is 0x3611BC bytes (mostly the 8 stream buffers plus the
-// 3x8 ADPCM packet buffers, 110592 bytes each), so each extra slot costs ~3.4 MB.
-// The stock 6-slot BSS array stays reserved in the exe's image either way, but
-// is never faulted in once smStreams points here, so the extra *committed* cost
-// is (AUDIO_STREAM_SLOTS - 6) slots even though the reservation is all of them.
-char snd_stream_storage[AUDIO_STREAM_SLOTS * AUDIO_STREAM_SIZE] = {};
-static const uint32_t snd_stream_storage_address = (uint32_t)&snd_stream_storage[0];
+// 3x8 ADPCM packet buffers, 110592 bytes each), so each extra slot costs ~3.4 MB
+// and the whole array is ~40 MB of a 32-bit process's 2 GB.
+//
+// That is far too much to spend unconditionally, and a DLL global would: .bss is
+// part of SizeOfImage, so the loader reserves it before any of our code runs and
+// long before the INI is read.  Instead the buffers are VirtualAlloc'd by
+// audio_stream_prepare() below, which apply_patches calls only after the set's
+// INI toggle passes — so AudioStreamLimit=0 really does cost zero address space.
+//
+// The base addresses are therefore not known at static-init time.  The table
+// entries carry `&<name>_address` in patch::replacement_base and an offset in
+// replacement_value, and apply_patches resolves the sum at write time.
+char* snd_stream_storage = nullptr;
+char* snd_stream_queue_storage = nullptr;
+static char* snd_playing_props_storage = nullptr;
 
-// Snd::SoundStream's per-slot arrays, relocated so slot 6+ has somewhere to live.
-// smQueue elements are PblListDoubleSorted (12 bytes); the game's CRT vector
-// ctor/dtor iterators construct them, so they only need the space.
-static char snd_playing_props_storage[AUDIO_STREAM_SLOTS * 4] = {};
-static char snd_stream_count_storage[AUDIO_STREAM_SLOTS * 4] = {};
-static char snd_playing_pos_storage[AUDIO_STREAM_SLOTS * 12] = {};
-static char snd_playing_vel_storage[AUDIO_STREAM_SLOTS * 12] = {};
-static const uint32_t snd_playing_props_address = (uint32_t)&snd_playing_props_storage[0];
-static const uint32_t snd_stream_count_address  = (uint32_t)&snd_stream_count_storage[0];
-static const uint32_t snd_playing_pos_address   = (uint32_t)&snd_playing_pos_storage[0];
-static const uint32_t snd_playing_vel_address   = (uint32_t)&snd_playing_vel_storage[0];
-
-char snd_stream_queue_storage[AUDIO_STREAM_SLOTS * 12] = {};
-static const uint32_t snd_stream_queue_address = (uint32_t)&snd_stream_queue_storage[0];
+static uint32_t snd_stream_storage_address = 0;
+static uint32_t snd_playing_props_address  = 0;
+static uint32_t snd_stream_count_address   = 0;
+static uint32_t snd_playing_pos_address    = 0;
+static uint32_t snd_playing_vel_address    = 0;
+static uint32_t snd_stream_queue_address   = 0;
 
 char* audio_stream_playing_props() { return snd_playing_props_storage; }
+
+// One reservation carved into the stream array plus Snd::SoundStream's five
+// per-slot arrays.  The stream array goes first so it inherits VirtualAlloc's
+// 64 KB-aligned base, matching the alignment the exe's own BSS array had.
+static bool audio_stream_prepare()
+{
+   if (snd_stream_storage) return true; // already prepared
+
+   constexpr uint32_t streams_size = AUDIO_STREAM_SLOTS * AUDIO_STREAM_SIZE;
+   constexpr uint32_t props_size   = AUDIO_STREAM_SLOTS * 4;
+   constexpr uint32_t count_size   = AUDIO_STREAM_SLOTS * 4;
+   constexpr uint32_t pos_size     = AUDIO_STREAM_SLOTS * 12;
+   constexpr uint32_t vel_size     = AUDIO_STREAM_SLOTS * 12;
+   constexpr uint32_t queue_size   = AUDIO_STREAM_SLOTS * 12;
+   constexpr uint32_t total =
+      streams_size + props_size + count_size + pos_size + vel_size + queue_size;
+
+   static_assert(streams_size % 4 == 0, "arrays after the streams must stay dword-aligned");
+
+   char* block = (char*)VirtualAlloc(nullptr, total, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+   if (!block) return false; // let apply_patches skip the set rather than run half-patched
+
+   char* cursor = block;
+   auto carve = [&cursor](uint32_t size) {
+      char* p = cursor;
+      cursor += size;
+      return p;
+   };
+
+   snd_stream_storage       = carve(streams_size);
+   snd_playing_props_storage = carve(props_size);
+   char* count_storage      = carve(count_size);
+   char* pos_storage        = carve(pos_size);
+   char* vel_storage        = carve(vel_size);
+   snd_stream_queue_storage = carve(queue_size);
+
+   snd_stream_storage_address = (uint32_t)(uintptr_t)snd_stream_storage;
+   snd_playing_props_address  = (uint32_t)(uintptr_t)snd_playing_props_storage;
+   snd_stream_count_address   = (uint32_t)(uintptr_t)count_storage;
+   snd_playing_pos_address    = (uint32_t)(uintptr_t)pos_storage;
+   snd_playing_vel_address    = (uint32_t)(uintptr_t)vel_storage;
+   snd_stream_queue_address   = (uint32_t)(uintptr_t)snd_stream_queue_storage;
+
+   return true;
+}
 
 // FNV-1a hash with forced lowercase — matches PblHash::calcHash in the game engine.
 static uint32_t pbl_hash(const char* str)
@@ -524,9 +570,10 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             // callbacks are lua_gettop() argument-count checks and must NOT move.
             patch_set{
                .name = "Audio Stream Limit Increase",
+               .prepare = audio_stream_prepare,
                .patches =
                   {
-                     patch{0x482D0D, 0xEEA618, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+                     patch{0x482D0D, 0xEEA618, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_storage_address}, // EngineBase::Open: smStreams = smStreamStorage
 
                      patch{0x34F066, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x0074F064
                      patch{0x356EC2, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00756EC1
@@ -555,39 +602,39 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x6225AB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
                      patch{0x6280C6, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
 
-                     patch{0x48A459, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x48A45F, 0x233A134, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
-                     patch{0x48A465, 0x233A138, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
-                     patch{0x48A46B, 0x233A13C, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
-                     patch{0x48A471, 0x233A140, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
-                     patch{0x48A477, 0x233A144, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
-                     patch{0x48ADEA, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x48AE3A, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x48AF3E, 0x233A130, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x48A459, 0x233A130, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x48A45F, 0x233A134, 4, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[1]
+                     patch{0x48A465, 0x233A138, 8, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[2]
+                     patch{0x48A46B, 0x233A13C, 12, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[3]
+                     patch{0x48A471, 0x233A140, 16, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[4]
+                     patch{0x48A477, 0x233A144, 20, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[5]
+                     patch{0x48ADEA, 0x233A130, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x48AE3A, 0x233A130, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x48AF3E, 0x233A130, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
 
-                     patch{0x489BF7, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x489C6F, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x48A3B5, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x48A565, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x48A5BA, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x48A5C7, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x48A608, 0x233A148, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x489BF7, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x489C6F, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x48A3B5, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x48A565, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x48A5BA, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x48A5C7, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x48A608, 0x233A148, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
 
-                     patch{0x48ADFA, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x48AE64, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x48AF64, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x48AFE8, 0x233A1A8, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0x48ADFA, 0x233A1A8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x48AE64, 0x233A1A8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x48AF64, 0x233A1A8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x48AFE8, 0x233A1A8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
 
-                     patch{0x489C3B, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x489C42, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x48A3BA, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x48A4FD, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x6225AF, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x6280CA, 0x233A1F0, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0x489C3B, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x489C42, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x48A3BA, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x48A4FD, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x6225AF, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x6280CA, 0x233A1F0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
 
-                     patch{0x48AE01, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x48AE48, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x48AF44, 0x233A720, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0x48AE01, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x48AE48, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x48AF44, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
                   },
             },
 
@@ -989,9 +1036,10 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             // callbacks are lua_gettop() argument-count checks and must NOT move.
             patch_set{
                .name = "Audio Stream Limit Increase",
+               .prepare = audio_stream_prepare,
                .patches =
                   {
-                     patch{0x3349BC, 0x9E40C0, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+                     patch{0x3349BC, 0x9E40C0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_storage_address}, // EngineBase::Open: smStreams = smStreamStorage
 
                      patch{0x138C64, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00539862
                      patch{0x3320DB, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00732CD9
@@ -1020,38 +1068,38 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0xADBB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
                      patch{0x36A9F6, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
 
-                     patch{0x336D66, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x336DD1, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x336DD8, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x336E1B, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x336FEB, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x337C07, 0x1E2AC40, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x336D66, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x336DD1, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x336DD8, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x336E1B, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x336FEB, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x337C07, 0x1E2AC40, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
 
-                     patch{0x337074, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x33707E, 0x1E2AC5C, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
-                     patch{0x337088, 0x1E2AC60, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
-                     patch{0x337092, 0x1E2AC64, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
-                     patch{0x33709C, 0x1E2AC68, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
-                     patch{0x3370A6, 0x1E2AC6C, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
-                     patch{0x337551, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x3375A8, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x337D69, 0x1E2AC58, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x337074, 0x1E2AC58, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x33707E, 0x1E2AC5C, 4, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[1]
+                     patch{0x337088, 0x1E2AC60, 8, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[2]
+                     patch{0x337092, 0x1E2AC64, 12, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[3]
+                     patch{0x33709C, 0x1E2AC68, 16, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[4]
+                     patch{0x3370A6, 0x1E2AC6C, 20, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[5]
+                     patch{0x337551, 0x1E2AC58, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x3375A8, 0x1E2AC58, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x337D69, 0x1E2AC58, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
 
-                     patch{0xAD63, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x337567, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x3375B4, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x337D6F, 0x1E2AC70, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0xAD63, 0x1E2AC70, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x337567, 0x1E2AC70, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x3375B4, 0x1E2AC70, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x337D6F, 0x1E2AC70, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
 
-                     patch{0xADBF, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x336D00, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x336FBD, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x337C12, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x36A9FA, 0x1E2ACB8, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0xADBF, 0x1E2ACB8, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x336D00, 0x1E2ACB8, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x336FBD, 0x1E2ACB8, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x337C12, 0x1E2ACB8, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x36A9FA, 0x1E2ACB8, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
 
-                     patch{0xAD83, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x33755F, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x3375AE, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x337D5F, 0x1E2B1E0, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0xAD83, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x33755F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x3375AE, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x337D5F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                   },
             },
 
@@ -1457,9 +1505,10 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             // callbacks are lua_gettop() argument-count checks and must NOT move.
             patch_set{
                .name = "Audio Stream Limit Increase",
+               .prepare = audio_stream_prepare,
                .patches =
                   {
-                     patch{0x3338CC, 0x9E2C20, snd_stream_storage_address, {.file_offset = true, .expected_is_va = true}}, // EngineBase::Open: smStreams = smStreamStorage
+                     patch{0x3338CC, 0x9E2C20, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_storage_address}, // EngineBase::Open: smStreams = smStreamStorage
 
                      patch{0x137EF4, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00538AF2
                      patch{0x33100B, 0x1446A68, 0x288D4D0, {.file_offset = true}}, // stream array byte bound @ 0x00731C09
@@ -1488,38 +1537,38 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0xADBB, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector ctor count
                      patch{0x369746, 6, 12, {.file_offset = true, .values_are_8bit = true}}, // smQueue vector dtor count
 
-                     patch{0x335C76, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x335CE1, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x335CE8, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x335D2B, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x335EFB, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
-                     patch{0x336B17, 0x1E297A0, snd_stream_count_address, {.file_offset = true, .expected_is_va = true}}, // smCount[0]
+                     patch{0x335C76, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x335CE1, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x335CE8, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x335D2B, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x335EFB, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
+                     patch{0x336B17, 0x1E297A0, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_count_address}, // smCount[0]
 
-                     patch{0x335F84, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x335F8E, 0x1E297BC, snd_playing_props_address + 4, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[1]
-                     patch{0x335F98, 0x1E297C0, snd_playing_props_address + 8, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[2]
-                     patch{0x335FA2, 0x1E297C4, snd_playing_props_address + 12, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[3]
-                     patch{0x335FAC, 0x1E297C8, snd_playing_props_address + 16, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[4]
-                     patch{0x335FB6, 0x1E297CC, snd_playing_props_address + 20, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[5]
-                     patch{0x336461, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x3364B8, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
-                     patch{0x336C79, 0x1E297B8, snd_playing_props_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingProps[0]
+                     patch{0x335F84, 0x1E297B8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x335F8E, 0x1E297BC, 4, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[1]
+                     patch{0x335F98, 0x1E297C0, 8, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[2]
+                     patch{0x335FA2, 0x1E297C4, 12, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[3]
+                     patch{0x335FAC, 0x1E297C8, 16, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[4]
+                     patch{0x335FB6, 0x1E297CC, 20, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[5]
+                     patch{0x336461, 0x1E297B8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x3364B8, 0x1E297B8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
+                     patch{0x336C79, 0x1E297B8, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_props_address}, // smPlayingProps[0]
 
-                     patch{0xAD63, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x336477, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x3364C4, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
-                     patch{0x336C7F, 0x1E297D0, snd_playing_pos_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingPos[0]
+                     patch{0xAD63, 0x1E297D0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x336477, 0x1E297D0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x3364C4, 0x1E297D0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                     patch{0x336C7F, 0x1E297D0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
 
-                     patch{0xADBF, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x335C10, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x335ECD, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x336B22, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
-                     patch{0x36974A, 0x1E29818, snd_stream_queue_address, {.file_offset = true, .expected_is_va = true}}, // smQueue[0]
+                     patch{0xADBF, 0x1E29818, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x335C10, 0x1E29818, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x335ECD, 0x1E29818, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x336B22, 0x1E29818, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
+                     patch{0x36974A, 0x1E29818, 0, {.file_offset = true, .expected_is_va = true}, &snd_stream_queue_address}, // smQueue[0]
 
-                     patch{0xAD83, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x33646F, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x3364BE, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
-                     patch{0x336C6F, 0x1E29D40, snd_playing_vel_address, {.file_offset = true, .expected_is_va = true}}, // smPlayingVel[0]
+                     patch{0xAD83, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x33646F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x3364BE, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                     patch{0x336C6F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                   },
             },
 

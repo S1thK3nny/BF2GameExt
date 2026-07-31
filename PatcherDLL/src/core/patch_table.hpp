@@ -23,10 +23,28 @@ struct patch {
    uint32_t expected_value = 0;
    uint32_t replacement_value = 0;
    patch_flags flags = {};
+
+   /// Late-bound replacement.  When set, the value written is
+   /// `*replacement_base + replacement_value`, resolved at apply time instead of
+   /// at static-init time, and replacement_value is read as an offset into that
+   /// buffer.  This is what lets a relocation buffer be allocated only if its
+   /// patch set is actually enabled — a buffer named directly by the table has to
+   /// be a DLL global, and a DLL global reserves its address space at load
+   /// whether the set applies or not.  See patch_set::prepare.
+   const uint32_t* replacement_base = nullptr;
 };
+
+/// Runs after the INI toggle passes but before the set is verified or written.
+/// Returning false skips the set exactly as a site mismatch would, so a failed
+/// allocation degrades to "feature off" instead of taking the process down.
+using patch_prepare_fn = bool (*)();
 
 struct patch_set {
    const char* name = "";
+
+   /// Optional; see patch_prepare_fn. Sets without late-bound buffers leave it null.
+   patch_prepare_fn prepare = nullptr;
+
    slim_vector<patch> patches;
 };
 
@@ -63,8 +81,11 @@ static constexpr uint32_t AUDIO_STREAM_SLOTS = 12;
 static constexpr uint32_t AUDIO_STREAM_SLOTS_STOCK = 6;
 static constexpr uint32_t AUDIO_STREAM_SIZE = 0x3611BC; // sizeof(Snd::Stream)
 
-extern char snd_stream_storage[];
-extern char snd_stream_queue_storage[]; // PblListDoubleSorted[AUDIO_STREAM_SLOTS], 12 bytes each
+// VirtualAlloc'd by the patch set's prepare(), so a disabled AudioStreamLimit
+// costs nothing.  Null until then — the runtime half only runs once it has
+// confirmed the set applied, so it never sees these unset.
+extern char* snd_stream_storage;
+extern char* snd_stream_queue_storage; // PblListDoubleSorted[AUDIO_STREAM_SLOTS], 12 bytes each
 
 // smPlayingProps[], relocated alongside the stream array.
 char* audio_stream_playing_props();
