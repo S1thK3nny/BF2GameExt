@@ -48,6 +48,10 @@ constexpr uint32_t kQueueStride    = 12; // sizeof(PblListDoubleSorted)
 constexpr uint32_t kQueueFlagsOff  = 8;  // PblListDoubleSorted::mFlags
 constexpr uint8_t  kQueueSortedBit = 1;
 
+// One warning per engine session rather than one per stream — Init runs on every
+// engine open/close, so this re-arms for each mission load.
+bool reported_this_session = false;
+
 void __cdecl init_extra_slots()
 {
    uint32_t* props = reinterpret_cast<uint32_t*>(audio_stream_playing_props());
@@ -56,6 +60,8 @@ void __cdecl init_extra_slots()
       props[i] = 0;
       snd_stream_queue_storage[i * kQueueStride + kQueueFlagsOff] |= kQueueSortedBit;
    }
+
+   reported_this_session = false;
 }
 
 // Init takes no arguments and returns void, but it is reached from LTCG code on
@@ -85,19 +91,18 @@ __declspec(naked) void __cdecl hooked_soundstream_init()
 
 void __cdecl report_extension_slot(void* stream)
 {
-   if (!stream) return;
+   if (!stream || reported_this_session) return;
 
    const uintptr_t offset = (uintptr_t)stream - (uintptr_t)&snd_stream_storage[0];
    const uint32_t slot = (uint32_t)(offset / AUDIO_STREAM_SIZE);
 
    if (slot >= AUDIO_STREAM_SLOTS || slot < AUDIO_STREAM_SLOTS_STOCK) return;
 
+   reported_this_session = true;
    warn_gamelog(RED_SEVERITY_INFO, SRC_FILE, __LINE__,
-                "[AudioStream] OpenAudioStream returned handle %u (slot %u of %u). "
-                "Stock SWBF2 only has %u audio streams, so this script REQUIRES "
-                "BF2GameExt with [LimitIncreases] AudioStreamLimit=1 — on an "
-                "unmodified install the call fails and the stream never plays.",
-                slot + 1, slot, AUDIO_STREAM_SLOTS, AUDIO_STREAM_SLOTS_STOCK);
+                "[AudioStreamExt] Detected more than %u OpenAudioStream calls. "
+                "Please keep in mind, you will be missing ambiance without BF2GameExt.",
+                AUDIO_STREAM_SLOTS_STOCK);
 }
 
 // Returns Stream* in EAX.  PUSHAD after the call captures that return value and
