@@ -600,6 +600,26 @@ namespace modtools {
    constexpr uintptr_t hud_reticle_fadd_operand     = 0x006834D9; // FADD [1.0] operand at +2
    constexpr uintptr_t hud_reticle_fmul_operand     = 0x006834E5; // FMUL [0.5] operand at +2
 
+   // ---- Combat awards (award_disable.cpp) --------------------------------------
+   // bool __thiscall MedalsMgr::IsAwardAvailable(MedalsMgr*, int index) — the one
+   // gate every award effect reads.  Body is
+   //     gEnableAllAwards || (this->mAwardAvailable & (1 << index))
+   // with mAwardAvailable a ushort at MedalsMgr+0x4C (same offset on all builds).
+   // Award indices come from MedalsMgr::sMedalPoints[9]:
+   //     0 gunslinger  1 frenzy   2 demolition  3 technician  4 marksman
+   //     5 regulator   6 endurance  7 guardian  8 warhero
+   // Never inlined — 23 call sites on all three builds.  ILT thunk 0x00403080.
+   constexpr uintptr_t medals_is_award_available    = 0x00653E00;
+
+   // bool __thiscall MedalsMgr::IsAwardAvailableInternal(MedalsMgr*, int index)
+   // — "has this award been earned", from career level + medal points.  It is
+   // what MedalsMgr::Update diffs IsAwardAvailable against to drive the bit and
+   // the award-unlocked HUD message, so suppressing awards HERE keeps the two
+   // sides agreeing and the HUD quiet.  Returns false outright on a net client
+   // (that build gets its mask from MedalsMgr::NetRead instead).
+   // Also read by MedalsMgr::ClearAllMedalPoints.  ILT thunk 0x004058F8.
+   constexpr uintptr_t medals_is_award_available_internal = 0x00653D70;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1190,6 +1210,12 @@ namespace steam {
    constexpr uintptr_t fl_fog_start        = 0x008F6DBC;  // FLRenderer::m_fFogStart (RenderFarScene @0x6bd940 reads)
    constexpr uintptr_t fl_fog_end          = 0x008F6DC0;  // FLRenderer::m_fFogEnd
 
+   // ---- Combat awards (see modtools namespace for docs) ------------------------
+   // Retail dropped the gEnableAllAwards debug flag, so the body is just the
+   // mask test; 23 call sites, matching modtools/Phantom one for one.
+   constexpr uintptr_t medals_is_award_available = 0x005A33D0;
+   constexpr uintptr_t medals_is_award_available_internal = 0x005A3350;
+
 } // namespace steam
 
 // =============================================================================
@@ -1623,6 +1649,11 @@ namespace gog {
    constexpr uintptr_t red_renderer_set_fog_enable    = 0x006b46b0;
    constexpr uintptr_t fl_fog_start                   = 0x008f825c;
    constexpr uintptr_t fl_fog_end                     = 0x008f8260;
+
+   // ---- Combat awards (see modtools namespace for docs) -------------------------
+   // port_gog.py code 0x5a33d0 / 0x5a3350 -> score 1.00, shift +0xfb0 (in-run)
+   constexpr uintptr_t medals_is_award_available      = 0x005a4380;
+   constexpr uintptr_t medals_is_award_available_internal = 0x005a4300;
 
 } // namespace gog
 

@@ -142,6 +142,9 @@
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\award_disable.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\flyer_sound_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -283,6 +286,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\award_disable.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_sound_fix.cpp">

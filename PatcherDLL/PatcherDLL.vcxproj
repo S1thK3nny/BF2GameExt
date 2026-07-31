@@ -147,6 +147,7 @@
     <ClInclude Include="src\entity\droideka_ball_mode.hpp" />
     <ClInclude Include="src\entity\soldier_override_texture.hpp" />
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp" />
+    <ClInclude Include="src\entity\award_disable.hpp" />
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
@@ -184,6 +185,7 @@
     <ClCompile Include="src\entity\droideka_ball_mode.cpp" />
     <ClCompile Include="src\entity\soldier_override_texture.cpp" />
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp" />
+    <ClCompile Include="src\entity\award_disable.cpp" />
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
