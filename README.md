@@ -47,6 +47,7 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Engine limit extensions | ✅ | ✅ | ✅ |
 | Engine and rendering fixes | ✅ | ✅ | ✅ |
 | Retail-only fixes (screenshot, error dialog, game logging) | n/a | ✅ | ✅ |
+| Modtools-only fixes (map queue, sound warnings) | ✅ | n/a | n/a |
 | Lua API | ✅ | ✅ | ✅ |
 | Prone stance | ✅ | ✅ | ✅ |
 | First-person animation banks and FP sprint | ✅ | ✅ | ✅ |

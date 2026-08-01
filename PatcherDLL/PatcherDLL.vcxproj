@@ -162,6 +162,7 @@
     <ClInclude Include="src\render\hud_widescreen.hpp" />
     <ClInclude Include="src\weapon\anim_textures.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
+    <ClInclude Include="src\shell\map_queue_fix.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -219,6 +220,7 @@
     <ClCompile Include="src\render\hud_widescreen.cpp" />
     <ClCompile Include="src\weapon\anim_textures.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />
+    <ClCompile Include="src\shell\map_queue_fix.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

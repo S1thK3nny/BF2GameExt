@@ -27,6 +27,7 @@
 #include "render/hud_widescreen.hpp"
 #include "weapon/anim_textures.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
+#include "shell/map_queue_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
 #include "util/audio_stream_limit.hpp"
@@ -232,6 +233,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    screenshot_fix_install(exe_base);
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
+   map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);

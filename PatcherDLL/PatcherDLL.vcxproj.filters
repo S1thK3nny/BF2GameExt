@@ -184,6 +184,9 @@
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp">
       <Filter>shell</Filter>
     </ClInclude>
+    <ClInclude Include="src\shell\map_queue_fix.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\ini_registry.hpp">
       <Filter>util</Filter>
     </ClInclude>
@@ -325,6 +328,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\shell\map_queue_fix.cpp">
       <Filter>shell</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\aim_assist.cpp">

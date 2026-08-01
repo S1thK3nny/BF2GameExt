@@ -140,6 +140,21 @@ namespace modtools {
    constexpr uintptr_t gamestate_shell_state_enter     = 0x00407ac7; // ILT thunk -> ShellState::Enter
    constexpr uintptr_t gamestate_mission_state_enter   = 0x00407fb8; // ILT thunk -> MissionState::Enter
 
+   // ---- Map-queue next-mission fix (modtools-only defect) ---------------------
+   // GameLoop::UpdateStats (0x00732ed0) is built from an older GameLoop.cpp than
+   // Phantom/Steam: the "playlist had another map -> enter MissionState" branch
+   // simply is not emitted, so every exit from the post-match stats screen lands
+   // in the shell.  See map_queue_fix.cpp.
+   //   ..._branch : `84 C0 75 2D` TEST AL,AL / JNZ shell, right after the
+   //                CALL MissionPlayList::SelectNextEntry at 0x0073309c.
+   //   ..._set_state : ILT thunk -> GameState::SetState (__cdecl, one hash arg;
+   //                0x8ff60339 = MissionState, 0x11e1fc01 = ShellState).
+   //   post_load_*  : NetPostLoad{Host,Join}Game** globals the shell path drains.
+   constexpr uintptr_t updatestats_playlist_branch     = 0x007330a1;
+   constexpr uintptr_t gamestate_set_state             = 0x00401af0;
+   constexpr uintptr_t post_load_host_game             = 0x00c69268;
+   constexpr uintptr_t post_load_join_game             = 0x00c6926c;
+
    // ---- EntityHover self-piloted crash fix -----------------------------------
    // EntityHover::UpdateIndirect (0x515cc0) AI obstacle-avoidance fetches the
    // hover's pilot and calls pilot->GetGameObject() with no null check; a
