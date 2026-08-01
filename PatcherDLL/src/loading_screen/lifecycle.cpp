@@ -376,12 +376,6 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
     // but a latch would silently lose that race if it ever stopped being true,
     // and the cost here is two ORs per tick.
     if (ecx) {
-        int configured = 0, shown = 0;
-
-        for (int i = 0; i < LoadScreenConfig::kNumTeamModels; ++i) {
-            if (g_loadScreenCfg.teamModel[i].hasModel) ++configured;
-        }
-
         // TeamModelOffset is stored as a top-left screen fraction so the same
         // load.cfg lands in the same place on every monitor; the element space
         // itself is device pixels anchored at the bottom-right safe-zone corner.
@@ -427,50 +421,8 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
                                  // TeamModelScale is for.
                 pos[3] = 1.0f;   // the engine's own setter writes w = 1.0
             }
-
-            if (*load_display::at<void*>(ecx, elem + load_display::kElemModel) != nullptr)
-                ++shown;
         }
 
-        // TEMPORARY DIAGNOSTIC.  Fires once per loading screen whenever any
-        // TeamModel is configured - NOT only on failure.  An earlier version
-        // logged only when nothing resolved, which meant the working-but-
-        // invisible case (models bound and enabled, drawn somewhere you cannot
-        // see) produced no output at all and looked like a dead hook.
-        if (configured != 0 && !s_teamModelsLogged) {
-            s_teamModelsLogged = true;
-            warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
-                   "[BF1Ext] TeamModel: %d slot(s) configured, %d shown. "
-                   "PostLoad claimed m_team1Num=%d m_team2Num=%d (we set these; "
-                   "-1 means that slot has no TeamModel). Screen %.0fx%.0f px, "
-                   "group anchor at screen-relative (%.3f, %.3f); positions below "
-                   "are pixels from that anchor, +x right and +y down.\n",
-                   configured, shown,
-                   *load_display::at<int>(ecx, load_display::kTeam1Num),
-                   *load_display::at<int>(ecx, load_display::kTeam2Num),
-                   screenW, screenH, anchorRelX, anchorRelY);
-
-            for (int t = 0; t < LoadScreenConfig::kNumTeamModels; ++t) {
-                const uintptr_t elem = load_display::team_icon(t);
-                const uint32_t  h    = *load_display::at<uint32_t>(ecx, elem + load_display::kElemModelHash);
-                if (!h) continue;
-                const float* tr = load_display::at<float>(ecx, elem + load_display::kElemPosition);
-                warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
-                       "[BF1Ext]   slot \"%d\" (%s): hash %08x model=%s search=%d "
-                       "flags=%08x enabled=%d scale=%.3f omegaY=%.3f pos=(%.1f, %.1f, %.1f)\n",
-                       t + 1, g_loadScreenCfg.teamModel[t].model, h,
-                       *load_display::at<void*>(ecx, elem + load_display::kElemModel)
-                           ? "RESOLVED" : "NOTFOUND",
-                       (*load_display::at<uint8_t>(ecx, elem + load_display::kElemModelFlags)
-                            & load_display::kElemSearchForModel) ? 1 : 0,
-                       *load_display::at<uint32_t>(ecx, elem + load_display::kElemFlags),
-                       (*load_display::at<uint32_t>(ecx, elem + load_display::kElemFlags)
-                            & load_display::kElemVisible) ? 1 : 0,
-                       *load_display::at<float>(ecx, elem + load_display::kElemScale),
-                       *load_display::at<float>(ecx, elem + load_display::kElemOmegaY),
-                       tr[0], tr[1], tr[2]);
-            }
-        }
     }
 
     // Tick the audio engine so queued voices are mixed to hardware.

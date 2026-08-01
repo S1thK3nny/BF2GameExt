@@ -172,12 +172,6 @@ inline int   s_lastAnimPhase  = -1;
 inline int   s_lastAnimCycle  = -1;
 inline DWORD s_nextBarSoundMs = 0;
 
-// One-shot latch for the team icon diagnostic, so a misconfigured TeamModel
-// complains once per loading screen rather than every Update. The Enable bits
-// themselves are NOT latched - see hooked_load_update. Re-armed alongside the
-// other per-load state in hooked_load_config.
-inline bool  s_teamModelsLogged = false;
-
 // Set when load_data_guard_install could not resolve one of the callees it
 // reimplements. Reported from hooked_load_config, which runs long after the
 // install window where calling into the game would fault.
