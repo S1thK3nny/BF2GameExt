@@ -86,6 +86,56 @@ struct LoadScreenConfig {
     bool removeMissionName;  // m_textMissionName — top-left map name
     bool removeModeName;     // m_textModeName — top-right game mode name
 
+    // ---- Team models ------------------------------------------------------
+    // The two spinning 3D models on the loading screen. BF2 has the feature
+    // fully built and switched off; the extension turns it back on.
+    //
+    // **The extension owns these keys outright - the engine's own TeamModel is
+    // not used at all.** Two reasons, both fatal to the stock key:
+    //
+    //   1. It only exists in the engine's LoadDisplay() branch (the Map()/World()
+    //      branch accepts seven keys and TeamModel is not among them), so models
+    //      could never vary per map.
+    //   2. It selects a slot by *faction*, and which two factions get shown is
+    //      decided by single-letter team names that are LOCALIZED. A German
+    //      build sends "k" for the CIS (KUS) against four hardcoded constants of
+    //      "a"/"r"/"c"/"i", so the second model silently never appears.
+    //
+    // So slots are addressed as "1" and "2" - just the two on-screen positions,
+    // no factions, nothing localized. The apply site binds the models itself and
+    // writes m_team1Num/m_team2Num to the fixed slots 0 and 1, after which
+    // PostLoad does the parenting, positioning and counter-rotation natively.
+    //
+    // Offsets are fractions of screen width/height, NOT pixels: the element
+    // coordinate space is device pixels (RedInterfaceScreen::Render builds the
+    // frustum so one world unit is one pixel of m_loadingScreen, whose
+    // dimensions come from s_screenFull), so a pixel offset would drift across
+    // resolutions. Measured from the TOP LEFT, +x right and +y down, matching
+    // AnimatedTextures and PlanetLevel. The element space is anchored at the
+    // bottom-right safe-zone corner, so the apply site rebases:
+    // elem = (frac - anchorRel) * screenSize on both axes.
+    static constexpr int kNumTeamModels = 2;
+    struct TeamModelEntry {
+        char  model[64];         // name as written; bound via SetModel
+        float x, y;              // top-left screen fraction
+        bool  hasModel;
+        bool  hasOffset;         // false = leave PostLoad's own placement alone
+    };
+    TeamModelEntry teamModel[kNumTeamModels];
+
+    // Absolute multiplier on m_scale, shared by both models - deliberately not
+    // per-slot, since two models on one loading screen realistically want the
+    // same size and a per-slot key would just be a duplicated line. NOT a screen
+    // fraction: one world unit is one device pixel, so a fixed scale holds its
+    // pixel size and shrinks relative to the screen as resolution rises.
+    float teamModelScale;        // 0 = leave the engine's 1.0
+
+    // Spin rate, written to m_teamModelOmega. PostLoad applies +omega to slot 0
+    // and -omega to slot 1, so they counter-rotate. Ours rather than the
+    // engine's key so that it works in Map() scope like everything else here.
+    float teamModelOmega;
+    bool  teamModelOmegaSet;     // false = leave Begin's default 0.6
+
     void reset() { memset(this, 0, sizeof(*this)); }
 };
 

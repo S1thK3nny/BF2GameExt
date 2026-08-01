@@ -97,6 +97,11 @@ inline fn_set_all_on_t     g_orig_set_all_on     = nullptr;
 inline fn_load_update_t    g_orig_load_update    = nullptr;
 inline fn_load_render_t    g_orig_load_render    = nullptr;
 inline DWORD*              g_qpc_stamp           = nullptr;
+
+// Red3DModelElementLite::SetModel(const char*) — __thiscall. Binds a team icon
+// model by name, exactly as the engine's own TeamModel key would.
+using fn_set_model_t = void(__fastcall*)(void* ecx, void* edx, const char* name);
+inline fn_set_model_t      g_set_model           = nullptr;
 inline DWORD               g_lastRenderMs        = 0;
 
 // =============================================================================
@@ -167,6 +172,12 @@ inline int   s_lastAnimPhase  = -1;
 inline int   s_lastAnimCycle  = -1;
 inline DWORD s_nextBarSoundMs = 0;
 
+// One-shot latch for the team icon diagnostic, so a misconfigured TeamModel
+// complains once per loading screen rather than every Update. The Enable bits
+// themselves are NOT latched - see hooked_load_update. Re-armed alongside the
+// other per-load state in hooked_load_config.
+inline bool  s_teamModelsLogged = false;
+
 // Set when load_data_guard_install could not resolve one of the callees it
 // reimplements. Reported from hooked_load_config, which runs long after the
 // install window where calling into the game would fault.
@@ -222,6 +233,8 @@ inline uint32_t kHash_RemoveLoadingBar     = 0;
 inline uint32_t kHash_RemoveLoadingText    = 0;
 inline uint32_t kHash_RemoveMissionName    = 0;
 inline uint32_t kHash_RemoveModeName       = 0;
+inline uint32_t kHash_TeamModelScale       = 0;
+inline uint32_t kHash_TeamModelOffset      = 0;
 
 // =============================================================================
 // PblConfig helpers
@@ -249,9 +262,38 @@ inline bool pbl_has_more(const void* pblcfg) {
 // data file, so there is nothing here to derive it from.
 inline constexpr int kPblDataDwords = 0x800;
 
+// Argument i as a string, or nullptr when it is not one.
+//
+// PblConfig stores a string argument as a byte offset from the start of the
+// argument dwords to the entry's trailing string blob; a NUMBER argument
+// occupies the same dword as a raw float. There is no type tag, so reading a
+// numeric argument as a string reinterprets its bit pattern as an offset:
+// `TeamModelOffset(120, -90)` gave 120.0f = 0x42F00000 and walked 1.1 GB off
+// the end of the buffer. That is not a hypothetical - it is a config written
+// against an older signature of a key, which is exactly what happens whenever
+// one of these keys gains or loses an argument.
+//
+// Every real offset must clear the argument dwords it is measured from and stay
+// inside the buffer we handed ReadNextData, and the string must terminate inside
+// it too. Float bit patterns fail that by a mile in both directions: anything
+// with a positive exponent is far past the end, and anything at or below 1.0f is
+// still ~0x3F800000. Callers must treat nullptr as "argument absent".
 inline const char* pbl_get_str(const uint32_t* data_buf, int i) {
+    const uint32_t argc = data_buf[1];
+    if (argc > (uint32_t)kPblDataDwords || i < 0 || (uint32_t)i >= argc) return nullptr;
+
     const int32_t off = (int32_t)data_buf[2 + i];
-    return (const char*)&data_buf[2] + off;
+    // The blob starts after the argument dwords; the buffer ends kPblDataDwords
+    // in, of which the first two are the hash and the count.
+    const int32_t lo  = (int32_t)(argc * 4u);
+    const int32_t hi  = (int32_t)((kPblDataDwords - 2) * 4);
+    if (off < lo || off >= hi) return nullptr;
+
+    const char* s   = (const char*)&data_buf[2] + off;
+    const char* end = (const char*)&data_buf[2] + hi;
+    for (const char* p = s; p < end; ++p)
+        if (!*p) return s;
+    return nullptr;  // runs off the end of the buffer without terminating
 }
 
 inline float pbl_get_float(const uint32_t* data_buf, int i) {

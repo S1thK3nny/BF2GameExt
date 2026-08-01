@@ -358,6 +358,121 @@ void __fastcall hooked_load_update(void* ecx, void* edx)
     if (saved_load_heap >= 0 && g_s_load_heap_ptr)
         *g_s_load_heap_ptr = saved_load_heap;
 
+    // ---- Team icon models --------------------------------------------------
+    // hooked_load_config has already bound the models and pointed
+    // m_team1Num/m_team2Num at slots 0 and 1, so PostLoad has parented them to
+    // m_groupBottomRight and set their spin - and then called Enable(false) on
+    // both.  Nothing in the engine ever calls Enable(true), which is the whole
+    // reason stock loading screens never show a team model.  Flipping that bit
+    // back is what is left to do.  The gate it feeds is the `flags & 0x100` test
+    // at the top of the per-element render, modtools 0x00816fa0.
+    //
+    // Driven off our own config rather than m_team1Num/m_team2Num: we wrote
+    // those, so reading them back would just be a longer way to say the same
+    // thing, and it keeps this loop correct if anything else ever touches them.
+    //
+    // Re-applied every Update rather than latched.  PostLoad is the only thing
+    // that clears the bit and it runs inside Begin, before the first Update -
+    // but a latch would silently lose that race if it ever stopped being true,
+    // and the cost here is two ORs per tick.
+    if (ecx) {
+        int configured = 0, shown = 0;
+
+        for (int i = 0; i < LoadScreenConfig::kNumTeamModels; ++i) {
+            if (g_loadScreenCfg.teamModel[i].hasModel) ++configured;
+        }
+
+        // TeamModelOffset is stored as a top-left screen fraction so the same
+        // load.cfg lands in the same place on every monitor; the element space
+        // itself is device pixels anchored at the bottom-right safe-zone corner.
+        // The dimensions come off m_loadingScreen, which the LoadDisplay ctor
+        // copies from s_screenFull.  They are only ever zero if the ctor took its
+        // g_bNoRender branch, in which case there is nothing being drawn to place
+        // anything on, so the offset is simply skipped.
+        const float screenW = (float)*load_display::at<uint32_t>(ecx, load_display::kScreenWidthPx);
+        const float screenH = (float)*load_display::at<uint32_t>(ecx, load_display::kScreenHeightPx);
+        const bool  haveScreenSize = (screenW > 0.0f && screenH > 0.0f);
+
+        // Where the parent group actually sits, in screen-relative units.
+        // PostLoad gives m_groupBottomRight (1.0, 1.0) AND sets its safe-zone
+        // flag, so Render remaps that to rel * safeSize + safeOffset before use.
+        // Reading the safe zone rather than assuming (1, 1) keeps a top-left
+        // fraction exact even when the safe zone is inset.
+        const float anchorRelX = 1.0f * *load_display::at<float>(ecx, load_display::kSafeZoneWidth)
+                                      + *load_display::at<float>(ecx, load_display::kSafeZoneOffsetX);
+        const float anchorRelY = 1.0f * *load_display::at<float>(ecx, load_display::kSafeZoneHeight)
+                                      + *load_display::at<float>(ecx, load_display::kSafeZoneOffsetY);
+
+        for (int i = 0; i < LoadScreenConfig::kNumTeamModels; ++i) {
+            const auto& off = g_loadScreenCfg.teamModel[i];
+            if (!off.hasModel) continue;
+            const uintptr_t elem = load_display::team_icon(i);
+            if (*load_display::at<uint32_t>(ecx, elem + load_display::kElemModelHash) == 0)
+                continue;
+            load_display::set_element_visible(ecx, elem, true);
+
+            if (g_loadScreenCfg.teamModelScale > 0.0f)
+                *load_display::at<float>(ecx, elem + load_display::kElemScale) =
+                    g_loadScreenCfg.teamModelScale;
+
+            if (off.hasOffset && haveScreenSize) {
+                float* pos = load_display::at<float>(ecx, elem + load_display::kElemPosition);
+                // Top-left fraction -> pixels relative to the group anchor.
+                // Both axes rebase the same way because element +y is down.
+                pos[0] = (off.x - anchorRelX) * screenW;
+                pos[1] = (off.y - anchorRelY) * screenH;
+                pos[2] = 0.0f;   // depth is not exposed: the icons are flat against
+                                 // the interface camera and moving them along z only
+                                 // changes their apparent size, which is what
+                                 // TeamModelScale is for.
+                pos[3] = 1.0f;   // the engine's own setter writes w = 1.0
+            }
+
+            if (*load_display::at<void*>(ecx, elem + load_display::kElemModel) != nullptr)
+                ++shown;
+        }
+
+        // TEMPORARY DIAGNOSTIC.  Fires once per loading screen whenever any
+        // TeamModel is configured - NOT only on failure.  An earlier version
+        // logged only when nothing resolved, which meant the working-but-
+        // invisible case (models bound and enabled, drawn somewhere you cannot
+        // see) produced no output at all and looked like a dead hook.
+        if (configured != 0 && !s_teamModelsLogged) {
+            s_teamModelsLogged = true;
+            warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "[BF1Ext] TeamModel: %d slot(s) configured, %d shown. "
+                   "PostLoad claimed m_team1Num=%d m_team2Num=%d (we set these; "
+                   "-1 means that slot has no TeamModel). Screen %.0fx%.0f px, "
+                   "group anchor at screen-relative (%.3f, %.3f); positions below "
+                   "are pixels from that anchor, +x right and +y down.\n",
+                   configured, shown,
+                   *load_display::at<int>(ecx, load_display::kTeam1Num),
+                   *load_display::at<int>(ecx, load_display::kTeam2Num),
+                   screenW, screenH, anchorRelX, anchorRelY);
+
+            for (int t = 0; t < LoadScreenConfig::kNumTeamModels; ++t) {
+                const uintptr_t elem = load_display::team_icon(t);
+                const uint32_t  h    = *load_display::at<uint32_t>(ecx, elem + load_display::kElemModelHash);
+                if (!h) continue;
+                const float* tr = load_display::at<float>(ecx, elem + load_display::kElemPosition);
+                warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                       "[BF1Ext]   slot \"%d\" (%s): hash %08x model=%s search=%d "
+                       "flags=%08x enabled=%d scale=%.3f omegaY=%.3f pos=(%.1f, %.1f, %.1f)\n",
+                       t + 1, g_loadScreenCfg.teamModel[t].model, h,
+                       *load_display::at<void*>(ecx, elem + load_display::kElemModel)
+                           ? "RESOLVED" : "NOTFOUND",
+                       (*load_display::at<uint8_t>(ecx, elem + load_display::kElemModelFlags)
+                            & load_display::kElemSearchForModel) ? 1 : 0,
+                       *load_display::at<uint32_t>(ecx, elem + load_display::kElemFlags),
+                       (*load_display::at<uint32_t>(ecx, elem + load_display::kElemFlags)
+                            & load_display::kElemVisible) ? 1 : 0,
+                       *load_display::at<float>(ecx, elem + load_display::kElemScale),
+                       *load_display::at<float>(ecx, elem + load_display::kElemOmegaY),
+                       tr[0], tr[1], tr[2]);
+            }
+        }
+    }
+
     // Tick the audio engine so queued voices are mixed to hardware.
     if (g_loadScreenCfg.bf1Enabled && g_snd_update) {
         const DWORD now = GetTickCount();
@@ -502,6 +617,8 @@ void loading_screen_init_hashes()
     kHash_RemoveLoadingText    = g_hash_string("RemoveLoadingText");
     kHash_RemoveMissionName    = g_hash_string("RemoveMissionName");
     kHash_RemoveModeName       = g_hash_string("RemoveModeName");
+    kHash_TeamModelScale       = g_hash_string("TeamModelScale");
+    kHash_TeamModelOffset      = g_hash_string("TeamModelOffset");
 }
 
 // =============================================================================
@@ -613,6 +730,8 @@ void loading_screen_install(uintptr_t exe_base)
     g_orig_load_update    = (fn_load_update_t)   at(a.load_update_real);
     g_orig_load_render    = (fn_load_render_t)   at(a.load_render_real);
     g_qpc_stamp           = (DWORD*)             at(a.load_update_qpc_stamp);
+
+    g_set_model           = (fn_set_model_t)     at(a.model_elem_set_model);
 
     g_orig_load_data_file = (fn_load_data_file_t)at(a.load_data_file_real);
 

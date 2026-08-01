@@ -92,6 +92,15 @@ namespace modtools {
    constexpr uintptr_t load_update_qpc_stamp     = 0x00ba2f60;
    constexpr uintptr_t platform_render_texture   = 0x004165fe;
 
+   // Red3DModelElementLite::SetModel(const char* name) — __thiscall, RET 4.
+   // Hashes the name and hands off to the by-hash variant (0x00839ea0), which
+   // stores the hash at elem+0x74, resolves it against the global RedModel table
+   // and writes the result to elem+0x78, setting the searchForModel bit at
+   // elem+0x80 on a miss.  The loading screen calls this to bind team icon
+   // models itself, because the engine's own TeamModel key is LoadDisplay-scope
+   // only and so cannot vary per map.
+   constexpr uintptr_t model_elem_set_model      = 0x00839f00;
+
    // LoadDataChunk and the four callees it dispatches to.  Detoured by
    // loading_screen/data_guard.cpp to bounds-check the fixed m_models[10] /
    // m_textures[50] / m_skeletons[10] arrays, which the stock loop appends to
@@ -1047,6 +1056,12 @@ namespace steam {
    constexpr uintptr_t load_data_chunk_real      = 0x005776e0;
    constexpr uintptr_t pbl_chunk_read_next_child = 0x0072aa30;
    constexpr uintptr_t red_model_read            = 0x006c43f0;
+   // Red3DModelElementLite::SetModel — already named in the Steam DB, and found
+   // the same way it is used: LoadConfig's TeamModel branch (0x005777e0, hash
+   // 0xd6c2b5f9) does PblHash -> GetTeamNum (0x00575550) -> `LEA this + slot*0x150
+   // + 0x430` -> SetModel, instruction-for-instruction the modtools sequence.
+   // Its by-hash tail is 0x006d6fc0, RedModel table 0x0093ebdc size 0x800.
+   constexpr uintptr_t model_elem_set_model      = 0x006d7010;
    constexpr uintptr_t red_texture_read          = 0x006ba2d0;
    constexpr uintptr_t red_skeleton_read         = 0x006e88c0;
    constexpr uintptr_t mem_pool_alloc           = 0x006dc370;
@@ -1614,6 +1629,9 @@ namespace gog {
    constexpr uintptr_t load_data_chunk_real           = 0x00578460;
    constexpr uintptr_t pbl_chunk_read_next_child      = 0x0072bb10;
    constexpr uintptr_t red_model_read                 = 0x006c5480;
+   // Red3DModelElementLite::SetModel — port_gog.py from steam 0x006d7010,
+   // score 1.00 (every instruction matched), shift +0x10a0 in-run.
+   constexpr uintptr_t model_elem_set_model           = 0x006d80b0;
    constexpr uintptr_t red_texture_read               = 0x006bb360;
    constexpr uintptr_t red_skeleton_read              = 0x006e9960;
    // PblConfig::PblConfig — byte-identical to steam 0x00727da0, and adjacent to

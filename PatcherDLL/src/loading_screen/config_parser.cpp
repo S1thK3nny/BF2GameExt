@@ -20,6 +20,49 @@ static void pbl_skip_next_scope(void* parent, uint8_t* tmp, uint32_t* scratch)
 
 static void parse_bf1_entry(const uint32_t* data_buf);
 
+// Resolve a TeamModel* key's slot argument.  Returns -1 and complains on
+// anything that is not the string "1" or "2".
+//
+// Deliberately strict and deliberately loud.  Everything that can go wrong here
+// goes wrong *quietly* otherwise: pbl_get_str returns null for a numeric
+// argument (an unquoted 1, or the superseded faction-name signatures), and the
+// old faction names all/rep/cis/imp look perfectly reasonable to a modder who
+// has read any other BF2 documentation. Each of those gets its own message,
+// because "TeamModel ignored" with no reason is the worst possible outcome for
+// something whose only symptom is a model that does not appear.
+static int parse_team_slot(const char* s, const char* key)
+{
+    auto fn_log = get_gamelog();
+
+    if (!s) {
+        fn_log("[BF1Ext] ERROR: %s's first argument must be the QUOTED string "
+               "\"1\" or \"2\". A bare number is not a string to the config "
+               "parser and cannot be read as one. Entry ignored.\n", key);
+        return -1;
+    }
+    if ((s[0] == '1' || s[0] == '2') && s[1] == '\0')
+        return s[0] - '1';
+
+    // Name the faction case specifically - it is the single most likely typo,
+    // and it used to work, so silence would look like a regression.
+    static const char* const kOldNames[] = { "all", "rep", "cis", "imp" };
+    for (const char* old : kOldNames) {
+        int i = 0;
+        for (; old[i] && (s[i] | 0x20) == old[i]; ++i) {}
+        if (!old[i] && !s[i]) {
+            fn_log("[BF1Ext] ERROR: %s takes a slot, not a faction: \"%s\" is no "
+                   "longer accepted. Use \"1\" or \"2\" - they are just the two "
+                   "on-screen positions, which is what makes this work on "
+                   "non-English builds. Entry ignored.\n", key, s);
+            return -1;
+        }
+    }
+
+    fn_log("[BF1Ext] ERROR: %s's first argument must be \"1\" or \"2\", got "
+           "\"%s\". Entry ignored.\n", key, s);
+    return -1;
+}
+
 // Parse a PlanetLevel DATA entry and append to g_loadScreenCfg.planets[].
 static void parse_planet_level(const uint32_t* data_buf)
 {
@@ -198,10 +241,63 @@ static void parse_bf1_entry(const uint32_t* data_buf)
     else if (kHash_RemoveModeName && hash == kHash_RemoveModeName) {
         g_loadScreenCfg.removeModeName = (argc >= 1) ? (pbl_get_int(data_buf, 0) != 0) : true;
     }
+    // ---- Team models ------------------------------------------------------
+    // All four keys are handled here rather than by the engine, so that they
+    // work in Map() scope and address slots instead of localized factions.
+    // See the LoadScreenConfig comment for why the stock key cannot be used.
+    //
+    // TeamModel("1"|"2", "modelName")
+    else if (hash == kHash_TeamModel) {
+        if (argc < 2) {
+            auto fn_log = get_gamelog();
+            fn_log("[BF1Ext] ERROR: TeamModel needs two arguments, "
+                   "TeamModel(\"1\"|\"2\", \"modelName\") - got %u. Entry ignored.\n", argc);
+        }
+        else {
+            const int slot = parse_team_slot(pbl_get_str(data_buf, 0), "TeamModel");
+            if (slot >= 0) {
+                const char* model = pbl_get_str(data_buf, 1);
+                if (!model || !*model) {
+                    auto fn_log = get_gamelog();
+                    fn_log("[BF1Ext] ERROR: TeamModel(\"%d\", ...) second argument must be a "
+                           "non-empty quoted model name. Entry ignored.\n", slot + 1);
+                }
+                else {
+                    auto& e = g_loadScreenCfg.teamModel[slot];
+                    strncpy_s(e.model, sizeof(e.model), model, sizeof(e.model) - 1);
+                    e.hasModel = true;
+                }
+            }
+        }
+    }
+    // TeamModelOffset("1"|"2", x, y) - top-left screen fractions.
+    else if (kHash_TeamModelOffset && hash == kHash_TeamModelOffset) {
+        if (argc < 3) {
+            auto fn_log = get_gamelog();
+            fn_log("[BF1Ext] ERROR: TeamModelOffset needs three arguments, "
+                   "TeamModelOffset(\"1\"|\"2\", x, y) - got %u. Entry ignored.\n", argc);
+        }
+        else {
+            const int slot = parse_team_slot(pbl_get_str(data_buf, 0), "TeamModelOffset");
+            if (slot >= 0) {
+                auto& e = g_loadScreenCfg.teamModel[slot];
+                e.x         = pbl_get_float(data_buf, 1);
+                e.y         = pbl_get_float(data_buf, 2);
+                e.hasOffset = true;
+            }
+        }
+    }
+    // TeamModelScale(f) - shared by both models, absolute multiplier.
+    else if (kHash_TeamModelScale && hash == kHash_TeamModelScale && argc >= 1) {
+        g_loadScreenCfg.teamModelScale = pbl_get_float(data_buf, 0);
+    }
+    // TeamModelRotationSpeed(f) - ours, so it works per map.
+    else if (hash == kHash_TeamModelRotationSpeed && argc >= 1) {
+        g_loadScreenCfg.teamModelOmega    = pbl_get_float(data_buf, 0);
+        g_loadScreenCfg.teamModelOmegaSet = true;
+    }
     // Known-but-unimplemented / BF2-native params — silently ignored.
-    else if (hash == kHash_TeamModel
-          || hash == kHash_TeamModelRotationSpeed
-          || hash == kHash_ProgressBarTotalTime) {
+    else if (hash == kHash_ProgressBarTotalTime) {
         // no action
     }
 }
@@ -257,6 +353,7 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
     s_lastAnimPhase  = -1;             // reset phase tracking for sound triggers
     s_lastAnimCycle  = -1;
     s_nextBarSoundMs = 0;
+    s_teamModelsLogged = false;        // re-arm the team icon diagnostic for new loading screen
     loading_screen_stop_all_sounds();  // clear anything still playing from a previous load
 
     // Current level hashes stored in the LoadDisplay object (ecx+4 = world hash, ecx+8 = map hash).
@@ -357,6 +454,50 @@ void __fastcall hooked_load_config(void* ecx, void* edx, uint32_t* fh)
         }
         else {
             // Unknown root-level scope — no scope consumed.
+        }
+    }
+
+    // ---- Team models: bind and claim the two slots -------------------------
+    // Must happen here rather than in the Update hook.  LoadDisplay::Begin runs
+    // SetLoadState -> LoadData (which is what called us) -> PostLoad, and
+    // PostLoad is what parents the icons to m_groupBottomRight, sets their spin
+    // and positions them - reading m_team1Num/m_team2Num to decide *which* slots
+    // to do that to.  Writing them now means PostLoad does all of that work for
+    // us natively; a slot left at -1 is not merely hidden, it is never added to
+    // the screen group at all and nothing later can bring it back.
+    //
+    // Both scopes have been parsed by this point, so a Map() override has
+    // already replaced the LoadDisplay() default.
+    {
+        int teamNum[LoadScreenConfig::kNumTeamModels] = { -1, -1 };
+        bool any = false;
+
+        for (int i = 0; i < LoadScreenConfig::kNumTeamModels; ++i) {
+            const auto& e = g_loadScreenCfg.teamModel[i];
+            if (!e.hasModel) continue;
+            any = true;
+
+            // Slot i of m_modelTeamIcon is just an array index once we stop
+            // treating the array as faction-indexed.
+            if (g_set_model) {
+                g_set_model((uint8_t*)ecx + load_display::team_icon(i), nullptr, e.model);
+                teamNum[i] = i;
+            }
+        }
+
+        if (any && !g_set_model) {
+            auto fn_log = get_gamelog();
+            fn_log("[BF1Ext] ERROR: TeamModel configured but Red3DModelElementLite::SetModel "
+                   "is not mapped for this build - the models cannot be bound.\n");
+        }
+
+        if (any) {
+            *load_display::at<int>(ecx, load_display::kTeam1Num) = teamNum[0];
+            *load_display::at<int>(ecx, load_display::kTeam2Num) = teamNum[1];
+
+            if (g_loadScreenCfg.teamModelOmegaSet)
+                *load_display::at<float>(ecx, load_display::kTeamModelOmega) =
+                    g_loadScreenCfg.teamModelOmega;
         }
     }
 

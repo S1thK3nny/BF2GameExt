@@ -54,6 +54,65 @@ LoadSoundLVL("dc:sound\\bes.lvl")          -- no group
 LoadSoundLVL("dc:sound\\bes.lvl;bes1cw")   -- with a group
 ```
 
+## TeamModel
+
+A spinning 3D model on each side of the loading screen. BF2 builds the feature
+and then switches it off; BF2GameExt turns it back on.
+
+The two slots are `"1"` and `"2"` - just the two on-screen positions. All four
+keys work in both `LoadDisplay()` and `Map()`, so models can differ per map.
+
+```
+LoadDisplay()
+{
+    TeamModel("1", "gal_prp_death_star")
+    TeamModel("2", "gal_prp_death_star")
+    TeamModelScale(100)
+    TeamModelRotationSpeed(1.0)
+
+    TeamModelOffset("1", 0.70, 0.75)
+    TeamModelOffset("2", 0.88, 0.75)
+}
+
+Map("VTRg_con")
+{
+    TeamModel("1", "gal_prp_rebel_logo")
+    TeamModel("2", "gal_prp_imperial_logo")
+}
+```
+
+| Parameter | Syntax | Description |
+|-----------|--------|-------------|
+| `TeamModel` | `TeamModel("1"\|"2", "modelName")` | Binds a model to one of the two slots |
+| `TeamModelOffset` | `TeamModelOffset("1"\|"2", x, y)` | Places that slot. `x`/`y` are screen fractions from the top left, `+x` right and `+y` down. `(0.5, 0.5)` is the centre |
+| `TeamModelScale` | `TeamModelScale(f)` | Multiplier on the model size, shared by both |
+| `TeamModelRotationSpeed` | `TeamModelRotationSpeed(f)` | Spin rate. The two models counter-rotate |
+
+The slot must be **quoted**. A bare `1` is a number, not a string, and cannot be read as one.
+
+It is not necessary to have two TeamModels. One is enough, and the other slot can be left empty. The two slots are independent: they can have different models and offsets. Scale and rotation speed are shared.
+
+The model must be in `load.lvl`, via a `model` REQN in `load.req`:
+
+```
+REQN
+{
+    "model"
+    "gal_prp_death_star"
+}
+```
+
+> ### Do not reuse loading screen assets in the mission
+>
+> **Any model or texture you load for the loading screen will NOT appear in the
+> mission if the mission uses it too.** The loading screen frees its own assets
+> when it tears down, and that takes the shared copy with it - the mission is
+> left referencing something that no longer exists.
+>
+> Give loading screen models and textures their own names, distinct from anything
+> the map loads. This is stock engine behaviour, not something the extension
+> introduces or can work around.
+
 ## BF1 Sequence
 
 Through a lot of trial and error, the BF1 loading screen was reverse engineered to a point where it can be reproduced in BF2. The sequence is a series of zooms into a planet, into the atmosphere, further into the surface and finally into the map itself. The sequence is controlled by a set of parameters in the `load.cfg` file, which define the planets, their textures, and the sounds that play during the zooms. Everything in this section requires `EnableBF1()`; without it, these parameters are parsed and discarded.

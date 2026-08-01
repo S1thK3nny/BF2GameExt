@@ -352,10 +352,155 @@ ProgressIndicator::Init(&m_progressBar, m_numLEDs, m_LEDSpacing,
 > and a ping-pong mode (via `m_progressBarDirection`), but `PostLoad` is the only
 > caller of `Init` and it always passes `LED_MODE_TIMER`.
 
-The team icons are given colour, scale, spin (`m_OmegaY = ±m_teamModelOmega`) and
-positions (±100 in `m_groupBottomRight`), then have their visibility setter called
-with 0. `TeamModel` and `TeamModelRotationSpeed` are parsed but nothing turns the
-elements on.
+### The team icon models
+
+`m_modelTeamIcon` is `Red3DModelElement[4]` at `+0x430`, stride `0x150`, one slot
+per faction. `PostLoad` parents the two *mission* teams' slots to
+`m_groupBottomRight` at x = -100 / +100, sets spin
+(`m_OmegaY = ±m_teamModelOmega`) - and then calls **`Enable(false)`** on both.
+
+That call is element vtable **slot 1**, `RedInterfaceElement::Enable(bool)`, a
+one-instruction setter for bit 8 of `+0x14`. (Slot 2 is a separate
+`Visible(bool)` driving bit 10; the engine does not use it here.) The progress
+bar a few lines earlier in the same function is shown with `Enable(true)` and
+nothing else, so `Enable` is the switch and the icons are simply switched off.
+
+Nothing in the engine ever turns them back on. **The feature is complete and
+disabled, not absent** - everything else is wired:
+
+- `LoadConfig`'s `TeamModel(teamName, modelName)` calls
+  `Red3DModelElementLite::SetModel`, which resolves the name against
+  `RedModel::_HashTable` (the global 2048-entry model table `RedModel::Read`
+  populates), so the model is genuinely bound.
+- `LoadDisplay` carries `m_redCamera` and `m_cameraMat`, and nothing else on the
+  loading screen is 3D - that camera path exists for these icons.
+
+Two different functions index the same four slots with the same numbering:
+
+| Slot | `GetTeamNum` name (the `TeamModel` key) |
+|---|---|
+| 0 | `all` |
+| 1 | `rep` |
+| 2 | `cis` |
+| 3 | `imp` |
+
+`GetTeamNum` (Phantom `0x006323b0`) hashes its argument and accepts only those
+four, returning -1 otherwise. Names resolved 2026-07-28 from its four hash
+constants against a curated candidate list, all four on the first pass:
+`0x13254bc4`, `0x2cf46160`, `0xf387c5d6`, `0x93e73ca1`.
+
+`m_team1Num` / `m_team2Num` (`+0x18` / `+0x1c`) are set in
+`LoadDisplay::SetLoadState` (mt `0x00679ab0`, Phantom `0x00635f00`), which is
+called only from `LoadDisplay::Begin` (mt `0x0067e507`). It reads
+`GetTeamLocalizeNames` (mt `0x00654980` - just returns the globals
+`0x00b93d40` / `0x00b99148`) and matches against a **second, different** hash
+set from `GetTeamNum`'s. Those four turn out to be single characters:
+
+| Hash | Slot | String |
+|---|---|---|
+| `0xe40c292c` | 0 `all` | `"a"` |
+| `0xf70c4715` | 1 `rep` | `"r"` |
+| `0xe60c2c52` | 2 `cis` | `"c"` |
+| `0xec0c35c4` | 3 `imp` | `"i"` |
+
+So the same four slots are addressed by `all`/`rep`/`cis`/`imp` from the config
+and by `a`/`r`/`c`/`i` from the mission side. The two globals have exactly two
+writers:
+
+- `Lua_Callbacks::ScriptCB_SetTeamNames(s1, s2)` (mt `0x00459a90`), a registered
+  Lua callback taking **exactly two string arguments**; it PblHashes each and
+  passes 0 for a null second.
+- the playlist advance `FUN_00654ea0`, from playlist entry `+0x44` / `+0x48`
+  (0x54-byte entries based at `DAT_00b93d48`).
+
+`SetLoadState` sets both to **-1** for the shell and galactic-conquest states,
+and `PostLoad` skips the whole block when they are negative. A mission whose
+second team name is not one of those four leaves `m_team2Num = -1`, and only one
+model can appear.
+
+The gate the bit feeds is the `flags & 0x100` test at the top of the per-element
+render, modtools `0x00816fa0`, reached from
+`RedInterfaceScreen::Render` `0x00817870`. The icons are children of
+`m_groupBottomRight` (`+0x0fe0`), added through its own virtual `AddElement`
+(vtbl `+0x44`), and that group is enabled by default like every other one.
+
+`Red3DModelElementLite` fields, read off modtools `SetModel` `0x00839ea0` and
+agreeing field-for-field with the Phantom PDB:
+
+| Offset | Field |
+|---|---|
+| `+0x74` | `m_uiModelHash` |
+| `+0x78` | `m_Model`, **null when the name did not resolve** |
+| `+0x80` bit 1 | `m_searchForModel`, set by `SetModel` on a lookup miss |
+
+`SetModel` resolves against the global `RedModel` hash table (modtools
+`0x00d4d964`, 2048 entries) that `RedModel::Read` `0x007fa910` populates.
+
+### Why the extension does not use the stock `TeamModel` key
+
+Two defects, neither fixable from outside:
+
+1. **It is `LoadDisplay()`-scope only.** The `Map()` / `World()` branch (mt
+   `0x0067d46f`, Steam `0x005777e0`) compares exactly seven hashes - `BackDrop`,
+   `RandomBackdrop`, `TipsPrefix`, `TipsTime`, `ProgressBarTotalTime`,
+   `CampaignLayout`, `CampaignName`. `TeamModel` is not among them on either
+   build, so models can never vary per map.
+2. **Slot selection is localized.** `SetLoadState` matches the two team-name
+   hashes against four **compiled-in literal constants** - `"a"`, `"r"`, `"c"`,
+   `"i"` - but the letter that reaches the playlist entry comes from localized
+   content. A German build sends `"k"` for the CIS (KUS, hash `0xee0c38ea`),
+   which matches nothing, so `m_team2Num` is `-1` and only one model can appear.
+   Confirmed 2026-08-01: identical mod, English Steam works, German modtools does
+   not. **`-1` is not "hidden" - `PostLoad` skips the whole block, so the element
+   is never `AddElement`'d and is not in the render list at all.**
+
+So the extension parses all four `TeamModel*` keys itself, in both scopes, and
+addresses slots as `"1"`/`"2"` rather than by faction. From `hooked_load_config`
+- which runs after `SetLoadState` and before `PostLoad`, since `Begin` is
+`SetLoadState` -> `LoadData` (-> `LoadConfig`) -> `PostLoad` - it:
+
+- binds each configured model with `Red3DModelElementLite::SetModel`
+  (mt `0x00839f00`, Steam `0x006d7010`, GOG `0x006d80b0`),
+- writes `m_team1Num` / `m_team2Num` to the fixed slots 0 and 1,
+- writes `m_teamModelOmega`.
+
+`PostLoad` then does the parenting, spin and positioning natively, and the
+`Update` hook supplies the missing `Enable(true)` plus scale and offset. The
+enable bit is re-applied every `Update` rather than latched: `PostLoad` is the
+only thing that clears it and it runs before the first `Update`, but a latch
+would silently lose that race if that ever changed.
+
+#### The element coordinate space
+
+Element positions are **device pixels**, not a 640x480 virtual space. The chain,
+all from `RedInterfaceScreen::Render` (mt `0x00817870`):
+
+- `m_loadingScreen` is a `RedInterfaceScreen` at `LoadDisplay + 0x1c0`
+  (`LEA ECX,[ESI + 0x1c0]` at mt `0x006d060f` in `PlatformRender`, straight into
+  `Render`). Its first two fields are `m_uiWidthInPixels` / `m_uiHeightInPixels`,
+  and the `LoadDisplay` ctor sets them with
+  `SetDimensions(s_screenFull.m_uiWidthInPixels, s_screenFull.m_uiHeightInPixels)`
+  - the real backbuffer size, set once, never rechecked.
+- `Render` places each child group at
+  `((relX - 0.5) * width, (relY - 0.5) * -height, -width / sfWidth)` and builds
+  the camera frustum from the same numbers, so one world unit at that depth is
+  one device pixel. Note the Y negation: `m_fScreenRelativeY` grows downward but
+  the resulting element space is **y-up**.
+- Child offsets add into that same space, which is why the engine's own calls
+  look like `SetPosition(m_textLoading.m_uiMaxLineExtent + 10.0, -10.0)`.
+
+`PostLoad` puts `m_groupBottomRight` at screen-relative `(1.0, 1.0)` with the
+safe-zone flag (`+0x98` bit 0) set, so the team icons' origin is the bottom-right
+safe-zone corner. Against that origin the hardcoded `x = -100 / +100` puts the
+first mission team 100 px inside the screen and **the second 100 px past the
+right edge** - one reason a stock-placed pair only ever shows one model even once
+both are enabled.
+
+Because the space is device pixels, a pixel-valued config key would drift across
+resolutions. `TeamModelOffset(team, x, y)` therefore stores screen *fractions*
+and the `Update` hook multiplies them by the live `m_uiWidthInPixels` /
+`m_uiHeightInPixels`. `TeamModelScale` stays absolute - it multiplies `m_scale`,
+which is a world-unit and therefore a pixel size.
 
 ---
 
@@ -476,6 +621,14 @@ unless it renders *before* handing off to the original.
 
 `DeleteData` frees the `m_textures[]` entries but leaves `m_models[]` untouched
 and only nulls `m_skeletons[]`.
+
+> **Assets are shared by name, so a loading screen asset the mission also uses
+> disappears from the mission.** Confirmed in game 2026-08-01. `RedModel` and
+> `RedTexture` are registered in process-global hash tables keyed by name hash,
+> and the loading screen's teardown frees its entries out of those tables - it
+> does not own a private copy. Anything the map references under the same name is
+> left pointing at freed storage and does not draw. Loading screen content must
+> use names distinct from anything the map loads.
 
 > **This is not harmless, and an earlier revision of this document said it was.**
 > Reading a `modl` chunk registers objects in *process-global* renderer lists
