@@ -139,6 +139,9 @@
     <ClInclude Include="src\entity\soldier_override_texture.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\soldier_ragdoll.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -286,6 +289,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\soldier_override_texture.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_ragdoll.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp">

@@ -12,6 +12,7 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/soldier_ragdoll.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/cloth_collision_fix.hpp"
@@ -198,6 +199,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
+      g_soldierRagdollEnabled = cfg.get_bool("Features", "SoldierRagdoll", false);
+      g_soldierRagdollDebug = cfg.get_bool("Features", "SoldierRagdollDebug", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
@@ -248,6 +251,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
+   soldier_ragdoll_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

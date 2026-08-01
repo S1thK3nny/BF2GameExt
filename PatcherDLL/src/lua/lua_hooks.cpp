@@ -12,6 +12,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/soldier_ragdoll.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/flyer_boost_animation.hpp"
@@ -172,6 +173,7 @@ static void __cdecl hooked_init_state()
    disguise_ext_reset();
    droideka_ball_mode_reset();
    soldier_override_texture_reset();
+   soldier_ragdoll_reset();
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).

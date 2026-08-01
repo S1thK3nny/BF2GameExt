@@ -287,6 +287,13 @@ namespace modtools {
    constexpr uintptr_t GameSound_play              = 0x00415451;
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
    constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
+   // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices — the sole
+   // producer of the soldier's per-joint world matrices.  thiscall(this, float),
+   // RET 4.  Tail is PUSH gMatrixIdentity / LEA ECX,[EBX+0xd0] / CALL
+   // ZephyrSkeleton<32>::BuildWorldMatrices (0x0082c390, which Ghidra currently
+   // mislabels "Finalize" — it writes m_pWorldMatrices[0] then recurses down the
+   // m_iChild chain).  Used by entity/soldier_ragdoll.cpp.
+   constexpr uintptr_t soldier_apply_procedural    = 0x00579F10;
    constexpr uintptr_t prone_guard_jnz             = 0x00545BA6;
    constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
