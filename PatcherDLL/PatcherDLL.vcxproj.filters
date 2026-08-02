@@ -151,6 +151,9 @@
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\ai_squad_order_null_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\controller\controller_support.hpp">
       <Filter>controller</Filter>
     </ClInclude>
@@ -298,6 +301,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">

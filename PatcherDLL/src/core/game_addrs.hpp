@@ -287,6 +287,15 @@ namespace modtools {
    constexpr uintptr_t GameSound_play              = 0x00415451;
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
    constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
+
+   // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
+   // The squad-order branch nulls its target pointer for two states then virtual
+   // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
+   // (MOV ECX,[ESP+8] ; MOV EDX,[EAX]); _resume continues into the call, _skip
+   // is the engine's own "call returned false" continuation.
+   constexpr uintptr_t ai_squad_order_guard_site   = 0x005A2B84;
+   constexpr uintptr_t ai_squad_order_guard_resume = 0x005A2B8A;
+   constexpr uintptr_t ai_squad_order_guard_skip   = 0x005A2BA9;
    constexpr uintptr_t prone_guard_jnz             = 0x00545BA6;
    constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
@@ -763,6 +772,17 @@ namespace steam {
    // and jumps to that same convergence point.
    constexpr uintptr_t activate_pilot_crash_site  = 0x00500634;
    constexpr uintptr_t activate_pilot_skip_target = 0x005006dd;
+
+   // ---- AILowLevel::UpdateIndirect null-target crash -------------------------
+   // AILowLevel::UpdateIndirect = FUN_0043bc80 (modtools 0x005A2A80).  Retail
+   // codegen differs from modtools: the (possibly null) target is in ECX and the
+   // guard site is the 7 bytes at 0x0043BD31
+   // (MOV EAX,[ECX] ; PUSH 1 ; PUSH [EBP-4]).  Both pushes sit after the
+   // dereference, so the skip path has nothing pending and is a bare jump to the
+   // engine's own "call returned false" continuation.
+   constexpr uintptr_t ai_squad_order_guard_site   = 0x0043BD31;
+   constexpr uintptr_t ai_squad_order_guard_resume = 0x0043BD38;
+   constexpr uintptr_t ai_squad_order_guard_skip   = 0x0043BD4A;
 
    // ---- Memory heap management -----------------------------------------------
 
@@ -1412,6 +1432,13 @@ namespace gog {
    // full note); this whole region is in the shift-0 range.
    constexpr uintptr_t activate_pilot_crash_site      = 0x00500634;
    constexpr uintptr_t activate_pilot_skip_target     = 0x005006dd;
+
+   // ---- AILowLevel::UpdateIndirect null-target crash -----------------------------
+   // Same codegen as Steam, shifted -0x10 (byte-identical at the site and at the
+   // skip target); see the steam namespace for the full note.
+   constexpr uintptr_t ai_squad_order_guard_site      = 0x0043BD21;
+   constexpr uintptr_t ai_squad_order_guard_resume    = 0x0043BD28;
+   constexpr uintptr_t ai_squad_order_guard_skip      = 0x0043BD3A;
 
    // ---- Memory heap management --------------------------------------------------
 
