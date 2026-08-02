@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest a new Lua function, ODF property, engine fix or limit increase.
+title: "[Request] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening one of these, please check
+        [the roadmap](https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/ROADMAP.md)
+        and [the feature list](https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/user/FEATURES.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What should it do?
+      description: Describe the capability, not the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What are you trying to build with it?
+      description: >
+        The concrete modding use case. This matters a lot: the engine usually
+        offers several ways to reach a goal, and knowing the goal often turns a
+        hard request into an easy one.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where would it live?
+      options:
+        - Lua function (mission scripts)
+        - ODF property
+        - load.cfg parameter (loading screens)
+        - INI toggle
+        - Engine limit increase
+        - Bug fix
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art
+      description: >
+        Does the stock engine half-implement this already? Does BF1 do it? Is
+        there a known ODF property that is parsed but unwired? Any pointer into
+        the binary saves a lot of searching.
+    validations:
+      required: false

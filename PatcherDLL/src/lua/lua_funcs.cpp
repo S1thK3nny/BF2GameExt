@@ -1579,7 +1579,7 @@ void register_lua_functions(lua_State* L)
    // classic `if GameExt then ... end` presence check keeps working) that
    // namespaces the metadata fields:
    //   if GameExt then ... end             -- extension present
-   //   print(GameExt.version)              -- "1.0.0.1"
+   //   print(GameExt.version)              -- "1.0.0"
    //   if GameExt.build == "steam" then    -- which exe we're patching
    //   GameExt.disable = true              -- opt out of intrusive features
    const char* buildName = "unknown";
