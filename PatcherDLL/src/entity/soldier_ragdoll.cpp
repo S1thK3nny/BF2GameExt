@@ -29,14 +29,18 @@
 // every frame).
 //
 // Note the root matrix is built against gMatrixIdentity, so m_pWorldMatrices are
-// in MODEL space, not world space.  That is what makes this cheap: the corpse's
-// contact plane is a fixed model-space height (measured at seed, see seed()) and
-// no terrain query is needed at all.  Gravity is model-space down.  The corpse entity
-// keeps its own engine-driven motion (EntitySoldier::DirectionKill gives it a
-// death impulse and its collision cylinder stays on the terrain); the ragdoll
-// rides along in model space.  The visible cost is that the body has no inertia
-// against that motion - a corpse sliding downhill is dragged rigidly rather than
-// tumbling.  Fixing that needs the entity world matrix on both sides of the sim.
+// in MODEL space, not world space.  That is what makes this cheap: no terrain
+// query is needed anywhere.
+//
+// The sim itself runs in WORLD space so the body has inertia of its own, which
+// model space cannot express: there the corpse entity's motion is invisible, so
+// a body could only ever be dragged rigidly along by it.  seed() moves the pose
+// out to world space and takes its starting velocity from EntitySoldier::
+// mVelocity, where DirectionKill has just deposited the death impulse; the
+// entity is not consulted again after that, and write_back() brings the result
+// back to model space.  Contact stays a single frozen plane, captured in world
+// at seed, so no terrain query creeps back in - see seed() for why it is frozen
+// rather than tracked, and what that costs on a slope.
 //
 // Data layout (build-invariant: these are PODs read straight out of the .zaabin
 // skeleton, and ZephyrSkeleton<32> is 0x810 bytes on debug and release alike -
@@ -91,6 +95,41 @@ static constexpr int kJointChild       = 0x61;  // char m_iChild
 
 static constexpr int kHealthFlags      = 0x1FC; // EntitySoldier struct_base + mHealthFlags
 static constexpr int kIsAliveBit       = 3;
+
+// EntitySoldier::mMatrix - the corpse's world transform (PblMatrix: right, up,
+// forward, trans).  Sits between the RedSceneObject block and mModel at +0x130.
+static constexpr int kEntityMatrix     = 0xF0;
+
+// EntitySoldier::mVelocity - the corpse's world-space velocity, and the field
+// the death impulse lands in.  This is what gives the body its momentum; without
+// it the ragdoll is born at rest and an explosion cannot throw it.
+//
+// Confirmed by DISASSEMBLY, not by the struct dump.  mt EntitySoldier::
+// DirectionKill (0x0054c020) normalises (soldierPos - blastPos) and hands it to
+// 0x005458b0, which writes three consecutive floats at this+0x4EC:
+//   - normal path:        += dir * 5.0
+//   - state 0x11 / 0x12:   = normalize(dir, biased up by 0.4 + rand*0.3) * 9.0
+//     followed by SetState(9)
+//
+// The dump puts EntitySoldier_data at 0x424, which would make +0x4EC the middle
+// of mPitchOffset / mPitchVelocity / mKickScale - three unrelated scalars, not an
+// impulse target.  The real base is 0x434, and two fields agree on it
+// independently: mVelocity at +184 lands on 0x4EC (the write above), and mState
+// at +800 lands on 0x754, which is exactly the field 0x005458b0 tests against
+// SoldierState 0x11/0x12.  This is the same 0x10 skew the dump has elsewhere -
+// see the warning in [[soldier-ragdoll-feature]] about sub-struct bases.
+//
+// The earlier attempt at this used struct+0x334, taking Controllable_data's base
+// (0x27C) with EntitySoldier_data's field index (+184) - two different
+// sub-structs. That is why corpses launched at clamp speed from a standing kill.
+static constexpr int kEntityVelocity   = 0x4EC;
+
+// Sanity ceiling on the seeded speed.  A real death impulse is 5-9 m/s, and a
+// sprinting soldier adds a few more; anything past this means we are reading a
+// field that is not mVelocity, and the body should collapse in place rather than
+// be flung off the map.  Logged when it trips so a bad offset stays visible
+// instead of being silently absorbed.
+static constexpr float kMaxSeedSpeed   = 30.0f;
 
 // PblMatrix is D3DX row-major with row-vector convention: rows at +0x00/+0x10/
 // +0x20 and the translation in row 3 at +0x30 (matches Chunk::mMatrix, whose
@@ -168,6 +207,42 @@ static inline Vec3 v_cross(const Vec3& a, const Vec3& b)
 }
 static inline float v_len(const Vec3& a) { return std::sqrt(v_dot(a, a)); }
 
+// PblMatrix is row-major with row vectors, so a point transforms as p * M with
+// the translation living in row 3.
+static inline Vec3 xform_point(const float* M, const Vec3& p)
+{
+   return {p.x * M[0] + p.y * M[4] + p.z * M[8]  + M[12],
+           p.x * M[1] + p.y * M[5] + p.z * M[9]  + M[13],
+           p.x * M[2] + p.y * M[6] + p.z * M[10] + M[14]};
+}
+
+// Inverse of the above for a rigid (optionally scaled) transform: subtract the
+// translation, then project onto each basis row and divide by its squared
+// length, which undoes any scale baked into the rows as well as the rotation.
+static inline Vec3 xform_point_inv(const float* M, const Vec3& p)
+{
+   const float d[3] = {p.x - M[12], p.y - M[13], p.z - M[14]};
+   Vec3 out{};
+   float* o = &out.x;
+   for (int r = 0; r < 3; r++) {
+      const float* row = M + r * 4;
+      const float sq = row[0] * row[0] + row[1] * row[1] + row[2] * row[2];
+      o[r] = (sq > 1e-12f)
+                ? (d[0] * row[0] + d[1] * row[1] + d[2] * row[2]) / sq
+                : 0.0f;
+   }
+   return out;
+}
+
+// A soldier's world transform is upright yaw, so a sane matrix has a near-
+// vertical up row and a unit-ish scale.  Anything else means we are reading a
+// torn-down or not-yet-initialised entity and should stay in model space.
+static inline bool matrix_is_sane(const float* M)
+{
+   const float sq = M[4] * M[4] + M[5] * M[5] + M[6] * M[6];
+   return sq > 0.25f && sq < 4.0f;
+}
+
 // ---------------------------------------------------------------------------
 // Per-corpse state
 // ---------------------------------------------------------------------------
@@ -240,7 +315,8 @@ static RagdollState* acquire_state(void* animator)
 // subtract per bone and is automatically correct for per-joint scale and for
 // whatever non-standard skeleton a mod ships.
 
-static void seed(RagdollState* s, const float* world, const uint8_t* joints, int n)
+static void seed(RagdollState* s, const float* world, const uint8_t* joints, int n,
+                 const float* entityMat, const Vec3& vel)
 {
    s->numJoints = n;
 
@@ -426,7 +502,61 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
    for (int i = 0; i < n; i++) if (s->sim[i]) simCount++;
    s->simCount = simCount;
 
+   // Everything above ran in MODEL space, which is the space the world matrices
+   // are built in and the space the classification and rest lengths belong to.
+   // The simulation itself runs in WORLD space so the body has inertia against
+   // the corpse entity's own motion - in model space that motion is invisible,
+   // so a corpse sliding downhill was dragged along rigidly instead of tumbling.
+   // Rest lengths and the truss survive the move unchanged because the entity
+   // transform is rigid.
+   // The contact plane is frozen HERE, in world space, rather than tracked off
+   // the entity every frame.  The entity keeps sliding under its own death
+   // impulse and the body now travels under its own, but the two are integrated
+   // separately and will not agree; tracking the entity would drag the floor
+   // around under a body that is not following it.  Freezing makes them
+   // independent, so entity drift cannot reach us.
+   // The cost is that the plane is the height where the soldier DIED, not where
+   // the body lands.  Exact on flat ground; a body thrown off a ledge stops in
+   // mid-air at the old height, and one blown up a slope sinks into it.  Fixing
+   // that properly means a real terrain height at the landing point, which is
+   // the one thing this design has so far avoided needing.
+   s->groundY += entityMat[13];
+
+   // Seed the body's momentum from the corpse entity's own velocity, which is
+   // where EntitySoldier::DirectionKill has just deposited the death impulse.
+   // Verlet carries velocity as the gap between pos and prev, and step() scales
+   // that gap by kDamping before applying it, so the gap has to be pre-divided
+   // to make the first step come out at exactly v.  Without this the body is
+   // born at rest and no explosion can throw it, however hard it hit.
+   float speed = v_len(vel);
+   Vec3  v     = vel;
+   if (speed > kMaxSeedSpeed) {
+      const float k = kMaxSeedSpeed / speed;
+      v.x *= k; v.y *= k; v.z *= k;
+   }
+   const float gap = kFixedStep / kDamping;
+
+   for (int i = 0; i < n; i++) {
+      s->pos[i]  = xform_point(entityMat, s->pos[i]);
+      s->prev[i] = {s->pos[i].x - v.x * gap,
+                    s->pos[i].y - v.y * gap,
+                    s->pos[i].z - v.z * gap};
+   }
+
    s->seeded = true;
+
+   // Logged per corpse, not once per level: only some deaths are explosions, so
+   // a single sample cannot tell a correct mVelocity from a wrong one.  Across a
+   // few kills this should read ~0 for a standing shot, a few m/s along the
+   // travel direction for a running one, and 5-9 m/s biased upward and away from
+   // the blast for an explosion.  Anything constant, huge, or unrelated to how
+   // the soldier died means kEntityVelocity is pointing at the wrong field.
+   if (g_soldierRagdollDebug) {
+      auto fn_log = get_gamelog();
+      fn_log("[Ragdoll] seed vel=(%.3f, %.3f, %.3f) speed=%.3f%s\n",
+             vel.x, vel.y, vel.z, speed,
+             speed > kMaxSeedSpeed ? "  CLAMPED - suspect offset" : "");
+   }
 
    // One-shot dump of the seed configuration.  The model-space frame is the one
    // thing here that cannot be settled by reading the disassembly - whether the
@@ -455,7 +585,7 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
 // Solver
 // ---------------------------------------------------------------------------
 
-static void step(RagdollState* s, float dt)
+static void step(RagdollState* s, float dt, float groundY)
 {
    const int n = s->numJoints;
 
@@ -496,7 +626,7 @@ static void step(RagdollState* s, float dt)
    // back onto the plane and the constraints never recover the bone lengths, so
    // the whole skeleton converges onto a single height.  Each joint stops a
    // radius above the plane so the body keeps some thickness.
-   const float contactY = s->groundY + kJointRadius;
+   const float contactY = groundY + kJointRadius;
    for (int i = 0; i < n; i++) {
       if (!s->sim[i] || s->pos[i].y >= contactY) continue;
       s->pos[i].y = contactY;
@@ -530,12 +660,22 @@ static void axis_angle_to_mat3(const Vec3& axis, float s, float c, float out[9])
    out[6] = t * x * z + s * y; out[7] = t * y * z - s * x; out[8] = c + t * z * z;
 }
 
-static void write_back(RagdollState* s, float* world, const uint8_t* joints)
+static void write_back(RagdollState* s, float* world, const uint8_t* joints,
+                       const float* entityMat)
 {
    const int n = s->numJoints;
 
-   // Snapshot the animated translations first: the write loop overwrites row 3
-   // in place, and a joint's swing needs its child's ORIGINAL position.
+   // The solver works in world space but the matrices we are writing are model
+   // space, so bring the simulated positions back first.  Everything below then
+   // stays entirely model-space, which is what keeps the swing math correct: it
+   // compares an animated direction against a simulated one, and those two have
+   // to be in the same space.
+   Vec3 simT[kMaxJoints];
+   for (int i = 0; i < n; i++)
+      simT[i] = s->sim[i] ? xform_point_inv(entityMat, s->pos[i]) : Vec3{};
+
+   // Snapshot the animated translations too: the write loop overwrites row 3 in
+   // place, and a joint's swing needs its child's ORIGINAL position.
    Vec3 origT[kMaxJoints];
    for (int i = 0; i < n; i++) {
       const float* m = world + i * kMatrixFloats;
@@ -552,7 +692,7 @@ static void write_back(RagdollState* s, float* world, const uint8_t* joints)
       if (c < 0 || c >= n) continue;
 
       Vec3 a = v_sub(origT[c], origT[i]);
-      Vec3 b = v_sub(s->pos[c], s->pos[i]);
+      Vec3 b = v_sub(simT[c], simT[i]);
       const float la = v_len(a), lb = v_len(b);
       if (la < 1e-6f || lb < 1e-6f) continue;
 
@@ -609,9 +749,9 @@ static void write_back(RagdollState* s, float* world, const uint8_t* joints)
          }
       }
 
-      m[kMatTransX + 0] = s->pos[i].x;
-      m[kMatTransX + 1] = s->pos[i].y;
-      m[kMatTransX + 2] = s->pos[i].z;
+      m[kMatTransX + 0] = simT[i].x;
+      m[kMatTransX + 1] = simT[i].y;
+      m[kMatTransX + 2] = simT[i].z;
    }
 
    // Pass 4 - drag the collapsed scaffolding along, exactly as the engine's own
@@ -654,6 +794,12 @@ static void __fastcall hooked_ApplyProcedural(void* ecx, void* /*edx*/, float dt
          return;
       }
 
+      // The corpse's own world transform.  Used to move the sim in and out of
+      // world space; the contact plane is taken from it once, at seed, and then
+      // frozen (see seed()) rather than tracked per frame.
+      const float* entityMat = (const float*)(owner + kEntityMatrix);
+      if (!matrix_is_sane(entityMat)) return;
+
       uint8_t* skel   = animator + kSAZephyrSkeleton;
       uint8_t* shared = *(uint8_t**)(skel + kZSShared);
       if (!shared) return;
@@ -672,9 +818,18 @@ static void __fastcall hooked_ApplyProcedural(void* ecx, void* /*edx*/, float dt
       }
       s->touchTick = ++g_tick;
 
-      if (!s->seeded) seed(s, world, joints, n);
+      if (!s->seeded) {
+         // Read on the first dead frame, which is the frame after DirectionKill
+         // wrote the impulse, so this still carries the blast.  Read at seed and
+         // never again: from here the body is on its own, and the entity's later
+         // motion must not feed back into a sim it is no longer driving.
+         const float* ev = (const float*)(owner + kEntityVelocity);
+         seed(s, world, joints, n, entityMat, Vec3{ev[0], ev[1], ev[2]});
+      }
       if (s->numJoints != n) return;        // skeleton swapped under us
       if (s->simCount < kMinSimJoints) return; // nothing bone-like to simulate
+
+      const float groundY = s->groundY; // world space, frozen at seed
 
       // Park the sim once the body has settled, but keep writing the final pose
       // so the death clip cannot creep back in underneath it.
@@ -683,14 +838,14 @@ static void __fastcall hooked_ApplyProcedural(void* ecx, void* /*edx*/, float dt
          s->accum += dt;
          int steps = 0;
          while (s->accum >= kFixedStep && steps < kMaxSubsteps) {
-            step(s, kFixedStep);
+            step(s, kFixedStep, groundY);
             s->accum -= kFixedStep;
             steps++;
          }
          if (s->accum > kFixedStep * kMaxSubsteps) s->accum = 0.0f; // hitch guard
       }
 
-      write_back(s, world, joints);
+      write_back(s, world, joints, entityMat);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // A torn-down animator mid-frame must never take the game with it.
       release_state(ecx);
