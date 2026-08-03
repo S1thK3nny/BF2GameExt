@@ -127,6 +127,9 @@
     <ClInclude Include="src\shell\gc_visual_limits.hpp">
       <Filter>shell</Filter>
     </ClInclude>
+    <ClInclude Include="src\shell\ingame_movie_path.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\anim_bank_append.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -152,6 +155,9 @@
       <Filter>entity</Filter>
     </ClInclude>
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\ai_squad_order_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
     <ClInclude Include="src\controller\controller_support.hpp">
@@ -279,6 +285,9 @@
     <ClCompile Include="src\shell\gc_visual_limits.cpp">
       <Filter>shell</Filter>
     </ClCompile>
+    <ClCompile Include="src\shell\ingame_movie_path.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
     <ClCompile Include="src\entity\anim_bank_append.cpp">
       <Filter>entity</Filter>
     </ClCompile>
@@ -304,6 +313,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">

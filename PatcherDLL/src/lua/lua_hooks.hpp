@@ -183,7 +183,9 @@ void lua_set_global_string(lua_State* L, const char* name, const char* value);
 // Pass the live Lua state from the current C callback (NOT the cached g_L).
 bool gameext_is_disabled(lua_State* L);
 
-// Version string exposed to Lua as GameExt.version. Tracked independently of
-// Resource.rc's FILEVERSION (currently 1.0.0.1) — this is the API version
-// scripts branch on, so bump it only when the Lua surface changes.
-#define GAMEEXT_VERSION_STRING "1.0.0"
+// GAMEEXT_VERSION_STRING is exposed to Lua as GameExt.version. It comes from
+// version.h at the repo root, which is the single source of truth for every
+// version number in the project (both VERSIONINFO blocks read it too), so a
+// release bump is a one-file edit. Scripts branch on this string, so treat a
+// change to the Lua surface as a version bump.
+#include "version.h"

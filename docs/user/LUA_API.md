@@ -72,6 +72,20 @@ the sublevel suffix. The trailing `.lvl` is optional.
 | `SetLoadDisplayLevel("dc:LOAD\\load.lvl")` | `<addon dir>\Data\_lvl_pc\LOAD\load.lvl`, e.g. `addon\VTR\Data\_lvl_pc\LOAD\load.lvl` |
 | `SetLoadDisplayLevel("..\\..\\addon\\VTR\\data\\_LVL_PC\\LOAD\\load")` | raw path relative to `data\_lvl_pc\` (the original form, still supported) |
 
+## In-Game Movies
+
+Stock `ScriptCB_PlayInGameMovie(file, segment)` ignores `file` argument. Here it works,
+and also takes the `dc:` addon prefix.
+
+| Form | Resolves to |
+|------|-------------|
+| `ScriptCB_PlayInGameMovie("ingame.mvs", "hotmon01")` | stock ingame.mvs
+| `ScriptCB_PlayInGameMovie("mymovie.mvs", "seg")` | `data\_lvl_pc\Movies\mymovie.mvs` |
+| `ScriptCB_PlayInGameMovie("dc:mymovie.mvs", "seg")` | `<addon dir>\Data\_lvl_pc\Movies\mymovie.mvs` |
+
+A bare name that is missing from the base game but present in the active addon
+resolves to the addon copy on its own, so `dc:` is only needed when both exist.
+
 ## Rendering
 
 | Function | Description |

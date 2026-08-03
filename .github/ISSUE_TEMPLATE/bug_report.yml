@@ -1,0 +1,146 @@
+name: Bug report
+description: Something the extension does is wrong, or the game crashes with it installed.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        BF2GameExt patches three different executables at raw addresses, so a
+        report without the build and the INI is usually not actionable. The
+        required fields below are the ones that make the difference between a
+        bug that gets fixed and one that gets closed as unreproducible.
+
+        **If the game crashed, the `BF2GameExt_crash.log` field is the single
+        most useful thing in this form. Please do not skip it.**
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What went wrong, and what you expected instead.
+      placeholder: |
+        Expected: prone works when I double-tap crouch.
+        Actual: the soldier plays the crouch animation and never goes prone.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Which game build?
+      description: >
+        If you are on the Aspyr Classic Collection, BF2GameExt does not support
+        it and there is nothing to report. It is a different executable.
+      options:
+        - Modtools
+        - Steam
+        - GOG
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install it?
+      options:
+        - DInput8 proxy (dinput8.dll next to the game exe)
+        - Exe patcher (BF2GameExt.exe)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: BF2GameExt version
+      description: >
+        Right-click BF2GameExt.dll then Properties then Details, or run
+        `print(GameExt.version)` from a mission script. Please do not write
+        "latest".
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Include the map or mod if it only happens on one. If you can reproduce
+        it on a stock map, say so, that narrows things down enormously.
+      placeholder: |
+        1. Launch a stock instant-action map on Coruscant with the gcw era
+        2. Spawn as a stormtrooper
+        3. Enter a turret
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: is-crash
+    attributes:
+      label: Does the game crash?
+      options:
+        - label: Yes, the game crashes or closes itself
+          required: false
+
+  - type: textarea
+    id: crash-log
+    attributes:
+      label: BF2GameExt_crash.log
+      description: >
+        REQUIRED FOR CRASHES. BF2GameExt installs a crash handler that writes
+        `BF2GameExt_crash.log` next to the game executable (in `GameData`)
+        whenever the game faults. It is always on, you do not need to enable
+        anything. Paste the whole report for the crash, or attach the file by
+        dragging it into this box. The faulting address and the unrelocated
+        address in that file are what let us find the bug; without them a crash
+        report is mostly guesswork.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: ini
+    attributes:
+      label: Your BF2GameExt.ini
+      description: >
+        Paste the file, or say "unmodified default" if you have not touched it.
+        Many reports come down to one toggle.
+      render: ini
+    validations:
+      required: true
+
+  - type: textarea
+    id: gameext-log
+    attributes:
+      label: BF2GameExt.log
+      description: >
+        Optional but helpful. Also written next to the game executable. Shows
+        which patches applied and which were skipped.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: other-mods
+    attributes:
+      label: Other dinput8 proxies or mods present
+      description: >
+        ReShade, other dinput8.dll wrappers, gameplay mods, sides mods. The
+        proxy chain-loads other dinput8 DLLs, so conflicts are possible.
+      placeholder: "ReShade 6.x, plus a custom sides mod"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: sanity
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked that this still happens with a default BF2GameExt.ini
+          required: false
+        - label: I searched existing issues for this
+          required: false

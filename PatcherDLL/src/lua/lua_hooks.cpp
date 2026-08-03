@@ -22,6 +22,7 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/flyer_sound_fix.hpp"
@@ -302,6 +303,7 @@ void lua_hooks_install(uintptr_t exe_base)
    fp_anim_bank_install(exe_base);           // build-aware (all three), guards internally
    entity_carrier_fixes_install(exe_base);   // full set on modtools, bounds guards only elsewhere
    lua_create_entity_hook_install(exe_base); // guards internally
+   ingame_movie_path_install(exe_base);      // build-aware (all three), guards internally
 
    // Barrel fire origin (WeaponCannon vtable patch) installs separately via
    // barrel_fire_origin_install() in weapon/barrel_fire_origin.cpp.
@@ -330,6 +332,7 @@ void lua_hooks_uninstall()
    flyer_sound_uninstall();
    droideka_ball_mode_uninstall();
    droideka_death_anim_uninstall();
+   ingame_movie_path_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

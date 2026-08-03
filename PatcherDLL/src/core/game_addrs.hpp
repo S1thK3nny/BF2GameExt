@@ -265,6 +265,18 @@ namespace modtools {
    // when no addon is active.  Returns the addon directory, e.g. "addon\\VTR".
    constexpr uintptr_t dlc_get_content_directory   = 0x00449400;
 
+   // ---- Shell / In-game movies -------------------------------------------------
+   // Lua_Callbacks::ScriptCB_PlayInGameMovie(L) — __cdecl lua_CFunction, registered
+   // at 0x00AC7830.  Retail rewrote the dev-build version: it reads only Lua arg 2
+   // (the segment name) and picks the movie FILE from a hardcoded language table
+   // (ingame.mvs / ingamefr.mvs / ingamegr.mvs), so arg 1 is ignored entirely.
+   constexpr uintptr_t scriptcb_play_ingame_movie  = 0x004653E0;
+   // GameMovie::sInGameMovieFilename — 256-byte buffer StartInGameMoviePlay fills
+   // with "Movies\\<file>" and UpdatInGameMovie hands to GameMovie::Open.
+   constexpr uintptr_t ingame_movie_filename       = 0x00B30290;
+   // GameMovie::sInGameMoviePlayerState — 0 idle, 1 requested, 2 opening, 3 playing.
+   constexpr uintptr_t ingame_movie_player_state   = 0x00B30280;
+
    // ---- Debug Drawing (RedCommandConsole / 3D overlay) -----------------------
 
    constexpr uintptr_t draw_line_3d               = 0x007e96b0;
@@ -287,6 +299,16 @@ namespace modtools {
    constexpr uintptr_t GameSound_play              = 0x00415451;
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
    constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
+
+   // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
+   // The squad-order branch nulls its target pointer for two states then virtual
+   // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
+   // (MOV ECX,[ESP+8] ; MOV EDX,[EAX]); _resume continues into the call, _skip
+   // is the engine's own "call returned false" continuation.
+   constexpr uintptr_t ai_squad_order_guard_site   = 0x005A2B84;
+   constexpr uintptr_t ai_squad_order_guard_resume = 0x005A2B8A;
+   constexpr uintptr_t ai_squad_order_guard_skip   = 0x005A2BA9;
+
    // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices — the sole
    // producer of the soldier's per-joint world matrices.  thiscall(this, float),
    // RET 4.  Tail is PUSH gMatrixIdentity / LEA ECX,[EBX+0xd0] / CALL
@@ -294,6 +316,7 @@ namespace modtools {
    // mislabels "Finalize" — it writes m_pWorldMatrices[0] then recurses down the
    // m_iChild chain).  Used by entity/soldier_ragdoll.cpp.
    constexpr uintptr_t soldier_apply_procedural    = 0x00579F10;
+
    constexpr uintptr_t prone_guard_jnz             = 0x00545BA6;
    constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
@@ -771,6 +794,17 @@ namespace steam {
    constexpr uintptr_t activate_pilot_crash_site  = 0x00500634;
    constexpr uintptr_t activate_pilot_skip_target = 0x005006dd;
 
+   // ---- AILowLevel::UpdateIndirect null-target crash -------------------------
+   // AILowLevel::UpdateIndirect = FUN_0043bc80 (modtools 0x005A2A80).  Retail
+   // codegen differs from modtools: the (possibly null) target is in ECX and the
+   // guard site is the 7 bytes at 0x0043BD31
+   // (MOV EAX,[ECX] ; PUSH 1 ; PUSH [EBP-4]).  Both pushes sit after the
+   // dereference, so the skip path has nothing pending and is a bare jump to the
+   // engine's own "call returned false" continuation.
+   constexpr uintptr_t ai_squad_order_guard_site   = 0x0043BD31;
+   constexpr uintptr_t ai_squad_order_guard_resume = 0x0043BD38;
+   constexpr uintptr_t ai_squad_order_guard_skip   = 0x0043BD4A;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
@@ -937,6 +971,14 @@ namespace steam {
    constexpr uintptr_t red_warning_set_log_data    = 0x006F71A0; // 5-arg formatted overload
    constexpr uintptr_t log_formatted_flag          = 0x009C8490;
    constexpr uintptr_t dlc_get_content_directory   = 0x0048EBA0; // returns addmeDirectory
+
+   // ---- Shell / In-game movies -------------------------------------------------
+   // See the modtools namespace for what these are.  Reg table 0x007E7058;
+   // StartInGameMoviePlay (LTCG, ECX=file EDX=segment) is 0x00534BD0 and is where
+   // the two globals below were read off.
+   constexpr uintptr_t scriptcb_play_ingame_movie  = 0x00585790;
+   constexpr uintptr_t ingame_movie_filename       = 0x01E56288;
+   constexpr uintptr_t ingame_movie_player_state   = 0x01E5616C;
 
    // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
    // builds ship RedWarning file logging compiled but disabled.  After
@@ -1420,6 +1462,13 @@ namespace gog {
    constexpr uintptr_t activate_pilot_crash_site      = 0x00500634;
    constexpr uintptr_t activate_pilot_skip_target     = 0x005006dd;
 
+   // ---- AILowLevel::UpdateIndirect null-target crash -----------------------------
+   // Same codegen as Steam, shifted -0x10 (byte-identical at the site and at the
+   // skip target); see the steam namespace for the full note.
+   constexpr uintptr_t ai_squad_order_guard_site      = 0x0043BD21;
+   constexpr uintptr_t ai_squad_order_guard_resume    = 0x0043BD28;
+   constexpr uintptr_t ai_squad_order_guard_skip      = 0x0043BD3A;
+
    // ---- Memory heap management --------------------------------------------------
 
    constexpr uintptr_t red_set_current_heap           = 0x006c4ca0;
@@ -1533,6 +1582,13 @@ namespace gog {
    constexpr uintptr_t red_warning_set_log_data       = 0x006F8270;
    constexpr uintptr_t log_formatted_flag             = 0x009C9930;
    constexpr uintptr_t dlc_get_content_directory      = 0x0048EBA0;
+
+   // ---- Shell / In-game movies --------------------------------------------------
+   // See the modtools namespace.  Reg table 0x007E8058; StartInGameMoviePlay is
+   // 0x00535940 (instruction-for-instruction the same as Steam's 0x00534BD0).
+   constexpr uintptr_t scriptcb_play_ingame_movie     = 0x00586520;
+   constexpr uintptr_t ingame_movie_filename          = 0x01E57738;
+   constexpr uintptr_t ingame_movie_player_state      = 0x01E5761C;
 
    // ---- Shell / GC Visual Limits ------------------------------------------------
 
