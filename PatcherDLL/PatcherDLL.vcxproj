@@ -142,6 +142,7 @@
     <ClInclude Include="src\loading_screen\loading_screen.hpp" />
     <ClInclude Include="src\loading_screen\shared.hpp" />
     <ClInclude Include="src\shell\gc_visual_limits.hpp" />
+    <ClInclude Include="src\shell\ingame_movie_path.hpp" />
     <ClInclude Include="src\entity\anim_bank_append.hpp" />
     <ClInclude Include="src\entity\land_on_arrival_fix.hpp" />
     <ClInclude Include="src\entity\droideka_ball_mode.hpp" />
@@ -213,6 +214,7 @@
     <ClCompile Include="src\loading_screen\lifecycle.cpp" />
     <ClCompile Include="src\loading_screen\data_guard.cpp" />
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
+    <ClCompile Include="src\shell\ingame_movie_path.cpp" />
     <ClCompile Include="src\controller\controller_support.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
     <ClCompile Include="src\controller\aim_assist.cpp" />

@@ -265,6 +265,18 @@ namespace modtools {
    // when no addon is active.  Returns the addon directory, e.g. "addon\\VTR".
    constexpr uintptr_t dlc_get_content_directory   = 0x00449400;
 
+   // ---- Shell / In-game movies -------------------------------------------------
+   // Lua_Callbacks::ScriptCB_PlayInGameMovie(L) — __cdecl lua_CFunction, registered
+   // at 0x00AC7830.  Retail rewrote the dev-build version: it reads only Lua arg 2
+   // (the segment name) and picks the movie FILE from a hardcoded language table
+   // (ingame.mvs / ingamefr.mvs / ingamegr.mvs), so arg 1 is ignored entirely.
+   constexpr uintptr_t scriptcb_play_ingame_movie  = 0x004653E0;
+   // GameMovie::sInGameMovieFilename — 256-byte buffer StartInGameMoviePlay fills
+   // with "Movies\\<file>" and UpdatInGameMovie hands to GameMovie::Open.
+   constexpr uintptr_t ingame_movie_filename       = 0x00B30290;
+   // GameMovie::sInGameMoviePlayerState — 0 idle, 1 requested, 2 opening, 3 playing.
+   constexpr uintptr_t ingame_movie_player_state   = 0x00B30280;
+
    // ---- Debug Drawing (RedCommandConsole / 3D overlay) -----------------------
 
    constexpr uintptr_t draw_line_3d               = 0x007e96b0;
@@ -951,6 +963,14 @@ namespace steam {
    constexpr uintptr_t log_formatted_flag          = 0x009C8490;
    constexpr uintptr_t dlc_get_content_directory   = 0x0048EBA0; // returns addmeDirectory
 
+   // ---- Shell / In-game movies -------------------------------------------------
+   // See the modtools namespace for what these are.  Reg table 0x007E7058;
+   // StartInGameMoviePlay (LTCG, ECX=file EDX=segment) is 0x00534BD0 and is where
+   // the two globals below were read off.
+   constexpr uintptr_t scriptcb_play_ingame_movie  = 0x00585790;
+   constexpr uintptr_t ingame_movie_filename       = 0x01E56288;
+   constexpr uintptr_t ingame_movie_player_state   = 0x01E5616C;
+
    // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
    // builds ship RedWarning file logging compiled but disabled.  After
    // RedWarning::Init (detoured), raise the file destination's min severity to
@@ -1553,6 +1573,13 @@ namespace gog {
    constexpr uintptr_t red_warning_set_log_data       = 0x006F8270;
    constexpr uintptr_t log_formatted_flag             = 0x009C9930;
    constexpr uintptr_t dlc_get_content_directory      = 0x0048EBA0;
+
+   // ---- Shell / In-game movies --------------------------------------------------
+   // See the modtools namespace.  Reg table 0x007E8058; StartInGameMoviePlay is
+   // 0x00535940 (instruction-for-instruction the same as Steam's 0x00534BD0).
+   constexpr uintptr_t scriptcb_play_ingame_movie     = 0x00586520;
+   constexpr uintptr_t ingame_movie_filename          = 0x01E57738;
+   constexpr uintptr_t ingame_movie_player_state      = 0x01E5761C;
 
    // ---- Shell / GC Visual Limits ------------------------------------------------
 

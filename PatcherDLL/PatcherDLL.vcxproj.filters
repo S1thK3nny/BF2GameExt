@@ -127,6 +127,9 @@
     <ClInclude Include="src\shell\gc_visual_limits.hpp">
       <Filter>shell</Filter>
     </ClInclude>
+    <ClInclude Include="src\shell\ingame_movie_path.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\anim_bank_append.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -277,6 +280,9 @@
       <Filter>loading_screen</Filter>
     </ClCompile>
     <ClCompile Include="src\shell\gc_visual_limits.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\shell\ingame_movie_path.cpp">
       <Filter>shell</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\anim_bank_append.cpp">
