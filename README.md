@@ -18,16 +18,17 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
 
 ## Installation
 
-No exe patching required. Drop these files next to your game executable (inside `GameData`):
+1. Download the latest release zip.
+2. Open it. Inside you get a `GameData` folder, `LICENSE.txt` and `README.txt`.
+3. Drag `GameData` onto your Star Wars Battlefront II folder - the one that already contains a `GameData` - and let Windows merge it.
 
-- `dinput8.dll` (DInput8Proxy project)
-- `BF2GameExt.dll` (PatcherDLL project)
-- `BF2GameExt.ini` (from `dist/`)
-- `data\_lvl_pc\prone.lvl` (from `GameAssets/Prone/`) - the animation bank the Prone feature needs. Without it prone stays off; nothing else is affected.
+That is the whole install. Launch the game normally.
 
-The release zip already has this layout, so merging its `GameData` folder into your install puts every file in the right place.
+A simple drag and drop patch. To switch it off, set `Enabled=0` in `GameData\BF2GameExt.ini`; the game then runs fully stock with the files still in place.
 
 Works with Steam, GOG and Modtools builds. Compatible with other dinput8 proxy DLLs such as ReShade via automatic chain-loading.
+
+If it does not seem to be running, see [Troubleshooting](docs/user/TROUBLESHOOTING.md).
 
 ## Compatibility
 
@@ -67,7 +68,9 @@ Requirements:
 git clone https://github.com/S1thK3nny/BF2GameExt.git
 ```
 
-Open `BF2GameExt.sln` and build the solution. Output goes to `bin\Debug\` or `bin\Release\`.
+Open `BF2GameExt.sln` and build the solution. Output goes to `bin\Debug\` or `bin\Release\`: `dinput8.dll` from the DInput8Proxy project and `BF2GameExt.dll` from PatcherDLL.
+
+To produce a release zip, run `python tools/package_release.py`. It does a clean Release build, checks the version stamped into each binary against `version.h`, and writes `dist/BF2GameExt-<version>.zip` with the install layout above.
 
 ### Project Structure
 
