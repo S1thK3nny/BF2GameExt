@@ -1,0 +1,78 @@
+name: Build
+
+# Every push and PR gets a clean-machine build check. Pushing a v* tag also
+# packages the zip and publishes it as a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by the release step; harmless otherwise
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Check generated files are up to date
+        shell: bash
+        run: |
+          python generate_ini.py
+          # dist/BF2GameExt.ini and the two generated docs come out of
+          # ini_registry.hpp and controller_support.cpp. A diff here means
+          # someone changed a registry entry without re-running the generator.
+          if ! git diff --quiet -- dist/BF2GameExt.ini docs/user/CONFIGURATION.md docs/user/CONTROLLER.md; then
+            echo "::error::Generated files are stale. Run 'python generate_ini.py' and commit the result."
+            git diff --stat -- dist/BF2GameExt.ini docs/user/CONFIGURATION.md docs/user/CONTROLLER.md
+            git diff -- dist/BF2GameExt.ini docs/user/CONFIGURATION.md docs/user/CONTROLLER.md
+            exit 1
+          fi
+          echo "Generated files are current."
+
+      - name: Build and package
+        run: python tools/package_release.py
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: |
+          v=$(grep -oP '#define GAMEEXT_VERSION_(MAJOR|MINOR|PATCH)\s+\K\d+' version.h | paste -sd. -)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Version is $v"
+
+      # Tag builds must agree with version.h. Catches tagging v1.1.0 while the
+      # header still says 1.0.0, which would otherwise ship a mislabelled zip.
+      - name: Verify tag matches version.h
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          if [ "$tag" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "::error::Tag v$tag does not match version.h (${{ steps.ver.outputs.version }})"
+            exit 1
+          fi
+          echo "Tag matches version.h."
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BF2GameExt-${{ steps.ver.outputs.version }}
+          path: dist/BF2GameExt-*.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BF2GameExt-*.zip
+          draft: true          # review the notes before it goes public
+          generate_release_notes: true

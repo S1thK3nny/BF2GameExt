@@ -6,6 +6,8 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts (for modders)
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters (for modders)
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
+- **[Controller](docs/user/CONTROLLER.md)** - gamepad bindings, inputs and actions
+- **[Troubleshooting](docs/user/TROUBLESHOOTING.md)** - it did not load, or a feature does nothing
 - **[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
 
 ## Goal
@@ -16,22 +18,16 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
 
 ## Installation
 
-### Method 1 - DInput8 Proxy (recommended)
-
-No exe patching required! Drop these files next to your game executable (inside `GameData`):
+No exe patching required. Drop these files next to your game executable (inside `GameData`):
 
 - `dinput8.dll` (DInput8Proxy project)
 - `BF2GameExt.dll` (PatcherDLL project)
 - `BF2GameExt.ini` (from `dist/`)
+- `data\_lvl_pc\prone.lvl` (from `GameAssets/Prone/`) - the animation bank the Prone feature needs. Without it prone stays off; nothing else is affected.
+
+The release zip already has this layout, so merging its `GameData` folder into your install puts every file in the right place.
 
 Works with Steam, GOG and Modtools builds. Compatible with other dinput8 proxy DLLs such as ReShade via automatic chain-loading.
-
-### Method 2 - Exe Patcher
-
-1. Build `BF2GameExt.dll` (PatcherDLL project) and `BF2GameExt.exe` (BF2GameExt project)
-2. Place both in your `Star Wars Battlefront II Classic` folder (outside of `GameData`)
-3. Run `BF2GameExt.exe` and patch a **copy** of BF2_modtools.exe
-4. The patcher places the DLL into `GameData` automatically
 
 ## Compatibility
 
