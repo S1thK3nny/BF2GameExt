@@ -31,7 +31,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
 | `ComboAnimIncrease` | `1` | Raise combo animation limit |
 | `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
-| `NetworkTimerIncrease` | `1` | Increase network timer count |
+| `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
 | `AudioStreamLimit` | `1` | Raise the concurrent OpenAudioStream limit from 6 to 12. Each stream needs 3.4 MB of contiguous buffers, so this reserves 40 MB of the 32-bit process's 2 GB of virtual address space (RAM use is lower - pages are only committed as streams are actually used) |
@@ -43,7 +43,7 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ChunkPushFix` | `1` | Fix chunk push crash |
+| `ChunkPushFix` | `1` | Let explosions push bodies that break into chunks, instead of dropping them where they stood |
 | `PropGeneratorLoopFix` | `1` | Fix foliage-update crash at very high FOVs (PrismaticFlower's fix) |
 | `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
 | `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |

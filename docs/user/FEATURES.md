@@ -1,7 +1,6 @@
 # Features
 
-Unless noted otherwise, every feature here works on Modtools and Steam. See the
-[compatibility table](../../README.md#compatibility) for the current state of each build.
+See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
 ## Engine Limit Extensions
 
@@ -24,6 +23,7 @@ Automatic binary patches applied on load:
 - **String Pool** - Increases the string pool from 32 KB to 128 KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
+- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one gates keyboard, joystick and voice chat updates, and was fixed at 30 Hz, so input was only sampled 30 times a second no matter how high the framerate ran. This raises it to 120 Hz. The simulation timer is untouched, so nothing about game speed or netcode changes, input just stops being the slowest thing in the loop. INI: `[LimitIncreases] NetworkTimerIncrease=1`
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
 - **Sky Object Limit** - Removes the cap on how many objects a sky dome or backdrop can contain. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
 
@@ -32,6 +32,7 @@ Automatic binary patches applied on load:
 General engine bug fixes, several of them ported from PrismaticFlower's upstream. Build restrictions and INI keys are noted per entry:
 
 - **PropGenerator Loop Fix** - The procedural foliage system could read past the end of its object array at very high fields of view and crash. The patch restores the missing bounds check. INI: `[Fixes] PropGeneratorLoopFix=1`
+- **Chunk Push Fix** - When an explosion sweeps up a soldier, the engine rolls the class's chunk frequency to decide whether the body breaks apart into chunks. If that roll passes it flags the body and returns immediately, before the explosion's push is ever applied, so a body that gibs simply drops where it stood while a body that does not gets thrown. The fix lets the push run either way, so chunked bodies are flung by the blast like everything else. INI: `[Fixes] ChunkPushFix=1`
 - **Terrain Texture Fix** - The terrain shader caches two textures that only get assigned on maps that have a terrain detail map. Going from a map with one to a map without one in the same session left the shader pointing at freed memory, producing garbage terrain or a crash. The fix re-resolves both textures before every terrain load so they are always valid. Also fixes an upstream copy-paste bug that fed the wrong texture into one of the two slots. INI: `[Fixes] TerrainTextureFix=1`
 - **Game Logging Enablement** - Retail builds ship the engine's `BFront2.log` file logging compiled in but switched off. This turns it back on without needing the `/log` command line flag, which is useful for diagnosing crashes and mod issues. No effect on Modtools, which always logs. INI: `[Features] GameLogging=0` *(off by default)*
 - **Enable Sound Warnings** - When an ODF references a sound that is not loaded, the engine can warn about it, but the warning is switched off by default and cannot normally be enabled. This turns it on so missing sound names show up in the log. Modtools only: the retail builds compiled the warning code out entirely, so there is nothing to enable there. INI: `[Features] EnableSoundWarnings=0` *(off by default)*
@@ -93,6 +94,7 @@ retail builds have no command console to add them to.
 
 - `RenderHoverSprings` - Visualise hover vehicle spring compression with coloured wireframe spheres
 - `ShowWeaponRanges` - Draw weapon AI range circles (MinRange, OptimalRange, MaxRange) around soldiers
+- `memwatch` - Reverse-engineering aid. Arms a CPU hardware data breakpoint on an address and reports every distinct piece of code that reads or writes it, with a register snapshot and a best-effort call stack per accessor. Up to four addresses at once, since that is how many debug registers x86 has. `memwatch [u]<hexaddr> [len] [r|w|rw]` to arm, bare `memwatch` to report and disarm, `memwatch clear` to drop all watches. A plain address is a runtime one; the `u` prefix takes an unrelocated address straight out of Ghidra and rebases it for you. Reported accessor and caller addresses are unrelocated, so they paste back into Ghidra as is. See [MemWatchRE.md](../MemWatchRE.md)
 
 ## Controller Support
 

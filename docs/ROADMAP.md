@@ -31,6 +31,16 @@ matrix against the vehicle every frame with no smoothing (so the camera and aim 
 to the vehicle's collision jitter). Fixing it properly means building the missing weapon
 and aimer path, not patching the existing one.
 
+## Rendering
+
+**Lightsaber illumination** - Lightsaber blades are drawn as glowing geometry but emit no
+actual light, so a saber lights nothing around it. A working idea would be to have each
+blade register a real omni light with the engine's lighting system, colour taken from the
+blade's own ODF colours.
+A problem however is that the engine allows only four omni lights per object, so sabers compete with every other
+light in the area, and it is the same four-light wall documented in the per-object light
+limit notes.
+
 ## Sound
 
 **Sound region and stream manipulation** - Goal is runtime control over ambient sound
