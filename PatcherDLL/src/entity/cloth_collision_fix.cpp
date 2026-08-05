@@ -85,6 +85,18 @@ static constexpr int kClothData_offset        = 0x114; // ClothData*
 static constexpr int kData_numParticles_offset   = 0x00;
 static constexpr int kData_numFixedPoints_offset = 0x04;
 static constexpr int kData_restPos_offset        = 0x24; // PblVector3* (rest pose)
+// NOTE on ClothCollision.depth (+0x50) and cylinders:
+//   EnforceCollisions dispatches cylinders as
+//       EnforceCylinderCollision(this, M, vol->height, vol->width)
+//   and never passes `depth`, so the cross-section is a circle of radius
+//   `width`.  That looks like a bug next to the engine's own debug draw, which
+//   uses +/-width on X and +/-depth on Z - but every cylinder in every munged
+//   asset checked (praetorian .model, firstperson.lvl, side lvls) has
+//   depth == 0.0: the munger simply never writes the field for cylinders.
+//   So the circle IS correct, and it is the DEBUG DRAW that is degenerate -
+//   a zero-thickness OBB, which is why render_cloth_connections shows
+//   cylinders as flat rectangles.  An elliptical cross-section was implemented
+//   and reverted (2026-08-05) as provably dead code.
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -141,8 +153,11 @@ static void __cdecl enforce_cylinder_impl(void* ecx, float* mat, float height, f
    uint32_t totalCount = clothData[kData_numParticles_offset / 4];
    uint32_t fixedCount = clothData[kData_numFixedPoints_offset / 4];
 
-   // `height` is the FULL cylinder height (see header comment) - vanilla used
-   // height*2 here, making the volume 4x too tall.
+   // `height` is the FULL cylinder height - vanilla used height*2 as the HALF
+   // height, making the volume 4x too tall.  Confirmed against real assets:
+   // praetorian cape cylinders are bone_l_thigh w=0.125 h=0.75 and
+   // bone_r_calf w=0.125 h=0.60, i.e. a 75 cm thigh / 60 cm calf at a 12.5 cm
+   // radius.  Vanilla turned each of those into a 3 m tall cylinder.
    const float halfHeight = height * 0.5f;
 
    // Matrix layout (4x4, row-major as float[16]):

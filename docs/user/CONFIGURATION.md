@@ -100,14 +100,4 @@ Xbox-style aim assist for gamepad players, singleplayer only. **Off by default**
 
 The `[Controller.Unit]`, `[Controller.Vehicle]`, `[Controller.Flyer]`, `[Controller.Hero]` and `[Controller.Turret]` sections map physical buttons and axes to in-game actions. Every default is written into the shipped INI as a commented-out line. See [CONTROLLER.md](CONTROLLER.md) for the input and action names and the full default tables.
 
-## Regenerating
-
-This page, [CONTROLLER.md](CONTROLLER.md) and `dist/BF2GameExt.ini` are generated from `ini_registry.hpp` and `controller_support.cpp`. After changing either, run:
-
-```
-python generate_ini.py
-```
-
-CI fails the build if the committed copies do not match what the generator produces.
-
 Not everything is configured here. Gameplay features also read `load.cfg` parameters, ODF properties and Lua functions; see [FEATURES.md](FEATURES.md).

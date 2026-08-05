@@ -376,23 +376,6 @@ def write_configuration_md(entries, version, path: Path):
         "full default tables."
     )
     L.append("")
-    L.append("## Regenerating")
-    L.append("")
-    L.append(
-        "This page, [CONTROLLER.md](CONTROLLER.md) and `dist/BF2GameExt.ini` are "
-        "generated from `ini_registry.hpp` and `controller_support.cpp`. After "
-        "changing either, run:"
-    )
-    L.append("")
-    L.append("```")
-    L.append("python generate_ini.py")
-    L.append("```")
-    L.append("")
-    L.append(
-        "CI fails the build if the committed copies do not match what the "
-        "generator produces."
-    )
-    L.append("")
     L.append(
         "Not everything is configured here. Gameplay features also read `load.cfg` "
         "parameters, ODF properties and Lua functions; see "
