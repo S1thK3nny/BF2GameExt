@@ -97,5 +97,5 @@ retail builds have no command console to add them to.
 ## Controller Support
 
 - **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
-- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. INI: `[AimAssist]`
+- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
 - **Rumble** - Controller vibration on weapon fire and damage. INI: `[Controller] Rumble=1`

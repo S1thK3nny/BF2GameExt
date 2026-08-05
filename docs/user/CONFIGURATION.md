@@ -80,11 +80,11 @@ Gamepad support. The button and axis bindings live in the `[Controller.<Mode>]` 
 
 ## AimAssist
 
-Xbox-style aim assist for gamepad players, singleplayer only. The defaults are tuned to feel like the console release; the individual values are here for anyone who wants it stronger or weaker.
+Xbox-style aim assist for gamepad players, singleplayer only. **Off by default** - set `Enabled=1` to turn it on, since it changes how aiming feels and mouse players have no use for it. The tuning values are set to match the console release, so enabling it alone gives you the Xbox feel; they are exposed for anyone who wants it stronger or weaker.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Enabled` | `1` | Enable controller aim assist |
+| `Enabled` | `0` | Enable controller aim assist |
 | `ConeAngle` | `30` | Fallback cone angle in degrees when weapon has no AutoAimSize |
 | `TrackingDeadZone` | `0.5` | Dead zone multiplier for weapon AutoAimSize |
 | `FrictionStrength` | `3.0` | Directional friction scale when aiming away from lock |

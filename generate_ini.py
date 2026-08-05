@@ -64,9 +64,11 @@ SECTION_BLURBS = OrderedDict([
      "`[Controller.<Mode>]` sections and are documented separately in "
      "[CONTROLLER.md](CONTROLLER.md)."),
     ("AimAssist",
-     "Xbox-style aim assist for gamepad players, singleplayer only. The defaults "
-     "are tuned to feel like the console release; the individual values are here "
-     "for anyone who wants it stronger or weaker."),
+     "Xbox-style aim assist for gamepad players, singleplayer only. **Off by "
+     "default** - set `Enabled=1` to turn it on, since it changes how aiming "
+     "feels and mouse players have no use for it. The tuning values are set to "
+     "match the console release, so enabling it alone gives you the Xbox feel; "
+     "they are exposed for anyone who wants it stronger or weaker."),
 ])
 
 MODE_DESCRIPTIONS = OrderedDict([
@@ -406,9 +408,10 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     L = [DOC_HEADER, "", "# Controller Bindings", ""]
     L.append(
         f"Gamepad binding reference for BF2GameExt v{version}. Enable the pad "
-        f"itself with `[Controller] Enabled=1`; see "
-        f"[CONFIGURATION.md](CONFIGURATION.md#controller) for that and for the aim "
-        f"assist tuning values."
+        f"itself with `[Controller] Enabled=1`. Aim assist is separate and is "
+        f"**off by default** - turn it on with `[AimAssist] Enabled=1`. See "
+        f"[CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the "
+        f"aim assist tuning values."
     )
     L.append("")
 

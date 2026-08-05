@@ -149,7 +149,9 @@ an easy one.
   `[Controller.Unit]` does not change it for `[Controller.Hero]`.
 - In the shipped INI every default is commented out with a leading `;`.
   Uncomment a line to override it.
-- Aim assist is singleplayer only, and controller only.
+- Aim assist is off by default. It needs `[AimAssist] Enabled=1` of its own,
+  separately from `[Controller] Enabled=1`, and it is singleplayer only and
+  controller only.
 
 Full reference: [CONTROLLER.md](CONTROLLER.md).
 

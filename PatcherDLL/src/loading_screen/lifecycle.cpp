@@ -616,6 +616,53 @@ __declspec(naked) static void __stdcall prt_thunk_release(
 }
 
 // =============================================================================
+// PlatformRenderTexture tweak-colour operand
+// =============================================================================
+// Retail folded PlatformRenderTexture's RedColor* argument into a literal
+// `push &RedColor::WHITE`, so the arg the renderer passes is dropped on the
+// floor and every quad draws opaque.  Repointing that one imm32 at the
+// extension's own RedColor gives the renderer a per-draw alpha back, which the
+// BF1 zoom cross-fade needs.  See the prt_tweak_color_operand note in
+// game_addrs.hpp for the disassembly and for why we move the push instead of
+// writing into RedColor::WHITE itself.
+//
+// modtools passes both the colour and the alphaBlend flag for real, so its
+// table entry is 0 and this is a no-op there.
+
+static uint32_t* g_tintOperand     = nullptr;
+static uint32_t  g_tintOperandOrig = 0;
+
+static void prt_tint_patch_install(uintptr_t exe_base, const GameAddrs& a)
+{
+    if (!a.prt_tweak_color_operand || !a.prt_tweak_color_expected)
+        return;
+
+    uint32_t* op = (uint32_t*)resolve(exe_base, a.prt_tweak_color_operand);
+
+    // Guard: the operand must still read as the folded &RedColor::WHITE, or
+    // this is not the instruction that was reverse-engineered and the write
+    // would corrupt whatever is actually there.  Compared relocated, because
+    // the operand holds a real (relocated) pointer while the table stores the
+    // unrelocated VA.
+    const uint32_t expect = (uint32_t)(uintptr_t)resolve(exe_base, a.prt_tweak_color_expected);
+    if (*op != expect)
+        return;
+
+    g_tintOperandOrig = *op;
+    g_tintOperand     = op;
+
+    const uint32_t tint = (uint32_t)(uintptr_t)&g_prtTint;
+    protected_write(op, &tint, sizeof(tint));
+}
+
+static void prt_tint_patch_uninstall()
+{
+    if (!g_tintOperand) return;
+    protected_write(g_tintOperand, &g_tintOperandOrig, sizeof(g_tintOperandOrig));
+    g_tintOperand = nullptr;
+}
+
+// =============================================================================
 // Install / Uninstall
 // =============================================================================
 
@@ -652,9 +699,6 @@ void loading_screen_install(uintptr_t exe_base)
     g_propsLoopByte    = a.snd_props_loop_byte    ? a.snd_props_loop_byte    : 0x1c;
     g_propsNextAllowed = a.snd_props_next_allowed ? a.snd_props_next_allowed : 0x68;
 
-    // color_ptr_global is modtools-only; on release the argument is dead, so a
-    // null here is expected and the renderer passes it through unused.
-    g_color_ptr        = at(a.color_ptr_global);
     g_set_current_heap = (fn_set_current_heap_t) at(a.red_set_current_heap);
     g_runtime_heap_idx = (int*)                  at(a.runtime_heap_global);
     g_s_load_heap_ptr  = (int*)                  at(a.s_loadheap_global);
@@ -719,6 +763,9 @@ void loading_screen_install(uintptr_t exe_base)
     if (DetourTransactionCommit() != NO_ERROR) return;
     g_installed = true;
 
+    // After the gate, so a build that cannot run the module never gets patched.
+    prt_tint_patch_install(exe_base, a);
+
     // Must follow the LoadConfig detour: the guard calls LoadConfig's raw entry
     // point so hooked_load_config stays in the chain, exactly as vanilla does.
     load_data_guard_install(exe_base);
@@ -730,6 +777,8 @@ void loading_screen_uninstall()
 
     if (!g_installed) return;
     g_installed = false;
+
+    prt_tint_patch_uninstall();
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

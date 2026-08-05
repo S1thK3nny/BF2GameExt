@@ -41,7 +41,9 @@ static GameLog_t s_log = nullptr;
 // INI config
 // ---------------------------------------------------------------------------
 
-static bool  s_aimAssistEnabled = true;
+// Off unless the INI opts in. The tuning values below stay at their console
+// defaults, so [AimAssist] Enabled=1 on its own gives the Xbox feel.
+static bool  s_aimAssistEnabled = false;
 static float s_coneAngle = 30.0f;   // degrees — fallback when weapon has no AutoAimSize
 static float s_trackingDeadZone = 0.5f;    // multiplier for weapon AutoAimSize (Xbox: 0.5)
 static float s_frictionStrength = 3.0f;    // directional friction scale (Xbox: 3.0)
@@ -56,7 +58,7 @@ static float s_proxFrictionScale = 0.4f;    // min friction factor at center (0=
 void aim_assist_load_config(const char* ini_path)
 {
     ini_config cfg{ ini_path };
-    s_aimAssistEnabled = cfg.get_bool("AimAssist", "Enabled", true);
+    s_aimAssistEnabled = cfg.get_bool("AimAssist", "Enabled", false);
     s_coneAngle = cfg.get_float("AimAssist", "ConeAngle", 30.0f);
     s_trackingDeadZone = cfg.get_float("AimAssist", "TrackingDeadZone", 0.5f);
     s_frictionStrength = cfg.get_float("AimAssist", "FrictionStrength", 3.0f);

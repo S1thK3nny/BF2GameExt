@@ -65,7 +65,23 @@ inline fn_snd_ctrl_stop_t  g_snd_ctrl_stop   = nullptr;
 inline fn_snd_eng_update_t g_snd_update      = nullptr;
 inline DWORD               g_lastSndUpdateMs = 0;
 inline fn_prt_t            g_prt             = nullptr;
-inline void*               g_color_ptr       = nullptr;
+
+// The RedColor handed to PlatformRenderTexture as the per-draw tweak colour.
+// One 4-byte D3DCOLOR: byte 0 = b, 1 = g, 2 = r, 3 = a, so as a little-endian
+// dword it reads 0xAARRGGBB.  pcRenderPrimitive copies it into
+// RenderItem::tweakColor, which is the only handle the extension has on a
+// per-quad alpha.
+//
+// The extension owns this rather than pointing at the engine's RedColor::WHITE
+// because the retail builds folded PlatformRenderTexture's colour argument into
+// a literal `push &RedColor::WHITE` (see prt_tweak_color_operand) — writing an
+// alpha into the real WHITE would also reach the pcRedShader::Create call two
+// pushes earlier in the same function, which takes it as the material diffuse.
+// Repointing the one push at our own dword keeps the material alone.
+//
+// Left at opaque white outside the draws that need a ramp, so the stock
+// loading screen's own PlatformRenderTexture calls behave exactly as before.
+inline uint32_t            g_prtTint         = 0xFFFFFFFFu;
 inline fn_set_current_heap_t g_set_current_heap = nullptr;
 inline int*                g_runtime_heap_idx = nullptr;
 inline int*                g_s_load_heap_ptr  = nullptr;

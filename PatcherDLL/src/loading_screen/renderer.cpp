@@ -1,5 +1,8 @@
 #include "pch.h"
 #include "shared.hpp"
+#include "util/shader_patch_detect.hpp"
+
+#include <math.h>   // expf — the zoom cross-fade curve
 
 // =============================================================================
 // RenderScreen hook
@@ -18,6 +21,36 @@
 // Fixing it needs the backbuffer dimensions at render time plus an opt-in config
 // flag, since existing configs are authored against the raw behaviour and would
 // all shift if correction were applied unconditionally.
+
+// One textured quad through PlatformRenderTexture.
+//
+// `alpha` is the per-draw tweak-colour alpha, 255 = opaque.  On modtools it
+// rides PlatformRenderTexture's real RedColor* argument; on retail that
+// argument was constant-folded away and it arrives via the operand patch in
+// lifecycle.cpp.  The tint is restored to opaque white after every call so
+// nothing else in the frame inherits a ramp — safe because pcRenderPrimitive
+// copies the colour into RenderItem::tweakColor rather than keeping the
+// pointer, confirmed by disassembly on both build families.
+//
+// alphaBlend is derived from the alpha rather than passed in.  Stock
+// LoadDisplay::RenderScreen passes true unconditionally (modtools 0x0067a1b0,
+// `&RedColor::WHITE, true`) and the retail builds hardwired it on, so passing
+// true everywhere would be the more faithful thing — but every one of these
+// overlays was authored and play-tested against the flag being off on
+// modtools, and flipping it for opaque quads changes their look for no gain.
+// An opaque quad keeps the historical path; only a quad that actually needs to
+// ramp asks for blending.
+static void prt_quad(uint32_t hash,
+                     float x0, float y0, float x1, float y1,
+                     float u0, float v0, float u1, float v1,
+                     uint8_t alpha = 255)
+{
+    if (!hash) return;
+    const int blend = (alpha != 255) ? 1 : 0;
+    g_prtTint = 0x00FFFFFFu | ((uint32_t)alpha << 24);
+    g_prt(hash, x0, y0, x1, y1, &g_prtTint, blend, u0, v0, u1, v1, 1, 1, 0, 0);
+    g_prtTint = 0xFFFFFFFFu;
+}
 
 void __fastcall hooked_render_screen(void* ecx, void* edx)
 {
@@ -145,9 +178,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         const float ay = haveRect ? an.y : 0.0f;
         const float aw = haveRect ? an.w : 1.0f;
         const float ah = haveRect ? an.h : 1.0f;
-        g_prt(an.hashes[frame],
-              ax, ay, ax + aw, ay + ah, g_color_ptr, 0,
-              0,0,1,1,  1,1,0,0);
+        prt_quad(an.hashes[frame], ax, ay, ax + aw, ay + ah, 0, 0, 1, 1);
     }
 
     // --- BF1 zoom-sequence animation ---
@@ -176,6 +207,16 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         int   fgLevel = -1;
         float zx0 = 0.0f, zy0 = 0.0f, zx1 = 1.0f, zy1 = 1.0f;
         bool  animDone = false;
+
+        // Zoom phase only.  The sub-rect of the OUTGOING level's texture that the
+        // zoom magnifies, in UV space.  Screen rect and UV rect are the same
+        // numbers here — the planet entry is authored in normalized screen space
+        // and the texture is drawn full-screen, so the region under the selector
+        // is at the same fractional coordinates in both spaces.
+        float cu0 = 0.0f, cv0 = 0.0f, cu1 = 1.0f, cv1 = 1.0f;
+        // Linear zoom progress 0..1, NOT the eased rect curve — BF1 ramps the
+        // hand-over on the raw phase fraction, so the timing is read off that.
+        float zoomT = 0.0f;
 
         if (nTrans > 0) {
             const DWORD totalMs    = (DWORD)nTrans * kCyMs;
@@ -218,10 +259,12 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
                     zy0 = ty0;  zy1 = ty1;
                 }
                 else {
-                    const float a = anim_ease_out((float)(ph - kOffC) / (float)kZIMs);
+                    zoomT = (float)(ph - kOffC) / (float)kZIMs;
+                    const float a = anim_ease_out(zoomT);
                     zx0 = tx0 * (1.0f - a);            zy0 = ty0 * (1.0f - a);
                     zx1 = tx1 + (1.0f - tx1) * a;     zy1 = ty1 + (1.0f - ty1) * a;
                     fgLevel = nxt;
+                    cu0 = tx0;  cv0 = ty0;  cu1 = tx1;  cv1 = ty1;
                 }
 
                 // Sound triggers
@@ -269,18 +312,72 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         // Background — full-screen, opaque.
         {
             const auto& bg = g_loadScreenCfg.planets[bgLevel];
-            if (bg.texHash) {
-                g_prt(bg.texHash, 0.0f, 0.0f, 1.0f, 1.0f,
-                      g_color_ptr, 0, 0,0,1,1, 1,1,0,0);
-            }
+            prt_quad(bg.texHash, 0.0f, 0.0f, 1.0f, 1.0f, 0, 0, 1, 1);
         }
 
-        // Foreground — Phase C only.
+        // Foreground — zoom phase only.  The OUTGOING level's texture, UV-cropped
+        // to the rect the selector just finished framing and stretched over the
+        // growing rect, so that region magnifies.  This is the half that was
+        // missing: the zoom only ever grew the incoming image, so the outgoing
+        // one sat motionless at full-screen size behind it and the shot never
+        // appeared to push in.  At progress 0 the quad lands on exactly the
+        // pixels the full-screen backdrop already shows there, so the
+        // magnification starts seamlessly instead of popping, and the cut to the
+        // incoming level happens at the cycle boundary where the next
+        // background takes over full-screen.
+        //
+        // The INCOMING level's texture over the same rect, alpha ramping up
+        // (SWBF1 0x001ba888).  BF1 fades the incoming image IN rather than
+        // fading the crop OUT — the crop is drawn opaque and simply gets
+        // covered — which keeps the pair opaque instead of letting the backdrop
+        // show through a half-transparent sandwich.
+        //
+        // The curve reproduces BF1's, which is not a curve at all in the
+        // original: UpdateZoom re-applies `fade *= (1 - progress)` every frame,
+        // so the decay compounds and is frame-rate dependent.  Integrating that
+        // over N frames gives roughly exp(-N*t^2/2); at 60 fps over a 1.5 s zoom
+        // that is exp(-45*t^2), which is what is evaluated here — same shape,
+        // but independent of frame rate.  It puts the crop at ~5% opacity a
+        // quarter of the way in and invisible just after, matching how BF1
+        // actually looks.
+        //
+        // Once the incoming image is fully opaque the crop underneath cannot
+        // show, so it is dropped and the phase falls back to two opaque quads —
+        // the same draw shape as the rest of the sequence.
+        //
+        // Shader Patch cannot take this at all, so under SP the whole thing —
+        // magnifying crop included — stands down to the pre-BF1 behaviour of
+        // simply growing the incoming image.  Not a cosmetic preference: the
+        // crop only reads as a zoom because the fade hands over mid-flight, and
+        // on its own it just looks wrong.
+        //
+        // The reason is SP's fixed-function state matcher
+        // (direct3d/texture_stage_state_manager.cpp).  The engine puts
+        // tweakColor into D3DRS_TEXTUREFACTOR, and SP identifies the draw by
+        // pattern-matching the texture stage setup:
+        //
+        //     bool is_plain_texture_state(const DWORD texture_factor) ...
+        //        if (texture_factor != D3DCOLOR_ARGB(0xff,0xff,0xff,0xff)) return false;
+        //
+        // Exactly opaque white or no match, and an unmatched fixed-function
+        // state terminates.  So under SP the only usable tweak colour here is
+        // 0xFFFFFFFF: no alpha ramp, and no RGB ramp either (a dip-to-black
+        // fails the identical check).  See docs/LoadDisplaySystem.md.
         if (fgLevel >= 0) {
             const auto& fg = g_loadScreenCfg.planets[fgLevel];
-            if (fg.texHash) {
-                g_prt(fg.texHash, zx0, zy0, zx1, zy1,
-                      g_color_ptr, 0, 0,0,1,1, 1,1,0,0);
+
+            if (shader_patch_present()) {
+                prt_quad(fg.texHash, zx0, zy0, zx1, zy1, 0, 0, 1, 1);
+            }
+            else {
+                const auto&   outgoing    = g_loadScreenCfg.planets[bgLevel];
+                const float   cropOpacity = expf(-45.0f * zoomT * zoomT);
+                const uint8_t inAlpha     = (uint8_t)((1.0f - cropOpacity) * 255.0f + 0.5f);
+
+                if (inAlpha < 255)
+                    prt_quad(outgoing.texHash, zx0, zy0, zx1, zy1, cu0, cv0, cu1, cv1);
+
+                prt_quad(fg.texHash, zx0, zy0, zx1, zy1, 0, 0, 1, 1, inAlpha);
             }
         }
 
@@ -299,7 +396,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
             auto tile = [&](uint32_t h, float x0_,float y0_,float x1_,float y1_) {
                 if (!h || x1_<=x0_ || y1_<=y0_) return;
                 if (x0_>2.f||y0_>2.f||x1_>2.f||y1_>2.f) return;
-                g_prt(h,x0_,y0_,x1_,y1_, g_color_ptr, 0, 0,0,1,1, 1,1,0,0);
+                prt_quad(h, x0_, y0_, x1_, y1_, 0, 0, 1, 1);
             };
 
             tile(zH,0.0f,T0,L0,T1); tile(zH,L1,T0,R0,T1); tile(zH,R1,T0,1.f,T1);
@@ -312,10 +409,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
     }
 
     // --- ScanLineTexture: full-screen overlay drawn last ---
-    if (g_loadScreenCfg.scanLineTexHash)
-        g_prt(g_loadScreenCfg.scanLineTexHash,
-              0, 0, kW, kH, g_color_ptr, 0,
-              0,0,1,1,  1,1,0,0);
+    prt_quad(g_loadScreenCfg.scanLineTexHash, 0, 0, kW, kH, 0, 0, 1, 1);
 
     // Restore the heap.
     if (prevHeap >= 0 && g_set_current_heap)

@@ -4,7 +4,7 @@
 
 # Controller Bindings
 
-Gamepad binding reference for BF2GameExt v1.0.0. Enable the pad itself with `[Controller] Enabled=1`; see [CONFIGURATION.md](CONFIGURATION.md#controller) for that and for the aim assist tuning values.
+Gamepad binding reference for BF2GameExt v1.0.0. Enable the pad itself with `[Controller] Enabled=1`. Aim assist is separate and is **off by default** - turn it on with `[AimAssist] Enabled=1`. See [CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the aim assist tuning values.
 
 ## How a binding works
 

@@ -862,6 +862,168 @@ normalized screen coordinates. Draw order (back to front):
    vertical strips, corners), scaled by `ZoomSelectorTileSize`.
 5. **Scan lines** - full-screen overlay (`scanLineTexHash`), drawn last/on top.
 
+### Zoom-in cross-fade
+
+The last phase of each planet cycle pushes the camera into the rect the
+selector just framed. BF1 draws **two** coincident quads over that growing
+rect, not one - `LoadDisplay::RenderScreen` (SWBF1 `0x001ba680`), in the branch
+guarded on its "next texture" field `this+0x1a0` being set:
+
+| Quad | Texture | Screen rect | UV rect | Alpha |
+|------|---------|-------------|---------|-------|
+| 1 | outgoing level (`this+0x19c`) | animated, growing | the level's own target rect | opaque |
+| 2 | incoming level (`this+0x1a0`) | same animated rect | full | `255 - fade` |
+
+Quad 1 is what makes the shot appear to push in: the outgoing image is
+UV-cropped to the framed region and stretched over the growing rect, so that
+region magnifies. Because the planet entry is authored in normalized screen
+space and the backdrop is drawn full-screen, the screen rect and the UV rect
+are the same numbers - at progress 0 the quad lands on exactly the pixels the
+backdrop already shows there, so the magnification starts seamlessly.
+
+BF1 fades the incoming image **in** rather than fading the crop **out** (the
+crop is drawn opaque and simply gets covered). That keeps the pair opaque
+throughout; fading the crop out instead would let the full-screen backdrop show
+through the half-transparent sandwich.
+
+That fade is much faster than it looks in the table, because `UpdateZoom`
+re-applies it every frame rather than evaluating a curve:
+
+```c
+fade = fade + progress * (0 - fade);   // i.e. fade *= (1 - progress)
+```
+
+`progress` itself climbs 0 -> 1 across the zoom, so the decay compounds. At
+60 fps over a 1.5 s zoom the crop is at roughly 5% opacity a quarter of the way
+in and invisible immediately after - the cross-fade is effectively finished in
+the first quarter of the phase. It is also frame-rate dependent, being a raw
+per-frame lerp.
+
+The extension reproduces that shape frame-rate-independently: integrating the
+per-frame decay over N frames gives roughly `exp(-N*t^2/2)`, and at 60 fps over
+a 1.5 s zoom that is `exp(-45*t^2)`, which is what the renderer evaluates. Once
+the incoming quad reaches full opacity the crop underneath cannot show, so it is
+dropped and the phase falls back to two opaque quads.
+
+`LoadDisplay::UpdateZoom` (SWBF1 `0x001baa90`) drives it: `this+0x1a4` is a byte
+fade reset to `0xff` at each level change and ramped to 0 across the zoom, and
+`this+0x230` indexes a 4-entry ring of animated rects at `this+0x1e0`
+(`{float x0,y0,x1,y1; RedColor color;}`, stride `0x14`), while `this+0x194`
+indexes the level array at `this+0x000` (`{uint32 texHash; float x0,y0,x1,y1;}`,
+same stride) that supplies the UV crop.
+
+### Per-draw alpha on retail
+
+The cross-fade needs a per-quad alpha, which comes from `PlatformRenderTexture`
+arg 6 (`RedColor*`) - `RedRenderer::pcRenderPrimitive` copies it into
+`RenderItem::tweakColor`. `RedColor` is a 4-byte D3DCOLOR, BGRA in memory, so
+the little-endian dword reads `0xAARRGGBB`.
+
+modtools passes the argument through (`0x004165fe`). **Both retail builds
+constant-folded it away**, because the one stock caller always passes the same
+pair (`&RedColor::WHITE, true` - see modtools `LoadDisplay::RenderScreen`
+`0x0067a1b0`). Arg 6 and arg 7 still occupy stack slots (the function still
+`RET 0x34` for 13 dwords) but nothing reads them; instead the body has
+`push 0x210004` for the `pcRedShader::Create` flags - alphaBlend hardwired on -
+and:
+
+```
+00423b4a  push 0x200        ; pcRenderPrimitive flags
+00423b4f  push 0x007de144   ; RedColor*  <- folded &RedColor::WHITE
+00423b54  push 0x009caee0   ; &gMatrixIdentity
+```
+
+`loading_screen_install` repoints that push's imm32 at the extension's own
+4-byte `RedColor` (`g_prtTint`), guarded on the operand still reading as the
+expected WHITE global, and restores it on uninstall. The `pcRedShader::Create`
+call two pushes earlier keeps pointing at the real `RedColor::WHITE`, which is
+why the push is moved rather than `RedColor::WHITE` itself being written - that
+colour is the shader's material diffuse and is part of what `Create` is handed.
+
+| Build | `PlatformRenderTexture` | push operand | expected value |
+|-------|------------------------|--------------|----------------|
+| modtools | `0x004165fe` | n/a - real argument | - |
+| Steam | `0x00423980` | `0x00423b50` | `0x007de144` |
+| GOG | `0x00423950` | `0x00423b20` | `0x007df144` |
+
+`g_prtTint` sits at opaque white outside the draws that need a ramp, so the
+stock loading screen's own `PlatformRenderTexture` call is unaffected.
+
+### Translucent draws and Shader Patch
+
+Adding the cross-fade quad crashed reproducibly under Shader Patch 1.9.1 with
+`__fastfail(FAST_FAIL_FATAL_APP_EXIT)` - `int 29h` at RVA `0x2a6321` of its
+`d3d9.dll`, which is the MSVC CRT `abort()`, i.e. SP hit `std::terminate`. It
+logged no reason of its own, so an exception escaped rather than a checked
+failure. Same site as the CustomShaders crash (`0x5FF66321` then `0x5E9D6321`,
+both RVA `0x2a6321` under different ASLR bases).
+
+`int 29h` bypasses VEH, SEH and the unhandled-exception filter by design, so
+`crash_logger.cpp` cannot see it - only an attached debugger can. Do not try to
+catch it by widening the handler's filter.
+
+Two bisect runs narrowed the trigger:
+
+| Build | Zoom-phase draws | Result |
+|-------|------------------|--------|
+| baseline | backdrop + incoming (full UV, opaque) | works |
+| A | + crop quad, and **every** quad blended | 3.2 s of blended opaque draws fine, dies at the zoom |
+| B | + crop quad, blending only on the faded quad | dies at the zoom |
+| C | crop quad only, all opaque | works |
+
+Build A rules out blending as such: it ran a full screen of blended **opaque**
+quads for over three seconds. The variable that only ever appears at the zoom is
+a quad with **alpha < 255** - an actually translucent draw. Renaming `d3d9.dll`
+confirmed it: the cross-fade works perfectly without Shader Patch.
+
+**Why it dies.** The engine puts `tweakColor` into `D3DRS_TEXTUREFACTOR`. SP
+identifies fixed-function draws by pattern-matching the texture stage setup
+(`direct3d/texture_stage_state_manager.cpp`), and the matcher for ours is:
+
+```cpp
+bool Texture_stage_state_manager::is_plain_texture_state(const DWORD texture_factor) const noexcept
+{
+   ...
+   if (texture_factor != D3DCOLOR_ARGB(0xff, 0xff, 0xff, 0xff)) return false;
+   return true;
+}
+```
+
+**Exactly** opaque white or no match. `update()` tries `is_color_fill_state`,
+`is_damage_overlay_state`, `is_plain_texture_state`, `is_scene_blur_state`,
+`is_zoom_blur_state` in order and terminates if none match. That is precisely
+the observed behaviour: an opaque blended quad matches and renders for as long
+as you like; the first quad with alpha < 255 matches nothing.
+
+It also rules out the obvious workarounds. Clamping the ramp to 1..255 fails on
+the first frame, and a dip-through-black fails the identical check (it moves the
+RGB). Under SP the only usable tweak colour on this path is `0xFFFFFFFF`.
+
+Note the neighbouring matchers accept an arbitrary texture factor -
+`is_scene_blur_state` differs from `is_plain_texture_state` only in using
+`D3DTOP_SELECTARG1` for `alphaop`, and carries no texture-factor constraint at
+all. So SP is perfectly capable of a varying `TEXTUREFACTOR` alpha here; the
+plain-texture matcher simply does not permit one. **Worth reporting upstream** -
+relaxing that one comparison would let the cross-fade work under SP.
+
+**The branch.** `PatcherDLL/src/util/shader_patch_detect.hpp` tests for SP by
+the export its author nominated for the purpose and undertook to keep in place,
+`?prime_shader_cache@sp@@YAXXZ` (a `__declspec(dllexport)` in
+`src/shader_cache_primer.cpp`, not in `d3d9.def`, so it is independent of that
+file's export list). Without SP the renderer runs the real cross-fade. With SP
+the whole effect stands down to the pre-BF1 behaviour of growing the incoming
+image - crop included, since the crop only reads as a zoom when the fade hands
+over mid-flight and looks wrong on its own.
+
+### Blend flag
+
+`alphaBlend` is derived from the alpha: an opaque quad passes 0, which is what
+every existing overlay was authored and play-tested against on modtools, and
+only a quad that actually ramps asks for blending. Stock passes `true`
+unconditionally and retail hardwires it on, so passing `true` everywhere would
+be more faithful - but it changes how the opaque overlays composite on modtools
+for no gain, and that is a separate change from this one.
+
 ---
 
 ## `PblConfig` Parsing API

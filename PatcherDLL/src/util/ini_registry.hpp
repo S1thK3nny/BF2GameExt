@@ -79,7 +79,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Controller", "Rumble",  "1", "Enable controller rumble / vibration"),
 
    // [AimAssist] — controller aim assist (Xbox-style, singleplayer only)
-   INI_ENTRY("AimAssist", "Enabled",                 "1",   "Enable controller aim assist"),
+   INI_ENTRY("AimAssist", "Enabled",                 "0",   "Enable controller aim assist"),
    INI_ENTRY("AimAssist", "ConeAngle",               "30",  "Fallback cone angle in degrees when weapon has no AutoAimSize"),
    INI_ENTRY("AimAssist", "TrackingDeadZone",         "0.5", "Dead zone multiplier for weapon AutoAimSize"),
    INI_ENTRY("AimAssist", "FrictionStrength",          "3.0", "Directional friction scale when aiming away from lock"),
