@@ -362,6 +362,9 @@ namespace modtools {
    constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
    constexpr uintptr_t cloth_enforce_collisions     = 0x004cabd0;
    constexpr uintptr_t cloth_enforce_cylinder_coll  = 0x004c8660;
+   // EntityCloth::InternalUpdate - thiscall(PblMatrix*, RedPose*, uint iters,
+   // float dt), RET 0x10 on all three builds.  Frame-gated on +0x80.
+   constexpr uintptr_t cloth_internal_update        = 0x004cbc40;
 
    // ---- Animation ---------------------------------------------------------------
 
@@ -1087,6 +1090,10 @@ namespace steam {
    // LTCG: ECX=this, one stack arg (float* matrix, RET 4), halfHeight in
    // XMM2, radius in XMM3 — needs the naked thunk in cloth_collision_fix.cpp.
    constexpr uintptr_t cloth_enforce_cylinder_coll = 0x0045B7C0;
+   // EntityCloth::InternalUpdate - thiscall(PblMatrix*, RedPose*, uint iters,
+   // float dt at [EBP+0x14]), RET 0x10.  Not LTCG-mangled: the float comes off
+   // the stack, so a plain __fastcall detour is safe here.
+   constexpr uintptr_t cloth_internal_update    = 0x0045adb0;
    constexpr uintptr_t load_config_real         = 0x005777e0;
    constexpr uintptr_t load_data_file_real      = 0x00577620;
    constexpr uintptr_t load_end_real            = 0x00576b90;
@@ -1642,6 +1649,8 @@ namespace gog {
    constexpr uintptr_t cloth_enforce_collisions       = 0x0045ba40;
    constexpr uintptr_t cloth_satisfy_constraints      = 0x0045bc40;
    constexpr uintptr_t cloth_enforce_cylinder_coll    = 0x0045b7c0;
+   // GOG sits 0x10 below Steam here (Steam 0x0045adb0); same RET 0x10 shape.
+   constexpr uintptr_t cloth_internal_update          = 0x0045ada0;
    constexpr uintptr_t load_config_real               = 0x00578560;
    constexpr uintptr_t load_data_file_real            = 0x005783a0;
    constexpr uintptr_t load_end_real                  = 0x00577910;

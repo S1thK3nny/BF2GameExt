@@ -593,6 +593,73 @@ static int lua_SetCharacterWeapon(lua_State* L)
          desc.reload  = entity + 0x40;
       }
 
+      // Point the aimer back at the primary-channel active weapon. Used both as
+      // the ctor's post-loop fixup and as the rollback for every path that
+      // abandons a build — Weapon::Weapon calls Aimer::SetWeapon(mAimer, this)
+      // unconditionally, so any failure after that leaves the aimer bound to a
+      // weapon that is about to go away.
+      auto rebindAimer = [&]() {
+         __try {
+            int8_t aimSlot = *(int8_t*)(entity + lay.weaponIndexMap);
+            if (aimSlot >= 0 && aimSlot < 8) {
+               uintptr_t aimWpn = *(uintptr_t*)(entity + lay.weaponArray + aimSlot * 4);
+               if (aimWpn && aimWpn != 0xCDCDCDCDu) {
+                  typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
+                  ((AimerSetWeapon_t)res(g_addr->aimer_set_weapon))(entity + lay.aimer, aimWpn);
+               }
+            }
+         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      };
+
+      // Animmap PRE-FLIGHT — run the exact lookup Weapon::Weapon does, before
+      // anything is constructed.
+      //
+      // The ctor (modtools 0x61d410) does Aimer::SetWeapon(mAimer, this) FIRST
+      // and only then resolves the MAP, so a post-hoc check is always too late:
+      //   * the soldier's aimer is already bound to the new weapon, and
+      //   * WeaponMeleeClass::Build (Phantom 0x7c1fd5) copies the freshly built
+      //     instance's MAP into the SHARED class — m_eDeflectMatrixMap = -1 plus
+      //     _InitDeflectMatrices(this, -1) — which no rollback can undo and which
+      //     poisons every later spawn of that ODF.  It also derefs the instance
+      //     with no null check, so a pool miss access-violates inside Build; our
+      //     __except then reports "Build failed" while a live, aimer-bound weapon
+      //     is left orphaned in the pool (it crashes later in WeaponMelee::Update
+      //     once its owner at Weapon+0x6C is freed).
+      //
+      //   WeaponClass::mSoldierAnimationWeapon = +0x20 (INVALID_WEAPON = -1)
+      //   Controllable vtbl +0x4C              = GetAnimationBank (BANK, -1 = none)
+      //   SoldierAnimationBank::FindMap(BANK, WEAPON) -> MAP (-1 = miss)
+      // Both are skipped by the ctor when the weapon or bank is -1, so mirror that.
+      {
+         int32_t wantWeapon = -1;
+         __try { wantWeapon = *(int32_t*)(foundWc + 0x20); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+
+         if (wantWeapon != -1 && g_addr->get_weapon_anim_map) {
+            int32_t bank = -1;
+            __try {
+               typedef int32_t (__thiscall* GetAnimBank_t)(uintptr_t ctrl);
+               GetAnimBank_t fnBank = *(GetAnimBank_t*)(*(uintptr_t*)entity + 0x4C);
+               bank = fnBank(entity);
+            } __except(EXCEPTION_EXECUTE_HANDLER) { bank = -1; }
+
+            if (bank != -1) {
+               int32_t preMap = -1;
+               __try {
+                  typedef int32_t (__cdecl* FindMap_t)(int32_t bank, int32_t weapon);
+                  preMap = ((FindMap_t)res(g_addr->get_weapon_anim_map))(bank, wantWeapon);
+               } __except(EXCEPTION_EXECUTE_HANDLER) { preMap = -1; }
+
+               if (preMap == -1) {
+                  fn_GameLog("SetCharacterWeapon: '%s' has no animmap in char %d's animation bank "
+                             "(bank=%d weapon=%d) - refused before build.\n",
+                             targetOdf, charIndex, bank, wantWeapon);
+                  g_lua.pushnil(L);
+                  return 1;
+               }
+            }
+         }
+      }
+
       // Build the replacement — WeaponClass::Build, vtable slot +0x8,
       // __thiscall(WeaponDesc*), returns Weapon* (NULL if the pool is full).
       // The Weapon ctor allocates its own AmmoCounter/EnergyBar, binds the
@@ -605,8 +672,11 @@ static int lua_SetCharacterWeapon(lua_State* L)
          newWpn = fnBuild(foundWc, &desc);
       } __except(EXCEPTION_EXECUTE_HANDLER) { newWpn = 0; }
       if (!newWpn) {
-         fn_GameLog("SetCharacterWeapon: WeaponClass::Build failed for '%s' (Weapon pool full?).\n",
-                    targetOdf);
+         // Build may have run the ctor before failing (or faulted partway through
+         // it), in which case the aimer is already pointing at a weapon we will
+         // never install. Put it back on the weapon the soldier still holds.
+         rebindAimer();
+         fn_GameLog("SetCharacterWeapon: WeaponClass::Build failed for '%s'.\n", targetOdf);
          g_lua.pushnil(L);
          return 1;
       }
@@ -626,16 +696,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
             typedef void (__thiscall* WpnDelete_t)(uintptr_t w, uint32_t flags);
             ((WpnDelete_t)(**(uintptr_t**)newWpn))(newWpn, 1);
          } __except(EXCEPTION_EXECUTE_HANDLER) {}
-         __try {
-            int8_t aimSlot = *(int8_t*)(entity + lay.weaponIndexMap);
-            if (aimSlot >= 0 && aimSlot < 8) {
-               uintptr_t aimWpn = *(uintptr_t*)(entity + lay.weaponArray + aimSlot * 4);
-               if (aimWpn && aimWpn != 0xCDCDCDCDu) {
-                  typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
-                  ((AimerSetWeapon_t)res(g_addr->aimer_set_weapon))(entity + lay.aimer, aimWpn);
-               }
-            }
-         } __except(EXCEPTION_EXECUTE_HANDLER) {}
+         rebindAimer();
          fn_GameLog("SetCharacterWeapon: '%s' has no animmap in char %d's animation bank - swap refused.\n",
                     targetOdf, charIndex);
          g_lua.pushnil(L);
@@ -659,16 +720,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // Re-run the soldier ctor's post-loop fixup (modtools @0x533fee, Steam
       // @0x4defa2): point the aimer back at the primary-channel active weapon
       // (which is newWpn itself when that is the slot we just swapped).
-      __try {
-         int8_t aimSlot = *(int8_t*)(entity + lay.weaponIndexMap);
-         if (aimSlot >= 0 && aimSlot < 8) {
-            uintptr_t aimWpn = *(uintptr_t*)(entity + lay.weaponArray + aimSlot * 4);
-            if (aimWpn && aimWpn != 0xCDCDCDCDu) {
-               typedef void (__thiscall* AimerSetWeapon_t)(uintptr_t aimer, uintptr_t w);
-               ((AimerSetWeapon_t)res(g_addr->aimer_set_weapon))(entity + lay.aimer, aimWpn);
-            }
-         }
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      rebindAimer();
 
       // The Weapon ctor leaves the "currently drawn" flag (weapon+0xAC bit 2)
       // CLEAR — Weapon::Update's IDLE state refuses to even read the fire
