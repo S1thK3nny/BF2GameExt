@@ -2,6 +2,8 @@
 
 A DLL extension for Star Wars Battlefront II (2005) that exposes new modding capabilities by hooking into the game engine at runtime. It adds custom Lua functions, ODF properties, loading screen parameters, bug fixes, and engine limit extensions, on the Modtools build and increasingly on the retail Steam and GOG builds.
 
+<img width="800" height="450" alt="Prone" src="https://github.com/user-attachments/assets/4ea3e9d2-404b-4f2b-8cd0-cb0125042c51" />
+
 - **[Features](docs/user/FEATURES.md)** - everything it adds and fixes
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts (for modders)
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters (for modders)
