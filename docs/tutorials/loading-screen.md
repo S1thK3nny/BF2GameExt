@@ -18,12 +18,6 @@ Steps 1-3 and 6 below are the same for any custom loading screen. You can merge 
 
 This does not go over all new parameters added by the extension; see the [reference](../user/LOADING_SCREEN.md) for that.
 
-<!-- VIDEO: a custom loading screen running in BF2.
-     Drag the mp4 into a GitHub issue/PR comment box, wait for the upload, then
-     replace this whole comment with the URL GitHub hands back - the same
-     https://github.com/user-attachments/assets/... form as the readme image:
-     <video src="https://github.com/user-attachments/assets/..." controls muted></video> -->
-
 ## 1. Make the Load folder
 
 A custom loading screen is its own little level. In your mod folder:
@@ -118,6 +112,10 @@ Important to know:
 
 One model with the other slot left empty is fine.  
 This does not need to be in the `LoadDisplay()` block; it can be in a `Map()` block instead, so different maps can have different models and offsets.
+
+<img width="800" height="450" alt="TeamModelsPreview" src="https://github.com/user-attachments/assets/e90a478f-6863-4628-9c8c-b99ebf256936" />
+
+<sub>*Team Model example from [`GameAssets/Examples/LoadingScreen-TeamModels`](../../GameAssets/Examples/LoadingScreen-TeamModels). Does not come with the background image*</sub>
 
 ## 5. The BF1 zoom sequence
 
@@ -237,6 +235,9 @@ Map("ABCg_con")
     RemoveLoadingBar(0);
 }
 ```
+
+https://github.com/user-attachments/assets/c37be45d-8b5d-4d10-90cf-85e479a6b585
+<sub>*BF1 Loading Screen example from [`GameAssets/Examples/LoadingScreen-BF1`](../../GameAssets/Examples/LoadingScreen-BF1).*</sub>
 
 ## 6. Munge and hook it up
 
