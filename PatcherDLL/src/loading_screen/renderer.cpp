@@ -9,18 +9,34 @@
 // =============================================================================
 // Coordinates are normalized 0-1 screen space, confirmed from BF1 Ghidra analysis.
 //
-// TODO: no aspect correction anywhere in this file.  Every rect is taken
-// literally in normalized space, so w and h scale against different pixel
-// counts and a modder has to hand-compute h = w * screenAspect to keep a square
-// texture square.  Anything tuned for 16:9 draws stretched at 4:3 or 16:10.
-// This applies to all three consumers:
-//   - AnimatedTextures (AnimEntry x/y/w/h)
-//   - the PlanetLevel zoom sequence (PlanetEntry x/y/w/h -> zx0..zy1)
-//   - the ZoomSelector tiles, where zoomTileHalfH defaults to zoomTileHalfW and
-//     so is never actually square on screen
-// Fixing it needs the backbuffer dimensions at render time plus an opt-in config
-// flag, since existing configs are authored against the raw behaviour and would
-// all shift if correction were applied unconditionally.
+// There is no aspect correction anywhere in this file, and measurement says it
+// does not need any.  Recorded here because the absence reads like an oversight:
+//
+//   - PlanetLevel rects are aspect-INDEPENDENT and correct as-is.  The level
+//     image is drawn full-screen with UV 0..1, so image fraction and screen
+//     fraction are the same number at every resolution, and the rect tracks the
+//     same subject whatever the screen does.  This is the same identity the zoom
+//     phase relies on when it reuses tx0..ty1 as both screen rect and UV crop.
+//     Correcting anything here would break that.
+//
+//   - The ZoomSelector tiles are drawn non-square: zoomTileHalfH defaults to
+//     zoomTileHalfW (config_parser.cpp, and again at the fallback below), so a
+//     tile spans 2*hw of screen width by 2*hh of screen height.  The stock strip
+//     textures are immune by construction - load_edge_horz is uniform along x
+//     (one distinct column) and load_edge_vert uniform along y, so the stretch
+//     has nothing to act on.  What is left is line thickness, (2/32) * 0.04 * the
+//     screen dimension: 3.6 px horizontal against 6.4 px vertical at 2560x1440,
+//     3.6 against 4.8 at 1920x1440.  Play-tested at both; indistinguishable on a
+//     hairline sweeping over a moving backdrop.  The non-square corner tile is
+//     also load-bearing, its arms match the thicknesses of the two bands it joins
+//     precisely because it scales with each axis separately.
+//     An edge texture carrying real 2D detail (dashes, ticks, a bracket) would
+//     show the stretch.  That is the case worth revisiting, and only that one.
+//
+//   - AnimatedTextures rects distort a panel's own aspect the same way, but
+//     there is no correct answer for an arbitrary overlay rect and modders tune
+//     these by eye.  Preserving texture aspect would need an opt-in key and would
+//     move every overlay already authored against the current behaviour.
 
 // One textured quad through PlatformRenderTexture.
 //
@@ -167,7 +183,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         if (!an.hashes[frame])
             continue;
 
-        // No aspect correction here — see the file-header TODO.
+        // No aspect correction here — see the file header for why not.
         //
         // The rect is all-or-nothing: w and h are both needed to place the
         // overlay, so a partial rect falls back to full screen rather than

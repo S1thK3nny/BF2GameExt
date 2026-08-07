@@ -241,9 +241,10 @@ the filename.
 > is only ever needed for custom names. `assets\common\sound\global.snd` in the
 > modtools defines `load_zoom`, `load_transition`, `load_xtracking`,
 > `load_ytracking` and `load_bar` under a `// Load display` comment, and that
-> bank munges into `data\_lvl_pc\sound\global.lvl`, which retail loads at startup
-> and never unloads. Every mod-side `BF1Load.snd` floating around is a
-> byte-for-byte copy of that block.
+> bank munges into `core.lvl` - not into `data\_lvl_pc\sound\global.lvl`, which
+> is a separate bank. `core.lvl` is read during `GameState::PreStateInit` and
+> stays resident for the whole session. Every mod-side `BF1Load.snd` floating
+> around is a byte-for-byte copy of that block.
 >
 > This is not greppable from the shipped data: munged sound lvls store property
 > ids, not names. `load_xtracking` appears zero times as a string inside a

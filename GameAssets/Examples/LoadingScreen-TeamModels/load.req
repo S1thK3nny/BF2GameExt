@@ -1,0 +1,35 @@
+ucft
+{   
+	REQN
+	{
+		"texture"
+		"loading"
+		"loadtipsbox_pieces"
+	}
+
+	REQN
+	{
+		"texture"
+		"platform=xbox"
+	}
+
+	REQN
+	{
+		"texture"
+		"platform=pc"
+	}
+
+	REQN
+	{
+		"model"
+		"com_icon_alliance_load"
+		"com_icon_imperial_load"
+	}
+
+	REQN
+	{
+		"config"
+		"load"
+	}
+
+}

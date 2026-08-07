@@ -132,6 +132,6 @@ Through a lot of trial and error, the BF1 loading screen was reverse engineered 
 
 These take any registered sound name, but **the original BF1 loading screen
 sounds are still in the retail game** - `load_zoom`, `load_transition`,
-`load_xtracking`, `load_ytracking` and `load_bar` live in the stock
-`data\_lvl_pc\sound\global.lvl`, which is resident for the whole session, so
-naming them is all it takes.
+`load_xtracking`, `load_ytracking` and `load_bar` live in the `global.snd` bank
+inside the stock `core.lvl`, which is resident for the whole session, so naming
+them is all it takes.

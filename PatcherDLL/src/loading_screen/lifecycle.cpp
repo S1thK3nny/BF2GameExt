@@ -167,8 +167,9 @@ static bool want_sound_lvl()
     if (!g_loadScreenCfg.loadSoundLvl[0]) {
         // Legitimate two ways over: the sounds may live in the loading screen's
         // own lvl, and the five stock BF1 load names (load_zoom, load_transition,
-        // load_xtracking, load_ytracking, load_bar) are already in the always
-        // resident sound\global.lvl, which needs nothing at all. So this is
+        // load_xtracking, load_ytracking, load_bar) are already in the global.snd
+        // bank inside the always-resident core.lvl, which needs nothing at all.
+        // So this is
         // informational - but naming sounds with no LoadSoundLVL is also exactly
         // what a missing or misspelled key looks like, and that is otherwise
         // invisible until the sounds report "not found".

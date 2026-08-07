@@ -1,0 +1,49 @@
+ucft
+{   
+	REQN
+	{
+		"texture"
+		"loading"
+		"loadtipsbox_pieces"
+		"load_edge_corner"
+		"load_edge_horz"
+		"load_edge_vert"
+		"load_scanline"
+		"load_side_animation_0"
+		"load_side_animation_1"
+		"load_side_animation_2"
+		"load_side_animation_3"
+		"load_side_animation_4"
+		"load_side_animation_5"
+		"load_planet_backdrop"
+		"load_planet_rotating_backdrop"
+		"load_galacticmap_0"
+		"load_locale_geonosis_1"
+		"load_landsat_geonosis_2"
+		"load_level_geonosis_3"
+	}
+
+	REQN
+	{
+		"texture"
+		"platform=xbox"
+	}
+
+	REQN
+	{
+		"texture"
+		"platform=pc"
+	}
+
+	REQN
+	{
+		"model"
+	}
+
+	REQN
+	{
+		"config"
+		"load"
+	}
+
+}
