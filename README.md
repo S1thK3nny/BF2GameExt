@@ -4,14 +4,20 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 
 <img width="800" height="450" alt="Prone" src="https://github.com/user-attachments/assets/4ea3e9d2-404b-4f2b-8cd0-cb0125042c51" />
 
+**Playing with it**
+
 - **[Features](docs/user/FEATURES.md)** - everything it adds and fixes
-- **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
-- **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
-- **[Tutorials](docs/tutorials/README.md)** - step-by-step guides with munge-ready example assets
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
 - **[Controller](docs/user/CONTROLLER.md)** - gamepad bindings, inputs and actions
 - **[Troubleshooting](docs/user/TROUBLESHOOTING.md)** - it did not load, or a feature does nothing
-- **[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
+
+**Modding with it**
+
+- **[Tutorials](docs/tutorials/README.md)** - step-by-step guides with munge-ready example assets
+- **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
+- **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
+
+**[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
 
 ## Goal
 
