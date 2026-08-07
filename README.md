@@ -10,6 +10,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
 - **[Controller](docs/user/CONTROLLER.md)** - gamepad bindings, inputs and actions
 - **[Troubleshooting](docs/user/TROUBLESHOOTING.md)** - it did not load, or a feature does nothing
+- **[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
 
 **Modding with it**
 
@@ -17,7 +18,6 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
 
-**[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
 
 ## Goal
 
