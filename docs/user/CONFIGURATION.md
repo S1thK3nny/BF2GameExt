@@ -66,6 +66,8 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code) |
 | `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. Technician's award weapon shares the same unlock bit as its passive, so it stays locked too |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
+| `SoldierRagdoll` | `0` | Replace the canned soldier death animation with a simulated ragdoll (cosmetic and client-local; modtools only for now) |
+| `SoldierRagdollDebug` | `0` | Dump the first corpse's skeleton (joint count, hierarchy, model-space positions, contact plane) to the game log. Requires GameLogging on retail builds |
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
 

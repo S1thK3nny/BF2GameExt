@@ -71,6 +71,8 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code)"),
    INI_ENTRY("Features", "DisableAwardBuffs", "0", "Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. Technician's award weapon shares the same unlock bit as its passive, so it stays locked too"),
    INI_ENTRY("Features", "DisableAwardWeapons", "0", "Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards"),
+   INI_ENTRY("Features", "SoldierRagdoll", "0", "Replace the canned soldier death animation with a simulated ragdoll (cosmetic and client-local; modtools only for now)"),
+   INI_ENTRY("Features", "SoldierRagdollDebug", "0", "Dump the first corpse's skeleton (joint count, hierarchy, model-space positions, contact plane) to the game log. Requires GameLogging on retail builds"),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
 
