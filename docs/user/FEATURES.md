@@ -24,8 +24,11 @@ Automatic binary patches applied on load:
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
 - **Input Update Rate** - The engine runs two fixed-rate update timers. The second one gates keyboard, joystick and voice chat updates, and was fixed at 30 Hz, so input was only sampled 30 times a second no matter how high the framerate ran. This raises it to 120 Hz. The simulation timer is untouched, so nothing about game speed or netcode changes, input just stops being the slowest thing in the loop. INI: `[LimitIncreases] NetworkTimerIncrease=1`
-- **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
 - **Sky Object Limit** - Removes the cap on how many objects a sky dome or backdrop can contain. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
+- **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
+<img width="1800" height="2032" alt="GCVisuals" src="../images/GCVisuals.png" />
+
+<sub>*Taken with ['Choose Your Own' Galactic Conquest](https://www.moddb.com/mods/choose-your-own-galactic-conquest).*</sub>
 
 ## Engine & Rendering Fixes
 
@@ -54,6 +57,10 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 ## Soldier Systems
 
 - **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
+<img width="800" height="450" alt="Prone" src="../images/Prone.webp" />
+
+<sub>*Prone works with any mod unless specifically disabled by that mod*</sub>
+
 - **Multiple First-Person Animation Banks** - Lets each soldier class use its own first person animation bank instead of sharing one global set. Partial banks work too, with missing animations falling back to the defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **First-Person Sprint Animation** - The engine has no first person sprint state and just plays the run animation faster. This adds the possibility for modders to add a real sprint animation per weapon class. If `<bank>_rifle_sprint` (or `_bazooka_sprint`, `_tool_sprint`) exists in the bank it is used while sprinting. Works with custom banks, and is entirely optional: if the animation is absent, nothing changes.
 - **Animation Bank Appending** - Lets an animation bank be extended with extra numbered sub-banks spread across multiple .lvl files. The engine only scans for sub-banks once, during the first .lvl load, so a sub-bank that arrives later (for example `human_5` from a modified `ingame.lvl` after a mod's own `ingame.lvl` already registered `human_0`) was silently ignored. This picks up the late arrivals. Works for any bank, not just `human`. *The animation bank needs to be split into sub-banks for this to work.*
@@ -64,6 +71,10 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 ## Weapon Systems
 
 - **Barrel Fire Origin Fix** - Fixes projectiles spawning from `bone_head` instead of `hp_fire` on `cannon` and `launcher` weapons, so shots come out of the actual barrel hardpoint. Aim stays true while zoomed: the shot is re-aimed at whatever it would have hit from the default origin, so moving the muzzle never costs accuracy. Turns itself off while a sniper scope is on screen, where the barrel is not visible anyway. INI: `[Fixes] BarrelFireOriginFix=1`
+<img width="1800" height="506" alt="BarrelFireOriginFix" src="../images/BarrelFireOriginFix.png" />
+
+<sub>*Taken with [The Clone Wars Revised](https://www.moddb.com/mods/the-clone-wars-revised). Issue + fix apply to vanilla and any mod*</sub>
+
 - **Shield Channel Fix** - Fixes shield weapons activating regardless of which secondary weapon is selected. The shield now only responds when it is the active weapon for its channel.
 - **Disguise Model Override** - Lets WeaponDisguise swap the soldier's model to a specific model instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Animated Lightsaber Textures** - Ports the Xbox version's animated blade textures, giving a lightsaber a four frame texture cycle where PC blades use a single static texture. ODF, under the blade's WeaponMelee section: `AnimTexture1 = tex_frame2`, `AnimTexture2 = tex_frame3`, `AnimTexture3 = tex_frame4`
@@ -73,6 +84,8 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 - **Carrier Class** - EntityCarrier was an unused class. Now, it's a completely usable class with proper landing oscillation, cargo attachment, level of detail rendering, turret activation and animation, making it usable as a VehiclePad.
 - **Droideka Death Animation Fix** - Droidekas never played their death animation even though every stock droideka bank defines one. A bug cut the animation off after a single frame, so the droideka just exploded instantly, while walkers like the ATST, ATTE and ATAT played theirs correctly. The fix lets the death animation run to completion, and drops the personal shield as soon as the droideka starts dying instead of leaving it up through the collapse. Rolling droidekas still explode instantly by design, and banks with no death animation are unaffected. INI: `[Fixes] DroidekaDeathAnimation=1`
+<img width="800" height="450" alt="DroidekaDeathAnimationPreview" src="../images/DroidekaDeathAnim.webp" />
+
 - **Flyer Boost Animation** - If a flyer's animation bank contains an animation named `boost`, it plays automatically when boosting, with a smooth blend in and out. Frame 0 should be the normal flying pose and the last frame the full boost pose.
 - **Vehicle First/Third Person Toggle** - Fixes the change view button being silently ignored on hovers and walkers. Both classes shipped with the view change permanently reported as suppressed, so ground vehicles were stuck in third person unless `ForceMode` was set in the ODF. Also applies to their AI controlled variants.
 - **CreateEntity Vehicle Weapons Fix** - Vehicles spawned from Lua with `CreateEntity` worked fine except that their weapons silently did nothing. Stock `CreateEntity` skips the team assignment and activation steps the normal vehicle spawner performs, and without a team the game refuses to spawn projectiles. This runs the missing steps automatically. Adds an optional fourth argument, `CreateEntity(class, matrix, name [, team])`, defaulting to 0 if omitted. Existing call sites keep working unchanged.
