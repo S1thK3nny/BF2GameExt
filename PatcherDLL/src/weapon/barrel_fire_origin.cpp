@@ -4,6 +4,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/ray_hit.hpp"
 
 // =============================================================================
 // Barrel fire origin — OverrideAimer vtable hook.
@@ -69,60 +70,10 @@ static bool scopeTextureVisible()
 // CollisionManager::RayHit — used to find what the vanilla shot would hit, so the
 // barrel ray can be aimed at the same point (see convergeDirection below).
 //
-//   float RayHit(PblVector3* start, PblVector3* dir, float maxDist,
-//                CollisionObject** outHit, PblVector3* outNormal,
-//                GameObject** exclude, int excludeCount, int flags, bool)
-//
-// Returns the hit fraction of maxDist; 1.0 means nothing was hit.  outHit is
-// written unconditionally on entry, so it must never be null.
-//
-// The two builds disagree on everything but the argument list:
-//   modtools (0x42E230) — plain __cdecl, every argument on the stack, result ST(0)
-//   Steam    (0x45E3A0) — LTCG: ECX = start, EDX = dir, XMM2 = maxDist, the other
-//                         six pushed, caller-cleans, result XMM0
-// Calling the release build through the debug signature is the exact mistake that
-// produced the old aim-assist crash (every stack argument shifts one slot), hence
-// the naked thunk.
+// The signature, the per-build calling conventions and the naked thunk that
+// marshals between them live in util/ray_hit.cpp, which several features share.
 // ---------------------------------------------------------------------------
-typedef float(__cdecl* RayHit_t)(const void* start, const void* dir, float maxDist,
-                                 void** outHit, void* outNormal, void** exclude,
-                                 int excludeCount, int flags, int lastArg);
-
-static uintptr_t s_rayHitFn = 0;      // resolved engine address
-static RayHit_t  s_rayHit   = nullptr; // what convergeDirection() calls
-
-// Marshals the __cdecl signature above onto the release build's register layout.
-static __declspec(naked) float __cdecl rayhit_release_thunk(
-   const void* /*start*/, const void* /*dir*/, float /*maxDist*/,
-   void** /*outHit*/, void* /*outNormal*/, void** /*exclude*/,
-   int /*excludeCount*/, int /*flags*/, int /*lastArg*/)
-{
-   __asm {
-      push  ebp
-      mov   ebp, esp
-      // Stack arguments, deepest last: outHit .. lastArg (six dwords).
-      push  dword ptr [ebp + 0x28]   // lastArg
-      push  dword ptr [ebp + 0x24]   // flags
-      push  dword ptr [ebp + 0x20]   // excludeCount
-      push  dword ptr [ebp + 0x1C]   // exclude
-      push  dword ptr [ebp + 0x18]   // outNormal
-      push  dword ptr [ebp + 0x14]   // outHit
-      mov   ecx, dword ptr [ebp + 0x08]         // start
-      mov   edx, dword ptr [ebp + 0x0C]         // dir
-      movss xmm2, dword ptr [ebp + 0x10]        // maxDist
-      mov   eax, dword ptr [s_rayHitFn]
-      call  eax
-      add   esp, 24                             // caller-cleans
-      // XMM0 -> ST(0), which is where a __cdecl float return belongs.
-      sub   esp, 4
-      movss dword ptr [esp], xmm0
-      fld   dword ptr [esp]
-      add   esp, 4
-      mov   esp, ebp
-      pop   ebp
-      ret
-   }
-}
+static RayHit_t s_rayHit = nullptr;   // what convergeDirection() calls
 
 // How far to look for the vanilla shot's impact point.  Beyond this the ray is
 // treated as "nothing hit" and convergence falls back to the far end of the ray,
@@ -361,16 +312,13 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 // ---------------------------------------------------------------------------
 void barrel_fire_origin_install(uintptr_t exe_base)
 {
-   uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, scopeVA;
-   bool rayHitIsRelease;
+   uintptr_t cannonVA, launcherVA, implVA, thunkVA, scopeVA;
    switch (g_build) {
    case GameBuild::Modtools:
       cannonVA   = game_addrs::modtools::weapon_cannon_vftable_override_aimer;
       launcherVA = game_addrs::modtools::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::modtools::weapon_override_aimer_impl;
       thunkVA    = game_addrs::modtools::weapon_override_aimer_thunk;
-      rayHitVA   = game_addrs::modtools::collision_manager_ray_hit;
-      rayHitIsRelease = false;   // plain __cdecl, result in ST(0)
       scopeVA = game_addrs::modtools::scope_display_instance;
       s_misAimingOff = 0x160;
       break;
@@ -380,8 +328,6 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       launcherVA = game_addrs::steam::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::steam::weapon_override_aimer_impl;
       thunkVA    = game_addrs::steam::weapon_override_aimer_thunk;
-      rayHitVA   = game_addrs::steam::collision_manager_ray_hit;
-      rayHitIsRelease = true;    // ECX/EDX/XMM2 + six stack args, result in XMM0
       scopeVA = game_addrs::steam::scope_display_instance;
       s_misAimingOff = 0x15C;
       break;
@@ -391,8 +337,6 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       launcherVA = game_addrs::gog::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::gog::weapon_override_aimer_impl;
       thunkVA    = game_addrs::gog::weapon_override_aimer_thunk;
-      rayHitVA   = game_addrs::gog::collision_manager_ray_hit;
-      rayHitIsRelease = true;    // same LTCG RayHit convention as Steam
       scopeVA = game_addrs::gog::scope_display_instance;
       s_misAimingOff = 0x15C;    // shared release layout
       break;
@@ -402,8 +346,8 @@ void barrel_fire_origin_install(uintptr_t exe_base)
 
    // Direction convergence is optional: if RayHit is missing the hook still
    // relocates the origin, it just stops correcting for the offset while zoomed.
-   s_rayHitFn = (uintptr_t)resolve(exe_base, rayHitVA);
-   s_rayHit   = rayHitIsRelease ? &rayhit_release_thunk : (RayHit_t)s_rayHitFn;
+   ray_hit_init(exe_base);
+   s_rayHit = ray_hit_get();
 
    s_scopeDisplay = (uintptr_t)resolve(exe_base, scopeVA);
 

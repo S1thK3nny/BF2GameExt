@@ -109,6 +109,9 @@
     <ClInclude Include="src\util\cfile.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\ray_hit.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\ini_config.hpp">
       <Filter>util</Filter>
     </ClInclude>
@@ -268,6 +271,9 @@
       <Filter>debug_commands</Filter>
     </ClCompile>
     <ClCompile Include="src\util\cfile.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\ray_hit.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\loading_screen\config_parser.cpp">

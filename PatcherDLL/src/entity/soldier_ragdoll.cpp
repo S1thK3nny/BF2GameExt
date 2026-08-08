@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/ray_hit.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -29,8 +30,8 @@
 // every frame).
 //
 // Note the root matrix is built against gMatrixIdentity, so m_pWorldMatrices are
-// in MODEL space, not world space.  That is what makes this cheap: no terrain
-// query is needed anywhere.
+// in MODEL space, not world space.  That is what keeps this cheap: the pose the
+// engine hands us needs no world query to interpret.
 //
 // The sim itself runs in WORLD space so the body has inertia of its own, which
 // model space cannot express: there the corpse entity's motion is invisible, so
@@ -38,9 +39,11 @@
 // out to world space and takes its starting velocity from EntitySoldier::
 // mVelocity, where DirectionKill has just deposited the death impulse; the
 // entity is not consulted again after that, and write_back() brings the result
-// back to model space.  Contact stays a single frozen plane, captured in world
-// at seed, so no terrain query creeps back in - see seed() for why it is frozen
-// rather than tracked, and what that costs on a slope.
+// back to model space.  Contact is a single plane in world space, sampled with
+// one downward CollisionManager::RayHit so it carries the real surface height
+// and tilt, and re-sampled from the body's own centroid whenever the body has
+// travelled far enough for the old sample to be stale - see kGroundReprobeDist
+// for why it follows the body and never the corpse entity.
 //
 // Data layout (build-invariant: these are PODs read straight out of the .zaabin
 // skeleton, and ZephyrSkeleton<32> is 0x810 bytes on debug and release alike -
@@ -174,9 +177,75 @@ static constexpr float kStiffByDepth[kConstraintDepth + 1] = {
    0.30f,  // broad shape retention
 };
 
-// Joint thickness.  Contacts stop at groundY + radius rather than exactly on the
+// Joint thickness.  Contacts stop a radius off the plane rather than exactly on the
 // plane, so the corpse has volume instead of every joint converging on one
 // height (which is the other half of the flattening).
+// ---------------------------------------------------------------------------
+// Ground probe
+// ---------------------------------------------------------------------------
+// The contact plane used to be flat and taken from the height the soldier died
+// at, which is exact on level ground and wrong everywhere else: on a slope the
+// body lies horizontally with half of it buried and half floating.  One
+// CollisionManager::RayHit straight down at seed replaces that with the real
+// surface AND its normal, so the plane can tilt.  It is still frozen at seed and
+// still a single plane - see the note in seed() for why it is not tracked - so
+// this costs one raycast per corpse and nothing per frame.
+//
+// The ray starts above the body and looks down.  A soldier is standing on the
+// ground when it dies, so the hit we want is at roughly the entity's own height;
+// a hit noticeably ABOVE that is the corpse's own collision volume, which the
+// ray enters on the way down.  Rather than build an exclude list (which needs
+// the GameObject* behind the entity, the same reason barrel_fire_origin pushes
+// its ray start forward instead), restart the ray just below such a hit and try
+// again.  Two restarts is plenty for a body inside its own cylinder.
+static constexpr float kGroundRayStart   = 2.5f;   // above the entity origin, clear of the body
+static constexpr float kGroundRayDist    = 12.0f;  // downward search length
+static constexpr float kGroundSelfHitEps = 0.30f;  // above the feet by this much = not the floor
+static constexpr float kGroundRetryStep  = 0.25f;  // how far below a self-hit the next ray starts
+static constexpr int   kGroundRayTries   = 8;      // 8 x 0.25 m clears a standing soldier's cylinder
+
+// The same filter has to be looser when the plane is being re-probed under a
+// moving body (see kGroundReprobeDist): there the reference height is the OLD
+// plane, and ground that is genuinely rising is genuinely above it.  At the
+// re-probe interval this allows terrain to climb at ~60 degrees before a real
+// hit is mistaken for the corpse's own collision volume, which is still well
+// clear of the ~1.8 m cylinder cap that the filter exists to reject.
+static constexpr float kGroundReprobeRise = 0.60f;
+
+// How far below the measured (death-height) plane a probe result is allowed to
+// sit.  This bounds the damage a bad hit can do, and deliberately leaves long
+// falls alone: the sim's world positions are converted back through the entity
+// transform at write-back, so a body falling 20 m to a plane the entity is not
+// falling towards detaches from its own corpse.  Slopes, kerbs, steps and small
+// ledges are all well inside this; real falls are environment collision's
+// problem, not the contact plane's.
+static constexpr float kGroundMaxDrop    = 3.0f;
+
+// How far the body may travel horizontally before the plane is probed again.
+//
+// A single plane frozen at the death point is only the real surface NEAR that
+// point, and a soldier killed while moving does not stay near it: the death
+// impulse throws the body several metres, and it spends that whole flight with a
+// contact plane sampled somewhere behind it.  Land on rising ground and the body
+// goes into the hillside, because the plane it landed on is where the terrain
+// used to be.
+//
+// So the plane follows the BODY - re-probed from its own centroid, not from the
+// entity.  That distinction is the whole reason the original design froze it:
+// the entity keeps sliding under its own death impulse and the two integrations
+// do not agree, so tracking the entity drags the floor out from under a body
+// that is not going there.  The body's own centroid has no such problem.
+//
+// Most re-probes land while the body is still airborne, where moving the plane
+// cannot disturb anything because nothing is touching it.  Once it is down,
+// contact friction kills the slide within a few steps, so re-probes become rare
+// exactly when a moving plane would be most visible.
+static constexpr float kGroundReprobeDist = 0.35f;
+
+// Below this the surface is a wall, not a floor, and the body would slide along
+// it forever.  Fall back to flat rather than tilt onto something near-vertical.
+static constexpr float kGroundMinNormalY = 0.5f;
+
 static constexpr float kJointRadius  = 0.09f;
 
 // Joint classification (see seed()).  kCoincidentEps is "sits on its parent";
@@ -243,6 +312,104 @@ static inline bool matrix_is_sane(const float* M)
    return sq > 0.25f && sq < 4.0f;
 }
 
+// Casts down from above `refY` at (x, z) looking for the surface the corpse is
+// on.  `refY` is where the caller believes the ground to be - the soldier's feet
+// at seed, the current plane on a re-probe - and both the self-hit filter and
+// the drop bound are measured against it.  `selfHitEps` is how far above refY a
+// hit may sit before it is treated as the body rather than the floor.
+// Returns false when nothing usable was found, leaving the caller's plane alone.
+// outP/outN are only written on success.
+static bool probe_ground(float x, float z, float refY, float selfHitEps,
+                         bool trace, Vec3* outP, Vec3* outN)
+{
+   RayHit_t rayHit = ray_hit_get();
+   if (!rayHit) {
+      if (g_soldierRagdollDebug) {
+         auto fn_log = get_gamelog();
+         fn_log("[Ragdoll] probe: RayHit unresolved for this build\n");
+      }
+      return false;
+   }
+
+   const Vec3 down{0.0f, -1.0f, 0.0f};
+   float      startY = refY + kGroundRayStart;
+
+   for (int attempt = 0; attempt < kGroundRayTries; attempt++) {
+      const Vec3 start{x, startY, z};
+
+      void* hitObj = nullptr;   // written on entry by RayHit; must never be null
+
+      // Zero rather than (0,1,0) so "RayHit left this alone" is distinguishable
+      // from "RayHit says the surface is flat" - the two want different handling
+      // below, and a sentinel that is already a legal answer hides the difference.
+      Vec3 normal{0.0f, 0.0f, 0.0f};
+
+      const float frac = rayHit(&start, &down, kGroundRayDist, &hitObj, &normal,
+                                nullptr, 0, kRayFlagsAim, 1);
+      const float hitY = startY - frac * kGroundRayDist;
+
+      // Per-attempt trace.  Two guesses at why the probe was failing have now
+      // both been wrong, so this reports the raw answer rather than a verdict:
+      // frac == 1 means the mask/address/convention never found a surface, while
+      // a small frac with a high hitY means the self-hit filter is eating a real
+      // hit.  Those want opposite fixes and are indistinguishable from outside.
+      if (g_soldierRagdollDebug && trace) {
+         auto fn_log = get_gamelog();
+         fn_log("[Ragdoll] probe try%d startY=%.3f refY=%.3f frac=%.4f hitY=%.3f "
+                "obj=%p n=(%.3f, %.3f, %.3f)\n",
+                attempt, startY, refY, frac, hitY, hitObj,
+                normal.x, normal.y, normal.z);
+      }
+
+      if (!(frac >= 0.0f) || frac >= 1.0f) return false;   // also rejects NaN
+
+      // A zero-length hit means the ray STARTED inside a collision volume, which
+      // is what a ray dropped through a corpse does - confirmed in the log, where
+      // three consecutive tries came back frac=0.0000 against the same object
+      // with junk normals (one pointing straight down).  Such a hit carries no
+      // usable surface, and accepting one once the retry has walked down near
+      // refY would plant the plane inside the body and float it.  Always step
+      // past it.
+      if (frac <= 0.0f) {
+         startY -= kGroundRetryStep;
+         continue;
+      }
+
+      // Above the reference height by more than the caller's tolerance: this is
+      // the body's own collision volume, or something resting on it.  Drop below
+      // the hit and look again.
+      //
+      // The step down has to be a real gap, not an epsilon.  A collision system
+      // that reports a t == 0 hit for a ray starting INSIDE a volume will hand
+      // back the same surface every attempt, and a 1 cm step would never clear
+      // the ~1.8 m of a soldier's own cylinder before the retries ran out.
+      if (hitY > refY + selfHitEps) {
+         startY = hitY - kGroundRetryStep;
+         continue;
+      }
+
+      if (hitY < refY - kGroundMaxDrop) return false;      // long fall; keep the current plane
+
+      const float len = v_len(normal);
+      if (len > 0.9f && len < 1.1f) {
+         normal.x /= len; normal.y /= len; normal.z /= len;
+         // Too steep to be a floor: the body would slide down it forever.  Take
+         // the height, which is still an improvement, but stay flat.
+         if (normal.y < kGroundMinNormalY) normal = Vec3{0.0f, 1.0f, 0.0f};
+      } else {
+         // No usable normal came back for this surface.  Correcting the height
+         // is most of the win; inventing a tilt from nothing is not.
+         normal = Vec3{0.0f, 1.0f, 0.0f};
+      }
+
+      *outP = Vec3{x, hitY, z};
+      *outN = normal;
+      return true;
+   }
+
+   return false;   // never got past the body
+}
+
 // ---------------------------------------------------------------------------
 // Per-corpse state
 // ---------------------------------------------------------------------------
@@ -261,7 +428,13 @@ struct RagdollState {
    bool        seeded;
    float       accum;                 // fixed-step accumulator
    float       age;                   // seconds since death
-   float       groundY;               // model-space contact plane, measured at seed
+   // Contact plane, world space, frozen at seed.  groundP is a point on it and
+   // groundN its unit normal; a flat plane is groundN = (0,1,0), which is what
+   // the measured-height fallback produces and is bit-identical to the old
+   // height-only test.
+   Vec3        groundP;
+   Vec3        groundN;
+   bool        groundProbed;           // true = plane came from a raycast, not the fallback
    bool        sim[kMaxJoints];       // false = scaffolding / non-physical node
    signed char parent[kMaxJoints];    // raw m_iParent, as authored
    signed char cparent[kMaxJoints];   // constraint parent after pass-through, -1 = free root
@@ -496,7 +669,7 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
    float lowest = 0.0f;
    for (int i = 0; i < n; i++)
       if (s->sim[i] && s->pos[i].y < lowest) lowest = s->pos[i].y;
-   s->groundY = lowest;
+   const float measuredGroundY = lowest;
 
    int simCount = 0;
    for (int i = 0; i < n; i++) if (s->sim[i]) simCount++;
@@ -515,12 +688,19 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
    // separately and will not agree; tracking the entity would drag the floor
    // around under a body that is not following it.  Freezing makes them
    // independent, so entity drift cannot reach us.
-   // The cost is that the plane is the height where the soldier DIED, not where
-   // the body lands.  Exact on flat ground; a body thrown off a ledge stops in
-   // mid-air at the old height, and one blown up a slope sinks into it.  Fixing
-   // that properly means a real terrain height at the landing point, which is
-   // the one thing this design has so far avoided needing.
-   s->groundY += entityMat[13];
+   // The plane is the surface under where the soldier DIED, not under where the
+   // body ends up.  Exact on flat ground and close enough for the metre or two a
+   // body travels; a corpse thrown clean off a ledge still stops at the old
+   // height, which is environment collision's problem rather than this one's.
+   const float measuredWorldY = measuredGroundY + entityMat[13];
+
+   // Default: the flat, measured plane.  probe_ground() upgrades it to the real
+   // surface and its normal when the raycast agrees, which is what lets a body
+   // lie ALONG a slope instead of horizontally through it.
+   s->groundP      = Vec3{entityMat[12], measuredWorldY, entityMat[14]};
+   s->groundN      = Vec3{0.0f, 1.0f, 0.0f};
+   s->groundProbed = probe_ground(entityMat[12], entityMat[14], measuredWorldY,
+                                  kGroundSelfHitEps, true, &s->groundP, &s->groundN);
 
    // Seed the body's momentum from the corpse entity's own velocity, which is
    // where EntitySoldier::DirectionKill has just deposited the death impulse.
@@ -553,9 +733,13 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
    // the soldier died means kEntityVelocity is pointing at the wrong field.
    if (g_soldierRagdollDebug) {
       auto fn_log = get_gamelog();
-      fn_log("[Ragdoll] seed vel=(%.3f, %.3f, %.3f) speed=%.3f%s\n",
+      fn_log("[Ragdoll] seed vel=(%.3f, %.3f, %.3f) speed=%.3f%s  ground=%s "
+             "y=%.3f (measured %.3f) slope=%.1fdeg\n",
              vel.x, vel.y, vel.z, speed,
-             speed > kMaxSeedSpeed ? "  CLAMPED - suspect offset" : "");
+             speed > kMaxSeedSpeed ? "  CLAMPED - suspect offset" : "",
+             s->groundProbed ? "raycast" : "measured-flat",
+             s->groundP.y, measuredWorldY,
+             std::acos(s->groundN.y < 1.0f ? s->groundN.y : 1.0f) * 57.2957795f);
    }
 
    // One-shot dump of the seed configuration.  The model-space frame is the one
@@ -567,9 +751,13 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
       g_loggedSeed = true;
       auto fn_log = get_gamelog();
       fn_log("[Ragdoll] seed: numJoints=%d simulated=%d constraints=%d "
-             "medianBone=%.4f outlierOver=%.4f groundY=%.4f contactY=%.4f\n",
+             "medianBone=%.4f outlierOver=%.4f ground=%s p=(%.3f, %.3f, %.3f) "
+             "n=(%.3f, %.3f, %.3f) slope=%.1fdeg\n",
              n, s->simCount, s->consCount, medianLen, outlierLen,
-             s->groundY, s->groundY + kJointRadius);
+             s->groundProbed ? "raycast" : "measured-flat",
+             s->groundP.x, s->groundP.y, s->groundP.z,
+             s->groundN.x, s->groundN.y, s->groundN.z,
+             std::acos(s->groundN.y < 1.0f ? s->groundN.y : 1.0f) * 57.2957795f);
       for (int i = 0; i < n; i++) {
          fn_log("[Ragdoll]   j%02d %s parent=%-3d cparent=%-3d child=%-3d "
                 "pos=(%.3f, %.3f, %.3f) restLen=%.4f\n",
@@ -581,11 +769,73 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
    }
 }
 
+// Height of the contact plane directly above/below (x, z).
+static inline float plane_height_at(const Vec3& P, const Vec3& N, float x, float z)
+{
+   if (N.y < 1e-4f) return P.y;   // near-vertical; treat as flat to avoid a blowup
+   return P.y - ((x - P.x) * N.x + (z - P.z) * N.z) / N.y;
+}
+
+// Re-probes the contact plane once the body has travelled far enough from where
+// the current one was sampled.  See kGroundReprobeDist for why this follows the
+// body's centroid rather than the corpse entity.
+static void reprobe_ground(RagdollState* s)
+{
+   if (!s->groundProbed) return;   // never got a raycast; nothing to refine
+
+   const int n = s->numJoints;
+
+   Vec3 c{0.0f, 0.0f, 0.0f};
+   int  count = 0;
+   for (int i = 0; i < n; i++) {
+      if (!s->sim[i]) continue;
+      c.x += s->pos[i].x; c.z += s->pos[i].z;
+      count++;
+   }
+   if (count == 0) return;
+   c.x /= (float)count; c.z /= (float)count;
+
+   const float dx = c.x - s->groundP.x;
+   const float dz = c.z - s->groundP.z;
+   if (dx * dx + dz * dz < kGroundReprobeDist * kGroundReprobeDist) return;
+
+   // Where the CURRENT plane sits under the body.  This is both the reference
+   // height for the probe (so its self-hit filter and drop bound stay relative to
+   // where the body actually is) and the fallback anchor below.
+   const float planeY = plane_height_at(s->groundP, s->groundN, c.x, c.z);
+
+   Vec3 p, nrm;
+   if (probe_ground(c.x, c.z, planeY, kGroundReprobeRise, false, &p, &nrm)) {
+      // Logged because the failure this exists to fix is invisible from the
+      // outside: a body sinking into a hillside and a body lying on it look the
+      // same in a log that only records the seed.  dy is the correction the old
+      // frozen plane would have got wrong by.
+      if (g_soldierRagdollDebug) {
+         const float dy = p.y - planeY;
+         if (dy > 0.05f || dy < -0.05f) {
+            auto fn_log = get_gamelog();
+            fn_log("[Ragdoll] reprobe at (%.2f, %.2f) dy=%+.3f slope=%.1fdeg\n",
+                   c.x, c.z, dy,
+                   std::acos(nrm.y < 1.0f ? nrm.y : 1.0f) * 57.2957795f);
+         }
+      }
+      s->groundP = p;
+      s->groundN = nrm;
+      return;
+   }
+
+   // Probe failed - keep the plane exactly as it is, but slide the anchor along
+   // it to the body's new position.  Without this every subsequent step re-probes
+   // and fails again; with it, the next attempt comes after another
+   // kGroundReprobeDist of travel.
+   s->groundP = Vec3{c.x, planeY, c.z};
+}
+
 // ---------------------------------------------------------------------------
 // Solver
 // ---------------------------------------------------------------------------
 
-static void step(RagdollState* s, float dt, float groundY)
+static void step(RagdollState* s, float dt)
 {
    const int n = s->numJoints;
 
@@ -626,15 +876,45 @@ static void step(RagdollState* s, float dt, float groundY)
    // back onto the plane and the constraints never recover the bone lengths, so
    // the whole skeleton converges onto a single height.  Each joint stops a
    // radius above the plane so the body keeps some thickness.
-   const float contactY = groundY + kJointRadius;
+   //
+   // The plane may be tilted (see probe_ground), so this is a signed-distance
+   // test along its normal rather than a comparison of y.  For the flat fallback
+   // normal (0,1,0) it reduces exactly to the old `pos.y < groundY + radius`.
+   const Vec3& P = s->groundP;
+   const Vec3& N = s->groundN;
+
    for (int i = 0; i < n; i++) {
-      if (!s->sim[i] || s->pos[i].y >= contactY) continue;
-      s->pos[i].y = contactY;
-      // Contact friction: bleed off the tangential velocity by dragging the
-      // previous position towards the current one.
-      s->prev[i].x += (s->pos[i].x - s->prev[i].x) * kGroundFric;
-      s->prev[i].z += (s->pos[i].z - s->prev[i].z) * kGroundFric;
-      if (s->prev[i].y < contactY) s->prev[i].y = contactY;
+      if (!s->sim[i]) continue;
+
+      const float sd = v_dot(v_sub(s->pos[i], P), N);
+      if (sd >= kJointRadius) continue;
+
+      // Push straight out along the normal to the contact offset.
+      const float push = kJointRadius - sd;
+      s->pos[i].x += N.x * push;
+      s->pos[i].y += N.y * push;
+      s->pos[i].z += N.z * push;
+
+      // Contact friction: bleed off the velocity that runs ALONG the surface by
+      // dragging the previous position towards the current one, leaving the
+      // normal component alone.  On flat ground the tangent is the xz plane, so
+      // this is the same x/z drag as before.
+      const Vec3  vel = v_sub(s->pos[i], s->prev[i]);
+      const float vn  = v_dot(vel, N);
+      const Vec3  vt{vel.x - N.x * vn, vel.y - N.y * vn, vel.z - N.z * vn};
+      s->prev[i].x += vt.x * kGroundFric;
+      s->prev[i].y += vt.y * kGroundFric;
+      s->prev[i].z += vt.z * kGroundFric;
+
+      // And do not let the previous position sit inside the plane, or the
+      // implicit velocity drives the joint straight back through it next step.
+      const float sdPrev = v_dot(v_sub(s->prev[i], P), N);
+      if (sdPrev < kJointRadius) {
+         const float fix = kJointRadius - sdPrev;
+         s->prev[i].x += N.x * fix;
+         s->prev[i].y += N.y * fix;
+         s->prev[i].z += N.z * fix;
+      }
    }
 }
 
@@ -829,16 +1109,19 @@ static void __fastcall hooked_ApplyProcedural(void* ecx, void* /*edx*/, float dt
       if (s->numJoints != n) return;        // skeleton swapped under us
       if (s->simCount < kMinSimJoints) return; // nothing bone-like to simulate
 
-      const float groundY = s->groundY; // world space, frozen at seed
-
       // Park the sim once the body has settled, but keep writing the final pose
       // so the death clip cannot creep back in underneath it.
       if (s->age < kSettleTime) {
+         // Keep the contact plane under the body before integrating against it,
+         // so a corpse thrown across uneven ground lands on the surface it is
+         // actually over rather than the one it died on.
+         reprobe_ground(s);
+
          s->age += dt;
          s->accum += dt;
          int steps = 0;
          while (s->accum >= kFixedStep && steps < kMaxSubsteps) {
-            step(s, kFixedStep, groundY);
+            step(s, kFixedStep);
             s->accum -= kFixedStep;
             steps++;
          }
@@ -866,6 +1149,10 @@ void soldier_ragdoll_install(uintptr_t exe_base)
 
    original_ApplyProcedural =
       (fn_ApplyProcedural_t)resolve(exe_base, g_addr->soldier_apply_procedural);
+
+   // Optional: without it probe_ground() fails and every corpse falls back to the
+   // flat measured plane, which is what this feature did before.
+   ray_hit_init(exe_base);
 
    soldier_ragdoll_reset();
 
