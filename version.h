@@ -44,4 +44,4 @@
    0
 
 // Copyright line shared by every VERSIONINFO block.
-#define GAMEEXT_LEGAL_COPYRIGHT "Copyright (C) 2025-2026 BF2GameExt contributors"
+#define GAMEEXT_LEGAL_COPYRIGHT "Copyright (C) 2025-2026 S1thK3nny and BF2GameExt contributors"

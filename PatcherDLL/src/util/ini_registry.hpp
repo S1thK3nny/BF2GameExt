@@ -46,14 +46,14 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
    INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "1", "Raise combo animation limit",                         "Combo Anims Increase"),
    INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
-   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Increase network timer count",                        "Network Timer Increase"),
+   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
    INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
    INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise the concurrent OpenAudioStream limit from 6 to 12. Each stream needs 3.4 MB of contiguous buffers, so this reserves 40 MB of the 32-bit process's 2 GB of virtual address space (RAM use is lower - pages are only committed as streams are actually used)", "Audio Stream Limit Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
 
    // [Fixes] — bug-fix patches
-   INI_PATCH("Fixes", "ChunkPushFix", "1", "Fix chunk push crash", "Chunk Push Fix"),
+   INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
    INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
    INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
    INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
@@ -79,7 +79,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Controller", "Rumble",  "1", "Enable controller rumble / vibration"),
 
    // [AimAssist] — controller aim assist (Xbox-style, singleplayer only)
-   INI_ENTRY("AimAssist", "Enabled",                 "1",   "Enable controller aim assist"),
+   INI_ENTRY("AimAssist", "Enabled",                 "0",   "Enable controller aim assist"),
    INI_ENTRY("AimAssist", "ConeAngle",               "30",  "Fallback cone angle in degrees when weapon has no AutoAimSize"),
    INI_ENTRY("AimAssist", "TrackingDeadZone",         "0.5", "Dead zone multiplier for weapon AutoAimSize"),
    INI_ENTRY("AimAssist", "FrictionStrength",          "3.0", "Directional friction scale when aiming away from lock"),

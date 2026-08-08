@@ -1,7 +1,6 @@
 # Features
 
-Unless noted otherwise, every feature here works on Modtools and Steam. See the
-[compatibility table](../../README.md#compatibility) for the current state of each build.
+See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
 ## Engine Limit Extensions
 
@@ -24,14 +23,20 @@ Automatic binary patches applied on load:
 - **String Pool** - Increases the string pool from 32 KB to 128 KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
-- **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
+- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one gates keyboard, joystick and voice chat updates, and was fixed at 30 Hz, so input was only sampled 30 times a second no matter how high the framerate ran. This raises it to 120 Hz. The simulation timer is untouched, so nothing about game speed or netcode changes, input just stops being the slowest thing in the loop. INI: `[LimitIncreases] NetworkTimerIncrease=1`
 - **Sky Object Limit** - Removes the cap on how many objects a sky dome or backdrop can contain. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
+- **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
+
+  <img width="1800" alt="GCVisuals" src="../images/GCVisuals.jpg" />
+
+  <sub>*Taken with ['Choose Your Own' Galactic Conquest](https://www.moddb.com/mods/choose-your-own-galactic-conquest).*</sub>
 
 ## Engine & Rendering Fixes
 
 General engine bug fixes, several of them ported from PrismaticFlower's upstream. Build restrictions and INI keys are noted per entry:
 
 - **PropGenerator Loop Fix** - The procedural foliage system could read past the end of its object array at very high fields of view and crash. The patch restores the missing bounds check. INI: `[Fixes] PropGeneratorLoopFix=1`
+- **Chunk Push Fix** - When an explosion sweeps up a soldier, the engine rolls the class's chunk frequency to decide whether the body breaks apart into chunks. If that roll passes it flags the body and returns immediately, before the explosion's push is ever applied, so a body that gibs simply drops where it stood while a body that does not gets thrown. The fix lets the push run either way, so chunked bodies are flung by the blast like everything else. INI: `[Fixes] ChunkPushFix=1`
 - **Terrain Texture Fix** - The terrain shader caches two textures that only get assigned on maps that have a terrain detail map. Going from a map with one to a map without one in the same session left the shader pointing at freed memory, producing garbage terrain or a crash. The fix re-resolves both textures before every terrain load so they are always valid. Also fixes an upstream copy-paste bug that fed the wrong texture into one of the two slots. INI: `[Fixes] TerrainTextureFix=1`
 - **Game Logging Enablement** - Retail builds ship the engine's `BFront2.log` file logging compiled in but switched off. This turns it back on without needing the `/log` command line flag, which is useful for diagnosing crashes and mod issues. No effect on Modtools, which always logs. INI: `[Features] GameLogging=0` *(off by default)*
 - **Enable Sound Warnings** - When an ODF references a sound that is not loaded, the engine can warn about it, but the warning is switched off by default and cannot normally be enabled. This turns it on so missing sound names show up in the log. Modtools only: the retail builds compiled the warning code out entirely, so there is nothing to enable there. INI: `[Features] EnableSoundWarnings=0` *(off by default)*
@@ -53,6 +58,11 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 ## Soldier Systems
 
 - **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
+
+  <img width="800" alt="Soldier going prone" src="../images/Prone.webp" />
+
+  <sub>*Prone works with any mod unless specifically disabled by that mod*</sub>
+
 - **Multiple First-Person Animation Banks** - Lets each soldier class use its own first person animation bank instead of sharing one global set. Partial banks work too, with missing animations falling back to the defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **First-Person Sprint Animation** - The engine has no first person sprint state and just plays the run animation faster. This adds the possibility for modders to add a real sprint animation per weapon class. If `<bank>_rifle_sprint` (or `_bazooka_sprint`, `_tool_sprint`) exists in the bank it is used while sprinting. Works with custom banks, and is entirely optional: if the animation is absent, nothing changes.
 - **Animation Bank Appending** - Lets an animation bank be extended with extra numbered sub-banks spread across multiple .lvl files. The engine only scans for sub-banks once, during the first .lvl load, so a sub-bank that arrives later (for example `human_5` from a modified `ingame.lvl` after a mod's own `ingame.lvl` already registered `human_0`) was silently ignored. This picks up the late arrivals. Works for any bank, not just `human`. *The animation bank needs to be split into sub-banks for this to work.*
@@ -63,6 +73,11 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 ## Weapon Systems
 
 - **Barrel Fire Origin Fix** - Fixes projectiles spawning from `bone_head` instead of `hp_fire` on `cannon` and `launcher` weapons, so shots come out of the actual barrel hardpoint. Aim stays true while zoomed: the shot is re-aimed at whatever it would have hit from the default origin, so moving the muzzle never costs accuracy. Turns itself off while a sniper scope is on screen, where the barrel is not visible anyway. INI: `[Fixes] BarrelFireOriginFix=1`
+
+  <img width="1800" alt="BarrelFireOriginFix" src="../images/BarrelFireOriginFix.jpg" />
+
+  <sub>*Taken with [The Clone Wars Revised](https://www.moddb.com/mods/the-clone-wars-revised). Issue + fix apply to vanilla and any mod*</sub>
+
 - **Shield Channel Fix** - Fixes shield weapons activating regardless of which secondary weapon is selected. The shield now only responds when it is the active weapon for its channel.
 - **Disguise Model Override** - Lets WeaponDisguise swap the soldier's model to a specific model instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Animated Lightsaber Textures** - Ports the Xbox version's animated blade textures, giving a lightsaber a four frame texture cycle where PC blades use a single static texture. ODF, under the blade's WeaponMelee section: `AnimTexture1 = tex_frame2`, `AnimTexture2 = tex_frame3`, `AnimTexture3 = tex_frame4`
@@ -72,6 +87,9 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 - **Carrier Class** - EntityCarrier was an unused class. Now, it's a completely usable class with proper landing oscillation, cargo attachment, level of detail rendering, turret activation and animation, making it usable as a VehiclePad.
 - **Droideka Death Animation Fix** - Droidekas never played their death animation even though every stock droideka bank defines one. A bug cut the animation off after a single frame, so the droideka just exploded instantly, while walkers like the ATST, ATTE and ATAT played theirs correctly. The fix lets the death animation run to completion, and drops the personal shield as soon as the droideka starts dying instead of leaving it up through the collapse. Rolling droidekas still explode instantly by design, and banks with no death animation are unaffected. INI: `[Fixes] DroidekaDeathAnimation=1`
+
+  <img width="800" alt="DroidekaDeathAnimationPreview" src="../images/DroidekaDeathAnim.webp" />
+
 - **Flyer Boost Animation** - If a flyer's animation bank contains an animation named `boost`, it plays automatically when boosting, with a smooth blend in and out. Frame 0 should be the normal flying pose and the last frame the full boost pose.
 - **Vehicle First/Third Person Toggle** - Fixes the change view button being silently ignored on hovers and walkers. Both classes shipped with the view change permanently reported as suppressed, so ground vehicles were stuck in third person unless `ForceMode` was set in the ODF. Also applies to their AI controlled variants.
 - **CreateEntity Vehicle Weapons Fix** - Vehicles spawned from Lua with `CreateEntity` worked fine except that their weapons silently did nothing. Stock `CreateEntity` skips the team assignment and activation steps the normal vehicle spawner performs, and without a team the game refuses to spawn projectiles. This runs the missing steps automatically. Adds an optional fourth argument, `CreateEntity(class, matrix, name [, team])`, defaulting to 0 if omitted. Existing call sites keep working unchanged.
@@ -93,9 +111,10 @@ retail builds have no command console to add them to.
 
 - `RenderHoverSprings` - Visualise hover vehicle spring compression with coloured wireframe spheres
 - `ShowWeaponRanges` - Draw weapon AI range circles (MinRange, OptimalRange, MaxRange) around soldiers
+- `memwatch` - Reverse-engineering aid. Arms a CPU hardware data breakpoint on an address and reports every distinct piece of code that reads or writes it, with a register snapshot and a best-effort call stack per accessor. Up to four addresses at once, since that is how many debug registers x86 has. `memwatch [u]<hexaddr> [len] [r|w|rw]` to arm, bare `memwatch` to report and disarm, `memwatch clear` to drop all watches. A plain address is a runtime one; the `u` prefix takes an unrelocated address straight out of Ghidra and rebases it for you. Reported accessor and caller addresses are unrelocated, so they paste back into Ghidra as is. See [MemWatchRE.md](../MemWatchRE.md)
 
 ## Controller Support
 
 - **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
-- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. INI: `[AimAssist]`
+- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
 - **Rumble** - Controller vibration on weapon fire and damage. INI: `[Controller] Rumble=1`

@@ -371,6 +371,9 @@ namespace modtools {
    constexpr uintptr_t cloth_satisfy_constraints    = 0x004cae40;
    constexpr uintptr_t cloth_enforce_collisions     = 0x004cabd0;
    constexpr uintptr_t cloth_enforce_cylinder_coll  = 0x004c8660;
+   // EntityCloth::InternalUpdate - thiscall(PblMatrix*, RedPose*, uint iters,
+   // float dt), RET 0x10 on all three builds.  Frame-gated on +0x80.
+   constexpr uintptr_t cloth_internal_update        = 0x004cbc40;
 
    // ---- Animation ---------------------------------------------------------------
 
@@ -1096,6 +1099,10 @@ namespace steam {
    // LTCG: ECX=this, one stack arg (float* matrix, RET 4), halfHeight in
    // XMM2, radius in XMM3 — needs the naked thunk in cloth_collision_fix.cpp.
    constexpr uintptr_t cloth_enforce_cylinder_coll = 0x0045B7C0;
+   // EntityCloth::InternalUpdate - thiscall(PblMatrix*, RedPose*, uint iters,
+   // float dt at [EBP+0x14]), RET 0x10.  Not LTCG-mangled: the float comes off
+   // the stack, so a plain __fastcall detour is safe here.
+   constexpr uintptr_t cloth_internal_update    = 0x0045adb0;
    constexpr uintptr_t load_config_real         = 0x005777e0;
    constexpr uintptr_t load_data_file_real      = 0x00577620;
    constexpr uintptr_t load_end_real            = 0x00576b90;
@@ -1139,6 +1146,32 @@ namespace steam {
    // release build still RETs 0x34 for 13 stack dwords — but the body never
    // reads either slot, and LoadDisplay::RenderScreen 0x00577280 does not even
    // bother storing them.  Left undefined (0) on purpose.
+   //
+   // Both were constant-folded instead, because the one stock caller passes the
+   // same values every time (&RedColor::WHITE, true — see modtools
+   // LoadDisplay::RenderScreen 0x0067a1b0).  In 0x00423980 that shows up as
+   // `push 0x210004` for the pcRedShader::Create flags, i.e. alphaBlend already
+   // hardwired on, and:
+   //
+   //     00423b4a  push 0x200        ; pcRenderPrimitive flags
+   //     00423b4f  push 0x007de144   ; RedColor*  <- the folded &RedColor::WHITE
+   //     00423b54  push 0x009caee0   ; &gMatrixIdentity
+   //
+   // pcRenderPrimitive copies *that* into RenderItem::tweakColor, so it is a
+   // genuine per-draw tint the extension has no other way to reach.  The
+   // address below is the push's imm32 operand (the instruction byte + 1);
+   // loading_screen_install repoints it at the extension's own 4-byte RedColor
+   // so the BF1 zoom cross-fade can ramp alpha.  Guarded: the write only
+   // happens if the operand still reads as the expected WHITE global, and
+   // uninstall puts the original dword back.
+   //
+   // Not defined for modtools — it passes both arguments for real, so nothing
+   // needs patching there.
+   constexpr uintptr_t prt_tweak_color_operand  = 0x00423b50;
+   // &RedColor::WHITE, the value the operand is expected to hold before we
+   // touch it.  Also passed to pcRedShader::Create two pushes earlier, which we
+   // deliberately leave pointing at the real WHITE — only the tweak colour moves.
+   constexpr uintptr_t prt_tweak_color_expected = 0x007de144;
    //
    // Snd::Sound::VoiceVirtualToVoiceVirtualHandle — __cdecl, (voice -
    // smVoiceVirtuals 0x01e2b4c0) / 200 + 1, the exact inverse of 0x0073af60.
@@ -1625,6 +1658,8 @@ namespace gog {
    constexpr uintptr_t cloth_enforce_collisions       = 0x0045ba40;
    constexpr uintptr_t cloth_satisfy_constraints      = 0x0045bc40;
    constexpr uintptr_t cloth_enforce_cylinder_coll    = 0x0045b7c0;
+   // GOG sits 0x10 below Steam here (Steam 0x0045adb0); same RET 0x10 shape.
+   constexpr uintptr_t cloth_internal_update          = 0x0045ada0;
    constexpr uintptr_t load_config_real               = 0x00578560;
    constexpr uintptr_t load_data_file_real            = 0x005783a0;
    constexpr uintptr_t load_end_real                  = 0x00577910;
@@ -1715,6 +1750,10 @@ namespace gog {
    constexpr uintptr_t load_render_real               = 0x00577c90;
    constexpr uintptr_t render_screen_real             = 0x00578000;
    constexpr uintptr_t platform_render_texture        = 0x00423950;
+   // Same constant folding as steam (see that namespace for the full note); the
+   // push sits at 0x00423b1f, so the imm32 operand is one byte on.
+   constexpr uintptr_t prt_tweak_color_operand        = 0x00423b20;
+   constexpr uintptr_t prt_tweak_color_expected       = 0x007df144;
    constexpr uintptr_t disguise_set_property          = 0x006844a0;
    constexpr uintptr_t game_model_table               = 0x01ec26b4;
 

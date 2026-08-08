@@ -2,11 +2,22 @@
 
 A DLL extension for Star Wars Battlefront II (2005) that exposes new modding capabilities by hooking into the game engine at runtime. It adds custom Lua functions, ODF properties, loading screen parameters, bug fixes, and engine limit extensions, on the Modtools build and increasingly on the retail Steam and GOG builds.
 
+<img width="800" height="450" alt="Prone" src="docs/images/Prone.webp" />
+
+**Playing with it**
+
 - **[Features](docs/user/FEATURES.md)** - everything it adds and fixes
-- **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts (for modders)
-- **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters (for modders)
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
+- **[Controller](docs/user/CONTROLLER.md)** - gamepad bindings, inputs and actions
+- **[Troubleshooting](docs/user/TROUBLESHOOTING.md)** - it did not load, or a feature does nothing
 - **[Roadmap](docs/ROADMAP.md)** - planned work, and what will not be attempted
+
+**Modding with it**
+
+- **[Tutorials](docs/tutorials/README.md)** - step-by-step guides with munge-ready example assets
+- **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
+- **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
+
 
 ## Goal
 
@@ -16,22 +27,17 @@ Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to 
 
 ## Installation
 
-### Method 1 - DInput8 Proxy (recommended)
+1. Download the latest release zip.
+2. Open it. Inside you get a `GameData` folder, `LICENSE.txt` and `README.txt`.
+3. Drag `GameData` onto your Star Wars Battlefront II folder - the one that already contains a `GameData` - and let Windows merge it.
 
-No exe patching required! Drop these files next to your game executable (inside `GameData`):
+That is the whole install. Launch the game normally.
 
-- `dinput8.dll` (DInput8Proxy project)
-- `BF2GameExt.dll` (PatcherDLL project)
-- `BF2GameExt.ini` (from `dist/`)
+A simple drag and drop patch. To switch it off, set `Enabled=0` in `GameData\BF2GameExt.ini`; the game then runs fully stock with the files still in place.
 
 Works with Steam, GOG and Modtools builds. Compatible with other dinput8 proxy DLLs such as ReShade via automatic chain-loading.
 
-### Method 2 - Exe Patcher
-
-1. Build `BF2GameExt.dll` (PatcherDLL project) and `BF2GameExt.exe` (BF2GameExt project)
-2. Place both in your `Star Wars Battlefront II Classic` folder (outside of `GameData`)
-3. Run `BF2GameExt.exe` and patch a **copy** of BF2_modtools.exe
-4. The patcher places the DLL into `GameData` automatically
+If it does not seem to be running, see [Troubleshooting](docs/user/TROUBLESHOOTING.md).
 
 ## Compatibility
 
@@ -71,7 +77,9 @@ Requirements:
 git clone https://github.com/S1thK3nny/BF2GameExt.git
 ```
 
-Open `BF2GameExt.sln` and build the solution. Output goes to `bin\Debug\` or `bin\Release\`.
+Open `BF2GameExt.sln` and build the solution. Output goes to `bin\Debug\` or `bin\Release\`: `dinput8.dll` from the DInput8Proxy project and `BF2GameExt.dll` from PatcherDLL.
+
+To produce a release zip, run `python tools/package_release.py`. It does a clean Release build, checks the version stamped into each binary against `version.h`, and writes `dist/BF2GameExt-<version>.zip` with the install layout above.
 
 ### Project Structure
 

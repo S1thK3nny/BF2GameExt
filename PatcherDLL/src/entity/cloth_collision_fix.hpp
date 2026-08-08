@@ -3,18 +3,32 @@
 #include <stdint.h>
 
 // =============================================================================
-// Cloth Collision Velocity Correction
+// Cloth simulation fixes
 //
-// Hooks EntityCloth::EnforceCollisions to fix the Verlet velocity error that
-// causes cloth to oscillate through collision primitives.  The collision
-// functions modify the position buffer but never update old_pos, so the
-// implicit Verlet velocity (pos - old_pos) fights the correction every frame.
+// Three hooks on EntityCloth:
 //
-// The fix snapshots positions before collision, then for any displaced particle
-// kills the penetrating velocity component while preserving tangential sliding.
+//   InternalUpdate           - fixed 1/30 s simulation timestep with the
+//                              accumulator clamped to 0.13333 s (ported from
+//                              the Phantom dev build; retail integrates at the
+//                              raw, unclamped frame delta, which is what lets
+//                              particles tunnel straight through the collision
+//                              volumes), plus a raised solver iteration count
+//                              (every shipped call site passes 1).
 //
-// Call cloth_collision_fix_install()   from lua_hooks_install().
-// Call cloth_collision_fix_uninstall() from lua_hooks_uninstall().
+//   EnforceCollisions        - corrects the implicit Verlet velocity for any
+//                              particle that collision displaced, so the
+//                              correction is not undone on the next step, and
+//                              resets non-finite particles to their rest
+//                              position so a single NaN cannot permanently
+//                              kill the cloth.
+//
+//   EnforceCylinderCollision - fixes the doubled half-height (the authored
+//                              `height` is the FULL height, so vanilla's
+//                              volume was 4x too tall) and the axis push that
+//                              always went along +axis regardless of which
+//                              cap the particle entered through.
+//
+// Installed from dllmain's patch block while the sections are still RW.
 // =============================================================================
 
 void cloth_collision_fix_install(uintptr_t exe_base);
