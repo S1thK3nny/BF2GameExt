@@ -59,9 +59,9 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 - **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
 
-  <img width="800" alt="Soldier going prone" src="../images/Prone.webp" />
+  <img width="800" alt="Soldier going prone" src="../images/LegacyProne.webp" />
 
-  <sub>*Prone works with any mod unless specifically disabled by that mod*</sub>
+  <sub>*Taken with [Star Wars Battlefront 3 Legacy](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy). Prone applies to vanilla and any mod*</sub>
 
 - **Multiple First-Person Animation Banks** - Lets each soldier class use its own first person animation bank instead of sharing one global set. Partial banks work too, with missing animations falling back to the defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **First-Person Sprint Animation** - The engine has no first person sprint state and just plays the run animation faster. This adds the possibility for modders to add a real sprint animation per weapon class. If `<bank>_rifle_sprint` (or `_bazooka_sprint`, `_tool_sprint`) exists in the bank it is used while sprinting. Works with custom banks, and is entirely optional: if the animation is absent, nothing changes.
