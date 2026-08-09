@@ -4,7 +4,7 @@ contact_links:
     url: https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/user/FEATURES.md
     about: Check here first, the behaviour you are seeing may be a documented feature or a known limitation.
   - name: Roadmap
-    url: https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/ROADMAP.md
+    url: https://github.com/S1thK3nny/BF2GameExt/blob/main/ROADMAP.md
     about: Planned work, and the things that will not be attempted (and why).
   - name: Lua API reference
     url: https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/user/LUA_API.md

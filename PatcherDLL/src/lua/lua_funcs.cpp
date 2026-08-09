@@ -334,7 +334,7 @@ static int lua_GetCharacterWeapon(lua_State* L)
 // @param #int    channel     Weapon channel (default 0): 0=primary, 1=secondary
 // @return #bool              1 on success, nil on failure.
 //
-// v6 (2026-07-18) — engine-native rebuild. See docs/CharacterWeaponSystem.md
+// v6 (2026-07-18) — engine-native rebuild. See docs/RE/CharacterWeaponSystem.md
 // "SetCharacterWeapon v6" for the full RE trail (Phantom-build PDB).
 //
 // TODO:
@@ -798,7 +798,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
 // Resolve (charIndex, channel) → active Weapon* for that channel.
 // Returns nullptr on any failure. Shared by GetWeaponAmmo / SetWeaponAmmo.
 //
-// Confirmed chain (see docs/CharacterWeaponSystem.md):
+// Confirmed chain (see docs/RE/CharacterWeaponSystem.md):
 //   charArray + idx*0x1B0     → charSlot
 //   *(charSlot + 0x148)       → intermediate
 //   intermediate + 0x18       → Controllable*
@@ -1572,7 +1572,7 @@ static const lua_func_entry custom_functions[] = {
    { "GetCharacterWeapon",    lua_GetCharacterWeapon },
    // v6 rebuild (2026-07-18): builds a real Weapon via WeaponClass::Build and
    // destroys the old one — the v1..v5 in-place mutation approach corrupted
-   // MemoryPool free lists (see docs/CharacterWeaponSystem.md).
+   // MemoryPool free lists (see docs/RE/CharacterWeaponSystem.md).
    { "SetCharacterWeapon",    lua_SetCharacterWeapon },
    { "GetWeaponAmmo",         lua_GetWeaponAmmo },
    { "SetWeaponAmmo",         lua_SetWeaponAmmo },

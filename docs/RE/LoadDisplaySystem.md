@@ -285,7 +285,7 @@ void LoadDisplay::LoadConfig(uint32_t* fileHandle);
 
 Parses the level's `LoadConfig` block from a `PblConfig` stream.
 `hooked_load_config` re-runs the same stream afterwards to pick up the BF1-ext
-keys documented in [user/LOADING_SCREEN.md](user/LOADING_SCREEN.md).
+keys documented in [user/LOADING_SCREEN.md](../user/LOADING_SCREEN.md).
 
 #### Stock keys, `LoadDisplay { }` scope (hash `0x8689c861`)
 

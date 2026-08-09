@@ -12,7 +12,7 @@
 //
 // Verified 2026-07-27 against modtools disassembly (PostLoad 0x67bd50,
 // LoadDataChunk 0x67dea0, LoadData 0x67e360) and Steam LoadDataChunk 0x5776e0.
-// Full table and derivation: docs/LoadDisplaySystem.md.
+// Full table and derivation: docs/RE/LoadDisplaySystem.md.
 //
 // One table serves all three builds — do NOT add per-build variants without
 // re-deriving, the whole point is that they agree.

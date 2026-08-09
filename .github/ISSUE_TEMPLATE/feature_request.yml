@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Before opening one of these, please check
-        [the roadmap](https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/ROADMAP.md)
+        [the roadmap](https://github.com/S1thK3nny/BF2GameExt/blob/main/ROADMAP.md)
         and [the feature list](https://github.com/S1thK3nny/BF2GameExt/blob/main/docs/user/FEATURES.md).
 
   - type: textarea

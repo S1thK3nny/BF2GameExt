@@ -2,7 +2,7 @@
 
 Planned and in-progress work. This is the backlog, not a feature list: nothing here
 is shipped. For what the DLL actually does today, see
-[docs/user/FEATURES.md](user/FEATURES.md).
+[docs/user/FEATURES.md](docs/user/FEATURES.md).
 
 ## Vehicles
 
@@ -72,7 +72,7 @@ individual combat action, and which ODF and Lua knobs actually feed into it. Sho
 record the confirmed no-ops so others stop trying to use them.
 
 **Improve RedConsoleCommands documentation** - The existing
-[reference](RedConsoleCommands.md) was largely built from symbol names, so a number of
+[reference](docs/RE/RedConsoleCommands.md) was largely built from symbol names, so a number of
 entries are inferred rather than verified. Needs a pass that actually exercises the
 commands, corrects the inferred descriptions, and marks the ones confirmed to be dead
 no-ops.
@@ -89,5 +89,5 @@ It is not a matter of flipping the disabled flag. The PC build compiles the rele
 down to a single element, so simply unclamping the camera count writes past the end of those
 arrays and corrupts memory rather than producing a second viewport. Making it real means
 rebuilding those structures and every consumer of them. Notes on the system are in
-[SplitscreenSystem.md](SplitscreenSystem.md) for the curious, but it is documentation, not
+[SplitscreenSystem.md](docs/RE/SplitscreenSystem.md) for the curious, but it is documentation, not
 a plan.

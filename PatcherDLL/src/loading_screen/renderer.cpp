@@ -378,7 +378,7 @@ void __fastcall hooked_render_screen(void* ecx, void* edx)
         // Exactly opaque white or no match, and an unmatched fixed-function
         // state terminates.  So under SP the only usable tweak colour here is
         // 0xFFFFFFFF: no alpha ramp, and no RGB ramp either (a dip-to-black
-        // fails the identical check).  See docs/LoadDisplaySystem.md.
+        // fails the identical check).  See docs/RE/LoadDisplaySystem.md.
         if (fgLevel >= 0) {
             const auto& fg = g_loadScreenCfg.planets[fgLevel];
 

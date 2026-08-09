@@ -104,7 +104,7 @@ namespace modtools {
    // LoadDataChunk and the four callees it dispatches to.  Detoured by
    // loading_screen/data_guard.cpp to bounds-check the fixed m_models[10] /
    // m_textures[50] / m_skeletons[10] arrays, which the stock loop appends to
-   // with no checks at all.  See docs/LoadDisplaySystem.md.
+   // with no checks at all.  See docs/RE/LoadDisplaySystem.md.
    constexpr uintptr_t load_data_chunk_real      = 0x0067dea0;
    constexpr uintptr_t pbl_chunk_read_next_child = 0x007e4350;  // __thiscall(dst), RET 4
    constexpr uintptr_t red_model_read            = 0x007fa910;  // __cdecl(chunk) -> RedModel*
