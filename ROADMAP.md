@@ -31,15 +31,64 @@ matrix against the vehicle every frame with no smoothing (so the camera and aim 
 to the vehicle's collision jitter). Fixing it properly means building the missing weapon
 and aimer path, not patching the existing one.
 
+## Soldiers
+
+**Charged jump for soldiers** - Speeder bikes get a hold-to-charge jump driven by five
+`EntityHoverClass` ODF properties; soldiers only get a single fixed `JumpHeight` impulse.
+Goal is to give soldiers the same model:
+
+```
+JumpTimeMin      = 0.1
+JumpTimeMax      = 0.35
+JumpForce        = 50.0
+JumpMinSpeedMult = 0.4
+JumpEnergyPerSec = 100.0
+```
+
+All five are parsed today in `EntityHoverClass::SetProperty` only, so this means adding the
+properties to `EntitySoldierClass` and porting the charge logic (hold window, force scaling
+between min and max hold, forward speed multiplier while charging, energy drain per second)
+onto the soldier jump path rather than replacing `JumpHeight` outright. `JumpHeight` should
+keep working for ODFs that do not opt in.
+
 ## Rendering
 
-**Lightsaber illumination** - Lightsaber blades are drawn as glowing geometry but emit no
-actual light, so a saber lights nothing around it. A working idea would be to have each
-blade register a real omni light with the engine's lighting system, colour taken from the
-blade's own ODF colours.
+**Restore the decal system** - BF2 ships a complete decal pipeline with only the
+`Add*Decal` entry points gutted, so surfaces never take burn or impact marks. Target is
+marks on walls and props; character marks are out of scope, since the engine has no
+per-bone decal skinning and no Ghoul2 equivalent. Ordered plan:
+
+- **A. Proof of life.** Build a `DecalClass`, allocate one `Decal` from `Decal::sMemoryPool`,
+  fill a hardcoded 4-vertex quad, link it into `m_decals` and see if it draws. This answers
+  what disassembly cannot: whether a `DecalClass` instantiates end to end, whether the shader
+  resolves, and whether the empty `PlatformInit` is fatal. If a quad will not render, stop.
+- **B. Terrain decals.** Transcribe Phantom's `ComputeTerrainDecal` and drive it from A's
+  spawn path. Retail dead-stripped it, so Phantom's body is the original shipping
+  implementation - transcription, not invention. Gives a validated reference decal to check
+  step D against.
+- **C. Find a `RayTest` that returns hit position plus normal.** Untraced. Blaster bolts must
+  already compute one to place impact effects. Unblocks D and may shrink it considerably.
+- **D. Write `ComputeObjectDecal`.** The real work, and the only piece with no existing body
+  to copy - it is empty in all three builds, Phantom included. Clip the projection quad
+  against the collision object's triangles. Q3-derived implementations are GPLv2 and this
+  repo is MIT, so read for design only.
+- **E. Wire it up.** Hook `WeaponMelee::UpdateFire` after the ray test returns true; the
+  object, ray index and segment are all in hand there.
+
+A and B are confidently estimable. C and D are where the schedule can move. Once the
+pipeline exists, blaster impacts and explosion scorch marks are nearly free and will be far
+more visible in normal play than saber marks.
+
+**Lightsaber illumination (optional feature, 1.1.0)** - Lightsaber blades are drawn as
+glowing geometry but emit no actual light, so a saber lights nothing around it. A working
+idea would be to have each blade register a real omni light with the engine's lighting
+system, colour taken from the blade's own ODF colours.
 A problem however is that the engine allows only four omni lights per object, so sabers compete with every other
 light in the area, and it is the same four-light wall documented in the per-object light
-limit notes.
+limit notes. That contention is exactly why this should ship opt-in rather than on by
+default: a saber silently stealing a light slot from a map's own lighting is a worse
+default than no saber glow at all. Targeted at 1.1.0 alongside the decal work, as a
+combined "saber and impact visuals" release.
 
 ## Sound
 
