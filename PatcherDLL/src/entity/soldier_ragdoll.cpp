@@ -48,7 +48,7 @@
 // Data layout (build-invariant: these are PODs read straight out of the .zaabin
 // skeleton, and ZephyrSkeleton<32> is 0x810 bytes on debug and release alike -
 // cross-checked against the modtools EntityFlyer struct dump in
-// docs/ghidra-fixup-plan.md, which lists mZephyrSkeleton as 0x810).
+// docs/RE/ghidra-fixup-plan.md, which lists mZephyrSkeleton as 0x810).
 //
 //   SoldierAnimator      +0x50  EntitySoldier* mOwner  (struct_base, NOT entity)
 //                        +0xD0  ZephyrSkeleton<32> mZephyrSkeleton
@@ -248,6 +248,36 @@ static constexpr float kGroundMinNormalY = 0.5f;
 
 static constexpr float kJointRadius  = 0.09f;
 
+// ---------------------------------------------------------------------------
+// Self-collision
+// ---------------------------------------------------------------------------
+// Bones are capsules and collide pairwise, because joint spheres do not solve
+// the thing you actually see: two bones can cross clean through each other with
+// both endpoints still comfortably apart.  The test is segment-segment closest
+// approach, which is the capsule test once both radii are added.
+//
+// Radii are NOT authored.  A stock human skeleton has no thickness data, and
+// inventing per-bone numbers would be per-rig tuning that breaks on every modded
+// unit - the same reason rest lengths are measured off the live pose rather than
+// read from m_kBaseTransform.  Instead every bone starts at a fraction of the
+// median bone length, then each is thinned until it does not already overlap its
+// nearest non-adjacent neighbour IN THE DEATH POSE.
+//
+// That clamp is the load-bearing part.  A death pose already has bones touching -
+// arms against the torso, the three coincident shoulder joints - and a solver
+// told to separate things that start overlapped injects energy on frame one and
+// detonates the body.  Measuring at seed means the constraint can only ever
+// prevent NEW interpenetration, never fight the pose it was born in.
+//
+// Thinning to half the nearest seed distance is conservative: a bone that starts
+// close to one neighbour ends up thin along its whole length.  The alternative,
+// a per-pair distance table, costs ~500 floats per corpse to fix a case that
+// only shows up as slightly-too-permissive contact between two limbs.
+static constexpr float kSelfRadiusScale = 0.30f;  // of the median bone length
+static constexpr float kSelfSeedSlack   = 0.90f;  // keep a gap at seed, so no jitter
+static constexpr float kSelfMinRadius   = 0.015f; // thinner than this = do not collide
+static constexpr float kSelfStiffness   = 0.50f;  // share of the overlap resolved per step
+
 // Joint classification (see seed()).  kCoincidentEps is "sits on its parent";
 // kOutlierFactor is how many median bone lengths a LEAF may sit from its parent
 // before it is treated as an aim/hardpoint node rather than a bone.  On a stock
@@ -301,6 +331,51 @@ static inline Vec3 xform_point_inv(const float* M, const Vec3& p)
                 : 0.0f;
    }
    return out;
+}
+
+static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+// Closest points between segments p1->q1 and p2->q2, as parameters along each
+// plus the points themselves.  Standard clamped-parameter solve; the degenerate
+// branches matter here because a Zephyr skeleton is full of near-zero-length
+// links and a raw division would produce NaN and poison the whole body.
+static void closest_seg_seg(const Vec3& p1, const Vec3& q1,
+                            const Vec3& p2, const Vec3& q2,
+                            float* outS, float* outT, Vec3* outC1, Vec3* outC2)
+{
+   const Vec3  d1 = v_sub(q1, p1);
+   const Vec3  d2 = v_sub(q2, p2);
+   const Vec3  r  = v_sub(p1, p2);
+   const float a  = v_dot(d1, d1);
+   const float e  = v_dot(d2, d2);
+   const float f  = v_dot(d2, r);
+   const float kEps = 1e-8f;
+
+   float s, t;
+
+   if (a <= kEps && e <= kEps) {
+      s = t = 0.0f;                       // both degenerate: point vs point
+   } else if (a <= kEps) {
+      s = 0.0f; t = clamp01(f / e);       // first degenerate: point vs segment
+   } else {
+      const float c = v_dot(d1, r);
+      if (e <= kEps) {
+         t = 0.0f; s = clamp01(-c / a);   // second degenerate
+      } else {
+         const float b     = v_dot(d1, d2);
+         const float denom = a * e - b * b;
+         s = (denom > kEps) ? clamp01((b * f - c * e) / denom) : 0.0f;
+         t = (b * s + f) / e;
+         // t out of range: clamp it and re-solve s against the clamped t.
+         if (t < 0.0f)      { t = 0.0f; s = clamp01(-c / a); }
+         else if (t > 1.0f) { t = 1.0f; s = clamp01((b - c) / a); }
+      }
+   }
+
+   *outS  = s;
+   *outT  = t;
+   *outC1 = {p1.x + d1.x * s, p1.y + d1.y * s, p1.z + d1.z * s};
+   *outC2 = {p2.x + d2.x * t, p2.y + d2.y * t, p2.z + d2.z * t};
 }
 
 // A soldier's world transform is upright yaw, so a sane matrix has a near-
@@ -420,6 +495,21 @@ struct Constraint {
    float       stiff;
 };
 
+// One capsule of the body: the segment from joint a to joint b (b is a's
+// constraint parent) with a radius measured at seed.  radius == 0 means the bone
+// was thinned past usefulness by a neighbour and is excluded from the test.
+struct Bone {
+   signed char a, b;
+   float       radius;
+   // Bones this one must not be tested against, as a bitmask of bone indices.
+   // Bones that meet - by sharing a joint, or by having endpoints that sit on
+   // top of each other - touch by definition and are excluded rather than
+   // thinned.  See build_bones() for why the difference is load-bearing.
+   uint32_t    skip;
+};
+
+static_assert(kMaxJoints <= 32, "Bone::skip is a 32-bit mask of bone indices");
+
 struct RagdollState {
    void*       animator;              // key; nullptr = free slot
    uint32_t    touchTick;             // for LRU eviction
@@ -439,12 +529,18 @@ struct RagdollState {
    signed char parent[kMaxJoints];    // raw m_iParent, as authored
    signed char cparent[kMaxJoints];   // constraint parent after pass-through, -1 = free root
    signed char dirChild[kMaxJoints];  // joint this one aims at for its swing, -1 = none
+   // Second joint used to pin down ROLL about the dirChild axis.  One direction
+   // fixes two of three degrees of freedom; without this the twist is simply
+   // unrepresentable.  Chosen once at seed - see pick_roll_reference().
+   signed char refJoint[kMaxJoints];
    signed char follow[kMaxJoints];    // dropped node copies this joint's matrix, -1 = none
    Vec3        pos[kMaxJoints];
    Vec3        prev[kMaxJoints];
    float       restLen[kMaxJoints];   // distance to cparent, measured off the live pose
    Constraint  cons[kMaxConstraints];
    int         consCount;
+   Bone        bones[kMaxJoints];     // at most one per joint (its link to cparent)
+   int         boneCount;
 };
 
 static RagdollState g_ragdolls[kMaxRagdolls] = {};
@@ -658,6 +754,135 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
       }
    }
 
+   // ---- Roll references -----------------------------------------------------
+   // For each joint, a second joint off the dirChild axis, so write_back can
+   // build a full orientation frame instead of just a direction.
+   //
+   // Candidates are restricted to joints this one shares a truss constraint with.
+   // Those are the ones held rigidly relative to it, so the frame they define
+   // does not wobble as the body flexes; an arbitrary distant joint would make
+   // the head's roll depend on where a foot happened to end up.
+   //
+   // Scored on how perpendicular the candidate sits to the primary axis - a
+   // nearly-collinear reference determines roll about as well as no reference at
+   // all - with distance as the tie-breaker, preferring local structure.
+   for (int i = 0; i < n; i++) {
+      s->refJoint[i] = -1;
+      if (!s->sim[i]) continue;
+
+      const int c = s->dirChild[i];
+      if (c < 0 || c >= n) continue;
+
+      Vec3        axis = v_sub(s->pos[c], s->pos[i]);
+      const float alen = v_len(axis);
+      if (alen < kCoincidentEps) continue;
+      axis.x /= alen; axis.y /= alen; axis.z /= alen;
+
+      float bestScore = 0.0f;
+      int   best      = -1;
+
+      for (int ci = 0; ci < s->consCount; ci++) {
+         const Constraint& con = s->cons[ci];
+         int k = -1;
+         if (con.a == i) k = con.b;
+         else if (con.b == i) k = con.a;
+         else continue;
+
+         if (k == c || k < 0 || k >= n || !s->sim[k]) continue;
+
+         Vec3        d    = v_sub(s->pos[k], s->pos[i]);
+         const float dlen = v_len(d);
+         if (dlen < kCoincidentEps) continue;
+         d.x /= dlen; d.y /= dlen; d.z /= dlen;
+
+         // sin of the angle to the primary axis: 1 = ideal, 0 = useless.
+         const float dot  = v_dot(d, axis);
+         const float perp = 1.0f - dot * dot;
+         if (perp < 0.10f) continue;   // within ~18 degrees of the axis
+
+         const float score = perp / (1.0f + dlen / (medianLen > 0.0f ? medianLen : 1.0f));
+         if (score > bestScore) { bestScore = score; best = k; }
+      }
+
+      s->refJoint[i] = (signed char)best;
+   }
+
+   // ---- Self-collision capsules ---------------------------------------------
+   // One capsule per constraint link, then thinned so nothing starts overlapped.
+   // Runs while everything is still in MODEL space, which is fine: these are all
+   // distances, and the transform out to world is rigid.
+   s->boneCount = 0;
+   for (int i = 0; i < n; i++) {
+      if (!s->sim[i]) continue;
+      const int p = s->cparent[i];
+      if (p < 0 || p >= n) continue;
+      if (v_len(v_sub(s->pos[i], s->pos[p])) < kCoincidentEps) continue;
+
+      Bone& b  = s->bones[s->boneCount++];
+      b.a      = (signed char)i;
+      b.b      = (signed char)p;
+      b.radius = medianLen * kSelfRadiusScale;
+      b.skip   = 0;
+   }
+
+   // Decide, per pair, between EXCLUDING it and THINNING for it.  Getting this
+   // split wrong is what a first pass here got wrong, and the log said so:
+   // bones=21 selfColliding=15, with the arms among the six switched off.
+   //
+   // A Zephyr shoulder girdle is a single point - j07, j12 and j18 all sit at
+   // the same position - so both upper arms and the neck emanate from one place.
+   // Index-based adjacency does not see that they meet, so the thinning pass read
+   // their zero closest-approach as "already overlapped", thinned all three to
+   // nothing, and dropped precisely the bones that most need to collide with the
+   // torso.  Bones that MEET must be excluded; only bones that merely pass CLOSE
+   // should thin each other.
+   for (int i = 0; i < s->boneCount; i++) {
+      for (int j = i + 1; j < s->boneCount; j++) {
+         Bone& bi = s->bones[i];
+         Bone& bj = s->bones[j];
+
+         bool meets = (bi.a == bj.a || bi.a == bj.b || bi.b == bj.a || bi.b == bj.b);
+         if (!meets) {
+            const signed char ei[2] = {bi.a, bi.b};
+            const signed char ej[2] = {bj.a, bj.b};
+            for (int u = 0; u < 2 && !meets; u++)
+               for (int v = 0; v < 2 && !meets; v++)
+                  meets = v_len(v_sub(s->pos[ei[u]], s->pos[ej[v]])) < kCoincidentEps;
+         }
+
+         if (meets) {
+            bi.skip |= 1u << j;
+            bj.skip |= 1u << i;
+            continue;
+         }
+
+         float sT, tT;
+         Vec3  c1, c2;
+         closest_seg_seg(s->pos[bi.a], s->pos[bi.b], s->pos[bj.a], s->pos[bj.b],
+                         &sT, &tT, &c1, &c2);
+
+         const float half = v_len(v_sub(c1, c2)) * 0.5f * kSelfSeedSlack;
+         if (bi.radius > half) bi.radius = half;
+         if (bj.radius > half) bj.radius = half;
+      }
+   }
+
+   // A bone thinned below the useful minimum contributes nothing but work, and
+   // flooring it back up would re-introduce the seed overlap the pass just
+   // removed.  Drop it from the test instead.
+   int selfActive = 0;
+   for (int i = 0; i < s->boneCount; i++) {
+      if (s->bones[i].radius < kSelfMinRadius) s->bones[i].radius = 0.0f;
+      else selfActive++;
+   }
+
+   // How many joints ended up with a full orientation frame rather than a
+   // swing-only fallback.  This is the number that decides whether twist is
+   // representable at all, so it is worth having in the log.
+   int rollRefs = 0;
+   for (int i = 0; i < n; i++)
+      if (s->sim[i] && s->refJoint[i] >= 0) rollRefs++;
+
    // Contact plane.  A soldier is standing on the ground at the instant it dies,
    // so its lowest joint IS ground level - measuring it removes the assumption
    // that the model origin sits exactly at the feet.  Clamped to <= 0 so a
@@ -751,9 +976,11 @@ static void seed(RagdollState* s, const float* world, const uint8_t* joints, int
       g_loggedSeed = true;
       auto fn_log = get_gamelog();
       fn_log("[Ragdoll] seed: numJoints=%d simulated=%d constraints=%d "
+             "bones=%d selfColliding=%d rollRefs=%d "
              "medianBone=%.4f outlierOver=%.4f ground=%s p=(%.3f, %.3f, %.3f) "
              "n=(%.3f, %.3f, %.3f) slope=%.1fdeg\n",
-             n, s->simCount, s->consCount, medianLen, outlierLen,
+             n, s->simCount, s->consCount, s->boneCount, selfActive, rollRefs,
+             medianLen, outlierLen,
              s->groundProbed ? "raycast" : "measured-flat",
              s->groundP.x, s->groundP.y, s->groundP.z,
              s->groundN.x, s->groundN.y, s->groundN.z,
@@ -831,6 +1058,85 @@ static void reprobe_ground(RagdollState* s)
    s->groundP = Vec3{c.x, planeY, c.z};
 }
 
+// Pushes overlapping bone capsules apart.  Runs ONCE per step, after the truss
+// has converged and before ground contact - the same reasoning that keeps
+// contacts out of the relaxation loop.  Inside it, ten passes of separation
+// would out-vote the distance constraints and inflate the body; after it, the
+// truss gets the next step to reabsorb the correction.  Ground goes last because
+// it is the harder constraint: a limb pushed off another may not end up buried.
+static void solve_self_collision(RagdollState* s)
+{
+   // Broad phase: a bounding sphere per bone, so the full segment solve only
+   // runs for pairs that could possibly touch.  Most of a skeleton's ~200 bone
+   // pairs are nowhere near each other, and this loop runs for every corpse on
+   // every substep - up to four times a frame.
+   Vec3  mid[kMaxJoints];
+   float reach[kMaxJoints];
+   for (int i = 0; i < s->boneCount; i++) {
+      const Bone& b = s->bones[i];
+      const Vec3& pa = s->pos[b.a];
+      const Vec3& pb = s->pos[b.b];
+      mid[i]   = {(pa.x + pb.x) * 0.5f, (pa.y + pb.y) * 0.5f, (pa.z + pb.z) * 0.5f};
+      reach[i] = v_len(v_sub(pb, pa)) * 0.5f + b.radius;
+   }
+
+   for (int i = 0; i < s->boneCount; i++) {
+      const Bone& bi = s->bones[i];
+      if (bi.radius <= 0.0f) continue;
+
+      for (int j = i + 1; j < s->boneCount; j++) {
+         const Bone& bj = s->bones[j];
+         if (bj.radius <= 0.0f) continue;
+
+         // Bones that meet - by index or by coincident endpoints - touch by
+         // definition; the mask was resolved once at seed.
+         if (bi.skip & (1u << j)) continue;
+
+         const Vec3  sep    = v_sub(mid[i], mid[j]);
+         const float reachS = reach[i] + reach[j];
+         if (v_dot(sep, sep) > reachS * reachS) continue;
+
+         const float want = bi.radius + bj.radius;
+
+         float sT, tT;
+         Vec3  c1, c2;
+         closest_seg_seg(s->pos[bi.a], s->pos[bi.b], s->pos[bj.a], s->pos[bj.b],
+                         &sT, &tT, &c1, &c2);
+
+         Vec3        d   = v_sub(c1, c2);
+         const float len = v_len(d);
+         if (len >= want || len < 1e-6f) continue;
+
+         const float push = (want - len) * kSelfStiffness * 0.5f;
+         d.x = d.x / len * push; d.y = d.y / len * push; d.z = d.z / len * push;
+
+         // The contact point sits at parameter s along the bone, so moving it by
+         // d means moving the endpoints by d weighted (1-s) and s.  Dividing by
+         // the squared weights makes the weighted result come out to exactly d
+         // rather than a fraction of it.
+         const float w0i = 1.0f - sT, w1i = sT;
+         const float di  = w0i * w0i + w1i * w1i;
+         const float w0j = 1.0f - tT, w1j = tT;
+         const float dj  = w0j * w0j + w1j * w1j;
+
+         // closest_seg_seg was handed (pos[a], pos[b]), so a is parameter 0 and
+         // b is parameter 1 - weights must follow that order, not the struct's.
+         if (di > 1e-6f) {
+            Vec3& p0 = s->pos[bi.a];
+            Vec3& p1 = s->pos[bi.b];
+            p0.x += d.x * w0i / di; p0.y += d.y * w0i / di; p0.z += d.z * w0i / di;
+            p1.x += d.x * w1i / di; p1.y += d.y * w1i / di; p1.z += d.z * w1i / di;
+         }
+         if (dj > 1e-6f) {
+            Vec3& p0 = s->pos[bj.a];
+            Vec3& p1 = s->pos[bj.b];
+            p0.x -= d.x * w0j / dj; p0.y -= d.y * w0j / dj; p0.z -= d.z * w0j / dj;
+            p1.x -= d.x * w1j / dj; p1.y -= d.y * w1j / dj; p1.z -= d.z * w1j / dj;
+         }
+      }
+   }
+}
+
 // ---------------------------------------------------------------------------
 // Solver
 // ---------------------------------------------------------------------------
@@ -870,6 +1176,9 @@ static void step(RagdollState* s, float dt)
          s->pos[c.b].x += d.x; s->pos[c.b].y += d.y; s->pos[c.b].z += d.z;
       }
    }
+
+   // Keep the body out of itself before the floor gets the final say.
+   solve_self_collision(s);
 
    // Contacts are resolved ONCE, after the relaxation, not inside it.  Clamping
    // every iteration lets the floor dominate the solve: each pass shoves joints
@@ -940,6 +1249,67 @@ static void axis_angle_to_mat3(const Vec3& axis, float s, float c, float out[9])
    out[6] = t * x * z + s * y; out[7] = t * y * z - s * x; out[8] = c + t * z * z;
 }
 
+// Row-vector convention throughout: v' = v * M, so composing "apply A then B" is
+// the product A * B.
+static inline Vec3 mat3_xform(const Vec3& v, const float* M)
+{
+   return {v.x * M[0] + v.y * M[3] + v.z * M[6],
+           v.x * M[1] + v.y * M[4] + v.z * M[7],
+           v.x * M[2] + v.y * M[5] + v.z * M[8]};
+}
+
+// out = A * B.  out must not alias either input.
+static inline void mat3_mul(const float* A, const float* B, float* out)
+{
+   for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 3; j++)
+         out[i * 3 + j] = A[i * 3 + 0] * B[0 * 3 + j] +
+                          A[i * 3 + 1] * B[1 * 3 + j] +
+                          A[i * 3 + 2] * B[2 * 3 + j];
+}
+
+// Some unit vector perpendicular to v, chosen so the result never degenerates
+// and varies continuously with v - which is what makes the 180 degree case below
+// stable from frame to frame instead of flickering.
+static inline Vec3 any_perpendicular(const Vec3& v)
+{
+   const Vec3 seed = (std::fabs(v.x) < 0.9f) ? Vec3{1.0f, 0.0f, 0.0f}
+                                             : Vec3{0.0f, 1.0f, 0.0f};
+   Vec3        p = v_cross(v, seed);
+   const float l = v_len(p);
+   if (l < 1e-6f) return {0.0f, 1.0f, 0.0f};
+   p.x /= l; p.y /= l; p.z /= l;
+   return p;
+}
+
+static const float kIdentity3[9] = {1.0f, 0.0f, 0.0f,
+                                    0.0f, 1.0f, 0.0f,
+                                    0.0f, 0.0f, 1.0f};
+
+// Orthonormal frame from a primary direction and a secondary reference, rows
+// e1/e2/e3.  Gram-Schmidt: e1 is kept exactly, the reference only resolves the
+// roll about it.  Returns false if the two are collinear, leaving the frame
+// undetermined.
+static bool build_frame(const Vec3& primary, const Vec3& reference, float* out)
+{
+   const float lp = v_len(primary);
+   if (lp < 1e-6f) return false;
+   const Vec3 e1{primary.x / lp, primary.y / lp, primary.z / lp};
+
+   const float d = v_dot(reference, e1);
+   Vec3        e2{reference.x - e1.x * d, reference.y - e1.y * d, reference.z - e1.z * d};
+   const float l2 = v_len(e2);
+   if (l2 < 1e-4f) return false;   // collinear: no roll information
+   e2.x /= l2; e2.y /= l2; e2.z /= l2;
+
+   const Vec3 e3 = v_cross(e1, e2);
+
+   out[0] = e1.x; out[1] = e1.y; out[2] = e1.z;
+   out[3] = e2.x; out[4] = e2.y; out[5] = e2.z;
+   out[6] = e3.x; out[7] = e3.y; out[8] = e3.z;
+   return true;
+}
+
 static void write_back(RagdollState* s, float* world, const uint8_t* joints,
                        const float* entityMat)
 {
@@ -962,51 +1332,139 @@ static void write_back(RagdollState* s, float* world, const uint8_t* joints,
       origT[i] = {m[kMatTransX], m[kMatTransX + 1], m[kMatTransX + 2]};
    }
 
-   // Pass 1 - swing per joint, from its bone direction.
+   // Pass 1 - orientation.
+   //
+   // A joint's frame CANNOT be recovered from its bone direction alone.  One
+   // direction fixes two of three degrees of freedom, and the missing one is
+   // exactly the twist about that direction, so a swing-only reconstruction
+   // reports zero rotation for a body rolling about its own spine even though
+   // every simulated limb has swung right around it.  The torso mesh then keeps
+   // facing the way it died while the arms and legs do not, which reads as the
+   // whole body being twisted - and at a half turn it reads as 180 degrees,
+   // because that is what it is.
+   //
+   // Two earlier attempts here treated the symptom.  Guarding the degenerate
+   // cross(a, b) near a reversal only removes the flicker, not the wrong roll;
+   // inheriting the parent's rotation only makes neighbouring joints AGREE on a
+   // roll that is uniformly wrong, since it ultimately derives from a root swing
+   // that carries no twist either.  Neither can work, because the information
+   // simply is not present in a single direction.
+   //
+   // So each joint gets a second reference joint off its bone axis (picked at
+   // seed, see pick_roll_reference in seed()), giving a full orthonormal frame in
+   // both the animated and simulated poses.  The rotation between those two
+   // frames is the joint's absolute orientation change, twist included.
+   //
+   // Two fallbacks remain, in order:
+   //   - no usable roll reference: swing only, as a residual on the parent's
+   //     rotation, so the roll is at least consistent down the chain
+   //   - no bone direction at all (the head; the hands, whose only child is a
+   //     dropped aim node): keep the parent's rotation outright
+   //
+   // The parent's rotation must therefore be resolved before the child's, and
+   // cparent is very often a HIGHER index than the child (the pelvis is j25 with
+   // children j04/j05/j11/j21/j22), so index order is not hierarchy order.
    float rot[kMaxJoints][9];
    bool  hasRot[kMaxJoints] = {};
 
-   for (int i = 0; i < n; i++) {
-      if (!s->sim[i]) continue;
-      const int c = s->dirChild[i];
-      if (c < 0 || c >= n) continue;
+   // Sweep repeatedly, resolving whatever has a resolved parent, until nothing
+   // moves.
+   for (int pass = 0; pass < kMaxJoints; pass++) {
+      bool progress = false;
 
-      Vec3 a = v_sub(origT[c], origT[i]);
-      Vec3 b = v_sub(simT[c], simT[i]);
-      const float la = v_len(a), lb = v_len(b);
-      if (la < 1e-6f || lb < 1e-6f) continue;
+      for (int i = 0; i < n; i++) {
+         if (!s->sim[i] || hasRot[i]) continue;
 
-      a.x /= la; a.y /= la; a.z /= la;
-      b.x /= lb; b.y /= lb; b.z /= lb;
+         const int    p  = s->cparent[i];
+         const bool   isFreeRoot = (p < 0 || p >= n || !s->sim[p]);
+         if (!isFreeRoot && !hasRot[p]) continue;   // parent not resolved yet
 
-      Vec3 axis = v_cross(a, b);
-      const float sn = v_len(axis);
-      const float cs = v_dot(a, b);
+         const float* Rp = isFreeRoot ? kIdentity3 : rot[p];
 
-      // sn ~ 0 means the bone is unmoved (cs > 0) or exactly reversed (cs < 0).
-      // A reversal has no well-defined axis; leave it alone rather than pick an
-      // arbitrary one and snap the limb.
-      if (sn <= 1e-5f) continue;
+         // Default: move exactly as the parent did.
+         std::memcpy(rot[i], Rp, sizeof(rot[i]));
 
-      axis.x /= sn; axis.y /= sn; axis.z /= sn;
-      axis_angle_to_mat3(axis, sn, cs, rot[i]);
-      hasRot[i] = true;
-   }
+         const int c = s->dirChild[i];
+         const int r = s->refJoint[i];
 
-   // Pass 2 - a joint whose only child was dropped has no bone direction of its
-   // own: the hands (holding an aim node) and, more visibly, the head.  Left
-   // alone they would translate with the body while keeping the death clip's
-   // orientation - a head staying upright over a corpse lying down.  Inherit the
-   // nearest simulated ancestor's swing instead.
-   for (int i = 0; i < n; i++) {
-      if (!s->sim[i] || hasRot[i]) continue;
-      int a = s->cparent[i], guard = 0;
-      while (a >= 0 && a < n && !hasRot[a] && guard++ < kMaxJoints)
-         a = s->cparent[a];
-      if (a >= 0 && a < n && hasRot[a]) {
-         std::memcpy(rot[i], rot[a], sizeof(rot[i]));
+         // Preferred path: a full frame, animated and simulated, from the bone
+         // direction plus the roll reference.  R is then the absolute rotation
+         // between the two frames and captures TWIST, which is the whole reason
+         // the reference exists - a body rolling about its own spine barely
+         // changes any bone direction, so a swing-only reconstruction reports no
+         // rotation at all while the simulated limbs have swung right around.
+         bool framed = false;
+         if (c >= 0 && c < n && r >= 0 && r < n) {
+            float A[9], B[9];
+            if (build_frame(v_sub(origT[c], origT[i]), v_sub(origT[r], origT[i]), A) &&
+                build_frame(v_sub(simT[c], simT[i]), v_sub(simT[r], simT[i]), B)) {
+               // R = transpose(A) * B: decompose into the animated basis, then
+               // rebuild in the simulated one.
+               const float At[9] = {A[0], A[3], A[6],
+                                    A[1], A[4], A[7],
+                                    A[2], A[5], A[8]};
+               float composed[9];
+               mat3_mul(At, B, composed);
+               std::memcpy(rot[i], composed, sizeof(rot[i]));
+               framed = true;
+            }
+         }
+
+         // Fallback: no usable roll reference (a joint whose neighbours are all
+         // strung out along its own axis).  Solve the swing only, as a residual
+         // on the parent's rotation so it at least inherits a consistent roll.
+         if (!framed && c >= 0 && c < n) {
+            Vec3        a  = v_sub(origT[c], origT[i]);
+            Vec3        b  = v_sub(simT[c], simT[i]);
+            const float la = v_len(a), lb = v_len(b);
+
+            if (la > 1e-6f && lb > 1e-6f) {
+               a.x /= la; a.y /= la; a.z /= la;
+               b.x /= lb; b.y /= lb; b.z /= lb;
+
+               // Where the parent's rotation alone would have put this bone.
+               const Vec3 ap = mat3_xform(a, Rp);
+
+               Vec3        axis = v_cross(ap, b);
+               const float sn   = v_len(axis);
+               const float cs   = v_dot(ap, b);
+
+               float dR[9];
+               bool  haveDelta = false;
+
+               // The axis is cross(ap, b) divided by sn, so a small sn amplifies
+               // any noise in the cross product by 1/sn.  The threshold is the
+               // point past which that amplification stops being tolerable, not
+               // just the exact singularity.
+               if (sn > 1e-3f) {
+                  axis.x /= sn; axis.y /= sn; axis.z /= sn;
+                  axis_angle_to_mat3(axis, sn, cs, dR);
+                  haveDelta = true;
+               } else if (cs < 0.0f) {
+                  // Exactly reversed: no axis is implied, but leaving it gives a
+                  // bone pointing the wrong way.  Turn it about a perpendicular
+                  // derived from the direction itself, which is deterministic and
+                  // moves continuously with the bone instead of flickering.
+                  const Vec3 perp = any_perpendicular(ap);
+                  axis_angle_to_mat3(perp, 0.0f, -1.0f, dR);
+                  haveDelta = true;
+               }
+               // else: sn ~ 0 with cs > 0, the bone is already where the parent
+               // put it, so the inherited rotation is already correct.
+
+               if (haveDelta) {
+                  float composed[9];
+                  mat3_mul(Rp, dR, composed);       // parent first, then the bend
+                  std::memcpy(rot[i], composed, sizeof(rot[i]));
+               }
+            }
+         }
+
          hasRot[i] = true;
+         progress  = true;
       }
+
+      if (!progress) break;
    }
 
    // Pass 3 - apply.
