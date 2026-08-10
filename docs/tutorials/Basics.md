@@ -39,9 +39,11 @@ end
 see the [compatibility table](../../README.md#compatibility). If a feature you
 depend on is modtools-only, test the build, not just the table.
 
-## Where to put it
+## Where to put the call
 
-Both of these work, and they behave differently:
+The check itself works anywhere in the game. Script root, `ScriptPreInit`,
+`ScriptInit`, `ScriptPostLoad`, a callback five minutes into the match, an
+addon's `addme.lua` at startup - whatever.
 
 ```lua
 -- Script root: runs the moment the mission script is loaded, before anything
@@ -96,3 +98,8 @@ end
 `ReadDataFile("ingame.lvl")` call for it to take effect that mission. It
 suppresses the gameplay-altering features and leaves the fixes and the API
 alone.
+
+This is the one part of `GameExt` that does **not** carry across scripts. Every
+mission gets a fresh Lua state, `GameExt` is rebuilt in it, and `disable` comes
+back unset. It has to be set per mission, in that mission's script, before
+`ReadDataFile("ingame.lvl")`.
