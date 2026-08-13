@@ -59,6 +59,13 @@ SECTION_BLURBS = OrderedDict([
     ("Features",
      "Optional behaviour that changes the game rather than fixing it. Some need "
      "assets that ship alongside the DLL."),
+    ("AI",
+     "Removes the four hardcoded biases that make BF2's AI single out the human "
+     "player. SWBF1 has no player term anywhere in its target selection, which "
+     "is why its AI is remembered as fairer. All four are on by default; set any "
+     "of them to 0 for stock behaviour. AI will still turn on you the moment you "
+     "damage them, because that path force-sets the attacker as the target and "
+     "re-broadcasts to nearby squadmates; it is deliberate and is left alone."),
     ("Controller",
      "Gamepad support. The button and axis bindings live in the "
      "`[Controller.<Mode>]` sections and are documented separately in "

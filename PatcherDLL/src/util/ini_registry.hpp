@@ -56,6 +56,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
    INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
    INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
+   INI_PATCH("Fixes", "SaberBlockFix", "1", "Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock", "Lightsaber Block Direction Fix"),
    INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
    INI_ENTRY("Fixes", "BarrelFireOriginFix", "1", "Fire projectiles from barrel hardpoint instead of bone_head. HINT: firing from the barrel adds barrel-to-crosshair parallax, so shots may not land exactly on the reticle once ReticleCorrection re-aligns it to the 3D aim point (worst at close range and with large weapon offsets). Set ReticleCorrection=0 if barrel-origin shots feel off-point"),
    INI_ENTRY("Fixes", "BlurDownsizeClamp", "1", "Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix)"),
@@ -73,6 +74,12 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Features", "DisableAwardWeapons", "0", "Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards"),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
+
+   // [AI] — AI behaviour tuning
+   INI_ENTRY("AI", "PlayerVisionFairness",   "1", "AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock"),
+   INI_ENTRY("AI", "PlayerPriorityFairness", "1", "AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock"),
+   INI_ENTRY("AI", "PlayerThreatFairness",   "0", "AI stop treating you as extra dangerous while you are aiming at them. OFF by default: it is the one fairness option that makes AI feel unresponsive, since they no longer react to being aimed at. Set 1 to enable"),
+   INI_ENTRY("AI", "PlayerAwarenessFairness","1", "AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock"),
 
    // [Controller] — gamepad support
    INI_ENTRY("Controller", "Enabled", "1", "Enable gamepad / controller support"),

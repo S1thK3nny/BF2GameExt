@@ -46,6 +46,7 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 | `ChunkPushFix` | `1` | Let explosions push bodies that break into chunks, instead of dropping them where they stood |
 | `PropGeneratorLoopFix` | `1` | Fix foliage-update crash at very high FOVs (PrismaticFlower's fix) |
 | `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
+| `SaberBlockFix` | `1` | Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock |
 | `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |
 | `BarrelFireOriginFix` | `1` | Fire projectiles from barrel hardpoint instead of bone_head. HINT: firing from the barrel adds barrel-to-crosshair parallax, so shots may not land exactly on the reticle once ReticleCorrection re-aligns it to the 3D aim point (worst at close range and with large weapon offsets). Set ReticleCorrection=0 if barrel-origin shots feel off-point |
 | `BlurDownsizeClamp` | `1` | Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix) |
@@ -68,6 +69,17 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
+
+## AI
+
+Removes the four hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. All four are on by default; set any of them to 0 for stock behaviour. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `PlayerVisionFairness` | `1` | AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock |
+| `PlayerPriorityFairness` | `1` | AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock |
+| `PlayerThreatFairness` | `0` | AI stop treating you as extra dangerous while you are aiming at them. OFF by default: it is the one fairness option that makes AI feel unresponsive, since they no longer react to being aimed at. Set 1 to enable |
+| `PlayerAwarenessFairness` | `1` | AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock |
 
 ## Controller
 

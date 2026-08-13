@@ -78,6 +78,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
   <sub>*Taken with [The Clone Wars Revised](https://www.moddb.com/mods/the-clone-wars-revised). Issue + fix apply to vanilla and any mod*</sub>
 
+- **Lightsaber Block Fix** - Fixes lightsabers almost never blocking other lightsabers. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map, so duels come down to whoever swings first. Blocks now resolve against your attacker from anywhere, and the deflect animation matches the side the swing came from. Blaster deflection is unaffected. INI: `[Fixes] SaberBlockFix=1`
 - **Shield Channel Fix** - Fixes shield weapons activating regardless of which secondary weapon is selected. The shield now only responds when it is the active weapon for its channel.
 - **Disguise Model Override** - Lets WeaponDisguise swap the soldier's model to a specific model instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Animated Lightsaber Textures** - Ports the Xbox version's animated blade textures, giving a lightsaber a four frame texture cycle where PC blades use a single static texture. ODF, under the blade's WeaponMelee section: `AnimTexture1 = tex_frame2`, `AnimTexture2 = tex_frame3`, `AnimTexture3 = tex_frame4`
@@ -103,6 +104,10 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 - **Dead Body Shooting Control** - In the vanilla game, Alliance units break off to walk up to and fire on nearby soldier corpses. A fun feature implemented by Pandemic, but it does hinder the gameplay experience as they are dead focused on the corpses. Two INI toggles control this:
   - `[Features] DisableDeadBodyShooting=1` *(default on)* - Stops the behaviour entirely for every side, so no one ever shoots dead bodies. Overrides the all factions toggle.
   - `[Features] DeadBodyShootingAllFactions=1` *(default off)* - Extends the behaviour to all factions instead of just Alliance. Ignored while `DisableDeadBodyShooting=1`.
+
+- **AI Player Focus Fairness** - Stock BF2 gives the AI advantages that apply to the human player and to nobody else: it spots you at twice the range it spots a bot, treats you as closer than you really are when choosing who to attack, and ignores every other enemy on the field for as long as it is tracking you. Those three are removed by default, so the AI treats you like any other unit and keeps fighting the rest of the battle around you. AI still turn on you when you shoot them. Toggles, on by default, set to 0 for stock: `[AI] PlayerVisionFairness`, `PlayerPriorityFairness`, `PlayerAwarenessFairness`.
+
+  There is a fourth, `[AI] PlayerThreatFairness`, which is **off by default**. Stock BF2 treats you as more dangerous while you are aiming at an AI, and turning this on removes that. It makes the AI fairer on paper but noticeably less responsive to play against, because they stop reacting to being aimed at and will sometimes ignore you outright while you have them in your sights. Set it to 1 only if you want the AI to weigh you exactly like a bot in every situation.
 
 ## Additional Console Commands
 

@@ -668,6 +668,32 @@ namespace modtools {
    // Also read by MedalsMgr::ClearAllMedalPoints.  ILT thunk 0x004058F8.
    constexpr uintptr_t medals_is_award_available_internal = 0x00653D70;
 
+   // ---- AI player-focus fairness (ai/ai_fairness.cpp) -------------------------
+   // Two conditional jumps that gate BF2's two unconditional human-player
+   // biases.  Identity test at both is Controllable::mPlayerId — note that is
+   // +0xd4 here and on Steam, but +0xd0 on Phantom.
+   //
+   // VisionHelper::MaxVisibleDist (0x005c99a0): `JL` skipping the 2x player
+   // view-range doubling (FLD [ESP+0x10] / FADD ST0,ST0).  7C 0C -> EB 0C.
+   constexpr uintptr_t vision_maxdist_player_jl   = 0x005c9a27;
+   // AI::Threat::GetPriority (0x005a1290): the `JZ` taken when
+   // PlayerControllerPtr() returns null, i.e. "this threat is a bot, halve its
+   // score".  Forcing it unconditional sends players down the same /2 path and
+   // removes the up-to-2x bonus they get while facing the AI.
+   // 6-byte `0F 84 8E000000` -> `E9 8F000000 90` (same target, 0x005a150e).
+   constexpr uintptr_t threat_priority_player_jz  = 0x005a147a;
+   // AI::UnitThreatManager::ShouldRaytestUnit (0x005a1b10): the `JZ` that skips
+   // its `return false`.  Stock, that return fires whenever the candidate is a
+   // bot AND the AI is currently tracking a human player, so the AI stops
+   // spending line-of-sight rays on anyone but you and can never discover
+   // another target.  Forcing the jump makes the early-out unreachable.
+   constexpr uintptr_t threat_raytest_player_jz   = 0x005a1bb6;
+   // VisionHelper::GetVisualPriority (0x005c9240): `JZ` to the undoubled
+   // return, taken when AIUtil::IsVehicle(me) is false inside the player
+   // branch.  Its target 0x005c93b9 has exactly one xref (this jump), so
+   // NOPing it makes the undoubled epilogue unreachable.  74 13 -> 90 90.
+   constexpr uintptr_t vision_priority_player_jz  = 0x005c93a4;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1319,6 +1345,22 @@ namespace steam {
    constexpr uintptr_t medals_is_award_available = 0x005A33D0;
    constexpr uintptr_t medals_is_award_available_internal = 0x005A3350;
 
+   // ---- AI player-focus fairness (ai/ai_fairness.cpp) -------------------------
+   // See the modtools block for the derivation.  Steam emits both branches as
+   // `JL` on Controllable::mPlayerId (+0xd4) directly, so both are flipped to
+   // an unconditional JMP rather than NOPed.
+   //
+   // MaxVisibleDist (0x00670400): JL skipping the player MULSS by 2.0.
+   constexpr uintptr_t vision_maxdist_player_jl   = 0x00670496;
+   // AI::Threat::GetPriority (0x006699a0): the PlayerControllerPtr null `JZ`
+   // into the /2 path.  `0F 84 99000000` -> `E9 9A000000 90` (target 0x00669c4c).
+   constexpr uintptr_t threat_priority_player_jz  = 0x00669bad;
+   // AI::UnitThreatManager::ShouldRaytestUnit (0x0066a340) — see modtools note.
+   constexpr uintptr_t threat_raytest_player_jz   = 0x0066a3c0;
+   // GetVisualPriority (0x00670fb0): JL to the doubling path, taken when the
+   // target is a bot.  Forcing it always-taken doubles players too.
+   constexpr uintptr_t vision_priority_player_jl  = 0x006710eb;
+
 } // namespace steam
 
 // =============================================================================
@@ -1780,6 +1822,19 @@ namespace gog {
    // port_gog.py code 0x5a33d0 / 0x5a3350 -> score 1.00, shift +0xfb0 (in-run)
    constexpr uintptr_t medals_is_award_available      = 0x005a4380;
    constexpr uintptr_t medals_is_award_available_internal = 0x005a4300;
+
+   // ---- AI player-focus fairness (ai/ai_fairness.cpp) -------------------------
+   // Ported from Steam with tools/port_gog.py (shift +0x10a0, score 1.00 on all
+   // three code sites) and verified against the GOG image: both jumps carry the
+   // same opcode and displacement as Steam, so the same expected/replacement
+   // bytes apply.
+   constexpr uintptr_t vision_maxdist_player_jl   = 0x00671536;
+   constexpr uintptr_t vision_priority_player_jl  = 0x0067218b;
+   // AI::Threat::GetPriority player `JZ` — same 6 bytes and displacement as
+   // Steam (verified `0F 84 99000000` in the GOG image).
+   constexpr uintptr_t threat_priority_player_jz  = 0x0066ac4d;
+   // ShouldRaytestUnit `JZ` — same `74 0B` as modtools and Steam (verified).
+   constexpr uintptr_t threat_raytest_player_jz   = 0x0066b460;
 
 } // namespace gog
 

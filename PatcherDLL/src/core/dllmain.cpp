@@ -14,6 +14,7 @@
 #include "entity/droideka_ball_mode.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/vehicle_view_toggle.hpp"
+#include "ai/ai_fairness.hpp"
 #include "entity/cloth_collision_fix.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/award_disable.hpp"
@@ -194,6 +195,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_terrainTextureFixEnabled = cfg.get_bool("Fixes", "TerrainTextureFix", true);
       g_blurDownsizeClampEnabled = cfg.get_bool("Fixes", "BlurDownsizeClamp", true);
       g_screenshotFixEnabled = cfg.get_bool("Fixes", "ScreenshotFix", true);
+      g_aiPlayerVisionFairness   = cfg.get_bool("AI", "PlayerVisionFairness", true);
+      g_aiPlayerPriorityFairness = cfg.get_bool("AI", "PlayerPriorityFairness", true);
+      g_aiPlayerThreatFairness   = cfg.get_bool("AI", "PlayerThreatFairness", false);
+      g_aiPlayerAwarenessFairness = cfg.get_bool("AI", "PlayerAwarenessFairness", true);
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
@@ -250,6 +255,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
+   ai_fairness_install(exe_base);      // byte-patches .text — needs the RW window
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

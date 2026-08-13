@@ -638,6 +638,37 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "Lightsaber Block Direction Fix",
+               .patches =
+                  {
+                     // WeaponMelee::UpdateFire (VA 0x639020) calls the victim's
+                     // GameObject::Deflect (vtable +0xD4) with its two vectors SWAPPED.
+                     // The engine signature is Deflect(Ordnance*, PblVector3* worldPos,
+                     // PblVector3* dir), but the melee hit path pushes
+                     // (NULL, attackerMatrix.row2 /*a direction*/, hitPoint /*a position*/).
+                     //
+                     // Combo::Deflect::TestDeflect gates the block on
+                     //   atan2(-dot(defender.row0, dir), -dot(defender.row2, dir))
+                     // against the ODF DeflectAngle(min,max) window.  Fed a world-space
+                     // position, that measures the bearing of the world-origin -> hit-point
+                     // vector in the defender's frame, so a saber only blocks another saber
+                     // while the defender happens to be facing the map origin.  Blaster
+                     // deflection uses a different, correct call site, which is why only
+                     // saber-vs-saber blocking is affected.  A combo with no DeflectAngle
+                     // (min == max) skips the gate entirely and never showed the bug.
+                     //
+                     // Both operands are 4-byte LEA displacements, so the fix is a pure
+                     // disp32 rewrite with no length change:
+                     //   0x639F84  LEA ECX,[ESP+0x108]  (hit point) -> pushed as dir
+                     //   0x639FB1  LEA EDX,[ESP+0x0F4]  (row2)      -> pushed as worldPos
+                     // The +4 asymmetry on the second site is real: it executes after the
+                     // first PUSH, so its displacement is relative to ESP-4.
+                     patch{0x239F87, 0x108, 0x0F0, {.file_offset = true}}, // dir  <- attacker forward (matrix row 2)
+                     patch{0x239FB4, 0x0F4, 0x10C, {.file_offset = true}}, // pos  <- world-space hit point
+                  },
+            },
+
          },
    },
 
@@ -1100,6 +1131,22 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x33755F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x3375AE, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x337D5F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                  },
+            },
+
+            patch_set{
+               .name = "Lightsaber Block Direction Fix",
+               .patches =
+                  {
+                     // See the modtools set for the full write-up.  WeaponMelee::UpdateFire
+                     // (VA 0x68D2C0) passes Deflect's worldPos/dir arguments swapped, so a
+                     // saber only blocks another saber while facing the world origin.
+                     //   0x68DF9A  LEA ECX,[ESP+0x090]  (hit point) -> pushed as dir
+                     //   0x68DFD8  LEA ECX,[ESP+0x0CC]  (row2)      -> pushed as worldPos
+                     // The second site executes after the first PUSH, hence its +4 offset.
+                     // GOG = Steam + 0x1090 (tools/port_gog.py, score 1.00).
+                     patch{0x28D39D, 0x090, 0x0C8, {.file_offset = true}}, // dir  <- attacker forward (matrix row 2)
+                     patch{0x28D3DB, 0x0CC, 0x094, {.file_offset = true}}, // pos  <- world-space hit point
                   },
             },
 
@@ -1569,6 +1616,21 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x33646F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x3364BE, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x336C6F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                  },
+            },
+
+            patch_set{
+               .name = "Lightsaber Block Direction Fix",
+               .patches =
+                  {
+                     // See the modtools set for the full write-up.  WeaponMelee::UpdateFire
+                     // (VA 0x68C230) passes Deflect's worldPos/dir arguments swapped, so a
+                     // saber only blocks another saber while facing the world origin.
+                     //   0x68CF0A  LEA ECX,[ESP+0x090]  (hit point) -> pushed as dir
+                     //   0x68CF48  LEA ECX,[ESP+0x0CC]  (row2)      -> pushed as worldPos
+                     // The second site executes after the first PUSH, hence its +4 offset.
+                     patch{0x28C30D, 0x090, 0x0C8, {.file_offset = true}}, // dir  <- attacker forward (matrix row 2)
+                     patch{0x28C34B, 0x0CC, 0x094, {.file_offset = true}}, // pos  <- world-space hit point
                   },
             },
 
