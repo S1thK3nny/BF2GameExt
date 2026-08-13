@@ -75,6 +75,11 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
 
+   // [Lightsaber] — lightsaber blade lighting
+   INI_ENTRY("Lightsaber", "LightsaberIllumination", "0", "EXPERIMENTAL: ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. 0 by default"),
+   INI_ENTRY("Lightsaber", "LightsaberLightRadius", "4.0", "How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights"),
+   INI_ENTRY("Lightsaber", "LightsaberLightIntensity", "1.0", "Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored"),
+
    // [AI] — AI behaviour tuning
    INI_ENTRY("AI", "PlayerVisionFairness",   "1", "AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerPriorityFairness", "1", "AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock"),

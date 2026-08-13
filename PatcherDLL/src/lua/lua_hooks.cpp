@@ -26,6 +26,7 @@
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/flyer_sound_fix.hpp"
 #include "weapon/shield_channel_fix.hpp"
+#include "weapon/lightsaber_illumination.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
@@ -331,6 +332,9 @@ void lua_hooks_uninstall()
    droideka_ball_mode_uninstall();
    droideka_death_anim_uninstall();
    ingame_movie_path_uninstall();
+   // Must run while the hooks are still live: it unlinks our omni lights from
+   // the engine's global light lists first, and nothing else ever would.
+   lightsaber_illumination_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

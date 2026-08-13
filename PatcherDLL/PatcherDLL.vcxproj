@@ -163,6 +163,7 @@
     <ClInclude Include="src\render\screenshot_fix.hpp" />
     <ClInclude Include="src\render\hud_widescreen.hpp" />
     <ClInclude Include="src\weapon\anim_textures.hpp" />
+    <ClInclude Include="src\weapon\lightsaber_illumination.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
     <ClInclude Include="src\shell\map_queue_fix.hpp" />
   </ItemGroup>
@@ -224,6 +225,7 @@
     <ClCompile Include="src\render\screenshot_fix.cpp" />
     <ClCompile Include="src\render\hud_widescreen.cpp" />
     <ClCompile Include="src\weapon\anim_textures.cpp" />
+    <ClCompile Include="src\weapon\lightsaber_illumination.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />
     <ClCompile Include="src\shell\map_queue_fix.cpp" />
   </ItemGroup>

@@ -70,9 +70,19 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
 
+## Lightsaber
+
+Lighting for lightsaber blades. Off by default. Radius and intensity are independent: radius changes how far the light reaches, intensity changes how bright it is, and changing one does not affect the other.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `LightsaberIllumination` | `0` | EXPERIMENTAL: ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. 0 by default |
+| `LightsaberLightRadius` | `4.0` | How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights |
+| `LightsaberLightIntensity` | `1.0` | Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored |
+
 ## AI
 
-Removes the four hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. All four are on by default; set any of them to 0 for stock behaviour. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone.
+Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone.
 
 | Key | Default | Description |
 |-----|---------|-------------|

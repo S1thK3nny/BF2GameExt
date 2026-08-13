@@ -83,6 +83,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 - **Disguise Model Override** - Lets WeaponDisguise swap the soldier's model to a specific model instead of cloning the first enemy soldier. ODF: `DisguiseModel = modelname`
 - **Animated Lightsaber Textures** - Ports the Xbox version's animated blade textures, giving a lightsaber a four frame texture cycle where PC blades use a single static texture. ODF, under the blade's WeaponMelee section: `AnimTexture1 = tex_frame2`, `AnimTexture2 = tex_frame3`, `AnimTexture3 = tex_frame4`
 - **Grappling Hook** *(experimental)* - Re-enables the cut grappling hook weapon, with custom pull physics, a slingshot mechanic (jump mid-pull to launch), and rope cable rendering. ODF: `PullSpeed`, `MaxRange`
+- **Lightsaber Illumination** *(experimental)* - Stock lightsabers give off no light: the blade is only a glowing sprite, so a duel in a dark room leaves everyone unlit. Each ignited blade now casts a real light in its own blade colour, growing as the blade ignites, on stock and modded sabers alike with no ODF changes. Off by default, because an object can only take four dynamic lights at once and a nearby saber will often replace one the map was using. INI: `[Lightsaber] LightsaberIllumination=1`, plus `LightsaberLightRadius` (reach, default 4.0) and `LightsaberLightIntensity` (brightness, default 1.0)
 
 ## Vehicle Additions and Fixes
 

@@ -59,13 +59,20 @@ SECTION_BLURBS = OrderedDict([
     ("Features",
      "Optional behaviour that changes the game rather than fixing it. Some need "
      "assets that ship alongside the DLL."),
+    ("Lightsaber",
+     "Lighting for lightsaber blades. Off by default. Radius and intensity are "
+     "independent: radius changes how far the light reaches, intensity changes "
+     "how bright it is, and changing one does not affect the other."),
     ("AI",
-     "Removes the four hardcoded biases that make BF2's AI single out the human "
-     "player. SWBF1 has no player term anywhere in its target selection, which "
-     "is why its AI is remembered as fairer. All four are on by default; set any "
-     "of them to 0 for stock behaviour. AI will still turn on you the moment you "
-     "damage them, because that path force-sets the attacker as the target and "
-     "re-broadcasts to nearby squadmates; it is deliberate and is left alone."),
+     "Removes hardcoded biases that make BF2's AI single out the human player. "
+     "SWBF1 has no player term anywhere in its target selection, which is why "
+     "its AI is remembered as fairer. Three of the four are on by default; set "
+     "any of them to 0 for stock behaviour. `PlayerThreatFairness` is the "
+     "exception and is **off** by default, because it is the one that stops the "
+     "AI reacting to being aimed at, which makes them feel unresponsive rather "
+     "than fair. AI will still turn on you the moment you damage them, because "
+     "that path force-sets the attacker as the target and re-broadcasts to "
+     "nearby squadmates; it is deliberate and is left alone."),
     ("Controller",
      "Gamepad support. The button and axis bindings live in the "
      "`[Controller.<Mode>]` sections and are documented separately in "

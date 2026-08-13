@@ -28,6 +28,7 @@
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
 #include "weapon/anim_textures.hpp"
+#include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
 #include "shell/map_queue_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
@@ -205,6 +206,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
+      g_lightsaberIlluminationEnabled = cfg.get_bool("Lightsaber", "LightsaberIllumination", false);
+      g_lightsaberLightRadius = cfg.get_float("Lightsaber", "LightsaberLightRadius", 4.0f);
+      g_lightsaberLightIntensity = cfg.get_float("Lightsaber", "LightsaberLightIntensity", 1.0f);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
@@ -256,6 +260,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);      // byte-patches .text — needs the RW window
+   lightsaber_illumination_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,

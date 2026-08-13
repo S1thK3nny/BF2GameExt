@@ -694,6 +694,52 @@ namespace modtools {
    // NOPing it makes the undoubled epilogue unreachable.  74 13 -> 90 90.
    constexpr uintptr_t vision_priority_player_jz  = 0x005c93a4;
 
+   // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
+   // _RenderLightSabre(PblVector3* base, PblVector3* dir, uint tex, uint glowTex,
+   //                   float length, float width, uint flags) — __cdecl, ILT thunk
+   // 0x00401c03.  Draws one blade as two additive PIT_LASER particles; it creates
+   // no light of its own, which is the whole gap this feature fills.  Called once
+   // per *visible ignited* blade from the two Render functions below, with `base`
+   // at the hilt, `base + dir*length` at the tip, and `length` already multiplied
+   // by GetLightSaberLengthFactor (0 while retracted, 1 when fully out).
+   constexpr uintptr_t render_light_sabre           = 0x00633660;
+
+   // The two callers.  Neither passes the weapon down to _RenderLightSabre, so we
+   // hook them purely to publish the WeaponMeleeClass for the blade loop that
+   // follows — that class owns the blade table the light colour comes from.
+   //   WeaponMelee::Render(this, PblMatrix*, RedPose*, RedColor*, uint, bool)
+   //     __thiscall, 5 stack args (RET 0x14); mClass at this+0x68.
+   //   WeaponMeleeClass::Render(this, float, PblMatrix*, RedPose*, RedColor*,
+   //                            uint, bool) __thiscall, 6 stack args (RET 0x18);
+   //     ECX is already the class.
+   constexpr uintptr_t weapon_melee_render          = 0x00636E30;
+   constexpr uintptr_t weapon_melee_class_render    = 0x00634C20;
+
+   // RedOmniLight, as used by LightFlash (the explosion flash) at 0x00603bb0 —
+   // that ctor is the worked example every one of these came from.  Object is
+   // 0x120 bytes; m_pos +0x50, m_radius +0x5c, m_d3dLight +0x60.
+   //   ctor(this, PblVector3* pos, float radius, RedColorValue* rgba) RET 0xC
+   //   SetPosition(this, PblVector3*)      — also updates m_d3dLight.Position
+   //   SetRadius(this, float)              — also m_fRadiusInv / m_fRadiusInvSq
+   //   SetColor(this, RedColorValue* rgba) — scales Diffuse by (radius*0.5)^2,
+   //     so it MUST be called after SetRadius or the intensity is stale.
+   constexpr uintptr_t red_omni_light_ctor          = 0x00845C70;
+   constexpr uintptr_t red_omni_light_set_position  = 0x00845A10;
+   constexpr uintptr_t red_omni_light_set_radius    = 0x00845A50;
+   constexpr uintptr_t red_omni_light_set_color     = 0x00845AE0;
+
+   // RedLight::Activate / Deactivate — O(1) splices in/out of the two global
+   // light lists (heads at 0x00ae3ae0 / +0x40 node); flag 0x400 at light+4 is the
+   // "linked" bit, so both are idempotent.  This is the only thing that decides
+   // whether EntityGeometry::SetupLightingState can see a light.
+   constexpr uintptr_t red_light_activate           = 0x0082F7C0;
+   constexpr uintptr_t red_light_deactivate         = 0x0082F5E0;
+
+   // RedRenderer::GetFrameNumber is `MOV EAX,[0x00d62e1c]; RET`, so read the
+   // counter directly rather than paying a call. Used to tell "this light was
+   // refreshed this frame" from "its saber stopped rendering".
+   constexpr uintptr_t red_renderer_frame_number    = 0x00D62E1C;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1361,6 +1407,56 @@ namespace steam {
    // target is a bot.  Forcing it always-taken doubles players too.
    constexpr uintptr_t vision_priority_player_jl  = 0x006710eb;
 
+   // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
+   // Derived 2026-08-13 against BattlefrontII.exe (Ghidra :8193).  See the
+   // modtools block for what each one is; only the porting notes are here.
+   //
+   // _RenderLightSabre.  Found via the RedParticleRenderer::SubmitParticle
+   // (0x006D33A0) call list — this is its only caller inside the weapon region.
+   // Same 7 args and the same `if (tex && length != 0 && width != 0)` guard as
+   // modtools; the `(len+width)*2.0` bounds expression is folded differently but
+   // computes the same value.
+   //
+   // CONVENTION DIVERGES FROM MODTOOLS.  modtools is plain __cdecl (every arg on
+   // the stack, `ADD ESP,0x24 / RET`).  Steam passes arg1 in ECX and arg2 in EDX
+   // with the rest on the stack, and ends in a bare `RET` — register args with
+   // CALLER cleanup, which is NOT MSVC __fastcall (that would be RET 0x14).
+   // Declaring it __fastcall would corrupt the stack; it needs a naked
+   // register-transparent thunk.  See the notes in lightsaber_illumination.cpp.
+   constexpr uintptr_t render_light_sabre           = 0x0068F260;
+
+   // WeaponMelee::Render — named, and its signature matches modtools exactly
+   // (this, PblMatrix*, RedPose*, RedColor*, uint, bool).  Epilogue at
+   // 0x0068A406 is `RET 0x14`, so this one is ordinary __thiscall on both
+   // builds and needs no thunk.  The blade walk is visible just above it as
+   // `CMP ECX,[EDI+0x2C4]` with an `ADD EAX,0x34` stride, matching the known
+   // Steam blade array at WeaponMeleeClass+0x2C8 (entries 0x34).
+   constexpr uintptr_t weapon_melee_render          = 0x0068A050;
+
+   // WeaponMeleeClass::Render.  CONVENTION DIVERGES: modtools takes six stack
+   // dwords (RET 0x18), Steam takes ECX=this, the float in XMM1, and only ONE
+   // stack dword (epilogue 0x0068F255, `RET 0x4`).  Ghidra cannot fold the
+   // XMM argument into the signature and reports `float in_XMM1_Da` in the body
+   // instead.  Also needs a naked thunk.
+   constexpr uintptr_t weapon_melee_class_render    = 0x0068E8F0;
+
+   constexpr uintptr_t red_omni_light_ctor          = 0x006EE990;
+   constexpr uintptr_t red_omni_light_set_position  = 0x006EEBC0;
+   constexpr uintptr_t red_omni_light_set_radius    = 0x006EEC00;
+   constexpr uintptr_t red_omni_light_set_color     = 0x006EEB60;
+
+   // RedLight::Activate / Deactivate.  Same shape as modtools: flag 0x400 at
+   // light+4, list node at light+0x30.  Deactivate is tail-called from
+   // RedLight::~RedLight (0x006C6A60); Activate was found from the only two
+   // references to the light-count global 0x007DF024 (list head 0x007DF014).
+   constexpr uintptr_t red_light_activate           = 0x006C6AA0;
+   constexpr uintptr_t red_light_deactivate         = 0x006C6B20;
+
+   // NOTE: no red_renderer_frame_number for Steam.  The engine counter is only
+   // ever used as a shared tick between our own two hooks, never compared
+   // against anything the engine owns, so the feature uses a DLL-side counter
+   // driven off the Snd::Engine::Update hook instead.  See the .cpp.
+
 } // namespace steam
 
 // =============================================================================
@@ -1835,6 +1931,32 @@ namespace gog {
    constexpr uintptr_t threat_priority_player_jz  = 0x0066ac4d;
    // ShouldRaytestUnit `JZ` — same `74 0B` as modtools and Steam (verified).
    constexpr uintptr_t threat_raytest_player_jz   = 0x0066b460;
+
+   // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
+   // Ported from Steam with tools/port_gog.py, every one at score 1.00 on an
+   // in-run shift (+0x1090 for the weapon block, +0x10a0 for RedLight, +0x10b0
+   // for RedOmniLight), then checked against the GOG image directly.
+   //
+   // The LTCG conventions carry over unchanged — prologues and epilogues are
+   // byte-identical to Steam, so the same naked thunks apply:
+   //   render_light_sabre  prologue 55 8B EC 83 EC 18 53 8B 5D 08 56 8B F1 57 8B FA
+   //                       epilogue 5F 5E 5B 8B E5 5D C3        (bare RET)
+   //   melee_class_render  prologue 55 8B EC 83 E4 F0 81 EC 88 01 00 00
+   //                       epilogue 5E 5F 5B 8B E5 5D C2 04 00  (RET 0x4)
+   //   weapon_melee_render epilogue 5F 5E 8B E5 5D C2 14 00     (RET 0x14)
+   constexpr uintptr_t render_light_sabre             = 0x006902F0;
+   constexpr uintptr_t weapon_melee_render            = 0x0068B0E0;
+   constexpr uintptr_t weapon_melee_class_render      = 0x0068F980;
+
+   constexpr uintptr_t red_omni_light_ctor            = 0x006EFA40;
+   constexpr uintptr_t red_omni_light_set_position    = 0x006EFC70;
+   constexpr uintptr_t red_omni_light_set_radius      = 0x006EFCB0;
+   constexpr uintptr_t red_omni_light_set_color       = 0x006EFC10;
+
+   constexpr uintptr_t red_light_activate             = 0x006C7B40;
+   constexpr uintptr_t red_light_deactivate           = 0x006C7BC0;
+
+   // No red_renderer_frame_number here either — see the Steam block.
 
 } // namespace gog
 
