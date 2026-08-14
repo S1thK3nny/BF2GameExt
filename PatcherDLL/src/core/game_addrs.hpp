@@ -388,6 +388,14 @@ namespace modtools {
    constexpr uintptr_t disguise_drop               = 0x0062A180;
    constexpr uintptr_t game_model_table            = 0x00B76CC4;
 
+   // ---- Entity / Soldier jetpack ------------------------------------------------
+   // EntitySoldier::SetFirstPersonView (0x53CC60), the `CALL TurnOffJetEffect`
+   // it makes when entering first person.  ECX = the EntitySoldier base
+   // (LEA EDI,[ESI-0x258] on the line above).  The thunk at 0x40DE63 forwards to
+   // EntitySoldier::TurnOffJetEffect (0x535C90).
+   constexpr uintptr_t soldier_setfp_jet_effect_call   = 0x0053CC74;
+   constexpr uintptr_t soldier_turnoff_jet_effect      = 0x0040DE63;
+
    // ---- Character System --------------------------------------------------------
 
    constexpr uintptr_t char_array_base              = 0xB93A08;
@@ -886,6 +894,14 @@ namespace steam {
    constexpr uintptr_t ai_squad_order_guard_site   = 0x0043BD31;
    constexpr uintptr_t ai_squad_order_guard_resume = 0x0043BD38;
    constexpr uintptr_t ai_squad_order_guard_skip   = 0x0043BD4A;
+
+   // ---- Entity / Soldier jetpack ----------------------------------------------
+   // EntitySoldier::SetFirstPersonView (0x4F36E0), the `CALL TurnOffJetEffect`
+   // it makes when entering first person.  ECX = the EntitySoldier base
+   // (LEA ECX,[EDI-0x258] on the line above).  Release calls the real function
+   // directly rather than through an ILT thunk.
+   constexpr uintptr_t soldier_setfp_jet_effect_call   = 0x004F36F3;
+   constexpr uintptr_t soldier_turnoff_jet_effect      = 0x004E2300;
 
    // ---- Character System ------------------------------------------------------
    // Character::ChangeTeam (0x452330) — the mHeroFlag test that opens the
@@ -1661,6 +1677,12 @@ namespace gog {
    constexpr uintptr_t ai_squad_order_guard_site      = 0x0043BD21;
    constexpr uintptr_t ai_squad_order_guard_resume    = 0x0043BD28;
    constexpr uintptr_t ai_squad_order_guard_skip      = 0x0043BD3A;
+
+   // ---- Entity / Soldier jetpack ------------------------------------------------
+   // Byte-identical to Steam and at the same VAs (shift 0 across this run); see
+   // the steam namespace for the full note.
+   constexpr uintptr_t soldier_setfp_jet_effect_call   = 0x004F36F3;
+   constexpr uintptr_t soldier_turnoff_jet_effect      = 0x004E2300;
 
    // ---- Character System --------------------------------------------------------
    // Character::ChangeTeam (0x452310) — same codegen as Steam, shifted -0x20 and

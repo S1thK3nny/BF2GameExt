@@ -12,11 +12,6 @@ entity or the game camera rather than the active render camera, so once freecam 
 from the player everything is graded at the wrong distance. Needs the actual LOD distance
 source traced before a fix is designed.
 
-**Jetpack sound lost after entering first person** - With the jetpack enabled, switching into
-first person plays the jetpack shutdown sound and the jetpack audio never comes back, even
-though the jetpack keeps working. Looks like the view change tears down the sound instance
-without re-arming it, so the loop is stopped once and never restarted.
-
 ## Vehicles
 
 **9-pose vehicle aiming for AI** - The 9 aim poses are driven directly by the player's

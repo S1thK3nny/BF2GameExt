@@ -126,6 +126,7 @@
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
+    <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp" />
     <ClInclude Include="src\weapon\grappling_hook.hpp" />
@@ -196,6 +197,7 @@
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
+    <ClCompile Include="src\entity\jetpack_fp_sound_fix.cpp" />
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp" />
