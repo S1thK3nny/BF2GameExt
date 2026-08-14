@@ -112,17 +112,6 @@ A and B are confidently estimable. C and D are where the schedule can move. Once
 pipeline exists, blaster impacts and explosion scorch marks are nearly free and will be far
 more visible in normal play than saber marks.
 
-**Lightsaber illumination (optional feature, 1.1.0)** - Lightsaber blades are drawn as
-glowing geometry but emit no actual light, so a saber lights nothing around it. A working
-idea would be to have each blade register a real omni light with the engine's lighting
-system, colour taken from the blade's own ODF colours.
-A problem however is that the engine allows only four omni lights per object, so sabers compete with every other
-light in the area, and it is the same four-light wall documented in the per-object light
-limit notes. That contention is exactly why this should ship opt-in rather than on by
-default: a saber silently stealing a light slot from a map's own lighting is a worse
-default than no saber glow at all. Targeted at 1.1.0 alongside the decal work, as a
-combined "saber and impact visuals" release.
-
 ## Sound
 
 **Sound region and stream manipulation** - Goal is runtime control over ambient sound
