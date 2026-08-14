@@ -129,6 +129,11 @@ static uint32_t  g_lowresProneJumpOrig  = 0;
 // dedicated prone case of GetAnimatorLocal)
 static uint8_t* g_lowresProneCaseImmPtr = nullptr;
 
+// Lowres crouch-idle patch: stops crouch from sharing prone's pose slot
+static uint8_t* g_lowresCrouchIdlePtr     = nullptr;
+static uint8_t  g_lowresCrouchIdleOrig[3] = {};
+static size_t   g_lowresCrouchIdleLen     = 0;
+
 // WeaponClass struct offsets
 static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
 
@@ -559,9 +564,43 @@ void prone_system_install(uintptr_t exe_base)
     //   dedicated case @0x6491C9 = "MOV EBX,1; JMP merge" — no other state
     //   maps there, so just patch the MOV immediate 1 -> 2.
     //
+    // Pose slot 2 is not free, though: the CROUCH case picks it too, for a
+    // soldier who is crouching and standing still (crouching while moving uses
+    // slot 1).  So renaming slot 2 to the prone clip also puts every still,
+    // crouching soldier into the prone pose at low LOD.  There is no unused
+    // static slot to move to — PostLoad only reads entries 0..5 of the name
+    // table (stand_idle, crouch_idle_emote, crouch_idle_takeknee, jetpack_hover,
+    // divefoward, thrown_flail) and everything from 6 up is the dynamic
+    // script-animation range — so instead send crouch-idle to slot 1 as well
+    // and leave slot 2 to prone.  Cost is that a still crouching soldier at low
+    // LOD uses the "emote" crouch idle instead of "takeknee"; both are crouch
+    // idles, and this is the distant-LOD model only.
+    //
     // Skipped with the name-table patch above when prone is off: pointing prone
     // at pose slot 2 only means anything once slot 2 holds the prone clip name.
     // -----------------------------------------------------------------------
+    if (g_proneEnabled && g_addr->lowres_crouch_idle_branch) {
+        uint8_t* p = (uint8_t*)resolve(exe_base, g_addr->lowres_crouch_idle_branch);
+        if (g_build == GameBuild::Modtools) {
+            // JNZ 0x588575 (75 07) -> NOP NOP: fall through to MOV ESI,1.
+            if (p[0] == 0x75 && p[1] == 0x07) {
+                memcpy(g_lowresCrouchIdleOrig, p, 2);
+                g_lowresCrouchIdlePtr = p;
+                g_lowresCrouchIdleLen = 2;
+                p[0] = 0x90; p[1] = 0x90;
+            }
+        } else {
+            // SETBE BL (0F 96 C3) -> XOR BL,BL + NOP, so the INC EBX that
+            // follows always yields pose 1.  Byte-identical on Steam and GOG.
+            if (p[0] == 0x0F && p[1] == 0x96 && p[2] == 0xC3) {
+                memcpy(g_lowresCrouchIdleOrig, p, 3);
+                g_lowresCrouchIdlePtr = p;
+                g_lowresCrouchIdleLen = 3;
+                p[0] = 0x30; p[1] = 0xDB; p[2] = 0x90;
+            }
+        }
+    }
+
     if (g_proneEnabled) {
         if (g_build == GameBuild::Modtools &&
             g_addr->lowres_prone_jump_entry && g_addr->lowres_prone_jump_target) {
@@ -629,6 +668,12 @@ void prone_system_uninstall()
         const uint8_t orig = 0x01;
         protected_write(g_lowresProneCaseImmPtr, &orig, 1);
         g_lowresProneCaseImmPtr = nullptr;
+    }
+
+    // Restore lowres crouch-idle branch
+    if (g_lowresCrouchIdlePtr) {
+        protected_write(g_lowresCrouchIdlePtr, g_lowresCrouchIdleOrig, g_lowresCrouchIdleLen);
+        g_lowresCrouchIdlePtr = nullptr;
     }
 
     // Detach hooks

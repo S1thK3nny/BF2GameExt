@@ -513,6 +513,11 @@ namespace modtools {
    constexpr uintptr_t lowres_prone_jump_entry      = 0x005886a8;
    constexpr uintptr_t lowres_prone_jump_target     = 0x00588575;  // MOV ESI,2
 
+   // GetAnimatorLocal_ crouch case: JNZ 0x588575 (75 07), taken when the
+   // soldier is standing still, sending crouch-idle to pose slot 2 as well.
+   // NOP it so crouch falls through to MOV ESI,1 and slot 2 is prone's alone.
+   constexpr uintptr_t lowres_crouch_idle_branch    = 0x0058856C;
+
    // ---- State Machine / Triggers -----------------------------------------------
 
    constexpr uintptr_t trigger_update              = 0x00562dd0;
@@ -935,6 +940,11 @@ namespace steam {
    // prone uses pose slot 2 (the name-table entry patched above).  No jump
    // table repoint needed on Steam.
    constexpr uintptr_t lowres_prone_case_imm     = 0x006491CA;
+   // GetAnimatorLocal crouch case, branchless here: SETBE BL (0F 96 C3) then
+   // INC EBX, so a still crouching soldier also lands on pose slot 2.  Patch
+   // the SETBE to XOR BL,BL (30 DB 90) so crouch always resolves to slot 1 and
+   // slot 2 belongs to prone alone.
+   constexpr uintptr_t lowres_crouch_idle_branch = 0x006491C0;
 
    // ---- Entity / Vehicle (Carrier/Flyer) -------------------------------------
 
@@ -1676,6 +1686,7 @@ namespace gog {
    constexpr uintptr_t entity_droideka_rtti_hash      = 0x01ebd06c;
    constexpr uintptr_t lowres_prone_anim_name_ptr     = 0x007ea9e0;
    constexpr uintptr_t lowres_prone_case_imm          = 0x0064a26a;
+   constexpr uintptr_t lowres_crouch_idle_branch      = 0x0064a260;
 
    // ---- Entity / Vehicle (Carrier/Flyer) ----------------------------------------
 

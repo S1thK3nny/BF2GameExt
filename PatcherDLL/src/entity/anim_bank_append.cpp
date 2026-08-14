@@ -41,6 +41,12 @@
 //   appended.  Inject the human_5 prone animations into ingame.lvl with BAD_AL's
 //   LVLTool and this system appends it to the bank array.
 //
+//   Appending alone is not enough: the finder searches the bank array through
+//   per-frame index windows, and the window that is open while we append belongs
+//   to a single weapon type on the AddComboAnimation path.  widen_bank_ranges
+//   below reopens the bank-wide window over what we added — without it a late
+//   sub-bank is only ever found for weapon 0 ("rifle").
+//
 //   Not human-specific: any bank can be extended with numbered sub-banks, even
 //   if the original doesn't use them.  Individual animations within an existing
 //   sub-bank cannot be appended (the NULL guard means first-loaded wins); new
@@ -108,6 +114,19 @@ static void*            g_animHashTable      = nullptr;
 static constexpr int kAF_MaxCount      = 0x208;
 static constexpr int kAF_AnimBank      = 0x20C;
 static constexpr int kAF_AnimBankCount = 0x210;
+
+// m_Stack sits at +0: MyStack<AnimationFinder::Entry,3>, i.e. three 0xAC-byte
+// Entry frames followed by the depth (which is why mMaxCount lands on 0x208).
+// Entry (PDB-confirmed):
+//   +0x00 BANK eBank
+//   +0x04 int  iAnimBankStart_ByBank
+//   +0x08 int  iAnimBankEnd_ByBank
+//   +0x0C int  aiAnimBankStart_ByWeapon[20]
+//   +0x5C int  aiAnimBankEnd_ByWeapon[20]
+static constexpr int kAF_StackMaxDepth = 3;
+static constexpr int kAF_StackDepth    = 0x204;
+static constexpr int kAF_EntryStride   = 0xAC;
+static constexpr int kAFE_BankEnd      = 0x08;
 
 // RedAnimation layout
 static constexpr int kRA_ZephyrAnimBank = 0x14;
@@ -187,16 +206,58 @@ static void raise_finder_capacity(void* self)
 
 
 // ---------------------------------------------------------------------------
-// try_append_sub_banks — scans for sub-banks of rootName that exist in the
-// hash table but aren't in the AnimBank array yet.
+// widen_bank_ranges — make freshly appended sub-banks visible to every weapon.
+//
+// AnimationFinder::FindZephyrAnimation searches two windows into the class's
+// bank array: first the requesting weapon's own
+// [aiAnimBankStart_ByWeapon[w], aiAnimBankEnd_ByWeapon[w]) — entered only for
+// weapons whose name hash (_GetWeapon(w)+0x20) matches the requesting one, so no
+// other weapon ever looks inside it — and then the bank-wide
+// [iAnimBankStart_ByBank, iAnimBankEnd_ByBank).
+//
+// Both windows are stamped by whoever calls _AddBank, from the live count once it
+// returns.  AnimationFinder::Push brackets the call with the bank-wide pair, but
+// SoldierAnimationBank::AddComboAnimation brackets it with the by-weapon pair,
+// once per weapon type.  We append from inside _AddBank, so a sub-bank that
+// arrived too late for Push — exactly the case this module exists for — lands in
+// the window of whichever weapon was adding its combo bank at that moment.  That
+// is weapon 0, "rifle": every other weapon then resolves through the parent-weapon
+// fallback as if the sub-bank were not loaded at all.
+//
+// A frame whose bank-wide window ends exactly where we began appending was still
+// open on the end of the array, so widen it over what we added.  Push overwrites
+// that field with the same value the instant we return, so this only ever changes
+// anything for the weapon-bracketed calls.
 // ---------------------------------------------------------------------------
-static void try_append_sub_banks(char* self, const char* rootName)
+static void widen_bank_ranges(char* self, int oldCount, int newCount)
+{
+    unsigned depth = *(unsigned*)(self + kAF_StackDepth);
+    if (depth > kAF_StackMaxDepth) return;  // not a layout we recognise
+
+    for (unsigned i = 0; i < depth; i++) {
+        int* pEnd = (int*)(self + i * kAF_EntryStride + kAFE_BankEnd);
+        if (*pEnd == oldCount)
+            *pEnd = newCount;
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// try_append_sub_banks — scans for sub-banks of rootName that exist in the
+// hash table but aren't in the AnimBank array yet.  Returns true when rootName
+// names a numbered bank at all, i.e. "<rootName>_0" is registered, whether or
+// not anything needed appending.
+// ---------------------------------------------------------------------------
+static bool try_append_sub_banks(char* self, const char* rootName)
 {
     int   maxCount   = *(int*)(self + kAF_MaxCount);
     void** bankArray = *(void***)(self + kAF_AnimBank);
     int*  pCount     = *(int**)(self + kAF_AnimBankCount);
 
-    if (!bankArray || !pCount) return;
+    if (!bankArray || !pCount) return false;
+
+    const int startCount = *pCount;
+    bool      isNumbered = false;
 
     for (int i = 0; i < kMaxSubBankSearch; i++) {
         char subName[280];
@@ -207,6 +268,7 @@ static void try_append_sub_banks(char* self, const char* rootName)
 
         void* entry = fn_hashFind(g_animHashTable, 0x800, hash);
         if (!entry) break;  // No more sub-banks
+        isNumbered = true;
 
         // Skip entries with no animation data loaded
         if (*(void**)((char*)entry + kRA_ZephyrAnimBank) == nullptr)
@@ -249,6 +311,11 @@ static void try_append_sub_banks(char* self, const char* rootName)
         bankArray[*pCount] = entry;
         (*pCount)++;
     }
+
+    if (*pCount != startCount)
+        widen_bank_ranges(self, startCount, *pCount);
+
+    return isNumbered;
 }
 
 
@@ -263,16 +330,29 @@ static bool __fastcall hooked_AddBank(void* ecx, void* edx, char* name)
 
     bool result = original_AddBank(ecx, edx, name);
 
-    // Extract root bank name: everything before the FIRST underscore.
-    // "human_rifle" -> "human", "human" -> "human", "pim_stormtrooper" -> "pim"
+    // Two kinds of caller reach _AddBank, and only one of them passes a bare
+    // bank name.  AnimationFinder::Push passes "<bank>"; AddComboAnimation
+    // passes "<bank>_<weapon>".  Bank names may themselves contain underscores
+    // ("pim_stormtrooper"), so splitting on one is guesswork either way — cutting
+    // at the first underscore turns that bank into root "pim" and scans a bank
+    // that probably isn't there while missing the one that is.
+    //
+    // Let the hash table decide instead.  Try the name as given: if it is a real
+    // numbered bank, "<name>_0" is registered and we are done, which is the Push
+    // case and also the right answer for an underscored bank name.  Only when
+    // nothing is registered under it — the AddComboAnimation case, where no bank
+    // is called "human_rifle" — drop the last component and try again.
     char rootName[260];
     strncpy(rootName, name, 259);
     rootName[259] = '\0';
-    char* us = strchr(rootName, '_');
-    if (us) *us = '\0';
 
-    // Scan for missing sub-banks of the root
-    try_append_sub_banks((char*)ecx, rootName);
+    if (!try_append_sub_banks((char*)ecx, rootName)) {
+        char* us = strrchr(rootName, '_');
+        if (us) {
+            *us = '\0';
+            try_append_sub_banks((char*)ecx, rootName);
+        }
+    }
 
     return result;
 }
