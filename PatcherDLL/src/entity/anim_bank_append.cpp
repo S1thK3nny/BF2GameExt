@@ -38,8 +38,11 @@
 //   banks (human_rifle, ...) which happen AFTER vanilla ingame.lvl has loaded.
 //   On each call we extract the root bank name and scan for sub-banks that exist
 //   but aren't in the AnimBank array yet; late arrivals like human_5 get
-//   appended.  Inject the human_5 prone animations into ingame.lvl with BAD_AL's
-//   LVLTool and this system appends it to the bank array.
+//   appended.  That is how prone.lvl works: entity/prone_lvl_load.cpp hard-loads
+//   it straight after ingame.lvl and this system picks up its human_5.  Patching
+//   the prone animations into a replaced ingame.lvl was the old route and was
+//   abandoned long ago — do not reason about ingame.lvl contents when debugging
+//   a missing prone clip.
 //
 //   Appending alone is not enough: the finder searches the bank array through
 //   per-frame index windows, and the window that is open while we append belongs

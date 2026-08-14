@@ -669,6 +669,63 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            // -----------------------------------------------------------------
+            // RedLodManager::SetClassMaxCost(class, maxCount, cost0, cost1, cost2, cost3)
+            //
+            // This is what decides when a soldier drops to its humanlz model, and it
+            // is a COST BUDGET, not a distance.  RedLodManager::GetObjectLodHint
+            // (mt 0x008D0220) walks LOD levels 3..0 over mClass[class].mData[level],
+            // skipping levels whose mMaxCost is 0, and returns the first level whose
+            // cost band contains the object's cost.  SoldierLodData (mt 0x00416248)
+            // gives every soldier _LodClass 2 and a cost of 2000, so the stock LOD0
+            // budget of 0x4650 (18000) buys **nine** soldiers at full detail before
+            // the tenth is demoted.  At 20x that becomes 180.
+            //
+            // maxCount is NOT the soldier limiter and is deliberately left alone for
+            // class 2.  SetClassMaxCost floors it at 256 (`if (0x100 < param_2)`)
+            // before sizing the PblHeap, so the stock 100 is already 256 and
+            // upstream's 100 -> 127 bump changes nothing on any build.  Upstream's
+            // "8-bit signed int, needs relocating to increase it" note is chasing a
+            // ceiling that only starts to bind above 256 simultaneously-tracked
+            // soldiers, which BF2 does not reach on screen.
+            // -----------------------------------------------------------------
+            patch_set{
+               .name = "LOD Limit Extension",
+               .patches =
+                  {
+                     patch{0x41D455 + 0x1, 0xc8,    0xc8 * 0x14,    {.file_offset = true}}, // modelClass(0)    maxCount
+                     patch{0x41D450 + 0x1, 0xc350,  0xc350 * 0x14,  {.file_offset = true}}, // modelClass(0)    LOD0
+                     patch{0x41D441 + 0x1, 0x9c40,  0x9c40 * 0x14,  {.file_offset = true}}, // modelClass(0)    LOD3
+                     patch{0x41D3C0 + 0x1, 0x258,   0x258 * 0x14,   {.file_offset = true}}, // bigModelClass(1) maxCount
+                     patch{0x41D3BB + 0x1, 0x186a0, 0x186a0 * 0x14, {.file_offset = true}}, // bigModelClass(1) LOD0
+                     patch{0x41D3AC + 0x1, 0x9c40,  0x9c40 * 0x14,  {.file_offset = true}}, // bigModelClass(1) LOD3
+                     patch{0x41D387 + 0x1, 0x4650,  0x4650 * 0x14,  {.file_offset = true}}, // soldierClass(2)  LOD0  9 -> 180 soldiers
+                     patch{0x41D37A + 0x1, 0x9c40,  0x9c40 * 0x14,  {.file_offset = true}}, // soldierClass(2)  LOD3
+                     patch{0x41D410 + 0x1, 0x5dc,   0x5dc * 0x14,   {.file_offset = true}}, // hugeModelClass(3) maxCount, uber
+                     patch{0x41D40B + 0x1, 0x2710,  0x2710 * 0x14,  {.file_offset = true}}, // hugeModelClass(3) LOD0, uber
+                     patch{0x41D426 + 0x1, 0x12c,   0x12c * 0x14,   {.file_offset = true}}, // hugeModelClass(3) maxCount
+                     patch{0x41D421 + 0x1, 0x3e8,   0x3e8 * 0x14,   {.file_offset = true}}, // hugeModelClass(3) LOD0
+                     patch{0x41D3FA + 0x1, 0x9c40,  0x9c40 * 0x14,  {.file_offset = true}}, // hugeModelClass(3) LOD3
+                  },
+            },
+
+
+            patch_set{
+               .name = "Explosion VisibleRadius Increase",
+               .patches =
+                  {
+                     patch{0x203637 + 0x6, 0x42700000, 0x461c4000, {.file_offset = true}}, // 60.0f -> 10000.0f
+                  },
+            },
+
+            // Upstream's fourth render patch, "nearScene Extension", is deliberately
+            // not carried on any build.  It is a single byte 0 -> 1 whose effect
+            // nobody has pinned down, upstream ships it commented out on the modtools
+            // build they develop on, and its modtools offset (0x398B75) does not even
+            // hold the expected 0 in the shipping debug exe.  With no symptom to
+            // describe there is nothing to put in front of a user, so it stays out
+            // until someone can say what it fixes.
+
          },
    },
 
@@ -1149,6 +1206,42 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x28D3DB, 0x0CC, 0x094, {.file_offset = true}}, // pos  <- world-space hit point
                   },
             },
+
+            // The four sets below are transplanted from upstream BF2MemExt.  Every
+            // modtools and Steam site was byte-verified against the shipping exes;
+            // GOG could not be (no GOG install here), so these offsets are upstream's
+            // word.  That is safe rather than reckless: apply_patches verifies every
+            // site in a set before writing any of it and skips the whole set on the
+            // first mismatch, so a wrong GOG offset costs the feature, not the process.
+            patch_set{
+               .name = "LOD Limit Extension",
+               .patches =
+                  {
+                     patch{0x2BCD59 + 0x1, 0xc8,    0xc8 * 0xa,    {.file_offset = true}}, // modelClass(0)    maxCount
+                     patch{0x2BCD54 + 0x1, 0xc350,  0xc350 * 0xa,  {.file_offset = true}}, // modelClass(0)    LOD0
+                     patch{0x2BCD45 + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // modelClass(0)    LOD3
+                     patch{0x2BCCC1 + 0x1, 0x258,   0x258 * 0xa,   {.file_offset = true}}, // bigModelClass(1) maxCount
+                     patch{0x2BCCBC + 0x1, 0x186a0, 0x186a0 * 0xa, {.file_offset = true}}, // bigModelClass(1) LOD0
+                     patch{0x2BCCAD + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // bigModelClass(1) LOD3
+                     patch{0x2BCC81 + 0x1, 0x4650,  0x4650 * 0xa,  {.file_offset = true}}, // soldierClass(2)  LOD0
+                     patch{0x2BCC75 + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // soldierClass(2)  LOD3
+                     patch{0x2BCD11 + 0x1, 0x5dc,   0x5dc * 0xa,   {.file_offset = true}}, // hugeModelClass(3) maxCount, uber
+                     patch{0x2BCD0C + 0x1, 0x2710,  0x2710 * 0xa,  {.file_offset = true}}, // hugeModelClass(3) LOD0, uber
+                     patch{0x2BCD27 + 0x1, 0x12c,   0x12c * 0xa,   {.file_offset = true}}, // hugeModelClass(3) maxCount
+                     patch{0x2BCD22 + 0x1, 0x3e8,   0x3e8 * 0xa,   {.file_offset = true}}, // hugeModelClass(3) LOD0
+                     patch{0x2BCCFB + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // hugeModelClass(3) LOD3
+                  },
+            },
+
+
+            patch_set{
+               .name = "Explosion VisibleRadius Increase",
+               .patches =
+                  {
+                     patch{0x11BF59 + 0x6, 0x42700000, 0x461c4000, {.file_offset = true}}, // 60.0f -> 10000.0f
+                  },
+            },
+
 
          },
    },
@@ -1633,6 +1726,42 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x28C34B, 0x0CC, 0x094, {.file_offset = true}}, // pos  <- world-space hit point
                   },
             },
+
+            patch_set{
+               .name = "LOD Limit Extension",
+               .patches =
+                  {
+                     // RedLodManager::SetClassMaxCost(class, maxCount, cost0..cost3).
+                     // Retail multiplier is 10x (upstream BF2MemExt uses 10x on both
+                     // retail builds and 20x on modtools); kept identical so the two
+                     // tables stay diffable against upstream.
+                     patch{0x2BBCC9 + 0x1, 0xc8,    0xc8 * 0xa,    {.file_offset = true}}, // modelClass(0)    maxCount
+                     patch{0x2BBCC4 + 0x1, 0xc350,  0xc350 * 0xa,  {.file_offset = true}}, // modelClass(0)    LOD0
+                     patch{0x2BBCB5 + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // modelClass(0)    LOD3
+                     patch{0x2BBC31 + 0x1, 0x258,   0x258 * 0xa,   {.file_offset = true}}, // bigModelClass(1) maxCount
+                     patch{0x2BBC2C + 0x1, 0x186a0, 0x186a0 * 0xa, {.file_offset = true}}, // bigModelClass(1) LOD0
+                     patch{0x2BBC1D + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // bigModelClass(1) LOD3
+                     patch{0x2BBBF1 + 0x1, 0x4650,  0x4650 * 0xa,  {.file_offset = true}}, // soldierClass(2)  LOD0
+                     patch{0x2BBBE5 + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // soldierClass(2)  LOD3
+                     patch{0x2BBC81 + 0x1, 0x5dc,   0x5dc * 0xa,   {.file_offset = true}}, // hugeModelClass(3) maxCount, uber
+                     patch{0x2BBC7C + 0x1, 0x2710,  0x2710 * 0xa,  {.file_offset = true}}, // hugeModelClass(3) LOD0, uber
+                     patch{0x2BBC97 + 0x1, 0x12c,   0x12c * 0xa,   {.file_offset = true}}, // hugeModelClass(3) maxCount
+                     patch{0x2BBC92 + 0x1, 0x3e8,   0x3e8 * 0xa,   {.file_offset = true}}, // hugeModelClass(3) LOD0
+                     patch{0x2BBC6B + 0x1, 0x9c40,  0x9c40 * 0xa,  {.file_offset = true}}, // hugeModelClass(3) LOD3
+                     // soldierClass maxCount (0x2BBBF6+1, imm8 0x64) is deliberately NOT
+                     // patched — see the modtools block for why it cannot matter.
+                  },
+            },
+
+
+            patch_set{
+               .name = "Explosion VisibleRadius Increase",
+               .patches =
+                  {
+                     patch{0x11BF59 + 0x6, 0x42700000, 0x461c4000, {.file_offset = true}}, // 60.0f -> 10000.0f
+                  },
+            },
+
 
          },
    },

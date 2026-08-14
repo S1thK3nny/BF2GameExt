@@ -20,6 +20,8 @@ Automatic binary patches applied on load:
 - **Soldier Animation Bank Limit** - Raises the per-class loaded animation bank cap from 18 to 128, removing the `Out of space for soldier animation banks (max 18)` error. Note that a bank split into numbered sub-banks (`human_0` through `human_N`) uses one slot each, so this lets a class load far more split banks than before.
 
   **Caveat, a separate and deeper limit is not raised:** the number of *distinct bank names* is capped at **16** and *weapon types* at **20**. Those two cannot be raised safely. Keep modded soldier classes to 16 or fewer distinct bank names and 20 or fewer weapon types.
+- **LOD Limit** - Keeps far more models at full detail before they swap to their low-detail version. Stock budgets allow only nine soldiers on screen at full detail, so troops visibly turn into their low-res models as soon as a fight gets busy; this raises that to roughly 180. Also applies to props, large models and terrain-scale models. INI: `[LimitIncreases] LODLimitExtension=1`
+- **Explosion Visibility** - Explosions more than a short way off were not drawn at all, so distant fighting looked empty and silent. They are now visible across the map. Applies to every explosion that does not set its own visible radius. INI: `[LimitIncreases] ExplosionVisibleRadius=1`
 - **String Pool** - Increases the string pool from 32 KB to 128 KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
