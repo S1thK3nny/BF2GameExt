@@ -115,6 +115,37 @@ Character array: `sCharacters`, stride = 0x1B0 (432 bytes). Layout is **identica
 | mTakeoverChr           | 0x1A4  | Character*       | |
 | mTakeoverTime          | 0x1A8  | float            | |
 
+### mHeroFlag is "spawned as a hero", and is never cleared
+
+`mHeroFlag` (0x165) has exactly one writer in the whole exe, the tail of `Character::Spawn`:
+
+```c
+this->mHeroFlag = (unit->flags >> 1) & 1;   // bit 1 of GameObject+0x36C
+```
+
+Nothing clears it. Death runs `Unlink()` -> `Character::SetUnit(NULL)` and then
+`Character::Respawn`, which resets `mUnit`, `mVehicle` and `mCarriedFlagPtr` and leaves
+`mHeroFlag` at whatever the last spawn set. A dead hero therefore reads as a hero until the
+next `Character::Spawn` reassigns the flag from the unit that actually spawned.
+
+Consequences worth knowing:
+
+- `Character::ChangeTeam` returns false outright when the flag is set, so a player who dies
+  as a hero cannot switch teams until they respawn as something else. That is the vanilla
+  bug BF2GameExt patches (`entity/hero_team_switch_fix.cpp`), by qualifying the refusal with
+  `mUnit != NULL`.
+- `Character::Update` reads the flag on a **dead** character on purpose: an AI whose
+  `mHeroFlag` is still set is exempted from the `netNumBots` alive cap while waiting to
+  respawn. Clearing the flag on death would change that, which is why the fix does not.
+- `Character::IsHero` does not rely on the flag for dead characters. When `mUnit` is NULL it
+  falls back to `netHeroLastPlayerID[mTeamNumber] == mPlayerId`, which `NetGame::HeroKilled`
+  sets. So the engine's own "is this the hero" answer is already correct across a death, and
+  `mHeroFlag` is only meaningful while a unit exists.
+
+The hero rules layer (`NetGame::HeroRulesUpdate`, `HeroSelected`, `AcceptHero`,
+`HeroKilled`, `HeroSpawned`) never touches `mHeroFlag` at all; it works entirely through the
+`netHero*` per-team arrays.
+
 ### Character globals
 
 | Symbol          | Modtools       | Steam          |

@@ -396,6 +396,11 @@ namespace modtools {
    constexpr uintptr_t class_def_list               = 0xACD2C8;
    constexpr uintptr_t aimer_set_weapon             = 0x00407B76;  // Aimer::SetWeapon(Weapon*) ILT thunk — ECX=Aimer*, called by EntitySoldier ctor @0x533ffc
 
+   // Character::ChangeTeam (0x643480) — the mHeroFlag test that opens the
+   // function: MOV AL,[EDI+0x165] / TEST AL,AL / JNZ <return false>.
+   // Patch site is the load; `this` is in EDI.
+   constexpr uintptr_t character_change_team_hero_test = 0x00643485;
+
    // ---- Animation (weapon/soldier) ---------------------------------------------
 
    constexpr uintptr_t get_weapon_anim_map          = 0x00570760;
@@ -881,6 +886,13 @@ namespace steam {
    constexpr uintptr_t ai_squad_order_guard_site   = 0x0043BD31;
    constexpr uintptr_t ai_squad_order_guard_resume = 0x0043BD38;
    constexpr uintptr_t ai_squad_order_guard_skip   = 0x0043BD4A;
+
+   // ---- Character System ------------------------------------------------------
+   // Character::ChangeTeam (0x452330) — the mHeroFlag test that opens the
+   // function: CMP byte ptr [ESI+0x165],0 / JNZ <return false>.  Retail keeps
+   // `this` in ESI and folds the load into the compare, so the site is 7 bytes
+   // where modtools is 6.
+   constexpr uintptr_t character_change_team_hero_test = 0x00452338;
 
    // ---- Memory heap management -----------------------------------------------
 
@@ -1649,6 +1661,11 @@ namespace gog {
    constexpr uintptr_t ai_squad_order_guard_site      = 0x0043BD21;
    constexpr uintptr_t ai_squad_order_guard_resume    = 0x0043BD28;
    constexpr uintptr_t ai_squad_order_guard_skip      = 0x0043BD3A;
+
+   // ---- Character System --------------------------------------------------------
+   // Character::ChangeTeam (0x452310) — same codegen as Steam, shifted -0x20 and
+   // byte-identical at the site; see the steam namespace for the full note.
+   constexpr uintptr_t character_change_team_hero_test = 0x00452318;
 
    // ---- Memory heap management --------------------------------------------------
 

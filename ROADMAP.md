@@ -4,6 +4,19 @@ Planned and in-progress work. This is the backlog, not a feature list: nothing h
 is shipped. For what the DLL actually does today, see
 [docs/user/FEATURES.md](docs/user/FEATURES.md).
 
+## Bugs
+
+**LODs break under freecam** - Models pop to the wrong detail level, or drop out entirely,
+while the camera is detached. The LOD selection almost certainly scores against the player
+entity or the game camera rather than the active render camera, so once freecam moves away
+from the player everything is graded at the wrong distance. Needs the actual LOD distance
+source traced before a fix is designed.
+
+**Jetpack sound lost after entering first person** - With the jetpack enabled, switching into
+first person plays the jetpack shutdown sound and the jetpack audio never comes back, even
+though the jetpack keeps working. Looks like the view change tears down the sound instance
+without re-arming it, so the loop is stopped once and never restarted.
+
 ## Vehicles
 
 **9-pose vehicle aiming for AI** - The 9 aim poses are driven directly by the player's
@@ -21,6 +34,16 @@ rough around the edges:
   do not actually restrict to those, so the real semantics need pinning down.
 - Write proper user documentation for enabling it. It is currently gated on
   `HealthType = "animal"` plus an `AttackAnimation` ODF entry.
+
+**Flyer strafe mode ODF property** - The engine has an abandoned strafing path for flyers.
+Goal is an opt-in `EntityFlyer` ODF property that turns the turn axis into lateral movement,
+which means giving up rolling on any class that enables it, since the same input drives both.
+A prototype exists on an older commit and was
+player-only for exactly this reason: AI keeps rolling so navigation is not broken. The open
+question before this can ship is what AI actually does when a class it flies is in strafe
+mode, and whether the AI flight path can be fed strafing at all rather than simply left on
+the old behaviour. Needs a play test either way, since the visual lean scaling and sign were
+never confirmed in game.
 
 **ControlsUnit passenger weapons** - Lets a passenger use their own weapon from inside a
 vehicle. Very unlikely to happen: the engine stub is half baked, and it needs a lot more
@@ -50,6 +73,21 @@ properties to `EntitySoldierClass` and porting the charge logic (hold window, fo
 between min and max hold, forward speed multiplier while charging, energy drain per second)
 onto the soldier jump path rather than replacing `JumpHeight` outright. `JumpHeight` should
 keep working for ODFs that do not opt in.
+
+**Melee-only blocking** - Right now a blocking melee weapon deflects everything it is set up
+to deflect, which makes any shield or blocking stance behave like a lightsaber. Goal is an
+ODF or combo property that restricts a weapon's block to incoming melee attacks only, so
+blaster fire passes through. The deflect call site is already known from the saber block
+work, so this is a matter of finding what identifies the incoming attack at that point and
+adding a per-weapon gate, not new plumbing.
+
+**Real riot shields** - A shield that actually stops shots by geometry rather than by a
+deflect rule. Needs per-unit collision on the shield part, which the soldier collision model
+does not currently provide: soldiers use a single capsule, and the only existing example of
+custom soldier collision is the acklay style units, whose collision also does a ground check
+that a shield must not inherit. So the real work is a soldier collision path that supports
+extra attached collision volumes without dragging the ground handling along with it. Large,
+and gated on that collision work rather than on anything shield specific.
 
 ## Rendering
 
@@ -112,6 +150,12 @@ regions and streams. Current state of the problem:
 `SetClassProperty` pair. Same entity and class lookup, same property name resolution,
 returning the current value instead of writing one. The sound entity limitation above
 applies identically to `GetProperty`.
+
+**Hero health drain switch** - A way to stop heroes from bleeding health over time. This
+belongs in Lua rather than in an ODF property: the drain is a game rule, and an ODF entry
+would force every hero class to be edited individually and would not let a script turn it off
+for one mode and leave it on for another. Needs the code that applies the drain traced first,
+then a toggle hung off that path.
 
 ## Documentation
 

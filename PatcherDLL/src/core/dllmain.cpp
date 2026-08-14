@@ -24,6 +24,7 @@
 #include "entity/terrain_texture_fix.hpp"
 #include "entity/hover_pilot_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
+#include "entity/hero_team_switch_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
@@ -250,6 +251,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
+   hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);
