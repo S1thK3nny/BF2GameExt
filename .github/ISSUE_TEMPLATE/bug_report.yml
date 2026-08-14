@@ -52,6 +52,22 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: clean-exe
+    attributes:
+      label: Is your game executable the clean original?
+      description: >
+        BF2GameExt expects stock bytes and will skip its patches on an
+        executable another patcher has already modified. MemExt, no-CD exes and
+        older hex-edited copies all count. Steam users can check by verifying
+        integrity of game files.
+      options:
+        - Yes, unmodified
+        - No, it has been patched by something else
+        - Not sure
+    validations:
+      required: true
+
   - type: input
     id: version
     attributes:

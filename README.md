@@ -37,6 +37,8 @@ A simple drag and drop patch. To switch it off, set `Enabled=0` in `GameData\BF2
 
 Works with Steam, GOG and Modtools builds. Compatible with other dinput8 proxy DLLs such as ReShade via automatic chain-loading.
 
+**The game executable must be the clean original.** BF2GameExt patches the exe in memory at launch and expects stock bytes, so an executable that has already been modified by another patcher, whether it's MemExt, a no-CD exe or an older hex-edited copy. Any of these will very likely make the patches fail to apply and features silently do nothing. If yours has been patched before, restore the original executable first (verify the game files on Steam, reinstall on GOG, or copy `BattlefrontII.exe` back from a fresh install).
+
 If it does not seem to be running, see [Troubleshooting](docs/user/TROUBLESHOOTING.md).
 
 ## Compatibility

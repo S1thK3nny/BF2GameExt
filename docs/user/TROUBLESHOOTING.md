@@ -75,7 +75,42 @@ In rough order of likelihood:
 - **`[General] Enabled=0`** in your INI.
 - **You are on the Aspyr Classic Collection.** It is a different executable and
   is not supported. Only the Modtools, Steam and GOG builds work.
+- **Your executable has already been patched by something else.** See below.
 - **An overlay or launcher is loading its own `dinput8.dll`** ahead of ours.
+
+## Your executable has already been patched
+
+**BF2GameExt needs the clean, unmodified game executable.**
+
+It patches the exe in memory at launch and expects the original bytes to be
+there. If another patcher has already rewritten them on disk, those patches do
+not apply. The usual result is that the extension loads and writes its log, but
+half the features do nothing.
+
+`BF2GameExt.log` is how you confirm it. Lines reading
+
+```
+Skipping patch set (site mismatch @ ..., expected ...)
+```
+
+mean the bytes at that address were not what the game shipped with. One or two
+can just be a feature that is not mapped for your build; a long run of them
+means the executable itself is not stock.
+
+The one that comes up in practice is **MemExt**, the earlier project this one
+grew out of. An exe patched with MemExt is not a valid base for BF2GameExt.
+The same goes for no-CD executables, older hex-edited copies, and anything else
+that shipped as "a patched exe" rather than as files you drop in next to it.
+
+To fix it, put the original executable back:
+
+- **Steam** - right-click the game, Properties, Installed Files, Verify
+  integrity of game files.
+- **GOG** - reinstall, or restore the exe from your installer.
+- **Modtools** - copy `BF2_modtools.exe` back from a fresh mod tools install.
+
+Then install BF2GameExt again. Nothing it ships modifies the executable on
+disk, so once the original is back you can leave it alone permanently.
 
 ## ReShade or another dinput8 proxy
 

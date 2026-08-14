@@ -70,6 +70,20 @@ Works with the Modtools, Steam and GOG builds. It does NOT work with the
 Aspyr Classic Collection, which is a different executable.
 
 
+REQUIREMENT: A CLEAN GAME EXECUTABLE
+------------------------------------
+
+BF2GameExt patches the game in memory at launch and expects the original,
+unmodified executable. An exe that some other patcher has already rewritten
+will not work: the extension loads, but patches are skipped and features do
+nothing.
+
+This includes MemExt, no-CD executables and older hex-edited copies. If your
+exe has been patched before, restore the original first (Steam: verify
+integrity of game files; GOG: reinstall or restore from the installer) and
+then install BF2GameExt.
+
+
 INSTALL
 -------
 
