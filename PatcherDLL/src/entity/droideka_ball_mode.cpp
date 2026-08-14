@@ -41,10 +41,15 @@
 //   run so a droideka can always still unroll back out (that state is
 //   unreachable once the flag is set, but the flag is per-class and the check
 //   costs nothing).
+//
+// The spawn screen is a separate animator (see the DroidekaElement note further
+// down) and needs its own remap, or a unit that can no longer roll is still
+// previewed as a ball.
 // =============================================================================
 
 // FSM state ids - build-invariant (compile-time constants in the game's own
 // state table; verified identical in modtools and Steam disassembly).
+static constexpr int kStateIdle   = 0x00;
 static constexpr int kStateRollUp = 0x0B;
 static constexpr int kStateBall   = 0x0C;
 static constexpr int kStateUnroll = 0x0D;
@@ -71,6 +76,16 @@ static constexpr DroidekaLayout kLayoutRelease  = {0x438, 0x1A54};
 static DroidekaLayout s_layout = kLayoutModtools;
 
 // ---------------------------------------------------------------------------
+// DroidekaElement field offsets - build-invariant
+// ---------------------------------------------------------------------------
+// The spawn-screen preview droideka is a HUD element, not an entity, and unlike
+// EntityDroideka its struct is laid out identically in all three builds: every
+// ctor writes mState at +0x4B0 and every method reads mClass from +0x4A8
+// (modtools 0x673ac0/0x673b80, Steam+GOG 0x48d290/0x48d4f0).
+static constexpr int kElementClass = 0x4A8; // EntityDroidekaClass*
+static constexpr int kElementState = 0x4B0; // int, same state ids as the entity
+
+// ---------------------------------------------------------------------------
 // Game function types
 // ---------------------------------------------------------------------------
 
@@ -88,6 +103,9 @@ using fn_UpdatePilot_t = void(__fastcall*)(void* ecx, void* edx);
 // ODF inheritance: allocates a fresh class and copy-constructs it from `this`.
 using fn_Derive_t = void*(__fastcall*)(void* ecx, void* edx, unsigned int hash);
 
+// DroidekaElement::SetState - __thiscall(this, int state)
+using fn_ElementSetState_t = void(__fastcall*)(void* ecx, void* edx, int state);
+
 using fn_init_state_t = void(__cdecl*)();
 
 // ---------------------------------------------------------------------------
@@ -99,6 +117,7 @@ static fn_SetProperty_t original_SetProperty = nullptr;
 static fn_UpdatePilot_t original_UpdatePilot = nullptr;
 static fn_Derive_t      original_Derive      = nullptr;
 static fn_init_state_t  original_init_state  = nullptr;
+static fn_ElementSetState_t original_ElementSetState = nullptr;
 
 static uint32_t g_propHash = 0; // hash("DisableBallMode"), computed lazily
 
@@ -202,6 +221,46 @@ static void __fastcall hooked_UpdatePilot(void* ecx, void* /*edx*/)
 }
 
 // ---------------------------------------------------------------------------
+// Hook: DroidekaElement::SetState
+// ---------------------------------------------------------------------------
+// The spawn/class-select screen does not run the entity; it drives a
+// DroidekaElement, a HUD element carrying its own trimmed copy of the same FSM
+// (it indexes the very same EntityDroideka::sStateTable, and plays
+// mClass->mAnimations[state] out of the unit's animation bank). Its states:
+//
+//   ctor / Reset()          -> SetState(0x0C)  ball    (the resting preview)
+//   SetSelected(true)       -> UpdateState(false) -> 0x0D unroll
+//   SetSelected(false)      -> UpdateState(true)  -> 0x0B roll up
+//   Update()                -> NextState(0) while mState == 0, i.e. idle
+//
+// so a droideka whose roll UpdatePilot now refuses is still previewed rolled
+// into a ball. SetState is the single funnel for all four paths, so remapping
+// the three ball-side states to idle there covers the whole element.
+//
+// The one wrinkle is Update()'s `if (mState == 0) NextState(0)`: state 0's
+// next[0] is 0, so once we park the element in idle that fires SetState(0)
+// every frame, and SetState rewinds mTime and re-arms the animation. Dropping
+// the redundant idle->idle self-transition lets the idle animation actually
+// play. Only that degenerate case is dropped - a remapped call still goes
+// through, so deselecting restarts idle instead of doing nothing.
+
+static void __fastcall hooked_ElementSetState(void* ecx, void* /*edx*/, int state)
+{
+   if (g_disabledCount > 0 && ecx) {
+      void* cls = *(void**)((uintptr_t)ecx + kElementClass);
+      if (cls && isDisabled(cls)) {
+         const int cur = *(int*)((uintptr_t)ecx + kElementState);
+         if (state == kStateIdle && cur == kStateIdle)
+            return; // Update()'s per-frame idle self-transition
+         if (state == kStateRollUp || state == kStateBall || state == kStateUnroll)
+            state = kStateIdle;
+      }
+   }
+
+   original_ElementSetState(ecx, nullptr, state);
+}
+
+// ---------------------------------------------------------------------------
 // Hook: init_state (non-modtools only - see droideka_ball_mode_reset)
 // ---------------------------------------------------------------------------
 
@@ -235,6 +294,12 @@ void droideka_ball_mode_install(uintptr_t exe_base)
    original_UpdatePilot = (fn_UpdatePilot_t)resolve(exe_base, g_addr->droideka_update_pilot);
    original_Derive      = (fn_Derive_t)     resolve(exe_base, g_addr->droideka_class_derive);
 
+   // Optional: without it the roll still goes away, the spawn-screen preview
+   // just keeps showing the ball.
+   if (g_addr->droideka_element_set_state != 0)
+      original_ElementSetState = (fn_ElementSetState_t)
+         resolve(exe_base, g_addr->droideka_element_set_state);
+
    // On modtools lua_hooks already detours init_state and calls our reset from
    // its hooked_init_state; only take it ourselves elsewhere, so the function
    // is never detoured twice.
@@ -247,6 +312,8 @@ void droideka_ball_mode_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
    DetourAttach(&(PVOID&)original_UpdatePilot, hooked_UpdatePilot);
    DetourAttach(&(PVOID&)original_Derive,      hooked_Derive);
+   if (original_ElementSetState)
+      DetourAttach(&(PVOID&)original_ElementSetState, hooked_ElementSetState);
    if (ownInitState)
       DetourAttach(&(PVOID&)original_init_state, hooked_init_state);
    DetourTransactionCommit();
@@ -259,6 +326,8 @@ void droideka_ball_mode_uninstall()
    if (original_SetProperty) DetourDetach(&(PVOID&)original_SetProperty, hooked_SetProperty);
    if (original_UpdatePilot) DetourDetach(&(PVOID&)original_UpdatePilot, hooked_UpdatePilot);
    if (original_Derive)      DetourDetach(&(PVOID&)original_Derive,      hooked_Derive);
+   if (original_ElementSetState)
+      DetourDetach(&(PVOID&)original_ElementSetState, hooked_ElementSetState);
    if (original_init_state)  DetourDetach(&(PVOID&)original_init_state,  hooked_init_state);
    DetourTransactionCommit();
 }

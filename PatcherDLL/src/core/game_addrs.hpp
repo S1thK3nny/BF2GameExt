@@ -331,6 +331,12 @@ namespace modtools {
    constexpr uintptr_t droideka_update_pilot       = 0x004E8250; // entity vtable +0x120
    constexpr uintptr_t droideka_class_derive       = 0x004E5400; // class vtable 0xa3bb00 slot 1
 
+   // DroidekaElement::SetState(int) - the spawn-screen preview droideka's own
+   // little FSM, non-virtual, reached from Reset()/UpdateState()/NextState().
+   // DroidekaElement offsets (mClass +0x4A8, mState +0x4B0) are identical in all
+   // three builds; see entity/droideka_ball_mode.cpp.
+   constexpr uintptr_t droideka_element_set_state  = 0x00673B80;
+
    // ---- Entity / Droideka death animation fix ---------------------------------
    // The `CALL [EDX+0x130]` (NextState) inside EntityDroideka::Update (0x4ee5a0)
    // that re-issues the die input every frame while mIsDead.  ECX = entity base
@@ -910,6 +916,9 @@ namespace steam {
    constexpr uintptr_t droideka_class_set_property = 0x004A82A0; // class vtable 0x79aeb4 slot 6
    constexpr uintptr_t droideka_update_pilot       = 0x004A2030; // entity vtable +0x120
    constexpr uintptr_t droideka_class_derive       = 0x004A8180; // class vtable 0x79aeb4 slot 1
+   // DroidekaElement::SetState(int) - spawn-screen preview FSM. The element
+   // struct is laid out the same in every build (mClass +0x4A8, mState +0x4B0).
+   constexpr uintptr_t droideka_element_set_state  = 0x0048D4F0;
 
    // ---- Entity / Soldier override textures (OverrideTexture3..5) --------------
    // Steam offsets differ from modtools (release vs debug). Class fields the stock
@@ -1671,6 +1680,9 @@ namespace gog {
    constexpr uintptr_t droideka_class_set_property    = 0x004a82a0;
    constexpr uintptr_t droideka_update_pilot          = 0x004a2030;
    constexpr uintptr_t droideka_class_derive          = 0x004a8180;
+   // port_gog.py code 0x48d4f0 -> score 1.00, shift +0x0 (in-run); the 32-byte
+   // prologue is byte-identical to Steam in the on-disk image.
+   constexpr uintptr_t droideka_element_set_state     = 0x0048d4f0;
 
    // ---- Entity / Soldier override textures (OverrideTexture3..5) ----------------
 
