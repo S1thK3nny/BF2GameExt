@@ -34,7 +34,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
-| `AudioStreamLimit` | `1` | Raise the concurrent OpenAudioStream limit from 6 to 12. Each stream needs 3.4 MB of contiguous buffers, so this reserves 40 MB of the 32-bit process's 2 GB of virtual address space (RAM use is lower - pages are only committed as streams are actually used) |
+| `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |
 | `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
 | `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
 | `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
@@ -64,10 +64,10 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl (the human_5 animation sub-bank), which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
-| `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds (modtools always logs) |
-| `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code) |
-| `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. Technician's award weapon shares the same unlock bit as its passive, so it stays locked too |
+| `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
+| `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
+| `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
+| `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |

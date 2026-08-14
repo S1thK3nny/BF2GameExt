@@ -49,7 +49,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
    INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
-   INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise the concurrent OpenAudioStream limit from 6 to 12. Each stream needs 3.4 MB of contiguous buffers, so this reserves 40 MB of the 32-bit process's 2 GB of virtual address space (RAM use is lower - pages are only committed as streams are actually used)", "Audio Stream Limit Increase"),
+   INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise how many sounds can stream at the same time from 6 to 12. Uses more memory",                    "Audio Stream Limit Increase"),
    INI_PATCH("LimitIncreases", "LODLimitExtension",  "1", "Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail",                                                       "LOD Limit Extension"),
    INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
@@ -69,10 +69,10 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
 
    // [Features] — optional gameplay features (may require additional assets)
-   INI_ENTRY("Features", "Prone", "1", "Enable prone stance. Requires data\\_lvl_pc\\prone.lvl (the human_5 animation sub-bank), which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing"),
-   INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds (modtools always logs)"),
-   INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only; retail stripped the warning code)"),
-   INI_ENTRY("Features", "DisableAwardBuffs", "0", "Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. Technician's award weapon shares the same unlock bit as its passive, so it stays locked too"),
+   INI_ENTRY("Features", "Prone", "1", "Enable prone stance. Requires data\\_lvl_pc\\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing"),
+   INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds"),
+   INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only)"),
+   INI_ENTRY("Features", "DisableAwardBuffs", "0", "Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive"),
    INI_ENTRY("Features", "DisableAwardWeapons", "0", "Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards"),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
