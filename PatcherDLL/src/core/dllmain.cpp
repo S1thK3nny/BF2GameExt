@@ -29,6 +29,7 @@
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
+#include "render/red_light_stale_node_fix.hpp"
 #include "weapon/anim_textures.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
@@ -208,7 +209,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
-      g_lightsaberIlluminationEnabled = cfg.get_bool("Lightsaber", "LightsaberIllumination", false);
+      g_lightsaberIlluminationEnabled = cfg.get_bool("Lightsaber", "LightsaberIllumination", true);
       g_lightsaberLightRadius = cfg.get_float("Lightsaber", "LightsaberLightRadius", 4.0f);
       g_lightsaberLightIntensity = cfg.get_float("Lightsaber", "LightsaberLightIntensity", 1.0f);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
@@ -264,6 +265,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);      // byte-patches .text — needs the RW window
+   // Before the saber lights: its uninstall deactivates our own lights, and those
+   // calls should go through the guard.
+   red_light_stale_node_fix_install(exe_base);
    lightsaber_illumination_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {

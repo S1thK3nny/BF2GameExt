@@ -60,7 +60,7 @@ SECTION_BLURBS = OrderedDict([
      "Optional behaviour that changes the game rather than fixing it. Some need "
      "assets that ship alongside the DLL."),
     ("Lightsaber",
-     "Lighting for lightsaber blades. Off by default. Radius and intensity are "
+     "Lighting for lightsaber blades. On by default. Radius and intensity are "
      "independent: radius changes how far the light reaches, intensity changes "
      "how bright it is, and changing one does not affect the other."),
     ("AI",

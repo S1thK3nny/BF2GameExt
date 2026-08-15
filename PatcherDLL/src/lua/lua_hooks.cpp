@@ -27,6 +27,7 @@
 #include "entity/flyer_sound_fix.hpp"
 #include "weapon/shield_channel_fix.hpp"
 #include "weapon/lightsaber_illumination.hpp"
+#include "render/red_light_stale_node_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
@@ -174,6 +175,7 @@ static void __cdecl hooked_init_state()
    disguise_ext_reset();
    droideka_ball_mode_reset();
    soldier_override_texture_reset();
+   freecam_light_reset(); // its pool block did not survive the level change
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).
@@ -335,6 +337,8 @@ void lua_hooks_uninstall()
    // Must run while the hooks are still live: it unlinks our omni lights from
    // the engine's global light lists first, and nothing else ever would.
    lightsaber_illumination_uninstall();
+   // After it, so its deactivate_all() above is still covered by the guard.
+   red_light_stale_node_fix_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

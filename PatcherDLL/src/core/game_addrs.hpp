@@ -759,6 +759,14 @@ namespace modtools {
    constexpr uintptr_t red_light_activate           = 0x0082F7C0;
    constexpr uintptr_t red_light_deactivate         = 0x0082F5E0;
 
+   // SetFreeCamLightCallback's `s_pFreeCamLight`.  Referenced from exactly two
+   // places — that callback (0x004AD8xx) and FreeCamera::Update — and cleared by
+   // neither on a level change, which is the freecamlight.enable-0 crash.  Its
+   // 0x120-byte block comes from RedOmniLight::sMemoryPool and does not survive
+   // the level, so the pointer must be zeroed per mission.  Retail strips the
+   // whole freecamlight command family, so there is no Steam/GOG equivalent.
+   constexpr uintptr_t freecam_light_ptr            = 0x00B76C3C;
+
    // RedRenderer::GetFrameNumber is `MOV EAX,[0x00d62e1c]; RET`, so read the
    // counter directly rather than paying a call. Used to tell "this light was
    // refreshed this frame" from "its saber stopped rendering".

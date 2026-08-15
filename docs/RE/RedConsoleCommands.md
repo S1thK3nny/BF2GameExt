@@ -37,6 +37,56 @@ and once under a `debugmenu.*` name pointing at the *same* backing variable, so 
 in-game Debug Menu UI can drive them. Where an alias exists it is listed in the
 "debugmenu alias" column. They are functionally identical to the primary entry.
 
+### Shortcut keys
+
+A handful of commands are also bound to single keys. **These only fire while the console is
+in its hidden state.** Pressing the console key cycles: once opens it with a text prompt,
+again hides it but arms the shortcut keys, again returns to the text prompt. There is no way
+back to "console never opened" short of restarting.
+
+The console key is whatever sits left of the `1` key: `` ` `` on a US keyboard, `^` on a
+German one.
+
+> **Caveat.** These bindings are read straight out of the exe and the dispatch path is
+> confirmed, but they have not been made to fire in a play test - `Q` and `I` did nothing in
+> practice. Either the hidden console state is harder to reach than the code suggests, or
+> something else consumes the keys first. Treat the table as "what the binary registers",
+> not "what will happen when you press it". If you get them working, the doc is wrong and
+> should say so.
+>
+> The overlap is also suspicious on its face: `D`, `S`, `Z`, `X` and `M` are all ordinary
+> gameplay keys, and it is not established whether game input is suppressed while the
+> console is armed. If it is not, these were only ever usable while paused or in the free
+> camera.
+
+The complete set, read out of the modtools exe (16 bindings, no more):
+
+| Key | Command |
+|-----|---------|
+| `Q` | `FreeCameraQuakeMode` |
+| `I` | `FreeCameraInvertAxis` |
+| `'` | `FreeCameraStop` |
+| `S` | `Renderer.ScreenshotSetup` |
+| `D` | `ToggleDisplay` |
+| `;` | `stepframe 1` (pause and step one frame at a time) |
+| `/` | `stepframe 0` (resume normal speed) |
+| `Z` | `Screenshot` |
+| `X` | `PrintPlayerCoords` |
+| `M` | `ToggleSoldierModels` |
+| `,` | `ai.camdown 1` |
+| `.` | `ai.camup 1` |
+| Caps Lock | `ToggleDudes` |
+| Numpad `+` | `NighInfiniteReinforcements` |
+| Numpad `.` | `Net.CloseJournal` |
+| Delete | `SelfDestruct` |
+
+Note that a shortcut binds a whole command line, arguments included, which is why
+`stepframe` gets two keys rather than one toggle.
+
+The bindings are DirectInput scan codes, so they follow physical key positions rather than
+your keyboard layout: on a non-US board the `'`, `;`, `/`, `,` and `.` keys are wherever
+they sit on a US layout.
+
 ---
 
 ## Cheats & gameplay
@@ -82,7 +132,7 @@ in-game Debug Menu UI can drive them. Where an alias exists it is listed in the
 | `ai.showobstaclesradius` | float | radius | Radius for obstacle drawing. |
 | `ai.showtypemask` | int (bitmask) | `-1`=all (default), `0`=none, or a bit combination | Filters **which AI debug output is drawn** (not a render mask). Each AI unit carries a category tag, and some debug draws use fixed category bits (e.g. flyer strafe lines = bit `0x20`); an item is shown only if its bit is set in this mask. Only takes effect with `aimode` on, and also gates which units `ai.camup`/`ai.camdown` will stop on. Default `-1` shows everything; set a narrower value to focus on specific categories (`gAIDebugShowTypeMask`). |
 | `ai.showunitpathingradius` | int | value | Draw unit pathing radius. |
-| `showaimers` | bool | 0/1 | **No-op.** `gShowAimer` is only registered by the console and never read or written by any code path (confirmed in both modtools and release builds), so it draws nothing — not even in freecam. The aimer-node debug draw was cut, leaving only the console knob (`gShowAimer`). |
+| `showaimers` | bool | 0/1 | **No-op.** `gShowAimer` is only registered by the console and never read or written by any code path (confirmed in both modtools and release builds), so it draws nothing, not even in freecam. The aimer-node debug draw was cut, leaving only the console knob (`gShowAimer`). |
 | `showtargets` | bool | 0/1 | Draw AI targets (`gShowTarget`). |
 | `showflyerheights` | bool | 0/1 | Draw flyer min/max height planes (`gShowFlyerHeights`). |
 
@@ -97,27 +147,104 @@ in-game Debug Menu UI can drive them. Where an alias exists it is listed in the
 | `setviewrange` | cmd | `<dist>` | Set far view range (`SetViewRangeCallback`). |
 | `Renderer.SetAspect` | cmd | `<ratio>` | Set renderer aspect ratio (`JSetAspectRatio`). |
 | `Renderer.ScreenshotSetup` | cmd | - | Reconfigure camera aspect for screenshots (`JFuxorAspectRatio`). |
-| `SnapCamera` | cmd | - | Casts a ray forward from the camera up to 500 units and snaps the free camera onto the surface it hits. This only works while you are in free-camera mode, and it prints a message otherwise (`SnapCamera`). |
+| `SnapCamera` | cmd | - | Teleports the free camera onto whatever surface is in front of it, up to 500 units away. The angle you are looking is kept. Only works if you entered the free camera through `ScriptCB_Freecamera`; it prints a refusal if you used `debugmenu.ToggleFreeLook`. See [Free camera](#free-camera) (`SnapCamera`). |
 | `GetCameraPos` | cmd | - | Print current camera position (`GetCameraPos`). |
-| `DumpCamera` | cmd | - | Dump camera coordinates (`JDumpCameraCoords`). |
+| `DumpCamera` | cmd | - | Writes the current camera position and angle to **`CameraCoords.txt`** as a ready-to-paste `AddCameraShot(...)` line, appending one line per use. This is how the `AddCameraShot` calls in the stock mission scripts were authored, so it is the fastest way to set up your own intro camera shots: fly the free camera to each pose and run this. Only works in-game, not in the menus (`JDumpCameraCoords`). |
 | `SetControls` | cmd | - | (Re)assign player controls (`SetPlayerControls`). |
 | `Mouse.Invert` | bool | 0/1 | Invert mouse look (`gInvertMouse`). |
 
 ### Free camera
 
+The free camera detaches the view from your unit and lets you fly it anywhere on the map,
+through walls and terrain. It is what the developers used for screenshots, for checking
+level geometry, and for driving most of the collision debug views.
+
+Engine internals for all of this live in [FreeCameraSystem.md](FreeCameraSystem.md).
+
+#### Getting in and out
+
+There are two ways in, and they behave differently:
+
+| How | What you get |
+|-----|--------------|
+| `debugmenu.ToggleFreeLook` in the console (modtools only) | Just the camera. The HUD stays on screen, and `SnapCamera` will refuse to work. Run it again to leave: you drop back to the normal chase camera during a round, or to the map camera otherwise. |
+| `ScriptCB_Freecamera()` from Lua (all builds) | The full version entered via the pause menu. Closes the pause screen, hides the entire HUD, and enables `SnapCamera`. |
+
+Either way the camera starts exactly where your view already was, so it does not jump when
+you take control.
+
+#### Flying it
+
+Movement uses your normal movement keys and the mouse looks around. Everything else is on
+its own key:
+
+| Key (US layout position) | Does |
+|--------------------------|------|
+| Home / End | Move straight up / down |
+| `=` / `-` | Movement speed faster / slower |
+| `[` / `]` | Turn speed faster / slower |
+
+These are input bindings rather than console commands, so they follow physical key
+positions. On a German keyboard that means `´` / `ß` for movement speed and `ü` / `+` for
+turn speed.
+
+Each speed press multiplies by 1.25 or 0.8. **Nothing limits or resets them**, so leaning
+on the faster key leaves the camera permanently fast until you restart the map.
+
+Altitude being on its own two keys is deliberate: by default "forward" is horizontal no
+matter where you are looking, so you cannot fly into the floor by looking down. The
+`FreeCameraQuakeMode` command flips that to look-where-you-fly noclip, if you can reach it
+(see the console shortcut caveat below).
+
+#### Commands
+
 | Name | Type | Params | Description |
 |------|------|--------|-------------|
-| `FreeCameraStop` | cmd | - | Stop/exit free camera (`FreeCameraStop`). |
-| `FreeCameraInvertAxis` | cmd | - | Invert a free-camera axis (`FreeCameraInvertAxis`). |
-| `FreeCameraQuakeMode` | cmd | - | Toggles the Quake-style free-camera control scheme, which gives you WASD and mouse noclip flight (`FreeCamera::sQuakeControl`). |
-| `debugmenu.SetFreecamTarget` | bool | 0/1 | Set free-cam follow target object (`gSetTargetObj`). |
-| `debugmenu.SetFreecamTetherPos` | bool | 0/1 | Set free-cam tether position (`gSetTetherPosition`). |
-| `debugmenu.ToggleFreecamFollow` | bool | 0/1 | Toggle free-cam follow mode (`gIsFollowingObj`). |
-| `debugmenu.ToggleFreecamTether` | bool | 0/1 | Toggle free-cam tether mode (`gFollowingTethered`). |
-| `freecamlight.enable` | cmd | `<0/1>` | Enable the free-camera attached light (`SetFreeCamLightCallback`). |
-| `freecamlight.color` | cmd | `<r g b>` | Free-cam light color. |
-| `freecamlight.radius` | cmd | `<r>` | Free-cam light radius. |
-| `freecamlight.freeze` | cmd | `<0/1>` | Freeze free-cam light in place. |
+| `FreeCameraStop` | cmd | - | **Freezes the camera where it is. It does not exit the free camera.** The view keeps rendering, it just stops responding to you. Run it again to unfreeze. Useful for parking a shot. The camera also freezes on its own when a round ends. Shortcut key `'` (`FreeCameraStop`). |
+| `FreeCameraInvertAxis` | cmd | - | Inverts up and down for the free camera's mouse look only. Separate from the game's own `Mouse.Invert` setting, and it does not affect normal play. Shortcut key `I` (`FreeCameraInvertAxis`). |
+| `FreeCameraQuakeMode` | cmd | - | Switches "forward" between horizontal-only and follow-your-view, as described above. Nothing else changes; the same keys and mouse look work in both. Shortcut key `Q` (`FreeCamera::sQuakeControl`). |
+| `debugmenu.SetFreecamTarget` | bool | 0/1 | Point at something and run this with `1` to pick it as the follow target. It resolves immediately and resets itself (`gSetTargetObj`). |
+| `debugmenu.ToggleFreecamFollow` | bool | 0/1 | Makes the camera aim at the picked target and keep it centred. **Your own input is ignored while this is on** (`gIsFollowingObj`). |
+| `debugmenu.SetFreecamTetherPos` | bool | 0/1 | Run with `1` to memorize your current distance and angle from the target (`gSetTetherPosition`). |
+| `debugmenu.ToggleFreecamTether` | bool | 0/1 | Makes the camera also ride along at the memorized offset instead of only turning to face the target (`gFollowingTethered`). |
+| `freecamlight.enable` | cmd | `<0/1>` | Attaches a light to the camera so you can see inside dark geometry. Read the warning below before using this (`SetFreeCamLightCallback`). |
+| `freecamlight.color` | cmd | `<r g b>` | Colour of that light, three values. It starts magenta so it is obvious which light is yours. |
+| `freecamlight.radius` | cmd | `<r>` | How far the light reaches. Default 6. |
+| `freecamlight.freeze` | cmd | `<0/1>` | Leaves the light where it currently is instead of carrying it with the camera, so you can fly around and look at what it lights. |
+
+To follow a unit: fly so it is in front of you, `debugmenu.SetFreecamTarget 1`, then
+`debugmenu.ToggleFreecamFollow 1`. If you also want to ride along rather than just watch
+from a fixed point, position yourself first, then `debugmenu.SetFreecamTetherPos 1` and
+`debugmenu.ToggleFreecamTether 1`.
+
+The camera light sits slightly behind you and hugs whatever surface is back there, so it
+lights the scene in front without clipping into a wall. There is only one, and it only
+works on the first viewport.
+
+#### Things that will bite you
+
+> **The camera light does not survive a map reload** (modtools). The light's memory goes
+> away with the level, but the engine never clears its pointer to it. On the new map,
+> turning the light on again silently does nothing, and turning it **off** crashes on the
+> spot.
+>
+> BF2GameExt fixes this (`PatcherDLL/src/render/red_light_stale_node_fix.cpp`): the pointer
+> is dropped at every mission start, so with the DLL loaded the light simply works again
+> after a reload. Without it, turn the light off before reloading.
+
+> **The camera light can crash on a light-heavy map** (modtools). If the engine has no free
+> light slot left when you run `freecamlight.enable 1`, it crashes immediately instead of
+> reporting the failure. Nothing can be done about this from a mod; just be aware of what
+> caused it.
+
+> **The settings are global and sticky.** Freeze, invert, quake mode, follow and tether are
+> all remembered even after you leave the free camera, and turn back on with it. If the free
+> camera "does not respond" the next time you enter it, you probably left `FreeCameraStop`
+> or follow mode on.
+
+> **Model detail breaks while detached.** Models pop to the wrong level of detail or vanish
+> entirely once the camera moves away from your unit. This is a known engine bug, unrelated
+> to anything you did, and is tracked in `ROADMAP.md`.
 
 ### Camera tension / tracking (3rd-person tuning)
 
@@ -419,7 +546,7 @@ state each time you run them.
 | `BackDrop` | cmd | - | Shows or hides a solid colored panel that covers the top half of the screen behind the console's text output. The panel is created hidden and lives inside the console's element group, so you only see it while the console overlay is actually on screen. Toggling it during normal play with no console showing looks like nothing happens (`RedConsole::ToggleBackDrop`). |
 | `ToggleDudes` | cmd | - | Blanks the spawn and class-select screen when turned off, clearing the spawn-timer text, backdrop, unit preview, and team display. (`gDrawDudes`). |
 | `debugmenu.ToggleHolos` | cmd | - | Toggles rendering of the in-world holograms, meaning the holographic projector displays such as command-post holo-tables and holo unit markers (`gRenderHolos`). |
-| `debugmenu.ToggleFreeLook` | cmd | - | Enters free-look camera, and if you are already in free-look it drops back to the chase camera during play or to the map camera otherwise (`JToggleFreeLook`). |
+| `debugmenu.ToggleFreeLook` | cmd | - | Enters free-look camera, and if you are already in free-look it drops back to the chase camera during play or to the map camera otherwise. Camera only: it does **not** set `GameLoop::sFreeMode` or hide the HUD, unlike the `ScriptCB_Freecamera` route. See [Free camera](#free-camera) (`JToggleFreeLook`). |
 | `debugmenu.ToggleForceConsoleOff` | cmd | - | Toggles whether warnings and errors automatically open the on-screen console, by flipping the severity threshold on the open-console log destination (`JToggleForceConsoleOff`). |
 | `DrawEntityPaths` | cmd | - | Toggle debug lines showing the paths entities are currently following (`EntityPathFollower` debug lines). |
 | `showreticuleinfo` | bool | 0/1 | Show reticle/aim info (`gShowReticuleInfo`). |
@@ -433,6 +560,11 @@ state each time you run them.
 - Several commands share one callback and select behavior by the command **id** passed to
   the callback (e.g. all `fog.*` → `SetFogCallback`, all `HDR.*` → `HDRCommand`, all
   `Water.*` → `pcWaterConsoleCommands`, `freecamlight.*` → `SetFreeCamLightCallback`).
+  The id is the **PblHash of the leaf name only** - the part after the last dot - not of
+  the registered path. Verified against `Hash.exe`: `SetFreeCamLightCallback` compares
+  against `enable` = `0xaf8bb8ce`, `color` = `0x3d7e6258`, `radius` = `0x0dba4cb3`,
+  `freeze` = `0x30c707a2`, while `freecamlight.enable` hashes to `0x10d386c7` and appears
+  nowhere in the binary.
 - `debugmenu.*` aliases exist only to let the in-game Debug Menu drive the same flag; they
   are not separate features.
 - This list is the engine's built-in set. Project-specific Lua functions added by

@@ -74,11 +74,11 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 
 ## Lightsaber
 
-Lighting for lightsaber blades. Off by default. Radius and intensity are independent: radius changes how far the light reaches, intensity changes how bright it is, and changing one does not affect the other.
+Lighting for lightsaber blades. On by default. Radius and intensity are independent: radius changes how far the light reaches, intensity changes how bright it is, and changing one does not affect the other.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `LightsaberIllumination` | `0` | EXPERIMENTAL: ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. 0 by default |
+| `LightsaberIllumination` | `1` | Ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. Set 0 for stock |
 | `LightsaberLightRadius` | `4.0` | How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights |
 | `LightsaberLightIntensity` | `1.0` | Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored |
 

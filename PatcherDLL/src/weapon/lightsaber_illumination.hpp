@@ -5,9 +5,9 @@
 // =============================================================================
 // Lightsaber illumination - give ignited saber blades a real dynamic light.
 //
-//   [Features]
-//   LightsaberIllumination     = 1     ; master switch (off by default)
-//   LightsaberLightRadius      = 2.5   ; metres, at full blade extension
+//   [Lightsaber]
+//   LightsaberIllumination     = 1     ; master switch (on by default)
+//   LightsaberLightRadius      = 4.0   ; metres, at full blade extension
 //   LightsaberLightIntensity   = 1.0   ; multiplier on the blade colour
 //
 // Stock blades are additive particle billboards only - they emit nothing. This

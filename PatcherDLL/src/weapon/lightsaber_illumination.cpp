@@ -72,7 +72,7 @@
 // Config (read from the INI in dllmain)
 // ---------------------------------------------------------------------------
 
-bool  g_lightsaberIlluminationEnabled = false;
+bool  g_lightsaberIlluminationEnabled = true;
 float g_lightsaberLightRadius         = 4.0f;
 float g_lightsaberLightIntensity      = 1.0f;
 
