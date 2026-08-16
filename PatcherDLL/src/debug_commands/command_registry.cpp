@@ -9,6 +9,7 @@
 #include "hover_springs.hpp"
 #include "weapon_ranges.hpp"
 #include "mem_watch.hpp"
+#include "freecam_target_fix.hpp"
 // Add new command headers here
 // -----------------------------------------------------------------------------
 
@@ -55,6 +56,9 @@ void DebugCommandRegistry::install(uintptr_t exe_base)
    s_origEngineConsoleReg = (EngineConsoleReg_t)resolve(exe_base, engine_console_reg);
 
    DebugCommand::initEngine(exe_base);
+
+   // Resolve before HoverSprings, whose FreeCamera::Update hook calls into it.
+   FreecamTargetFix::install(exe_base);
 
    // Install hooks for all commands
    HoverSprings::install(exe_base);

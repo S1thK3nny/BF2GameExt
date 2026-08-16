@@ -138,11 +138,6 @@ void __declspec(dllexport) ExportFunction() {}
 
 static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 {
-   // First thing, before any patching: capture first-chance fatal exceptions
-   // to BF2GameExt_crash.log (the game's own SEH handler can otherwise swallow
-   // the crash and exit without a trace).
-   crash_logger_install();
-
    char* const game_address = (char*)exe_base;
 
    IMAGE_DOS_HEADER& dos_header = *(IMAGE_DOS_HEADER*)game_address;
@@ -160,19 +155,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 
    IMAGE_SECTION_HEADER* section_headers = (IMAGE_SECTION_HEADER*)(game_address + section_headers_offset);
 
-   slim_vector<DWORD> section_protection_values{file_header.NumberOfSections,
-                                                slim_vector<DWORD>::alloc_tag{}};
-
    slim_vector<section_info> sections{file_header.NumberOfSections,
                                       slim_vector<section_info>::alloc_tag{}};
-
-   for (int i = 0; i < file_header.NumberOfSections; ++i) {
-      if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
-                             section_headers[i].Misc.VirtualSize, PAGE_READWRITE,
-                             &section_protection_values[i])) {
-         FatalAppExitA(0, "Failed to make executable sections writable!");
-      }
-   }
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {
       sections[i] = {
@@ -180,6 +164,30 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
          .file_start = section_headers[i].PointerToRawData,
          .file_end = section_headers[i].PointerToRawData + section_headers[i].SizeOfRawData,
       };
+   }
+
+   // Are we even in the game? Our dinput8.dll proxy sits in GameData, so any
+   // program started from that folder that touches DirectInput loads us too --
+   // the Battlefront II Mod Loader being the one people hit. Bail on a foreign
+   // process before anything with a side effect: patching someone else's image
+   // is meaningless, FatalAppExit'ing it kills their program, and opening the
+   // log "w" from a launcher wipes the log from the last real game session.
+   if (identify_exe(exe_base, sections) == exe_identity::foreign) return;
+
+   // Before any patching: capture first-chance fatal exceptions to
+   // BF2GameExt_crash.log (the game's own SEH handler can otherwise swallow the
+   // crash and exit without a trace).
+   crash_logger_install();
+
+   slim_vector<DWORD> section_protection_values{file_header.NumberOfSections,
+                                                slim_vector<DWORD>::alloc_tag{}};
+
+   for (int i = 0; i < file_header.NumberOfSections; ++i) {
+      if (not VirtualProtect(game_address + section_headers[i].VirtualAddress,
+                             section_headers[i].Misc.VirtualSize, PAGE_READWRITE,
+                             &section_protection_values[i])) {
+         FatalAppExitA(0, "Failed to make executable sections writable!");
+      }
    }
 
    if (not apply_patches(exe_base, sections, ini_path)) {

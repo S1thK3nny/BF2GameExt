@@ -37,6 +37,67 @@ static auto resolve_file_address(uintptr_t offset, const slim_vector<section_inf
    return nullptr;
 }
 
+// Does the main module hold this list's identifying bytes? The id is a fixed
+// 8-byte sequence at a per-build offset, so a build is recognized by where the
+// bytes sit, not by the executable's name -- renamed or relocated copies still
+// identify, repacked ones do not.
+static bool matches_list(const exe_patch_list& exe_list, const uintptr_t exe_base,
+                         const slim_vector<section_info>& sections)
+{
+   if (exe_list.id_address_is_file_offset) {
+      const char* id_address = resolve_file_address(exe_list.id_address, sections);
+
+      return id_address and memeq(id_address, sizeof(exe_list.expected_id),
+                                  &exe_list.expected_id, sizeof(exe_list.expected_id));
+   }
+
+   return memeq(resolve(exe_base, exe_list.id_address), sizeof(exe_list.expected_id),
+                &exe_list.expected_id, sizeof(exe_list.expected_id));
+}
+
+// Walk a module's import directory looking for one DLL by name.
+static bool module_imports(const uintptr_t module_base, const char* dll_name)
+{
+   const char* const base = (const char*)module_base;
+
+   const IMAGE_DOS_HEADER& dos_header = *(const IMAGE_DOS_HEADER*)base;
+   if (dos_header.e_magic != IMAGE_DOS_SIGNATURE) return false;
+
+   const IMAGE_NT_HEADERS32& nt_headers = *(const IMAGE_NT_HEADERS32*)(base + dos_header.e_lfanew);
+   if (nt_headers.Signature != IMAGE_NT_SIGNATURE) return false;
+   if (nt_headers.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) return false;
+   if (nt_headers.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_IMPORT) return false;
+
+   const IMAGE_DATA_DIRECTORY& import_dir =
+      nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+
+   if (not import_dir.VirtualAddress or not import_dir.Size) return false;
+
+   for (const IMAGE_IMPORT_DESCRIPTOR* import =
+           (const IMAGE_IMPORT_DESCRIPTOR*)(base + import_dir.VirtualAddress);
+        import->Name; ++import) {
+      if (_stricmp(base + import->Name, dll_name) == 0) return true;
+   }
+
+   return false;
+}
+
+exe_identity identify_exe(const uintptr_t exe_base, const slim_vector<section_info>& sections)
+{
+   for (const exe_patch_list& exe_list : patch_lists) {
+      if (matches_list(exe_list, exe_base, sections)) return exe_identity::supported;
+   }
+
+   // No fingerprint matched, so decide how loudly to fail. An unrecognized BF2
+   // build is a real problem the user needs told about (a pre-patched exe, say);
+   // a launcher or tool that merely loaded our proxy is not our business at all.
+   // Every BF2 build links the Bink video decoder and no launcher does, which
+   // makes binkw32.dll the discriminator -- and unlike the executable's name, it
+   // survives the renamed copies people actually run.
+   return module_imports(exe_base, "binkw32.dll") ? exe_identity::unsupported
+                                                  : exe_identity::foreign;
+}
+
 // Verify a patch's site holds its expected original value (does not write).
 static bool verify_patch(const patch& patch, const uintptr_t exe_base,
                          const slim_vector<section_info>& sections)
@@ -91,23 +152,17 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
 
    ini_config cfg{ini_path};
 
+   // Name the host process. When identification fails this is the single most
+   // useful line in the log -- it says which executable we were actually loaded
+   // into, which is not always the one the user thinks they launched.
+   char module_path[MAX_PATH];
+   if (GetModuleFileNameA((HMODULE)exe_base, module_path, sizeof(module_path)))
+      log.printf("Host executable: %s\n", module_path);
+
    for (const exe_patch_list& exe_list : patch_lists) {
       log.printf("Checking executable against patch list: %s\n", exe_list.name);
 
-      if (exe_list.id_address_is_file_offset) {
-         const char* id_address = resolve_file_address(exe_list.id_address, sections);
-
-         if (not id_address or not memeq(id_address, sizeof(exe_list.expected_id),
-                                         &exe_list.expected_id, sizeof(exe_list.expected_id))) {
-            continue;
-         }
-      }
-      else {
-         if (not memeq(resolve(exe_base, exe_list.id_address),
-                       sizeof(exe_list.expected_id), &exe_list.expected_id, sizeof(exe_list.expected_id))) {
-            continue;
-         }
-      }
+      if (not matches_list(exe_list, exe_base, sections)) continue;
 
       log.printf("Identified executable as: %s\nApplying patches.\n", exe_list.name);
 

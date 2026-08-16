@@ -137,6 +137,7 @@
     <ClInclude Include="src\debug_commands\hover_springs.hpp" />
     <ClInclude Include="src\debug_commands\weapon_ranges.hpp" />
     <ClInclude Include="src\debug_commands\mem_watch.hpp" />
+    <ClInclude Include="src\debug_commands\freecam_target_fix.hpp" />
     <ClInclude Include="src\util\cfile.hpp" />
     <ClInclude Include="src\util\ini_config.hpp" />
     <ClInclude Include="src\util\slim_vector.hpp" />
@@ -211,6 +212,7 @@
     <ClCompile Include="src\debug_commands\hover_springs.cpp" />
     <ClCompile Include="src\debug_commands\weapon_ranges.cpp" />
     <ClCompile Include="src\debug_commands\mem_watch.cpp" />
+    <ClCompile Include="src\debug_commands\freecam_target_fix.cpp" />
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\util\audio_stream_limit.cpp" />

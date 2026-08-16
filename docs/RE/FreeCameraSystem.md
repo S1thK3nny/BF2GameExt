@@ -128,7 +128,7 @@ leaving the camera.
 - `gFollowingTethered` - also slaves position to `targetPos - followObjTether` each frame.
   The offset is world space, so the angle stays constant while tethered.
 
-Nothing clears `followThisObj` when the target entity is destroyed.
+Nothing clears `followThisObj` when the target entity is destroyed - see Engine defect 4.
 
 ### Collision debug ray
 
@@ -265,6 +265,40 @@ against all three images), so the guard ports unchanged:
 modtools  8B 41 04 F6 C4 04                mov eax,[ecx+4] ; test ah,4
 Steam/GOG 8B D1 F7 42 04 00 04 00 00       mov edx,ecx ; test [edx+4],0x400
 ```
+
+### 4. `followThisObj` outlives the entity it points at
+
+**This is the "spectate something that dies" crash.** `debugmenu.SetFreecamTarget` stores the
+raycast hit in `followThisObj` (`0x00B76C9C`) as a raw pointer and nothing ever clears it, so
+the first frame after the target is destroyed:
+
+```
+004ae332: mov edx,[0x00B76C9C]   ; followThisObj, still the dead entity
+004ae345: test edx,edx           ; non-null, so the guard passes
+004ae356: mov eax,[edx]          ; "vtable" of a freed block -> 0xDDDDDDDD
+004ae35f: call [eax+4]           ; read AV at 0xDDDDDDE1
+```
+
+`0xDDDDDDDD` is the debug-CRT freed-block fill, so the block really was released. Captured
+with `EAX=DDDDDDDD`, `ECX=EDX=213F6F3C` - `ECX` and `EDX` are the dead object, `EAX` is the
+vtable pointer read out of it.
+
+Three call sites dereference the pointer, so the pointer itself is what has to be validated:
+the tether-capture block at the top of `Update`, the tethered follow branch above
+(`0x004AE35F`), and the plain follow branch (`0x004AE3C0` / `0x004AE3D8`).
+
+**Guarded** by `PatcherDLL/src/debug_commands/freecam_target_fix.cpp`, called from the
+`FreeCamera::Update` hook in `hover_springs.cpp` before the original runs. It checks the
+target's vtable pointer against the exe's `.rdata` bounds (modtools
+`0x00A2A000..0x00AC3000`; every vtable in `game_addrs.hpp` falls inside it) and, on a miss,
+clears `followThisObj`, `gIsFollowingObj` and `gFollowingTethered` so the camera drops back
+to manual control. The one-shot request flags `gSetTargetObj` and `gSetTetherPosition` are
+left alone, so re-locking in the same frame still works.
+
+Limitation: a recycled block whose first dword happens to be a `.rdata` address passes the
+check. The exact fix is clearing the pointer at entity destruction - the manager loop at
+`0x0048FC70` is the natural hook - but the commands are modtools-only, so the cheap guard
+was judged proportionate.
 
 ## Reading a `RedLight::Deactivate` crash
 

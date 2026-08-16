@@ -84,6 +84,45 @@ that a shield must not inherit. So the real work is a soldier collision path tha
 extra attached collision volumes without dragging the ground handling along with it. Large,
 and gated on that collision work rather than on anything shield specific.
 
+**Improved dual pistols** - Two visible pistols that alternate fire, instead of the current
+one model and one muzzle. The only dual wield support the engine offers today is
+`OffhandGeometryName`, and every stock use of it is on a lightsaber, so a `cannon` class
+weapon that wants a second pistol has nothing to hang it on. Two routes:
+
+- Make `OffhandGeometryName` work outside melee weapons. The smaller change, but it only
+  ever attached a second *model*, so it buys the look and none of the behaviour.
+- Preferred: a new `dualcannon` ClassLabel deriving from `cannon`, owning both the second
+  model and the fire alternation.
+
+Either way the offhand attachment point should be named from the ODF rather than hardcoded,
+something like `OffhandHardPoint = "hp_weapons2"`, with the matching hardpoint added to the
+skeleton and model. The stock soldier skeleton carries only `hp_weapons` (CRC `0x2b960099`).
+
+Firing model: when weapon 1 finishes its salvo, switch to weapon 2; when weapon 2 finishes,
+switch back. An ODF option should pick the timing:
+
+- continuous - one trigger pull alternates 1, 2, 1, 2 for as long as it is held
+- per shot - one salvo per trigger pull, so fire 1, release, fire 2
+
+What is already mapped, so this does not start from nothing:
+
+- `Weapon` carries an `mIsOffhand` bit (`+0x2B0` bit 7), so the engine already distinguishes
+  an offhand weapon instance.
+- `EntitySoldier` carries a dual wield flag byte (modtools `+0x24A`, release `+0x232`,
+  bit 0), already in `entity_layout.hpp`.
+- That flag already reroutes input: the character weapon path treats channel 1 of a dual
+  wield pair as firing off the *reload* trigger, with no reload of its own. So the engine's
+  existing notion of dual wield is "two channels, the second one on the reload trigger",
+  not "one channel that alternates". Deciding whether to extend that or bypass it comes
+  first, because it settles whether this is a `Weapon` level change or an `EntitySoldier`
+  input change.
+
+Open question: whether the offhand should be a real second `Weapon` instance (two ammo
+pools, two reloads, two muzzle effects) or one weapon that alternates its fire origin
+between two hardpoints. The first is what "dual pistols" implies and is what the alternating
+salvo logic naturally wants; the second is far cheaper and may be enough if the ask turns
+out to be visual plus muzzle alternation.
+
 ## Rendering
 
 **Restore the decal system** - BF2 ships a complete decal pipeline with only the

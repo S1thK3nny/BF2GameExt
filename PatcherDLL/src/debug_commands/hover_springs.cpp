@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hover_springs.hpp"
 #include "weapon_ranges.hpp"
+#include "freecam_target_fix.hpp"
 #include "command_registry.hpp"
 
 #include <detours.h>
@@ -208,6 +209,11 @@ static FreeCamUpdate_t s_origFreeCamUpdate = nullptr;
 
 static void __fastcall hooked_FreeCamUpdate(void* ecx, void* edx, float dt)
 {
+   // Must run first: FreeCamera::Update virtual-calls its follow target before
+   // anything else, and the engine never clears that pointer when the target
+   // entity dies.
+   FreecamTargetFix::preFreeCamUpdate();
+
    s_origFreeCamUpdate(ecx, edx, dt);
 
    if (s_enabled) {

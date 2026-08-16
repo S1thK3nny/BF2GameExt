@@ -574,6 +574,13 @@ namespace modtools {
    constexpr uintptr_t freecam_update               = 0x004ae1b0;
    constexpr uintptr_t soldier_pcu                   = 0x00530B20;
 
+   // FreeCamera follow-target state, written by debugmenu.SetFreecamTarget and
+   // the tether command.  followThisObj is a raw GameObject* that nothing clears
+   // when the target entity is destroyed — see freecam_target_fix.cpp.
+   constexpr uintptr_t freecam_is_following_obj     = 0x00B76C35;
+   constexpr uintptr_t freecam_following_tethered   = 0x00B76C37;
+   constexpr uintptr_t freecam_follow_this_obj      = 0x00B76C9C;
+
    // ---- Debug Console (RedCommandConsole) ------------------------------------
 
    constexpr uintptr_t console_add_variable        = 0x007ed530;
