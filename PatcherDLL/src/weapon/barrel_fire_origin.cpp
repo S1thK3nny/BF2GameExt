@@ -1,5 +1,6 @@
 #include "pch.h"
 #include <math.h>
+#include <string.h>
 #include "barrel_fire_origin.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -23,15 +24,18 @@
 bool g_useBarrelFireOrigin = true;
 
 // Patched vtable slots + the originals they displaced (file-local; nothing else
-// touches them).  One entry per weapon class: WeaponCannon and WeaponLauncher, the
-// latter being a WeaponCannon subclass with its own vtable that overrides seven
-// slots — Fire not among them, so it reaches WeaponCannon::Fire and the same aimer
-// the hook writes.
-static const int kMaxPatchedSlots = 2;
+// touches them).  Two slots per weapon class — OverrideAimer (0x70) and Render
+// (0x8C) — on WeaponCannon and WeaponLauncher, the latter being a WeaponCannon
+// subclass with its own vtable that overrides seven slots.  Fire is not among
+// them, so it reaches WeaponCannon::Fire and the same aimer the hook writes, and
+// neither class overrides Render, so both Render slots hold the same function.
+static const int kMaxPatchedSlots = 4;
 static void** s_slot[kMaxPatchedSlots] = {};
 static void*  s_orig[kMaxPatchedSlots] = {};
 static int    s_slotCount = 0;
-static void*  s_hook = nullptr;
+
+// Weapon::mFirePointMatrix — PblMatrix, 16 floats, at Weapon+0x20 on every build.
+static const unsigned kFirePointMatrixOff = 0x20;
 
 // Controllable::mIsAiming offset — differs by build because TargetInfo shifts -4 on
 // release (modtools TargetInfo@0x148 -> mIsAiming 0x160; Steam/GOG @0x144 -> 0x15C).
@@ -197,10 +201,95 @@ static bool convergeDirection(float* dir, const float* origin, const float* barr
    return true;
 }
 
+// ---------------------------------------------------------------------------
+// Reflection regions — Weapon::Render hook.
+//
+// Weapon::Render is the engine's ONLY writer of Weapon::mFirePointMatrix.  It
+// bakes the matrix it is handed:
+//
+//   Weapon::Render(PblMatrix* world, RedPose* pose, RedColor* color,
+//                  uint flags, bool highRes)
+//       node = pose->Find(hp_fire)            // hash 0x2B960099 / 0xB7EC1D31
+//       if (!node) return;                    // no hardpoint -> matrix left alone
+//       world = node * world
+//       mRenderClass->mModel->Render(world, 0, color, flags, 0)
+//       if (color->a == 0) return;            // invisible -> matrix left alone
+//       mFirePointMatrix       = world
+//       mFirePointMatrix.trans = TransformCoord(mRenderClass->mFirePointOffset, world)
+//
+// which means the fire point is whatever the LAST draw of the frame used.
+//
+// Inside a reflection region that is not the real draw.  Dynamic entities get
+// their planar reflection by being drawn a SECOND time in the main pass with a
+// mirrored world matrix — EntityProp::Render and EntitySoldier::Render both do
+//
+//   if (!(flags & 0x200000) && FLRenderer::IsReflected(pos, radius, &R, false))
+//       Render(world * R, ..., flags & ~0x10000 | 0x10000100)
+//
+// where R is ReflectionRegion::m_reflectionMat, so the weapon is re-rendered
+// mirrored and mFirePointMatrix keeps the reflected position.  The aimer hook
+// then reads it a frame later and the bolt leaves from the mirror image: an
+// error of twice the shooter's height above the reflective plane, which is a
+// couple of units on the floor of dea1's falcon hangar and tens of units from
+// the walkways above it.
+//
+// Restoring the matrix around the mirrored draw fixes it at the source.  The
+// engine still gets the mirrored matrix for the duration of the call, so the
+// reflected muzzle flash and charge-up effect are unaffected, and afterwards
+// the field holds what the real draw put there.  This needs no idea of where
+// the mirror plane is, survives any number of overlapping reflection regions
+// (each mirrored draw is bracketed independently), and works for a mirror of
+// any orientation rather than just a horizontal floor.
+//
+// The predicate is the handedness of the matrix about to be baked: a mirror is
+// an improper transform, so its 3x3 determinant is negative.  Reflections are
+// the only source of one — a negative scale anywhere else would render the model
+// inside out — and a false positive would only mean this draw leaves the fire
+// point at its previous value, which is the safe direction to be wrong in.
+//
+// Weapon::Render stays plain __thiscall on all three builds (ECX = this, five
+// stack args, RET 0x14): it is virtual, so LTCG left the convention alone.
+// Verified off the Steam (0x679350) and GOG (0x67A3F0) prologue/epilogue.
+// ---------------------------------------------------------------------------
+typedef void(__fastcall* WeaponRender_t)(void* self, void* edx, const void* world,
+                                         void* pose, const void* color, unsigned flags,
+                                         int highRes);
+
+static WeaponRender_t s_origWeaponRender = nullptr;
+
+// 3x3 determinant of a PblMatrix's rotation part (rows are 4 floats each).
+static bool matrixIsMirrored(const void* matrix)
+{
+   const float* m = (const float*)matrix;
+   const float det = m[0] * (m[5] * m[10] - m[6] * m[9]) -
+                     m[1] * (m[4] * m[10] - m[6] * m[8]) +
+                     m[2] * (m[4] * m[9]  - m[5] * m[8]);
+   return det < 0.0f;
+}
+
+static void __fastcall hooked_weapon_Render(void* weapon, void* /*edx*/, const void* world,
+                                            void* pose, const void* color, unsigned flags,
+                                            int highRes)
+{
+   if (!s_origWeaponRender) return;   // never installed without this being set
+
+   const bool mirrored = g_useBarrelFireOrigin && weapon && world && matrixIsMirrored(world);
+
+   float saved[16];
+   if (mirrored)
+      memcpy(saved, (char*)weapon + kFirePointMatrixOff, sizeof(saved));
+
+   s_origWeaponRender(weapon, nullptr, world, pose, color, flags, highRes);
+
+   if (mirrored)
+      memcpy((char*)weapon + kFirePointMatrixOff, saved, sizeof(saved));
+}
+
 // Replacement for WeaponCannon::OverrideAimer (vtable slot 0x70).
 // Relocates the fire ORIGIN (Aimer::mFirePos, 0x88) to the barrel hardpoint
 // (Weapon::mFirePointMatrix trans).  Falls back to the vanilla aimer position when
-// the matrix is stale (first-person zoom) or reflected (water).
+// the matrix is stale (first-person zoom); reflection regions are handled at the
+// source by hooked_weapon_Render, not here.
 //
 // WeaponCannon::Fire (Phantom 0x7B5680) builds the OrdnanceDesc from mFirePos
 // (origin) and mDirection (0x48) INDEPENDENTLY, so moving the origin on its own
@@ -274,68 +363,37 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 
       // Weapon::mFirePointMatrix at weapon+0x20 (PblMatrix, 0x40 bytes).
       // PblMatrix::trans row is at offset 0x30 — the world-space fire position.
-      float* trans = (float*)((char*)weapon + 0x20 + 0x30);
+      const float* matrix = (const float*)((char*)weapon + kFirePointMatrixOff);
+      const float* trans  = matrix + 12;
 
       // Validate: check for uninitialized (0xCDCDCDCD) or zero
-      const uint32_t raw = *(uint32_t*)&trans[0];
+      const uint32_t raw = *(const uint32_t*)&trans[0];
       if (raw == 0xCDCDCDCD ||
           (trans[0] == 0.0f && trans[1] == 0.0f && trans[2] == 0.0f))
          return false;
 
+      // Reflection backstop.  hooked_weapon_Render keeps the mirrored duplicate
+      // draw from ever reaching this field, so a mirrored matrix here means that
+      // hook did not install (unknown build, vtable already patched by another
+      // mod) — fall back to the vanilla aimer rather than firing from the mirror
+      // image.  Cheap, and it fails safe instead of silently wrong.
+      if (matrixIsMirrored(matrix)) return false;
+
       float* aimerFirePos = (float*)((char*)aimer + 0x88);  // Aimer::mFirePos
-      float* rootPos      = (float*)((char*)aimer + 0x70);  // Aimer::mRootPos
+      const float* rootPos = (const float*)((char*)aimer + 0x70);  // Aimer::mRootPos
 
-      // Reflection guard: the engine's reflection render pass
-      // (FLRenderer::RenderReflections at 0x0081DCE0, region test at
-      // FLRenderer::IsReflected 0x0081CE10) mirrors mFirePointMatrix across
-      // the reflective surface.  Both water and reeflection regions
-      // floors produce a horizontal-plane Y-flip.
-      //
-      // A mirror flips the matrix's handedness — the 3×3 determinant goes
-      // from +1 (proper rotation) to -1 (improper rotation).  This catches
-      // every horizontal-plane mirror regardless of distance to the surface
-      // (a position-delta heuristic misses the case where the unit stands
-      // on the surface — Y delta drops to ~3 units).
-      //
-      // For a horizontal-plane reflection, only Y is mirrored: trans.x and
-      // trans.z are still the correct hp_fire world position.  We
-      // reconstruct Y by mirroring back across the soldier's feet plane,
-      // approximated as (rootPos.y − soldier_height).  Aimer::mRootPos was
-      // set by SetSoldierInfo to the un-reflected aim origin (eye height),
-      // so it's a clean reference.
-      const float* m0 = (float*)((char*)weapon + 0x20);
-      const float* m1 = m0 + 4;
-      const float* m2 = m0 + 8;
-      const float det =
-         m0[0] * (m1[1] * m2[2] - m1[2] * m2[1]) -
-         m0[1] * (m1[0] * m2[2] - m1[2] * m2[0]) +
-         m0[2] * (m1[0] * m2[1] - m1[1] * m2[0]);
-
-      float fireY = trans[1];
-      if (det < 0.0f) {
-         // Reconstruct un-mirrored Y using the soldier's authoritative
-         // world position (struct_base + 0x124).  owner is the Controllable
-         // base == entity == struct_base + 0x240, so world.y is at
-         // owner - 0x240 + 0x124 = owner - 0x11C.  This is the engine's
-         // own ground/origin reference for the unit — no soldier-height
-         // assumption needed, and it works regardless of stance.
-         // (Entity->Controllable == 0x240 assumed build-invariant; unverified
-         //  on Steam — only affects muzzle-flash Y inside water reflections.)
-         //
-         // Reflected trans.y = 2*Yw - true_y  →  true_y = 2*Yw - trans.y.
-         if (!owner) return false;
-         const float Yw = *(const float*)((const char*)owner - 0x11C);
-         fireY = 2.0f * Yw - trans[1];
-      }
-
-      // Position sanity: reject grossly out-of-body X/Z (corrupt matrix).
+      // Position sanity: reject a grossly out-of-body fire point (corrupt matrix).
+      // All three axes, since the barrel is always within arm's reach of the eye
+      // point no matter the stance or animation.
       const float dx = trans[0] - rootPos[0];
+      const float dy = trans[1] - rootPos[1];
       const float dz = trans[2] - rootPos[2];
-      if (dx < -5.0f || dx > 5.0f || dz < -5.0f || dz > 5.0f)
+      if (dx < -5.0f || dx > 5.0f || dy < -5.0f || dy > 5.0f ||
+          dz < -5.0f || dz > 5.0f)
          return false;
 
       aimerFirePos[0] = trans[0];
-      aimerFirePos[1] = fireY;
+      aimerFirePos[1] = trans[1];
       aimerFirePos[2] = trans[2];
 
       // Re-aim from the new origin so the shot still hits what the vanilla shot
@@ -352,16 +410,48 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    }
 }
 
+// Swaps one vtable slot to `hook`, but only if it still holds one of the two
+// vanilla values (impl or its ILT thunk) — otherwise the vtable is not the one we
+// think it is, or somebody else got there first.  Remembers what it displaced so
+// uninstall can put it back.  Returns the displaced entry, or null on refusal.
+static void* patch_vtable_slot(uintptr_t exe_base, uintptr_t slotVA,
+                               void* expected_impl, void* expected_thunk, void* hook)
+{
+   if (s_slotCount >= kMaxPatchedSlots) return nullptr;
+
+   void** slot = (void**)resolve(exe_base, slotVA);
+   if (*slot != expected_impl && *slot != expected_thunk)
+      return nullptr;
+
+   DWORD oldProt;
+   if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProt))
+      return nullptr;
+
+   void* orig = *slot;
+   s_slot[s_slotCount] = slot;
+   s_orig[s_slotCount] = orig;
+   s_slotCount++;
+   *slot = hook;
+   VirtualProtect(slot, sizeof(void*), oldProt, &oldProt);
+   return orig;
+}
+
 // ---------------------------------------------------------------------------
-// Install — build-aware (modtools + Steam).  Patches the OverrideAimer slot of the
-// WeaponCannon and WeaponLauncher vtables to our hook, each only after validating
-// that it still points at the vanilla implementation.  Struct offsets used by the
-// hook are build-invariant except mIsAiming (see s_misAimingOff).  GOG addresses
-// are not yet derived -> no-op.
+// Install — build-aware (modtools, Steam and GOG).  Patches two slots on each of
+// the WeaponCannon and WeaponLauncher vtables:
+//
+//   +0x70  OverrideAimer — relocates the fire origin to the barrel
+//   +0x8C  Render        — keeps the reflected duplicate draw from leaving a
+//                          mirrored matrix behind in mFirePointMatrix
+//
+// each only after validating that the slot still points at the vanilla entry.
+// Struct offsets used by the hooks are build-invariant except mIsAiming (see
+// s_misAimingOff).
 // ---------------------------------------------------------------------------
 void barrel_fire_origin_install(uintptr_t exe_base)
 {
    uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, scopeVA;
+   uintptr_t cannonRenderVA, launcherRenderVA, renderImplVA, renderThunkVA;
    bool rayHitIsRelease;
    switch (g_build) {
    case GameBuild::Modtools:
@@ -369,6 +459,10 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       launcherVA = game_addrs::modtools::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::modtools::weapon_override_aimer_impl;
       thunkVA    = game_addrs::modtools::weapon_override_aimer_thunk;
+      cannonRenderVA   = game_addrs::modtools::weapon_cannon_vftable_render;
+      launcherRenderVA = game_addrs::modtools::weapon_launcher_vftable_render;
+      renderImplVA     = game_addrs::modtools::weapon_render_impl;
+      renderThunkVA    = game_addrs::modtools::weapon_render_thunk;
       rayHitVA   = game_addrs::modtools::collision_manager_ray_hit;
       rayHitIsRelease = false;   // plain __cdecl, result in ST(0)
       scopeVA = game_addrs::modtools::scope_display_instance;
@@ -380,6 +474,10 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       launcherVA = game_addrs::steam::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::steam::weapon_override_aimer_impl;
       thunkVA    = game_addrs::steam::weapon_override_aimer_thunk;
+      cannonRenderVA   = game_addrs::steam::weapon_cannon_vftable_render;
+      launcherRenderVA = game_addrs::steam::weapon_launcher_vftable_render;
+      renderImplVA     = game_addrs::steam::weapon_render_impl;
+      renderThunkVA    = game_addrs::steam::weapon_render_thunk;
       rayHitVA   = game_addrs::steam::collision_manager_ray_hit;
       rayHitIsRelease = true;    // ECX/EDX/XMM2 + six stack args, result in XMM0
       scopeVA = game_addrs::steam::scope_display_instance;
@@ -391,6 +489,10 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       launcherVA = game_addrs::gog::weapon_launcher_vftable_override_aimer;
       implVA     = game_addrs::gog::weapon_override_aimer_impl;
       thunkVA    = game_addrs::gog::weapon_override_aimer_thunk;
+      cannonRenderVA   = game_addrs::gog::weapon_cannon_vftable_render;
+      launcherRenderVA = game_addrs::gog::weapon_launcher_vftable_render;
+      renderImplVA     = game_addrs::gog::weapon_render_impl;
+      renderThunkVA    = game_addrs::gog::weapon_render_thunk;
       rayHitVA   = game_addrs::gog::collision_manager_ray_hit;
       rayHitIsRelease = true;    // same LTCG RayHit convention as Steam
       scopeVA = game_addrs::gog::scope_display_instance;
@@ -407,24 +509,35 @@ void barrel_fire_origin_install(uintptr_t exe_base)
 
    s_scopeDisplay = (uintptr_t)resolve(exe_base, scopeVA);
 
-   void* expected_impl  = resolve(exe_base, implVA);
-   void* expected_thunk = resolve(exe_base, thunkVA);
-   s_hook = (void*)&hooked_cannon_OverrideAimer;
+   void* aimer_impl  = resolve(exe_base, implVA);
+   void* aimer_thunk = resolve(exe_base, thunkVA);
+   patch_vtable_slot(exe_base, cannonVA,   aimer_impl, aimer_thunk,
+                     (void*)&hooked_cannon_OverrideAimer);
+   patch_vtable_slot(exe_base, launcherVA, aimer_impl, aimer_thunk,
+                     (void*)&hooked_cannon_OverrideAimer);
 
-   const uintptr_t slotVAs[kMaxPatchedSlots] = { cannonVA, launcherVA };
-   for (int i = 0; i < kMaxPatchedSlots; i++) {
-      void** slot = (void**)resolve(exe_base, slotVAs[i]);
-      if (*slot != expected_impl && *slot != expected_thunk)
-         continue;   // already hooked, or not the vtable we think it is
+   // Render: the hook forwards to whatever it displaced, so the forward pointer
+   // has to be published before either slot is claimed — a render can land on us
+   // the moment the write does.  Both classes inherit the same Weapon::Render, so
+   // one pointer serves both; take it from whichever slot still holds a vanilla
+   // entry, so a slot somebody else already hooked can never become the target.
+   void* render_impl  = resolve(exe_base, renderImplVA);
+   void* render_thunk = resolve(exe_base, renderThunkVA);
+   void* const* cannonRender   = (void* const*)resolve(exe_base, cannonRenderVA);
+   void* const* launcherRender = (void* const*)resolve(exe_base, launcherRenderVA);
 
-      DWORD oldProt;
-      if (VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
-         s_slot[s_slotCount] = slot;
-         s_orig[s_slotCount] = *slot;
-         s_slotCount++;
-         *slot = s_hook;
-         VirtualProtect(slot, sizeof(void*), oldProt, &oldProt);
-      }
+   void* vanillaRender = nullptr;
+   if (*cannonRender == render_impl || *cannonRender == render_thunk)
+      vanillaRender = *cannonRender;
+   else if (*launcherRender == render_impl || *launcherRender == render_thunk)
+      vanillaRender = *launcherRender;
+
+   if (vanillaRender) {
+      s_origWeaponRender = (WeaponRender_t)vanillaRender;
+      patch_vtable_slot(exe_base, cannonRenderVA, render_impl, render_thunk,
+                        (void*)&hooked_weapon_Render);
+      patch_vtable_slot(exe_base, launcherRenderVA, render_impl, render_thunk,
+                        (void*)&hooked_weapon_Render);
    }
 }
 

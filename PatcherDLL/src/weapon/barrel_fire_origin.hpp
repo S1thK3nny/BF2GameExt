@@ -7,9 +7,11 @@
 //
 // Relocates the projectile fire origin to the weapon's barrel hardpoint
 // (Weapon::mFirePointMatrix) instead of the hardcoded chest-level aimer point.
-// Pure vtable detour + struct-memory reads.
+// Pure vtable detours + struct-memory reads: OverrideAimer (slot 0x70) moves the
+// origin, Render (slot 0x8C) keeps a reflection region's mirrored duplicate draw
+// from leaving that matrix reflected.
 //
-// GOG not derived.
+// modtools, Steam and GOG.
 // Install from dllmain's build-aware section, after game_build_select().
 // =============================================================================
 

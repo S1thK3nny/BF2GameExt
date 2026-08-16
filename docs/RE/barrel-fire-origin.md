@@ -6,8 +6,6 @@ Overrides the projectile fire origin for `WeaponCannon` so bolts originate from 
 weapon model's barrel hardpoint (`Weapon::mFirePointMatrix`) instead of the hardcoded
 chest-level aimer position (`sEyePointOffset`).
 
-Controlled at runtime via Lua: `SetBarrelFireOrigin(1)` / `SetBarrelFireOrigin(0)`.
-
 Scoped to **WeaponCannon and WeaponLauncher** via vtable patching. See
 [Patched classes](#patched-classes) for why those two and what it would take to add
 more.
@@ -18,23 +16,14 @@ more.
 
 **Working:**
 - Barrel fire origin override — bolts come from gun barrel in both first and third person
-- Toggle on/off via `SetBarrelFireOrigin(1)` / `SetBarrelFireOrigin(0)`
-- Lua 5.0 truthiness fix — `0` correctly disables (was the root cause of all
-  toggle-off failures across every approach we tried)
-- Water reflection Y-clamp — when mFirePointMatrix Y delta from mRootPos exceeds
-  5 units, Y is clamped to `rootPos - 2.7` (approximate barrel offset)
-- Writes corrected position to both `mFirePos` AND `mFirePointMatrix` trans (muzzle
-  flash reads mFirePos; projectile system may read the matrix directly)
 - Direction convergence while zoomed — the barrel origin stays active at every zoom
   level, and `Aimer::mDirection` is re-aimed at the point the vanilla ray would hit,
   found with `CollisionManager::RayHit` (see below)
+- Reflection regions — the mirrored duplicate draw no longer contaminates
+  `mFirePointMatrix`; see [Reflection regions](#reflection-regions)
 - First-person zoom still reverts to the vanilla aimer (`mFirePointMatrix` goes stale)
 
 **Known Issues:**
-- **Water reflection — projectile origin:** Muzzle flash is correct (reads mFirePos)
-  but bolts still originate from reflected position. The render reflection pass
-  overwrites `mFirePointMatrix` AFTER our hook. Y-clamp helps for large reflections
-  but subtle reflections (water near character height, delta < 5) slip through.
 - **Animation timing — running to fire:** When firing during a running animation, the
   bolt originates from the current barrel tip position (which may be far to the side
   in the run animation) before the fire animation plays. This is inherent to reading
@@ -102,15 +91,96 @@ Engine frame update:
         → writes mFirePos, mRootPos, mDirection, bDirect=true
     → calls weapon->OverrideAimer() via vtable
         → our hook checks zoom + first-person → skip if both true
-        → reads Weapon::mFirePointMatrix trans
+        → reads Weapon::mFirePointMatrix trans (left there by last frame's draw)
         → overwrites aimer->mFirePos with barrel world position
-        → also writes corrected pos back to mFirePointMatrix trans
+        → re-aims aimer->mDirection at the vanilla ray's hit point while zoomed
         → returns true
+  WeaponCannon::Fire builds OrdnanceDesc.pos straight from Aimer::mFirePos
 
 Rendering:
-  MuzzleFlashRenderer::RenderFlash reads aimer->mFirePos → correct position
-  Projectile system reads mFirePointMatrix → may get re-contaminated by reflection
+  Weapon::Render bakes the matrix it is handed into mFirePointMatrix, so the
+  fire point the hook reads next frame is whatever the LAST draw of this frame
+  used — see Reflection regions below.
 ```
+
+### Reflection regions
+
+`Weapon::Render` (modtools `0x61DFA0`, Steam `0x679350`, GOG `0x67A3F0`, Phantom
+`0x7AE8C0`) is the engine's **only** writer of `mFirePointMatrix`:
+
+```
+Weapon::Render(PblMatrix* world, RedPose* pose, RedColor* color,
+               uint flags, bool highRes)
+    node  = pose->Find(0x2B960099)      // 0xB7EC1D31 when WeaponClass flag 0x80
+    if (!node) return;                  // no hardpoint -> matrix left alone
+    world = node * world
+    mRenderClass->mModel->Render(world, 0, color, flags, 0)
+    if (color->a == 0) return;          // invisible -> matrix left alone
+    mFirePointMatrix       = world
+    mFirePointMatrix.trans = TransformCoord(mRenderClass->mFirePointOffset, world)
+```
+
+Dynamic entities get their planar reflection by being **drawn a second time in the
+main pass with a mirrored world matrix**, not by the reflection-texture pass. Every
+entity Render does the same thing (`EntityProp::Render` `0x560DC0` is the small
+readable example, `EntitySoldier::Render` `0x575380` the one that matters):
+
+```
+if (!(flags & 0x200000) &&                      // not already the reflection scene
+    FLRenderer::IsReflected(&worldPos, radius, &R, false))
+    reflMatrix = world * R
+    reflFlags  = flags & ~0x10000 | 0x10000100
+```
+
+`FLRenderer::IsReflected` (Phantom `0x88DF30`) walks `ReflectionRegion::s_VisibleList`
+and returns the **first** region containing the point, handing back that region's
+`m_reflectionMat`. `EntitySoldier::Render` then renders each weapon channel twice —
+Phantom `0x57844E` with the real matrix, `0x57848B` with `reflMatrix`, and the same
+pair at `0x5784CB`/`0x5784FE` for the offhand channel — so the **mirrored draw is the
+last write of the frame** and `mFirePointMatrix` keeps the reflected fire point.
+
+Reading it a frame later put the bolt at the mirror image: an error of twice the
+shooter's height above the reflective plane. In dea1's `falconhanger` (a light region
+overlapped by reflection region `hanger12`, `dea1_reflection_region.RGN`, centre
+`-137.41, 58.01, 18.39`, size `34.5, 8, 32.4`) that is ~0 standing on the hangar
+floor, a few units on the stairs, and tens of units from the walkways above — far
+enough that the bolt's sound never reached the player, which first read as "no sound".
+
+**Fix (2026-08-17):** hook `Weapon::Render` on vtable slot `0x8C` and bracket the
+mirrored draw — save `mFirePointMatrix`, call the original, put it back. The engine
+still sees the mirrored matrix for the whole call, so the reflected muzzle flash
+(`WeaponClass::RenderFlash`) and the charge-up emitter (`FLEffectObject::AttachEffectToMatrix`)
+are unchanged; afterwards the field holds what the real draw wrote.
+
+The predicate is the handedness of the matrix about to be baked — a mirror is an
+improper transform, so its 3×3 determinant is negative. This needs no knowledge of
+where the mirror plane is, survives any number of overlapping reflection regions
+(each mirrored draw is bracketed on its own), and works for a mirror of any
+orientation rather than only a horizontal floor.
+
+Neither `WeaponCannon` nor `WeaponLauncher` overrides `Render`, so both vtable slots
+hold the same entry. `Weapon::Render` stays plain `__thiscall` on all three builds
+(ECX = `this`, five stack args, `RET 0x14`) — it is virtual, so LTCG left the
+convention alone; verified off the Steam and GOG prologue/epilogue.
+
+**The general hazard:** anything that caches render-time state per object is wrong
+inside a reflection region, because the object is drawn twice and the mirrored draw
+wins. Suspect this first for any bug that only appears near reflective floors.
+
+#### Approaches tried and rejected
+
+- **Un-mirror across the soldier's feet** (`true_y = 2*Yw − trans.y`, `Yw` read at
+  `owner − 0x11C`). Exact only while standing *on* the reflective floor and wrong by
+  twice the height above the plane everywhere else, unbounded — this was the falcon
+  hangar bug. It also rested on the unverified `Entity→Controllable == 0x240`
+  assumption.
+- **Carry the barrel-to-eye Y delta across frames** (cache `trans.y − mRootPos.y` on
+  un-mirrored frames, rebuild Y from it on mirrored ones). Inside a reflection region
+  the mirrored draw is the last write *every* frame, so there are no un-mirrored
+  frames to sample: a weapon that first appears inside the region never gets a delta.
+  It also only handles a horizontal mirror, and two overlapping regions can leave a
+  doubly-mirrored (positive-determinant) matrix that the test never sees.
+- **Bail on `det < 0`.** Surrenders the feature exactly where the region is.
 
 ### Key Insight
 
@@ -205,74 +275,23 @@ are shifted by +4 bytes in the modtools binary compared to the PDB.
 
 ## Current Code State
 
-### weapon/barrel_fire_origin.cpp — hooked_cannon_OverrideAimer (snippet below is an older revision; see the source for current)
+`weapon/barrel_fire_origin.cpp` installs two vtable hooks per class:
 
-```cpp
-static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
-{
-   if (!g_useBarrelFireOrigin) return false;
+| Slot | Hook | Job |
+|------|------|-----|
+| `+0x70` `OverrideAimer` | `hooked_cannon_OverrideAimer` | writes `Aimer::mFirePos` from `mFirePointMatrix` trans, and re-aims `mDirection` while zoomed |
+| `+0x8C` `Render` | `hooked_weapon_Render` | brackets the mirrored duplicate draw so it cannot leave a reflected `mFirePointMatrix` behind |
 
-   // Zoom detection: revert to vanilla aimer only during first-person zoom.
-   // mIsAiming (owner+0x160): runtime zoomed state.
-   // mIsFirstPersonView: Controllable+0x34 (mTracker ptr) -> Tracker+0x14.
-   void* owner = *(void**)((char*)weapon + 0x6C);
-   if (owner) {
-      bool isZoomed = *(bool*)((char*)owner + 0x160);
-      if (isZoomed) {
-         void* tracker = *(void**)((char*)owner + 0x34);
-         if (tracker) {
-            bool isFirstPerson = *(bool*)((char*)tracker + 0x14);
-            if (isFirstPerson) return false;
-         }
-      }
-   }
+`OverrideAimer` writes **only** `Aimer::mFirePos` — never `mRootPos` (that would
+corrupt stance/LOS) and never `mFirePointMatrix` itself (the engine owns it). Its
+guards, all falling back to the vanilla aimer: first-person zoom, scope texture up,
+null aimer, `0xCDCDCDCD`/zero matrix, a mirrored matrix (a backstop for the Render
+hook failing to install), and a fire point more than 5 units from `mRootPos` on any
+axis.
 
-   __try {
-      void* aimer = *(void**)((char*)weapon + 0x70);
-      if (!aimer) return false;
-
-      float* trans = (float*)((char*)weapon + 0x20 + 0x30);
-
-      const uint32_t raw = *(uint32_t*)&trans[0];
-      if (raw == 0xCDCDCDCD ||
-          (trans[0] == 0.0f && trans[1] == 0.0f && trans[2] == 0.0f))
-         return false;
-
-      float* aimerFirePos = (float*)((char*)aimer + 0x88);
-      float* rootPos      = (float*)((char*)aimer + 0x70);
-
-      // Water reflection Y-clamp
-      float fireY = trans[1];
-      float barrelRootDy = fireY - rootPos[1];
-      if (barrelRootDy < -5.0f || barrelRootDy > 5.0f) {
-         fireY = rootPos[1] - 2.7f;
-      }
-
-      // Write to both mFirePos and mFirePointMatrix trans
-      aimerFirePos[0] = trans[0];
-      aimerFirePos[1] = fireY;
-      aimerFirePos[2] = trans[2];
-
-      trans[0] = aimerFirePos[0];
-      trans[1] = fireY;
-      trans[2] = aimerFirePos[2];
-      return true;
-   }
-   __except (EXCEPTION_EXECUTE_HANDLER) {
-      return false;
-   }
-}
-```
-
-### lua/lua_funcs.cpp — SetBarrelFireOrigin
-
-Uses `isnumber`/`tonumber` to handle Lua 5.0 truthiness (`0` is truthy in Lua).
-Swaps WeaponCannon vtable entry between hook and vanilla via VirtualProtect.
-
-### lua/lua_funcs.cpp — DumpAimerInfo
-
-Diagnostic function. Dumps aimer and weapon data to `Bfront2.log`, including
-a wide byte range at `owner+0x100..+0x300` for struct exploration.
+`lua/lua_funcs.cpp — DumpAimerInfo` is the diagnostic: dumps aimer and weapon data
+to `Bfront2.log`, including a wide byte range at `owner+0x100..+0x300` for struct
+exploration.
 
 ---
 
@@ -505,20 +524,9 @@ weapon in the level. At 1x it is far below what anyone can see.
 
 ## Lua API
 
-### SetBarrelFireOrigin(enable)
-
-Toggle barrel fire origin override for WeaponCannon.
-
-```lua
-SetBarrelFireOrigin(1)     -- enable
-SetBarrelFireOrigin(0)     -- disable
-SetBarrelFireOrigin(true)  -- enable
-SetBarrelFireOrigin(false) -- disable
-```
-
-**Lua 5.0 truthiness note:** In Lua 5.0, the number `0` is truthy — `lua_toboolean`
-returns 1 for it. The implementation checks `lua_isnumber` first and uses
-`lua_tonumber` for numeric args, so `SetBarrelFireOrigin(0)` correctly disables.
+Control is INI-only (`[Fixes] BarrelFireOriginFix`). The old `SetBarrelFireOrigin`
+live toggle is gone — see [Approaches Tried and Rejected](#lua-truthiness-bug-root-cause-of-all-toggle-off-failures)
+for the Lua 5.0 truthiness trap it left behind.
 
 ### DumpAimerInfo(charIndex [, channel])
 
@@ -535,17 +543,31 @@ Output includes: `Weapon::mZoom`, owner byte dump (0x100-0x300),
 
 ---
 
-## Address Reference (modtools exe, base 0x400000)
+## Address Reference (base 0x400000)
+
+Everything the installer resolves, plus the RE landmarks. All three retail-family
+entries live in `game_addrs::{modtools,steam,gog}`.
+
+| Item | modtools | Steam | GOG |
+|------|----------|-------|-----|
+| Weapon::OverrideAimer impl | 0x61CEE0 | 0x677780 | 0x678820 |
+| Weapon::OverrideAimer thunk | 0x4068DE | *(none — == impl)* | *(none)* |
+| WeaponCannon vtable | 0xA52468 | 0x7B057C | 0x7B14F4 |
+| WeaponLauncher vtable | 0xA53AE8 | 0x7B12A4 | 0x7B221C |
+| ↳ OverrideAimer slot (+0x70) cannon / launcher | 0xA524D8 / 0xA53B58 | 0x7B05EC / 0x7B1314 | 0x7B1564 / 0x7B228C |
+| Weapon::Render impl | 0x61DFA0 | 0x679350 | 0x67A3F0 |
+| Weapon::Render thunk | 0x4072BB | *(none — == impl)* | *(none)* |
+| ↳ Render slot (+0x8C) cannon / launcher | 0xA524F4 / 0xA53B74 | 0x7B0608 / 0x7B1330 | 0x7B1580 / 0x7B22A8 |
+| ScopeDisplay* global | 0xBA36D8 | 0x1EAF020 | 0x1EB04D4 |
+| CollisionManager::RayHit | 0x42E230 (thunk 0x407581) | 0x45E3A0 | 0x45E3A0 |
+| Aimer::SetSoldierInfo | 0x5EE9D0 (thunk 0x402702) | 0x43D290 | 0x43D280 |
+
+Modtools-only landmarks (RE reference, not resolved at runtime):
 
 | Item | Address |
 |------|---------|
-| Weapon::OverrideAimer impl | 0x61CEE0 |
-| Weapon::OverrideAimer thunk | 0x4068DE |
-| WeaponCannon vtable OverrideAimer slot | 0xA524D8 |
-| Aimer::SetSoldierInfo | 0x5EE9D0 (thunk 0x402702) |
 | EntitySoldier::UpdateWeaponAndAimer | 0x52C980 (thunk 0x40283D) |
 | Weapon::ZoomFirstPerson | 0x61B640 (static type check, NOT runtime) |
-| MuzzleFlashRenderer::RenderFlash | needs address |
 | sEyePointOffset (3x PblVector3) | 0xACE360 |
 | sEyePointRelativeWeaponOffset | 0xACE384 |
 | Character array base ptr | 0xB93A08 |
@@ -554,6 +576,20 @@ Output includes: `Weapon::mZoom`, owner byte dump (0x100-0x300),
 | Global class def list | 0xACD2C8 |
 | GameLog | 0x7E3D50 |
 | HashString | 0x7E1BD0 |
+
+Phantom landmarks for the reflection path (`Battlefront2_Phantom.exe`):
+
+| Item | Address |
+|------|---------|
+| Weapon::Render | 0x7AE8C0 (thunk 0x412BA7, vtable slot 0x8C) |
+| WeaponCannon::Fire | 0x7B5680 |
+| EntitySoldier::Render | 0x575380 |
+| ↳ FLRenderer::IsReflected call + reflected flags/matrix setup | 0x576001 – 0x5760A6 |
+| ↳ Weapon::Render, real / mirrored (main channel) | 0x57844E / 0x57848B |
+| ↳ Weapon::Render, real / mirrored (offhand channel) | 0x5784CB / 0x5784FE |
+| EntityProp::Render (small readable example of the same pattern) | 0x560DC0 |
+| FLRenderer::IsReflected | 0x88DF30 (thunk 0x419F01) |
+| FLRenderer::RenderReflections (the reflection *texture* pass) | 0x88F730 |
 
 ---
 
@@ -598,21 +634,13 @@ sites at `0x6740ee`/`0x674154`). Returning `true` unconditionally has no
 second-order AI/lock-on effect. The earlier verification stands: vtable slot and
 Aimer/Weapon offsets are correct and the mFirePos write is safe.
 
-## Steam Port (2026-07-08) — superseded by the crash note above
+## Retail port (2026-07-08, GOG completed later)
 
-Ported the origin-only fix (no direction convergence — that attempt was reverted).
-Installed build-aware via `barrel_fire_origin_install()` (weapon/barrel_fire_origin.cpp),
-called from dllmain's build-aware section, so it runs on Steam as well as modtools. GOG
-not yet derived (no-ops there).
-
-**Steam addresses** (base 0x400000), already present in `game_addrs::steam`:
-
-| Item | Steam | Verified |
-|------|-------|----------|
-| Weapon::OverrideAimer impl (returns false) | 0x00677780 | slot content + decompile |
-| Weapon::OverrideAimer thunk | 0x00677780 | no ILT thunk in release; == impl |
-| WeaponCannon vtable | 0x007B057C | ctor `mov [esi],0x7b057c` |
-| WeaponCannon OverrideAimer slot (vtable+0x70) | 0x007B05EC | contains 0x00677780 |
+Installed build-aware via `barrel_fire_origin_install()`
+(`weapon/barrel_fire_origin.cpp`), called from dllmain's build-aware section, so all
+three builds get the same hooks. Addresses are in the table above; the Render slots
+were derived by reading the vtables (`+0x70` matching the known OverrideAimer entry
+confirms the base) and `tools/port_gog.py code 0x679350` → `0x67A3F0`, score 1.00.
 
 **Struct offsets** — all build-invariant EXCEPT `mIsAiming` (Controllable):
 
@@ -625,35 +653,10 @@ not yet derived (no-ops there).
 | WeaponClass +0x2B0 zoom bit | 0x2B0 | 0x2B0 | WeaponClass invariant |
 | Aimer::mFirePos/mRootPos | 0x88/0x70 | same | Aimer invariant |
 
-The hook selects `mIsAiming` via `s_barrelMisAimingOff` (set in the installer).
-
-**Caveat — reflection guard:** the water-reflection Y reconstruction reads
-`owner-0x11C` (soldier world Y = Entity+0x124, assuming Entity→Controllable=0x240).
-That assumption is unverified on Steam; if it's off, only the muzzle-flash Y inside
-water reflections is wrong (main pass uses trans[1] directly, unaffected; whole block
-is under det<0 + __try). Verify if reflections look wrong near water on Steam.
-
----
-
-## Address Reference (modtools exe, base 0x400000)
-
-| Item | Address |
-|------|---------|
-| Weapon::OverrideAimer impl | 0x61CEE0 |
-| Weapon::OverrideAimer thunk | 0x4068DE |
-| WeaponCannon vtable OverrideAimer slot | 0xA524D8 |
-| Aimer::SetSoldierInfo | 0x5EE9D0 (thunk 0x402702) |
-| EntitySoldier::UpdateWeaponAndAimer | 0x52C980 (thunk 0x40283D) |
-| Weapon::ZoomFirstPerson | 0x61B640 (static type check, NOT runtime) |
-| MuzzleFlashRenderer::RenderFlash | needs address |
-| sEyePointOffset (3x PblVector3) | 0xACE360 |
-| sEyePointRelativeWeaponOffset | 0xACE384 |
-| Character array base ptr | 0xB93A08 |
-| Max character count | 0xB939F4 |
-| Team array ptr | 0xAD5D64 |
-| Global class def list | 0xACD2C8 |
-| GameLog | 0x7E3D50 |
-| HashString | 0x7E1BD0 |
+The hook selects `mIsAiming` via `s_misAimingOff` (set in the installer). The old
+reflection guard's `owner-0x11C` read (soldier world Y, assuming
+`Entity→Controllable == 0x240`) is gone with the un-mirror it served — the hook no
+longer has any unverified build-variant offset.
 
 ---
 
@@ -661,11 +664,11 @@ is under det<0 + __try). Verify if reflections look wrong near water on Steam.
 
 | File | Purpose |
 |------|---------|
-| `PatcherDLL/src/weapon/barrel_fire_origin.{hpp,cpp}` | OverrideAimer vtable hook + build-aware install/uninstall (moved here from lua_hooks 2026-07-08; no Lua dependency) |
+| `PatcherDLL/src/weapon/barrel_fire_origin.{hpp,cpp}` | OverrideAimer + Render vtable hooks and build-aware install/uninstall (moved here from lua_hooks 2026-07-08; no Lua dependency) |
 | `PatcherDLL/src/lua/lua_funcs.cpp` | `DumpAimerInfo` diagnostic Lua function (modtools-only) |
 | `PatcherDLL/src/core/dllmain.cpp` | reads INI toggle; calls `barrel_fire_origin_install` in the build-aware section |
-| `PatcherDLL/src/core/game_addrs.hpp` | modtools + steam addresses |
-| `docs/barrel-fire-origin.md` | This file |
+| `PatcherDLL/src/core/game_addrs.hpp` | modtools + steam + gog addresses |
+| `docs/RE/barrel-fire-origin.md` | This file |
 
 **Note:** `SetBarrelFireOrigin` (the old live Lua toggle) no longer exists — control
 is INI-only (`[Fixes] BarrelFireOriginFix`). The hook was historically parked in
@@ -676,14 +679,7 @@ now lives in its own `weapon/` module.
 
 ## Known Issues / Future Work
 
-1. **Water reflection — projectile origin:** Muzzle flash is correct (reads mFirePos)
-   but bolts still originate from reflected position (projectile system reads
-   mFirePointMatrix which gets re-contaminated by render pass). Possible fixes:
-   - Find a pre-reflection copy of bone transforms (trace XREFs to weapon+0x20)
-   - Hook the projectile spawn to force it to read mFirePos
-   - Find a reflection region flag to detect and skip during reflection pass
-
-2. **Animation timing — running to fire:** When firing during a running animation, the
+1. **Animation timing — running to fire:** When firing during a running animation, the
    bolt originates from the barrel tip's current animated position (may be far to the
    side) before the fire animation transitions. `mFirePointMatrix` always reflects the
    current animation frame — there's no way to predict the post-transition barrel
@@ -693,14 +689,14 @@ now lives in its own `weapon/` module.
    - Fixed offset from rootPos along aim direction (consistent but less realistic)
    - Accept as cosmetic (current approach)
 
-3. **Per-weapon-class control:** Patches WeaponCannon and WeaponLauncher. See
+2. **Per-weapon-class control:** Patches WeaponCannon and WeaponLauncher. See
    [Patched classes](#patched-classes) — extending further needs a check that the
    class's `Fire` reads the aimer, not just a vtable address.
 
-4. **Slight aiming offset:** The barrel position is ~0.5 units from the aimer
+3. **Slight aiming offset:** The barrel position is ~0.5 units from the aimer
    position. At close range this causes a small parallax between crosshair and impact.
 
-5. **AI units:** The vtable patch affects all WeaponCannon instances, including AI.
+4. **AI units:** The vtable patch affects all WeaponCannon instances, including AI.
    This is generally desirable but may need a per-entity toggle if issues arise.
 
 ---

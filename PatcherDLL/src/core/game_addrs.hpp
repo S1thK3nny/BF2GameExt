@@ -65,6 +65,15 @@ namespace modtools {
    constexpr uintptr_t weapon_override_aimer_impl  = 0x61CEE0;
    constexpr uintptr_t weapon_override_aimer_thunk = 0x4068DE;
 
+   // Weapon::Render(PblMatrix*, RedPose*, RedColor*, uint flags, bool highRes) —
+   // vtable slot 0x8C, and the ONLY writer of Weapon::mFirePointMatrix.  Neither
+   // WeaponCannon nor WeaponLauncher overrides it, so both slots hold the same
+   // thunk.  See docs/RE/barrel-fire-origin.md ("Reflection regions").
+   constexpr uintptr_t weapon_cannon_vftable_render   = 0xA524F4;
+   constexpr uintptr_t weapon_launcher_vftable_render = 0xA53B74;
+   constexpr uintptr_t weapon_render_impl             = 0x61DFA0;
+   constexpr uintptr_t weapon_render_thunk            = 0x4072BB;
+
    // Weapon::ZoomFirstPerson() — returns true if weapon is in first-person zoom
    constexpr uintptr_t weapon_zoom_first_person = 0x61B640;
 
@@ -819,6 +828,14 @@ namespace steam {
    constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
    constexpr uintptr_t weapon_override_aimer_thunk = 0x00677780;          // No ILT thunk in release build; same as impl
    constexpr uintptr_t weapon_zoom_first_person = 0x00677d40;
+
+   // Weapon::Render — vtable slot 0x8C on both classes; sole writer of
+   // Weapon::mFirePointMatrix.  Still plain __thiscall under LTCG (ECX = this,
+   // five stack args, RET 0x14) — verified off the prologue/epilogue.
+   constexpr uintptr_t weapon_cannon_vftable_render   = 0x007b0608;       // 0x7b057c + 0x8c
+   constexpr uintptr_t weapon_launcher_vftable_render = 0x007b1330;       // 0x7b12a4 + 0x8c
+   constexpr uintptr_t weapon_render_impl             = 0x00679350;
+   constexpr uintptr_t weapon_render_thunk            = 0x00679350;
 
    // ScopeDisplay* — same +0x4C9 visible flag as modtools (the instance is 0x500
    // here vs 0x520 in the debug build, but only the trailing GameSound members
@@ -1666,6 +1683,10 @@ namespace gog {
    constexpr uintptr_t weapon_override_aimer_impl     = 0x00678820;
    constexpr uintptr_t weapon_override_aimer_thunk    = 0x00678820;
    constexpr uintptr_t weapon_zoom_first_person       = 0x00678de0;
+   constexpr uintptr_t weapon_cannon_vftable_render   = 0x007b1580;       // 0x7b14f4 + 0x8c
+   constexpr uintptr_t weapon_launcher_vftable_render = 0x007b22a8;       // 0x7b221c + 0x8c
+   constexpr uintptr_t weapon_render_impl             = 0x0067a3f0;       // port_gog.py from steam 0x679350, score 1.00
+   constexpr uintptr_t weapon_render_thunk            = 0x0067a3f0;
    constexpr uintptr_t scope_display_instance         = 0x01eb04d4;
    constexpr uintptr_t collision_manager_ray_hit      = 0x0045e3a0;
    constexpr uintptr_t weapon_update                  = 0x00679250;
