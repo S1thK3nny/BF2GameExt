@@ -10,6 +10,7 @@
 // reversing out when boost ends.  Same convention as "takeoff" and "fins".
 //
 // Frame 0 = normal flying pose.  Final frame = full boost pose.
+// The clip's frame count sets the blend duration, at the standard 30 fps.
 // =============================================================================
 
 void flyer_boost_anim_install(uintptr_t exe_base);

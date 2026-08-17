@@ -98,6 +98,14 @@ Either way the offhand attachment point should be named from the ODF rather than
 something like `OffhandHardPoint = "hp_weapons2"`, with the matching hardpoint added to the
 skeleton and model. The stock soldier skeleton carries only `hp_weapons` (CRC `0x2b960099`).
 
+The `dualcannon` route is cheaper than it sounds: registering a new `ClassLabel` is one
+allocation plus one constructor call, and the whole extension surface is two pure virtuals
+(`Derive` and `Build`) plus `SetProperty`. Extra per-instance state is free because the new
+class owns every allocation of its own type. Full write-up, including what still has to be
+checked before it could ship, in
+[docs/RE/WeaponClassFactory.md](docs/RE/WeaponClassFactory.md). That does not settle the
+open question below, which is the part that actually needs deciding.
+
 Firing model: when weapon 1 finishes its salvo, switch to weapon 2; when weapon 2 finishes,
 switch back. An ODF option should pick the timing:
 

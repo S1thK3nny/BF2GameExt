@@ -44,7 +44,12 @@ static uintptr_t kRT_RedPose     = 0x180C;  // Steam 0x17CC  LEA ECX,[ESI+0x17cc
 static uintptr_t kCls_AnimObj     = 0x878;  // Steam 0x7B0  MOV [ESI+0x7b0],EDI @004b9748
 static uintptr_t kCls_TakeoffAnim = 0x87C;  // Steam 0x7B4  MOV [ESI+0x7b4],EAX @004b9780
 
-static constexpr float kTransitionTime = 0.6f;
+// The clip's own length sets the transition time: BF2 animations are munged at
+// a fixed 30 fps, so (frames-1)/30 is the authored duration.  A one-frame clip
+// has no duration to read, and anything shorter than the floor would blend in a
+// single render tick, so both fall back to kMinTransitionTime.
+static constexpr float kAnimFps = 30.0f;
+static constexpr float kMinTransitionTime = 0.05f;
 static constexpr uintptr_t kRenderThisToBase = 0x94;
 
 // Global identity matrix used by Skeleton::Finalize
@@ -268,6 +273,10 @@ bool flyer_boost_anim_render_prepare(char* structBase)
       BoostInstance* inst = findOrCreateInst(structBase);
       if (!inst) return false;
 
+      uint16_t bsFrames = *(uint16_t*)((char*)cls->animBoost + 8);
+      float transitionTime = (float)(bsFrames - 1) / kAnimFps;
+      if (!(transitionTime > kMinTransitionTime)) transitionTime = kMinTransitionTime;
+
       // Update ratio (freeze during pause)
       DWORD now = GetTickCount();
       float dt = 0.0f;
@@ -278,7 +287,7 @@ bool flyer_boost_anim_render_prepare(char* structBase)
       inst->lastTickMs = now;
 
       float target = isBoosting ? 1.0f : 0.0f;
-      float step = dt / kTransitionTime;
+      float step = dt / transitionTime;
       if (inst->boostRatio < target) {
          inst->boostRatio += step;
          if (inst->boostRatio > target) inst->boostRatio = target;
@@ -305,12 +314,10 @@ bool flyer_boost_anim_render_prepare(char* structBase)
       void* takeoffAnim = *(void**)((char*)classPtr + kCls_TakeoffAnim);
       if (!takeoffAnim) return false;  // need takeoff as base
 
-      // Get frame counts
       uint16_t tkFrames = *(uint16_t*)((char*)takeoffAnim + 8);
-      uint16_t bsFrames = *(uint16_t*)((char*)cls->animBoost + 8);
 
       // Step 1: Compute base pose (takeoff at full progress = flying pose)
-      fn_SetAnimation(poseDyn, nullptr, takeoffAnim, 30.0f);
+      fn_SetAnimation(poseDyn, nullptr, takeoffAnim, kAnimFps);
       float baseTime = (float)(tkFrames - 1) * *(float*)(structBase + kSB_Progress);
       fn_SetAnimTime(poseDyn, nullptr, baseTime);
 
@@ -327,7 +334,7 @@ bool flyer_boost_anim_render_prepare(char* structBase)
       float t = inst->boostRatio;
       float smooth = t * t * (3.0f - 2.0f * t);
 
-      fn_SetAnimation(poseDyn, nullptr, cls->animBoost, 30.0f);
+      fn_SetAnimation(poseDyn, nullptr, cls->animBoost, kAnimFps);
       float boostTime = (float)(bsFrames - 1) * smooth;
       fn_SetAnimTime(poseDyn, nullptr, boostTime);
       fn_PoseStaticBlend(staticPose, nullptr, poseDyn, smooth);
