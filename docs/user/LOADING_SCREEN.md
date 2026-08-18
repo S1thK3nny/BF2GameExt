@@ -113,6 +113,10 @@ REQN
 > the map loads. This is stock engine behaviour, not something the extension
 > introduces or can work around.
 
+<img width="800" height="450" alt="TeamModelsPreview" src="https://github.com/user-attachments/assets/e90a478f-6863-4628-9c8c-b99ebf256936" />
+
+<sub>*Team Model example from [`GameAssets/Examples/LoadingScreen-TeamModels`](../../GameAssets/Examples/LoadingScreen-TeamModels). Does not come with the background image*</sub>
+
 ## BF1 Sequence
 
 Through a lot of trial and error, the BF1 loading screen was reverse engineered to a point where it can be reproduced in BF2. The sequence is a series of zooms into a planet, into the atmosphere, further into the surface and finally into the map itself. The sequence is controlled by a set of parameters in the `load.cfg` file, which define the planets, their textures, and the sounds that play during the zooms. Everything in this section requires `EnableBF1()`; without it, these parameters are parsed and discarded.
@@ -135,3 +139,7 @@ sounds are still in the retail game** - `load_zoom`, `load_transition`,
 `load_xtracking`, `load_ytracking` and `load_bar` live in the `global.snd` bank
 inside the stock `core.lvl`, which is resident for the whole session, so naming
 them is all it takes.
+
+https://github.com/user-attachments/assets/c37be45d-8b5d-4d10-90cf-85e479a6b585
+
+<sub>*BF1 Loading Screen example from [`GameAssets/Examples/LoadingScreen-BF1`](../../GameAssets/Examples/LoadingScreen-BF1).*</sub>
