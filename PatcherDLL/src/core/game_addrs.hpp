@@ -571,6 +571,7 @@ namespace modtools {
 
    constexpr uintptr_t weapon_update                = 0x0061D850;  // Weapon::Update
    constexpr uintptr_t weapon_shield_update         = 0x0063F360;  // WeaponShield::Update
+   constexpr uintptr_t soldier_enter_controllable   = 0x005448D0;  // EntitySoldier::EnterControllable
 
    // ---- Spline / Cable Rendering ----------------------------------------------
 
@@ -849,6 +850,7 @@ namespace steam {
    constexpr uintptr_t collision_manager_ray_hit = 0x0045E3A0;
    constexpr uintptr_t weapon_update            = 0x006781B0;             // Weapon vtable (0x7b01a8) slot 1
    constexpr uintptr_t weapon_shield_update     = 0x00691A80;             // WeaponShield vtable (0x7b1a9c) slot 1
+   constexpr uintptr_t soldier_enter_controllable = 0x004F0CA0;           // EntitySoldier::EnterControllable
 
    // ---- Hashing / Texture lookup ---------------------------------------------
 
@@ -1691,6 +1693,7 @@ namespace gog {
    constexpr uintptr_t collision_manager_ray_hit      = 0x0045e3a0;
    constexpr uintptr_t weapon_update                  = 0x00679250;
    constexpr uintptr_t weapon_shield_update           = 0x00692b10;
+   constexpr uintptr_t soldier_enter_controllable     = 0x004f0ca0;
 
    // ---- Hashing / Texture lookup ------------------------------------------------
 
