@@ -49,7 +49,9 @@
 // FIX 2: a second hook on EntitySoldier::EnterControllable drops every shield the
 //      soldier owns as it boards, and the Update hook keeps them down for as
 //      long as Character::mVehicle / mRemote is set.  Both go through the
-//      engine's own OFF path rather than tearing the effect down by hand.
+//      engine's own OFF path rather than tearing the effect down by hand, and
+//      both run the released effect's dissolve out so the bubble goes with the
+//      soldier instead of lingering (see finish_effect_now).
 //
 // Two shield modes (WeaponShield::Update, verified on Phantom @0x7D0190 and
 // modtools @0x63F360):
@@ -87,6 +89,14 @@ static constexpr int kDamageableSub_vtblGet  = 0x20;  // -> Damageable*
 static constexpr int kDamageable_mFlags      = 0x1FC;
 static constexpr uint32_t kShieldUpBit       = 1u << 5;
 
+// WeaponShield::mShieldEffect.  This one is NOT build-invariant: it sits past the
+// WeaponShield-specific block, which the release layout packs differently.
+// Read straight off the ON path's `mShieldEffect = mClass->mShieldEffect->Create()`
+// store -- modtools 0x63F511, Steam 0x691C2F.
+static constexpr int kWeaponShield_mShieldEffectDebug   = 0x1C8;
+static constexpr int kWeaponShield_mShieldEffectRelease = 0x198;
+static int s_shieldEffectOff = 0;
+
 // ---------------------------------------------------------------------------
 // Function types
 // ---------------------------------------------------------------------------
@@ -96,6 +106,7 @@ typedef bool (__thiscall* fn_ShieldUpdate_t)(void* ecx, float dt);
 
 typedef bool  (__thiscall* fn_EnterControllable_t)(void* ecx, void* target);
 typedef void* (__thiscall* fn_GetDamageable_t)(void* ecx);
+typedef bool  (__thiscall* fn_EffectUpdate_t)(void* ecx, float dt);
 
 static fn_ShieldUpdate_t      original_ShieldUpdate      = nullptr;
 static fn_EnterControllable_t original_EnterControllable = nullptr;
@@ -189,10 +200,58 @@ static bool owner_is_riding(uintptr_t owner)
        || *(uintptr_t*)(chr + kCharacter_mRemote)  != 0;
 }
 
-// Run one update with the shield forced down, so the engine's own OFF path
-// destroys the effect, stops the loop sound, plays ShieldOffSound and pulls the
-// shield body out of the collision manager.
-static void drive_shield_off(uintptr_t wpn)
+// The shield's OFF path releases the effect with StopAndFinish, which for a
+// ShieldEffect means `TurnOff(); m_bStopAndFinish = true`: the bubble then
+// dissolves over ShieldEffectClass::m_fTurnOffTime before the effect thread
+// finally reports itself finished and is destroyed.  That dissolve is right when
+// the player drops the shield, but not when they board something -- there the
+// bubble should be gone with the soldier.
+//
+// Rather than reach into ShieldEffect's own fields, run out its clock: keep
+// calling the effect's Update (vtable slot 1, and it is the object's own Update,
+// whatever subclass it is) until it reports finished.  ShieldEffect::Update
+// returns false as soon as m_fTurnOnTimer passes m_fTurnOffTime with
+// m_bStopAndFinish set, and the engine destroys it on its next pass exactly as it
+// would have after the dissolve.  Bounded, and it gives up quietly on anything
+// that does not finish, which just leaves the stock behaviour in place.
+static void finish_effect_now(void* effect)
+{
+   void** vtbl = *(void***)effect;
+   if (!vtbl || !vtbl[1]) return;
+
+   fn_EffectUpdate_t update = (fn_EffectUpdate_t)vtbl[1];
+   for (int i = 0; i < 64; ++i) {
+      if (!update(effect, 1.0f)) return;
+   }
+}
+
+// Run WeaponShield::Update with the fire trigger masked out, so the toggle test
+// cannot fire.  Everything else -- drain, expiry, upkeep, the OFF path -- runs
+// normally.  `instantEffect` additionally skips the dissolve if this call is what
+// released the effect.
+static bool shield_update_masked(uintptr_t wpn, float dt, bool instantEffect)
+{
+   void** effectSlot = s_shieldEffectOff ? (void**)(wpn + s_shieldEffectOff) : nullptr;
+   void*  effect     = effectSlot ? *effectSlot : nullptr;
+
+   void** trigger = (void**)(wpn + kWeapon_mTrigger);
+   void*  saved   = *trigger;
+   *trigger    = &s_nullTrigger;
+   bool result = original_ShieldUpdate((void*)wpn, dt);
+   *trigger    = saved;
+
+   // The weapon only clears its own pointer on the frame the OFF path releases
+   // the effect, so this fires once and never on an effect still in use.
+   if (instantEffect && effect && effectSlot && !*effectSlot)
+      finish_effect_now(effect);
+
+   return result;
+}
+
+// Force the shield down: clear the owner's shield bit, then let the engine's own
+// OFF path destroy the effect, stop the loop sound, play ShieldOffSound and pull
+// the shield body out of the collision manager.
+static void drive_shield_off(uintptr_t wpn, float dt)
 {
    uintptr_t owner = *(uintptr_t*)(wpn + kWeapon_mOwner);
    if (!owner) return;
@@ -201,12 +260,7 @@ static void drive_shield_off(uintptr_t wpn)
    if (!flags || !(*flags & kShieldUpBit)) return;  // already down
 
    *flags &= ~kShieldUpBit;
-
-   void** trigger = (void**)(wpn + kWeapon_mTrigger);
-   void*  saved   = *trigger;
-   *trigger = &s_nullTrigger;
-   original_ShieldUpdate((void*)wpn, 0.0f);
-   *trigger = saved;
+   shield_update_masked(wpn, dt, /*instantEffect*/ true);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,20 +281,16 @@ static bool __fastcall hooked_ShieldUpdate(void* ecx, void* /*edx*/, float dt)
    bool riding = owner_is_riding(owner);
    if (riding) {
       uint32_t* flags = shield_state_flags(owner);
-      if (flags) *flags &= ~kShieldUpBit;
+      if (flags && (*flags & kShieldUpBit)) {
+         *flags &= ~kShieldUpBit;
+         return shield_update_masked(wpn, dt, /*instantEffect*/ true);
+      }
    }
 
    if (!riding && is_active_for_channel(ecx))
       return original_ShieldUpdate(ecx, dt);
 
-   // Deselected, or riding: run the real update with the fire trigger masked
-   // out.  Only the toggle test sees the difference; drain, expiry, upkeep and
-   // the OFF path all still run.
-   void* saved  = *trigger;
-   *trigger     = &s_nullTrigger;
-   bool  result = original_ShieldUpdate(ecx, dt);
-   *trigger     = saved;
-   return result;
+   return shield_update_masked(wpn, dt, /*instantEffect*/ false);
 }
 
 // ---------------------------------------------------------------------------
@@ -266,7 +316,7 @@ static bool __fastcall hooked_EnterControllable(void* ecx, void* /*edx*/, void* 
       if (!vtbl || vtbl[1] != (void*)s_shieldUpdateAddr) continue;
 
       if (*(uintptr_t*)(w + kWeapon_mOwner) == entity)
-         drive_shield_off(w);
+         drive_shield_off(w, 0.0f);
    }
    return entered;
 }
@@ -282,6 +332,10 @@ void shield_channel_fix_install(uintptr_t exe_base)
 
    s_shieldUpdateAddr    = (uintptr_t)resolve(exe_base, g_addr->weapon_shield_update);
    original_ShieldUpdate = (fn_ShieldUpdate_t)s_shieldUpdateAddr;
+
+   s_shieldEffectOff = (g_build == GameBuild::Modtools)
+                         ? kWeaponShield_mShieldEffectDebug
+                         : kWeaponShield_mShieldEffectRelease;
 
    if (g_addr->soldier_enter_controllable)
       original_EnterControllable =
@@ -308,4 +362,5 @@ void shield_channel_fix_uninstall()
 
    original_EnterControllable = nullptr;
    s_shieldUpdateAddr         = 0;
+   s_shieldEffectOff          = 0;
 }

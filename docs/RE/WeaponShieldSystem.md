@@ -162,6 +162,55 @@ everything else in the function:
 * The detour also declared `void` where the function returns `bool`, so the base
   `Weapon::Update` result was not reliably propagated to the vtable caller.
 
+## The effect object
+
+`WeaponShieldClass::ShieldEffect` resolves to a `ShieldEffectClass`, and the
+instance the weapon holds in `mShieldEffect` is a `ShieldEffect`: a `Thread` +
+`PblHandled` + `FLEffectObject` + `RedSceneObject` with five fields of its own.
+
+| Phantom / modtools | Field |
+|---|---|
+| `+0xD8` | `m_pClass` |
+| `+0xE0` | `m_fScrollTimer` |
+| `+0xE4` | `m_fTurnOnTimer` |
+| `+0xE8` | `m_fTurnOnFactor` |
+| `+0xEC` | `m_bTurnOn` |
+| `+0xED` | `m_bStopAndFinish` |
+
+`ShieldEffect::Update` (Phantom `0x744D90`, modtools `0x773430`; the retail builds
+strip the `"FLEffect::Update"` profiler string this was found by) is the whole
+lifetime:
+
+```
+m_fTurnOnTimer += dt;  m_fScrollTimer += dt;
+if (!m_bTurnOn) {
+    if (m_fTurnOnTimer >= m_pClass->m_fTurnOffTime) {
+        if (m_bStopAndFinish) return false;   // finished -> engine destroys it
+        factor = 0;
+    } else factor = 1 - m_fTurnOnTimer / m_pClass->m_fTurnOffTime;   // the dissolve
+} else {
+    factor = min(m_fTurnOnTimer / m_pClass->m_fTurnOnTime, 1);
+}
+m_fTurnOnFactor = factor;
+return FLEffectObject::Update(this, dt);
+```
+
+`ShieldEffect::TurnOff` is `if (m_bTurnOn) { m_bTurnOn = false; m_fTurnOnTimer = 0; }`,
+and `ShieldEffect::StopAndFinish` (vtable slot `0x20`) is `TurnOff(); m_bStopAndFinish = true`.
+So the OFF path's effect release is a *fade*, not a removal.
+
+`ShieldEffect::DeactivateEffect` (slot `0x1C`) does remove it at once -- scene
+object out via `RedSceneObject(+0x80)->vtable[0x48]`, then
+`FLEffectObject::DeactivateEffect` unlinks the thread. It is **not** usable on its
+own: unlinking the thread means `Update` never runs again, never returns false, and
+the object is never destroyed. The engine only ever calls it on a path that returns
+false to the thread updater in the same breath (`FLEffectObject::Update`, when the
+attached object has died).
+
+`WeaponShield::mShieldEffect` is one of the few offsets here that is not
+build-invariant: **modtools `+0x1C8`, Steam/GOG `+0x198`** (read off the ON path's
+store at `0x63F511` / `0x691C2F`).
+
 ## The boarding bug
 
 Nothing drops the shield when the soldier boards something.
@@ -197,6 +246,17 @@ with the trigger masked. `on` computes to zero, so the engine's own OFF path doe
 the teardown. The `Update` hook additionally holds the shield down for as long as
 `mVehicle`/`mRemote` is set, which covers the case where the soldier keeps
 updating while riding, and stops it being re-raised.
+
+To make the bubble go with the soldier rather than dissolve behind them, the
+released effect's clock is run out instead: call the effect's own `Update` (vtable
+slot 1) with a 1-second step until it reports finished, capped at 64 steps. For a
+`ShieldEffect` that is one call, since `TurnOff` has just reset `m_fTurnOnTimer` to
+zero and any sane `m_fTurnOffTime` is under a second; the engine then destroys it on
+its next pass exactly as it would have after the dissolve. Anything that does not
+finish inside the cap is left alone and keeps stock behaviour, which is what makes
+this safe against a `ShieldEffect` property pointing at some other effect type. The
+effect pointer is captured before the call and only used if the weapon cleared its
+own field, so it fires once and never on an effect still in use.
 
 Note this only reaches the toggle variant. A finite-clip auto shield forces `on = 1`
 whenever it has strength, so clearing the bit cannot hold it down; no stock content
