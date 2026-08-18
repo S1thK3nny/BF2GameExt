@@ -131,6 +131,25 @@ between two hardpoints. The first is what "dual pistols" implies and is what the
 salvo logic naturally wants; the second is far cheaper and may be enough if the ask turns
 out to be visual plus muzzle alternation.
 
+## Weapons
+
+**Force pushable grenades** - Force push moves units and ignores thrown ordnance, so a
+grenade sails straight through a push that would have thrown a soldier across the room. Goal
+is to let a push pick up a live grenade and send it back.
+
+Needs tracing first: what the push collects as targets and whether an in flight ordnance can
+join that set at all, and how to move one once found, since the ordnance is already running
+its own trajectory.
+
+Identifying a grenade at the push site is the part that needs care. `ClassLabel = "grenade"`
+sits on the *weapon* ODF; what flies is an ordnance instance from a separate ordnance ODF,
+so nothing at the push site sees that label. Walking back to the spawning weapon to test it
+would work but is blanket, catching any weapon that borrowed the label. Preferred is an opt
+in property on the ordnance class: the grappling hook already adds `PullSpeed` and `MaxRange`
+that way through `OrdnanceClass::SetProperty`, and an `Ordnance` carries its `OrdnanceClass*`
+at `+0x30`, so the lookup is solved. What it must not be is the ordnance ClassLabel, which
+would sweep up rockets, mines and anything else on the same label.
+
 ## Rendering
 
 **Restore the decal system** - BF2 ships a complete decal pipeline with only the
@@ -174,6 +193,21 @@ regions and streams. Current state of the problem:
 - So the open question is a respawn or re-apply path: change the class, then force the
   existing sound entities to rebuild from it, without regions immediately overwriting the
   result.
+
+## Controller
+
+**Shell and menu navigation** - Gamepad support is gameplay only today. Every binding mode
+(`Unit`, `Vehicle`, `Flyer`, `Hero`, `Turret`) maps to an in game control path, so the pad
+does nothing in the front end: the main menu, the spawn screen, the map and unit selection,
+and the pause menu all still need mouse and keyboard. That makes the controller support a
+half answer for anyone actually playing from the couch.
+
+Goal is a shell input mode that drives the existing UI navigation rather than faking mouse
+movement: directional input to move the selection, a confirm and a back action, and shoulder
+buttons for tab or page changes where the screen has them. Needs the shell's own input and
+focus handling traced first, including whether the spawn screen and the pause menu go
+through the same path as the main menu or each roll their own, since that decides whether
+this is one mode or several.
 
 ## Lua API
 

@@ -19,12 +19,6 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
 
 
-## Goal
-
-Fully reverse-engineer Star Wars Battlefront II (2005) and produce a complete Ghidra decompilation of the game engine - then use that knowledge to push the boundaries of what's possible in SWBF2 modding. Re-enable cut features, fix long-standing engine bugs, and add entirely new capabilities through the game's existing Lua and ODF systems.
-
-Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to deliver even basic fixes the community had been requesting for years, while simultaneously taking from modders without credit. Every feature listed in [Features](docs/user/FEATURES.md) was achieved by patching raw assembly in a 20-year-old binary without source code access. Consider what a studio with the actual source code could have accomplished in a single afternoon and then ask why they didn't.
-
 ## Installation
 
 1. Download the latest release zip.
@@ -40,6 +34,12 @@ Works with Steam, GOG and Modtools builds. Compatible with other dinput8 proxy D
 **The game executable must be the clean original.** BF2GameExt patches the exe in memory at launch and expects stock bytes, so an executable that has already been modified by another patcher, whether it's MemExt, a no-CD exe or an older hex-edited copy. Any of these will very likely make the patches fail to apply and features silently do nothing. If yours has been patched before, restore the original executable first (verify the game files on Steam, reinstall on GOG, or copy `BattlefrontII.exe` back from a fresh install).
 
 If it does not seem to be running, see [Troubleshooting](docs/user/TROUBLESHOOTING.md).
+
+## Goal
+
+Fully reverse-engineer Star Wars Battlefront II (2005) and produce a complete Ghidra decompilation of the game engine - then use that knowledge to push the boundaries of what's possible in SWBF2 modding. Re-enable cut features, fix long-standing engine bugs, and add entirely new capabilities through the game's existing Lua and ODF systems.
+
+Aspyr's Classic Collection, outsourced to Dragons Lake Entertainment, failed to deliver even basic fixes the community had been requesting for years, while simultaneously taking from modders without credit. Every feature listed in [Features](docs/user/FEATURES.md) was achieved by patching raw assembly in a 20-year-old binary without source code access. Consider what a studio with the actual source code could have accomplished in a single afternoon and then ask why they didn't.
 
 ## Compatibility
 
