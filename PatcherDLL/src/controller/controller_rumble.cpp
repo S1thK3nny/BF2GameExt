@@ -7,7 +7,16 @@
 #include <detours.h>
 #include <cmath>
 
-// TODO: Rumble is a damn piece of work, still doesn't work when taking damage.
+// Three rumble sources feed one output: per-shot recoil and sustained charge,
+// both read from the WeaponClass rumble fields below, and a damage pulse
+// computed from the local player's health delta.
+//
+// A weapon whose ODF leaves the rumble values at zero produces no fire
+// rumble at all. That is data, not a bug, and it is the normal case: of the
+// stock side ODFs only 61 set any Recoil*/Charge* key, so most weapons are
+// silent on fire and always were. The damage pulse reads no ODF and works
+// on every unit, so 'no rumble at all' and 'no rumble when firing this one
+// weapon' are different problems.
 
 bool  g_rumbleEnabled = false;
 float g_rumbleScale   = 1.0f;
@@ -111,7 +120,10 @@ static inline float seconds_since(const LARGE_INTEGER& start)
 }
 
 // ---------------------------------------------------------------------------
-// WeaponClass rumble ODF field offsets (from PDB + Xbox RE, identical PC/Xbox)
+// WeaponClass rumble ODF field offsets (from PDB + Xbox RE, identical PC/Xbox).
+// The member names below are also the literal ODF key names, confirmed
+// against the stock side ODFs, except TimeAtMaxCharge and RecoilDelayLight
+// which the engine parses but no stock ODF sets.
 // ---------------------------------------------------------------------------
 
 struct WeaponRumbleOffsets {

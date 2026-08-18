@@ -110,6 +110,57 @@ path - including the absolute addon directory `GetContentDirectory` returns on a
 real install - has to fit in 128 characters. That cap is the engine's, and the
 shell's own `dc:` movies have always lived with it.
 
+**The `dc:` form does not fit on a default Steam install.** `GetContentDirectory`
+returns an absolute path, so the install directory eats most of the budget:
+
+```
+130  C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II Classic\GameData\AddOn\mymod\Data\_lvl_pc\Movies\ingame.mvs
+ 61  data\_lvl_pc\..\..\AddOn\mymod\Data\_lvl_pc\Movies\ingame.mvs
+```
+
+Past 127 characters `MakeFullName` truncates in place and the open fails. The
+second form is the same file reached by climbing out of `data\_lvl_pc\` instead,
+the trick `SetLoadDisplayLevel` already uses, and it takes the cap out of play.
+This is why BF2GameExt emits the relative climb rather than `dc:`.
+
+## What "Unable to open movie file" actually means
+
+`GameMovie::Open` (Phantom `0x005d2540`) logs that warning at severity 2 when
+`RedMovie::Open` returns false. Two details matter when reading it:
+
+**It prints the unresolved name.** The two `%s` arguments pushed at `0x005d26f2`
+are `ESI` and `EDI`, which hold `param_1` and `param_2` as they arrived - not the
+`MakeFullName` output. So `Unable to open movie file dc:Movies\ingame.mvs:seg`
+says nothing about which directory was searched, and a truncated path looks
+identical to a missing one.
+
+**The segment is not validated there.** The chain is
+
+```
+RedMovie::Open          0x00413a75 -> 0x008dd130
+RedMoviePlayer::Open    0x004160e0 -> 0x008db9f0
+RedMoviePlayerBase::Open           0x00407081
+```
+
+and only two things in it can produce the warning:
+
+| Failure | Cause |
+|---|---|
+| `PblFile::Open(name)` false | file is not at the resolved path |
+| `OpenHeader` false | no `Info` chunk parsed, i.e. not a munged `.mvs` |
+
+`RedMoviePlayerBase::OpenHeader` (`0x0092c000`) takes the segment hash as
+`param_3` and **never reads it** - it walks the chunk tree for `Info` (`0x0fb40705`),
+fixes up segment start positions, then returns true if `mInfo` is non-null after
+selecting segment 0. A wrong segment name therefore cannot cause this message; it
+fails later and silently, in `GameMovie::Play` via
+`RedMovie::Properties::FindByHashID`.
+
+`LoadUtil::MakeFullName` has no null guard on the DLC branch either - with no
+addon mounted it formats `"%s\\Data\\"` from a NULL `GetContentDirectory()`,
+yielding `(null)\Data\_lvl_pc\Movies\...` and the same warning rather than a
+crash.
+
 ## Movie properties are not a gate
 
 A `.mvs` is played by *segment* name, looked up through
@@ -127,10 +178,23 @@ and does not gate playback.
 ## The fix
 
 `PatcherDLL/src/shell/ingame_movie_path.cpp` detours the Lua callback, snapshots
-argument 1, lets the original run, and then rewrites `sFilename` in place -
-`"Movies\<name>"`, or `"dc:Movies\<name>"` when the movie belongs to the addon.
+both arguments, lets the original run, and then rewrites `sFilename` in place -
+`"Movies\<name>"` for the base game, or
+`"..\..\<addon>\Data\_lvl_pc\Movies\<name>"` when the movie belongs to the addon.
 Nothing reads that buffer until `UpdatInGameMovie` ticks on a later frame, so the
 edit always lands before `GameMovie::Open` sees it.
+
+`"dc:Movies\<name>"` is emitted only as a fallback, for an addon directory that
+is not under the working directory and so cannot be named by climbing. A real
+install never has one; the path-length arithmetic above is why the climb is
+preferred.
+
+Because the engine's own warning identifies neither the directory it searched nor
+which failure it hit, the hook resolves the path itself and logs the result: the
+full on-disk name on success, and on failure a finished sentence naming the cause
+- file absent, no addon mounted, or a resolved path over the 127-character limit
+with the measured length. It never refuses to rewrite, so an unresolvable request
+still reaches `GameMovie::Open` and the script's intent stays visible in the log.
 
 Rewriting the global was chosen over reimplementing the callback because the
 callback also stops all sound, stops rumble, and pushes onto the segment queue -

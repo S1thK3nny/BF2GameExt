@@ -68,6 +68,12 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |
 
+## Where to get it
+
+The only official downloads are the [GitHub releases page](https://github.com/S1thK3nny/BF2GameExt/releases) and the ModDB page. Every release publishes a SHA-256 for the zip, so you can check yours against it.
+
+The licence is MIT, so anyone may fork and redistribute this. A third-party build is simply not this project: verify it yourself and report anything wrong with it to whoever built it.
+
 ## Building from Source
 
 Requirements:

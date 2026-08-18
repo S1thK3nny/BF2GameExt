@@ -41,29 +41,6 @@ stock behaviour that BF2GameExt changes:
 If you write mission scripts, `print(GameExt.version)` returns the version
 string and a nil `GameExt` means the Lua half never initialised.
 
-## Antivirus quarantined dinput8.dll
-
-Expect this one. Proxy DLLs get flagged constantly.
-
-A proxy takes the name of a system library, forwards the real exports onward,
-and loads another DLL into the process. DLL-hijacking malware does exactly
-that, and ours is unsigned on top of it, so scanners match the shape rather
-than any specific content. The giveaway is that the detection is a generic
-heuristic name rather than a named malware family.
-
-What to do:
-
-- Restore the file from quarantine and add an exclusion for your `GameData`
-  folder.
-- If you would rather verify first, check the zip's hash against the release
-  page, and note that the whole source tree is public and builds to the same
-  thing.
-- The `ExePatcher` install method gets flagged for a different reason (it
-  writes to a copy of the game executable) and is not a safer alternative.
-
-If your scanner deleted the file silently, the symptom is "nothing happens" and
-`dinput8.dll` is simply gone. Check the folder before assuming a bug.
-
 ## Nothing happens, and there is no BF2GameExt.log
 
 In rough order of likelihood:
@@ -71,12 +48,13 @@ In rough order of likelihood:
 - **The files are in the wrong folder.** They go next to the game executable,
   which means inside `GameData`, not the folder above it that contains
   `GameData`. This trips up nearly everyone.
-- **Antivirus ate `dinput8.dll`.** See above.
 - **`[General] Enabled=0`** in your INI.
 - **You are on the Aspyr Classic Collection.** It is a different executable and
   is not supported. Only the Modtools, Steam and GOG builds work.
 - **Your executable has already been patched by something else.** See below.
 - **An overlay or launcher is loading its own `dinput8.dll`** ahead of ours.
+- **`dinput8.dll` is not in the folder any more.** Rare, but a scanner can
+  remove it. See [Antivirus flagged dinput8.dll](#antivirus-flagged-dinput8dll).
 
 ## Your executable has already been patched
 
@@ -189,6 +167,23 @@ an easy one.
   controller only.
 
 Full reference: [CONTROLLER.md](CONTROLLER.md).
+
+## Antivirus flagged dinput8.dll
+
+This has not come up in practice, but it is possible, so it is worth knowing
+about. A proxy DLL takes the name of a system library, forwards the real exports
+onward, and loads another DLL into the process, which is a shape some scanners
+flag generically. If yours does, the detection will be a generic heuristic name
+rather than a named malware family, and the symptom is "nothing happens" with
+`dinput8.dll` gone from `GameData`.
+
+If it happens, restore the file and add an exclusion for your `GameData` folder.
+To satisfy yourself first, check the zip's hash against the SHA-256 on the
+release page and download only from the sources under
+[Where to get it](../../README.md#where-to-get-it). The source tree is public
+too, so you can read or rebuild it yourself, though a rebuild will not
+reproduce the published hash byte for byte because the compiler and the zip both
+stamp timestamps into their output.
 
 ## Uninstalling
 

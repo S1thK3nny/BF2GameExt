@@ -17,12 +17,18 @@ The version comes from version.h and nowhere else. Before zipping, the script
 checks the version resource compiled into each binary against version.h and
 refuses to package on a mismatch, which is what catches "I forgot to rebuild".
 
+It also prints a SHA-256 for the zip and for each shipped DLL, and writes
+dist/BF2GameExt-<version>.zip.sha256. Publish the zip hash in the release notes
+and on the ModDB page: users are told to add an antivirus exclusion for this
+DLL, so they need a way to confirm the copy they exclude is the one built here.
+
 Usage:
     python tools/package_release.py              # clean build, then package
     python tools/package_release.py --no-build   # package what is in bin/Release
 """
 
 import argparse
+import hashlib
 import re
 import shutil
 import subprocess
@@ -291,6 +297,15 @@ def package(version: str) -> Path:
     return zip_path
 
 
+def sha256_file(path):
+    """SHA-256 of a file, read in chunks so the zip never lands in memory whole."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-build", action="store_true",
@@ -314,6 +329,22 @@ def main():
     with zipfile.ZipFile(zip_path) as z:
         for n in sorted(z.namelist()):
             print(f"    {n}")
+
+    # The zip hash is what the release notes and the ModDB page publish. The
+    # per-DLL hashes cover the case where there is no zip to check: modpacks
+    # bundle the two DLLs loose, so anyone who got them that way needs
+    # something to compare against.
+    zip_hash = sha256_file(zip_path)
+    print("\nSHA-256:")
+    print(f"    {zip_hash}  {zip_path.name}")
+    for _, dest in PAYLOAD:
+        print(f"    {sha256_file(STAGING / dest)}  {dest.rsplit('/', 1)[-1]}")
+
+    # Sidecar in sha256sum format, so `sha256sum -c` works on it unmodified and
+    # the line can be pasted straight into the release notes.
+    sums = DIST / f"{zip_path.name}.sha256"
+    sums.write_text(f"{zip_hash}  {zip_path.name}\n", encoding="utf-8")
+    print(f"\nWrote {sums}")
 
 
 if __name__ == "__main__":

@@ -79,15 +79,9 @@ static bool                  g_installed         = false;
 
 static void** g_pFreeCamLight = nullptr;
 
-// One-shot log guards. A corrupt list tends to repeat, and this runs inside the
+// One-shot log guard. A corrupt list tends to repeat, and this runs inside the
 // renderer - a line per light per frame would be its own denial of service.
 static bool g_loggedStale = false;
-
-// Install runs from dllmain, long before the engine opens its logfile, so a line
-// written there is thrown away. Defer the breadcrumb to the first time the hook
-// is actually entered, which is also the only proof that matters: if this line
-// is absent from the log after using a light, the detour is not live.
-static bool g_loggedAlive = false;
 
 // ---------------------------------------------------------------------------
 // The actual freecamlight fix
@@ -106,11 +100,6 @@ void freecam_light_reset()
 
 static void __fastcall hooked_Deactivate(void* ecx, void* edx)
 {
-   if (!g_loggedAlive) {
-      g_loggedAlive = true;
-      get_gamelog()("[RedLightStaleNodeFix] guard is live\n");
-   }
-
    uint8_t* light = (uint8_t*)ecx;
    if (!light) return; // the engine would fault on the flags read
 

@@ -86,6 +86,11 @@ and also takes the `dc:` addon prefix.
 A bare name that is missing from the base game but present in the active addon
 resolves to the addon copy on its own, so `dc:` is only needed when both exist.
 
+Every call is logged to `BF2GameExt.log` with the file it actually opened. If the
+movie will not play, that line names the exact path that was tried and why it
+failed. The engine's own `Unable to open movie file` warning quotes the name your
+script passed, not the path it looked in, so it cannot tell you that on its own.
+
 ## Rendering
 
 | Function | Description |
