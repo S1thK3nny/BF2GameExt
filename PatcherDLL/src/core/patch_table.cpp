@@ -34,6 +34,7 @@ char EntityEx_mIdMap_new[0x4004 + 4] = {};
 static const uint32_t EntityEx_mIdMap_header_addr  = (uint32_t)&EntityEx_mIdMap_new[0];
 static const uint32_t EntityEx_mIdMap_table_addr   = (uint32_t)&EntityEx_mIdMap_new[4];
 static const uint32_t EntityEx_mIdMap_mid_addr     = (uint32_t)&EntityEx_mIdMap_new[0x2004]; // values array start
+static const uint32_t EntityEx_mIdMap_sentinel_addr = (uint32_t)&EntityEx_mIdMap_new[0x4004]; // end-of-iteration sentinel
 
 // Particle cache increase: 300 -> 1200 entries
 // CacheParticle struct is 36 (0x24) bytes: PblVector3 mPos, RedColorValue mColor, float mSize, float mRotation
@@ -315,6 +316,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      // Inline iteration (FUN_0048e7e0 / FUN_0048eaa0)
                      patch{0x8e7fc + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048e7e0 loop bound
                      patch{0x8e83b + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048e7e0 loop bound
+                     patch{0x8e84f + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048e7e0 loop bound (inner rescan)
                      patch{0x8eb4c + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048eaa0 loop bound
                      patch{0x8eba5 + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048eaa0 loop bound
                      patch{0x8ebbc + 0x2, 0x400, 0x800, {.file_offset = true}},    // FUN_0048eaa0 loop bound
@@ -389,6 +391,17 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x8eb54 + 0x3, 0xb7bd3c, EntityEx_mIdMap_mid_addr, {.file_offset = true, .expected_is_va = true}},   // FUN_0048eaa0 value read
                      patch{0x8eb79 + 0x3, 0xb7bd3c, EntityEx_mIdMap_mid_addr, {.file_offset = true, .expected_is_va = true}},   // FUN_0048eaa0 value read
                      patch{0x8ebc4 + 0x3, 0xb7bd3c, EntityEx_mIdMap_mid_addr, {.file_offset = true, .expected_is_va = true}},   // FUN_0048eaa0 value read
+
+                     // --- Address redirects: end-of-iteration sentinel (0xb7cd3c -> new) ---
+                     // These CMP sites compare the value just read above against the sentinel to
+                     // detect an exhausted scan. In the original table this aliased for free (the
+                     // value-array's one-past-the-end read landed exactly on 0xb7cd3c). The value
+                     // read was relocated above; without also relocating the compare, the two sides
+                     // no longer refer to the same slot and the boundary case dereferences garbage.
+                     patch{0x8e80b + 0x2, 0xb7cd3c, EntityEx_mIdMap_sentinel_addr, {.file_offset = true, .expected_is_va = true}},  // FUN_0048e7e0 sentinel compare
+                     patch{0x8e85e + 0x2, 0xb7cd3c, EntityEx_mIdMap_sentinel_addr, {.file_offset = true, .expected_is_va = true}},  // FUN_0048e7e0 sentinel compare
+                     patch{0x8eb5b + 0x2, 0xb7cd3c, EntityEx_mIdMap_sentinel_addr, {.file_offset = true, .expected_is_va = true}},  // FUN_0048eaa0 sentinel compare
+                     patch{0x8ebcb + 0x2, 0xb7cd3c, EntityEx_mIdMap_sentinel_addr, {.file_offset = true, .expected_is_va = true}},  // FUN_0048eaa0 sentinel compare
                   },
             },
 
