@@ -28,6 +28,7 @@
 #include "weapon/shield_channel_fix.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "render/water_texture_count_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
@@ -338,6 +339,7 @@ void lua_hooks_uninstall()
    // the engine's global light lists first, and nothing else ever would.
    lightsaber_illumination_uninstall();
    // After it, so its deactivate_all() above is still covered by the guard.
+   water_texture_count_fix_uninstall();
    red_light_stale_node_fix_uninstall();
 
    DetourTransactionBegin();

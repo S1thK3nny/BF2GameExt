@@ -190,6 +190,9 @@
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\water_texture_count_fix.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\anim_textures.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -349,6 +352,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\water_texture_count_fix.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\anim_textures.cpp">

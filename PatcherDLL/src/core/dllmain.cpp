@@ -30,6 +30,7 @@
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "render/water_texture_count_fix.hpp"
 #include "weapon/anim_textures.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
@@ -252,6 +253,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    terrain_texture_fix_install(exe_base);
    blur_downsize_clamp_install(exe_base);
    screenshot_fix_install(exe_base);
+   water_texture_count_fix_install(exe_base); // byte-patches .text — needs the RW window
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
    map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window

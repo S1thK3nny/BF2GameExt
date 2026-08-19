@@ -789,6 +789,31 @@ namespace modtools {
    // refreshed this frame" from "its saber stopped rendering".
    constexpr uintptr_t red_renderer_frame_number    = 0x00D62E1C;
 
+
+   // ---- RedWater animated-texture count clamp ---------------------------------
+   //
+   // RedWater::ReadConfig dispatches NormalMapTextures / BumpMapTextures /
+   // SpecularMaskTextures (PblHash 0xEAC587AC / 0x11D65039 / 0xC0311180) into one
+   // handler that reads the frame count straight out of the property and then
+   // fills a fixed 50-entry static table with no bounds check at all:
+   //
+   //     CVTTSS2SI EAX,[ESI+0xc]        ; count, unclamped
+   //     MOV  [<count>],EAX             ; <- patch site (A3 imm32, 5 bytes)
+   //     TEST EAX,EAX / JZ
+   //   loop:
+   //     ... texture lookup ...
+   //     MOV  [EDI*4 + <array>],EAX     ; no bounds check
+   //     INC  EDI
+   //     CMP  EDI,[<count>]             ; bound re-read from memory every pass
+   //     JC   loop
+   //
+   // See docs/RE/RedWaterTextureArrays.md.  Each address below is the `MOV
+   // [<count>],EAX` store; the count global's address is taken from that
+   // instruction's own imm32 operand at install time, so it needs no entry here.
+   constexpr uintptr_t water_normalmap_count_store    = 0x00864CCB;
+   constexpr uintptr_t water_bumpmap_count_store      = 0x00864A0F;
+   constexpr uintptr_t water_specularmask_count_store = 0x00864B9C;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1538,6 +1563,31 @@ namespace steam {
    // against anything the engine owns, so the feature uses a DLL-side counter
    // driven off the Snd::Engine::Update hook instead.  See the .cpp.
 
+
+   // ---- RedWater animated-texture count clamp ---------------------------------
+   //
+   // RedWater::ReadConfig dispatches NormalMapTextures / BumpMapTextures /
+   // SpecularMaskTextures (PblHash 0xEAC587AC / 0x11D65039 / 0xC0311180) into one
+   // handler that reads the frame count straight out of the property and then
+   // fills a fixed 50-entry static table with no bounds check at all:
+   //
+   //     CVTTSS2SI EAX,[ESI+0xc]        ; count, unclamped
+   //     MOV  [<count>],EAX             ; <- patch site (A3 imm32, 5 bytes)
+   //     TEST EAX,EAX / JZ
+   //   loop:
+   //     ... texture lookup ...
+   //     MOV  [EDI*4 + <array>],EAX     ; no bounds check
+   //     INC  EDI
+   //     CMP  EDI,[<count>]             ; bound re-read from memory every pass
+   //     JC   loop
+   //
+   // See docs/RE/RedWaterTextureArrays.md.  Each address below is the `MOV
+   // [<count>],EAX` store; the count global's address is taken from that
+   // instruction's own imm32 operand at install time, so it needs no entry here.
+   constexpr uintptr_t water_normalmap_count_store    = 0x0071FCD3;
+   constexpr uintptr_t water_bumpmap_count_store      = 0x0071FAB6;
+   constexpr uintptr_t water_specularmask_count_store = 0x0071FBF4;
+
 } // namespace steam
 
 // =============================================================================
@@ -2058,6 +2108,31 @@ namespace gog {
    constexpr uintptr_t red_light_deactivate           = 0x006C7BC0;
 
    // No red_renderer_frame_number here either — see the Steam block.
+
+
+   // ---- RedWater animated-texture count clamp ---------------------------------
+   //
+   // RedWater::ReadConfig dispatches NormalMapTextures / BumpMapTextures /
+   // SpecularMaskTextures (PblHash 0xEAC587AC / 0x11D65039 / 0xC0311180) into one
+   // handler that reads the frame count straight out of the property and then
+   // fills a fixed 50-entry static table with no bounds check at all:
+   //
+   //     CVTTSS2SI EAX,[ESI+0xc]        ; count, unclamped
+   //     MOV  [<count>],EAX             ; <- patch site (A3 imm32, 5 bytes)
+   //     TEST EAX,EAX / JZ
+   //   loop:
+   //     ... texture lookup ...
+   //     MOV  [EDI*4 + <array>],EAX     ; no bounds check
+   //     INC  EDI
+   //     CMP  EDI,[<count>]             ; bound re-read from memory every pass
+   //     JC   loop
+   //
+   // See docs/RE/RedWaterTextureArrays.md.  Each address below is the `MOV
+   // [<count>],EAX` store; the count global's address is taken from that
+   // instruction's own imm32 operand at install time, so it needs no entry here.
+   constexpr uintptr_t water_normalmap_count_store    = 0x00720DA3;
+   constexpr uintptr_t water_bumpmap_count_store      = 0x00720B86;
+   constexpr uintptr_t water_specularmask_count_store = 0x00720CC4;
 
 } // namespace gog
 
