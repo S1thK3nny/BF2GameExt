@@ -8,6 +8,7 @@
 // See voice_limit.hpp for the mechanism and why the probe array has to move.
 
 int g_voiceLimit = 0;
+bool g_softwareVoices = false;
 
 namespace {
 
@@ -299,7 +300,28 @@ void voice_limit_install(uintptr_t exe_base)
    // voice pool is harmless, the spare inputs are simply never connected.
    const uint32_t mixerInputs = (uint32_t)((n + 7) / 8) * 8;
 
-   bool mixerOk = (mixerInputs <= 0x7F);
+   // SOFTWARE MIXER HAZARD -- why this is off by default.
+   //
+   // Relocating the four arrays and raising the count is correct in itself, but
+   // it exposes an unguarded path in the engine. Snd::SoftOutput::ConnectInput
+   // (0x0089FCE0) is a two-instruction thunk with no bounds check, and one of its
+   // callers reconnects a voice on a mix-config change without testing the index:
+   //
+   //   0089E44D  MOV EDX,[ESI+0x484]   ; mSoftConnIdx, -1 if it never got one
+   //   0089E453  PUSH EDX              ; pushed unchecked
+   //   0089E45A  CALL 0x0089FCE0       ; -> 00898F5A LEA EAX,[EAX+ECX*8]
+   //                                   ;    00898F61 MOV [EAX],EDX
+   //
+   // At index -1 that writes eight bytes below the table. Stock never reaches it
+   // because 32 voices fit 32 inputs exactly, so GetUnconnectedInput cannot fail.
+   // Once the pool is larger than the inputs actually available at that moment it
+   // can and does: observed as a WRITE access violation at 0x00898F61 to
+   // (table - 8) on the software-to-hardware mix-config switch at the main menu.
+   //
+   // Guarding it means detouring the reconnect path to drop -1, which is a
+   // separate piece of work. Until then the software branch stays pinned at 32,
+   // which is stock behaviour and safe.
+   bool mixerOk = g_softwareVoices && (mixerInputs <= 0x7F);
    if (mixerOk) {
       uint8_t* const cnt = reinterpret_cast<uint8_t*>(resolve(exe_base, kMixerCountImm8));
       uint8_t* const gate = reinterpret_cast<uint8_t*>(resolve(exe_base, kMixerGateImm8));

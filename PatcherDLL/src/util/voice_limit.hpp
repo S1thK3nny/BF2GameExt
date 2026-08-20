@@ -66,5 +66,12 @@
 // PUSH imm8 of value + 8.
 extern int g_voiceLimit;
 
+// Widen the software mixer too, so voices past 32 are audible in mixConfig 1.
+// OFF by default: see the SOFTWARE MIXER HAZARD note in voice_limit.cpp. The
+// relocation itself is correct, but the engine reconnects voices on a mix-config
+// change without testing for the -1 that GetUnconnectedInput returns when it has
+// no free input, and writes table[-1]. Do not enable until that is guarded.
+extern bool g_softwareVoices;
+
 void voice_limit_install(uintptr_t exe_base);
 void voice_limit_uninstall();
