@@ -190,6 +190,7 @@
     <ClCompile Include="src\core\lvl_read.cpp" />
     <ClCompile Include="src\core\patch_table.cpp" />
     <ClCompile Include="src\ai\ai_fairness.cpp" />
+    <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />
     <ClCompile Include="src\entity\prone_lvl_load.cpp" />

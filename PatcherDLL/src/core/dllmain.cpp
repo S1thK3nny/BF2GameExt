@@ -30,6 +30,7 @@
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
 #include "util/voice_limit.hpp"
+#include "ai/ai_update_budget.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
@@ -232,6 +233,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_soundDiagEnabled          = cfg.get_bool("Fixes", "SoundDiagnostic", false);
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
+      g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
+      // Unregistered developer key, like the other diagnostics.
+      g_aiUpdateDiag              = cfg.get_bool("AI", "AIUpdateDiag", false);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -300,7 +304,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
-   ai_fairness_install(exe_base);      // byte-patches .text — needs the RW window
+   ai_fairness_install(exe_base);
+   ai_update_budget_install(exe_base); // byte-patches .text - needs the RW window      // byte-patches .text — needs the RW window
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
    red_light_stale_node_fix_install(exe_base);

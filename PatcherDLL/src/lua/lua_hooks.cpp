@@ -28,6 +28,7 @@
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
 #include "util/voice_limit.hpp"
+#include "ai/ai_update_budget.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "entity/land_on_arrival_fix.hpp"
@@ -358,6 +359,7 @@ void lua_hooks_uninstall()
    // detaching it first would unpick the chain from the middle.
    sound_diag_uninstall();
    voice_limit_uninstall();
+   ai_update_budget_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

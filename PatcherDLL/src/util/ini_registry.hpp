@@ -93,6 +93,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Lightsaber", "LightsaberLightIntensity", "1.0", "Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored"),
 
    // [AI] — AI behaviour tuning
+   INI_ENTRY("AI", "AIUpdateBudget", "0", "How many AI units may make a NEW decision each simulation turn. 0 keeps the stock 10. The engine services only the most overdue units and re-queues them, while movement and firing run for everyone every turn - so a unit that misses its slot keeps walking and shooting but never re-decides, which is what standing around looks like. Raising this costs frame time and only helps if the budget is actually the constraint, so measure before changing it. Range 10 to 127. Modtools only"),
    INI_ENTRY("AI", "PlayerVisionFairness",   "1", "AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerPriorityFairness", "1", "AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerThreatFairness",   "0", "AI stop treating you as extra dangerous while you are aiming at them. OFF by default: it is the one fairness option that makes AI feel unresponsive, since they no longer react to being aimed at. Set 1 to enable"),
