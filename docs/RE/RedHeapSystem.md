@@ -162,9 +162,70 @@ in TempLoadHeap.
 
 ## MemoryPool
 
-`MemoryPool::Allocate` at `0x008024A6`. Creates or expands slab storage from
-`__RedCurrHeap`. If slabs are created while `__RedCurrHeap = TempLoadHeap`,
-they are dangling after `ReleaseTempHeap`.
+`MemoryPool::Allocate` — modtools `0x00802300`, steam `0x006dc370`,
+gog `0x006dd410`. `void __thiscall(MemoryPool*, uint size)`. Creates the pool
+lazily on first use, then expands it a slab at a time. Decompiled in full from
+modtools; the growth path is:
+
+```c
+if (mPool == NULL) Create(this, mCount, mSize, mGrow);   // lazy first slab
+if (mSize < size)  RedWarning(... "allocation size (%d) exceeds item size (%d)");
+
+if (mFree == NULL) {                                     // the pool is full
+   RedWarning(2, ... "Memory pool \"%s\" is full; raise count to at least %d");
+
+   if (mHeap == -1) mHeap = ___RedCurrHeap;              // latch on FIRST growth
+   int saved = RedSetCurrentHeap(mHeap);
+   mFree = RedAllocFromHeap(___RedCurrHeap, mSize * mGrow, 0);
+   RedSetCurrentHeap(saved);
+
+   if (mFree == NULL) {                                  // OUT OF HEAP
+      RedWarning(3, ... "Memory pool \"%s\" unable to grow by %d");
+      return;                                            // <-- caller gets nothing
+   }
+
+   mCount += mGrow;
+   /* link the mGrow new items into a free list, terminator at the last one */
+   if (mPool == NULL) mPool = mFree;                     // only the FIRST slab
+}
+```
+
+Four things follow from that, all read from the decompile:
+
+**The engine latches the heap itself.** `if (mHeap == -1) mHeap = ___RedCurrHeap`
+means an unconfigured pool binds to whatever heap is current at its FIRST growth
+and keeps it forever after. So the dangling-slab risk is real but narrower than
+"slabs created on TempLoadHeap": it needs the pool's first *growth* to happen
+while `___RedCurrHeap = TempLoadHeap`, after which every later growth also goes
+there, including growths long after `ReleaseTempHeap`.
+
+**Only the first slab is ever recorded.** `mPool` is a single `void*` and is
+assigned only when null. Every growth slab's base pointer is written into `mFree`
+and then consumed by the free list, so it is **never stored anywhere** — those
+allocations can never be freed, not even by the pool's destructor. N growths
+leave N-1 permanently unreachable blocks.
+
+**Growth is one `RedAllocFromHeap` of `mSize * mGrow` bytes.** Growing by a small
+`mGrow` many times therefore costs strictly more than growing by a large `mGrow`
+once: more allocator calls, more block headers, more fragmentation, and more
+unreachable blocks — for the same number of elements. Observed in play: `Weapon`
+(512 B/item) has `mGrow = 1` and grew 20 times in one match, 706 -> 725, i.e.
+twenty separate 512-byte slabs. `mGrow` appears to be roughly 72 bytes converted
+to items and clamped at 1, which gives the biggest structs the worst increment.
+
+**Failure to grow is silent to the caller.** `Allocate` returns `void`, and on a
+failed `RedAllocFromHeap` it logs and returns having handed back nothing. That is
+the likely shape of the pool-growth crashes: not a corrupt heap, but a heap that
+could not satisfy the slab, followed by the caller using memory it never got.
+
+Both retail builds drop `mPeak`, so `mHeap`, `mPool` and `mFree` sit four bytes
+lower than on modtools. See `game_addrs.hpp`.
+
+> **Hazard, not observed:** the free-list terminator is written at
+> `(mGrow - 1) * mSize`. With `mGrow == 0` that is `0xFFFFFFFF * mSize` — a wild
+> write far outside the slab. The growth path is only reachable once `Create` has
+> run, so this needs `Create` to leave `mGrow` at zero; whether anything can do
+> that was not established.
 
 ---
 

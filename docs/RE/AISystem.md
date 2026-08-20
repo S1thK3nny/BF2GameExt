@@ -340,7 +340,7 @@ a faster tier sooner when a player closes on them.
 |---|---|
 | `UnitAgent::sMemoryPool` exhaustion leaves units with no agent | Pool exhaustion cannot produce a null agent; the allocator grows or logs |
 | The 750-entry `PathRequest` cap | `RequestPath` frees the requester's previous request first, so there is at most one live request per controller — 750 is unreachable at any real unit count |
-| The 200-slot vision ray queue | Its only producer is `UpdatePotentiallyVisible`, itself inside the already-capped high-level update, so arrival rate plateaus at ~50/pass regardless of unit count |
+| The 201-slot vision ray queue (`0xc9`, not 200 - the two `PblHeap`s it feeds are `mMaxCount = 200`) | Its only producer is `UpdatePotentiallyVisible`, itself inside the already-capped high-level update, so arrival rate plateaus at ~50/pass regardless of unit count |
 | Anything O(n^2) per frame | `sUpdateFriendlyFire` and the spatial queries are linear or better; nothing all-pairs runs per frame |
 
 ---
