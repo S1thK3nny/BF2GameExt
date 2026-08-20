@@ -50,8 +50,16 @@ int  s_reports = 0;
 uint8_t* s_budgetAddr = nullptr;
 uint8_t  s_budgetOrig = 0;
 
-using fn_mgr_update_t = void(__fastcall*)(void* self, void* edx);
-using fn_high_level_t = void(__fastcall*)(void* self, void* edx, float dt);
+// Signatures READ from the images, not inferred:
+//   0x005997A0  ControllerManager::Update  __cdecl (float dt)   -- a free
+//               function taking one stack argument, NOT a method.
+//   0x005A0370  UnitController::UpdateHighLevel  __thiscall (this)  -- ECX only,
+//               NO stack arguments, so it RETs 0.
+// Getting the second wrong is not survivable: declaring a stack argument it does
+// not have makes the hook RET 4 and pop four bytes nobody pushed, unwinding the
+// stack a little further on every single high-level update.
+using fn_mgr_update_t = void(__cdecl*)(float dt);
+using fn_high_level_t = void(__fastcall*)(void* self, void* edx);
 
 fn_mgr_update_t g_origMgrUpdate = nullptr;
 fn_high_level_t g_origHighLevel = nullptr;
@@ -129,17 +137,17 @@ void report()
    }
 }
 
-void __fastcall hooked_high_level(void* self, void* edx, float dt)
+void __fastcall hooked_high_level(void* self, void* edx)
 {
    InterlockedIncrement(&s_highLevel);
-   g_origHighLevel(self, edx, dt);
+   g_origHighLevel(self, edx);
 }
 
-void __fastcall hooked_mgr_update(void* self, void* edx)
+void __cdecl hooked_mgr_update(float dt)
 {
    const LONG n = InterlockedIncrement(&s_turns);
 
-   g_origMgrUpdate(self, edx);
+   g_origMgrUpdate(dt);
 
    // Sampling rather than every turn: the walk is O(controllers) and this runs
    // inside the simulation tick.
