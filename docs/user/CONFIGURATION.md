@@ -17,6 +17,21 @@ Read by `dinput8.dll` before the extension is loaded, so these two cannot be cha
 | `Enabled` | `1` | Master enable/disable switch for BF2GameExt |
 | `DLLPath` | `BF2GameExt.dll` | Path to the main extension DLL (relative to proxy) |
 
+## Features
+
+Optional behaviour that changes the game rather than fixing it. Some need assets that ship alongside the DLL.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `FirstPersonMelee` | `0` | Let units carrying a melee weapon use first person, lightsaber heroes included - stock BF2 forces third person for anyone holding one, and draws only the hilt if you get there anyway. OFF by default: it applies to every melee unit, and most heroes have no first person model authored, so they borrow whatever hands their class defines. Needs cockpit camera enabled to see any effect. Set 1 to enable |
+| `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
+| `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
+| `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
+| `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
+| `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
+| `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
+| `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
+
 ## LimitIncreases
 
 Engine limit patches. All are on by default and all are safe to leave on; they only raise a ceiling, they do not change behaviour below it.
@@ -69,20 +84,6 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 | `DLCMissionInitFix` | `0` | EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off) |
 | `DroidekaDeathAnimation` | `1` | Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected |
 | `ReticleCorrection` | `-1` | HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1) |
-
-## Features
-
-Optional behaviour that changes the game rather than fixing it. Some need assets that ship alongside the DLL.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
-| `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
-| `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
-| `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
-| `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
-| `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
-| `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
 
 ## Lightsaber
 

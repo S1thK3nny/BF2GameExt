@@ -38,6 +38,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("General", "DLLPath",  "BF2GameExt.dll", "Path to the main extension DLL (relative to proxy)"),
 
    // [LimitIncreases] — engine limit patches (all default to enabled)
+   INI_PATCH("Features", "FirstPersonMelee", "0", "Let units carrying a melee weapon use first person, lightsaber heroes included - stock BF2 forces third person for anyone holding one, and draws only the hilt if you get there anyway. OFF by default: it applies to every melee unit, and most heroes have no first person model authored, so they borrow whatever hands their class defines. Needs cockpit camera enabled to see any effect. Set 1 to enable", "First Person Melee"),
    INI_PATCH("LimitIncreases", "HeapExtension",       "1", "Extend RedMemory heap size",                          "RedMemory Heap Extensions"),
    INI_PATCH("LimitIncreases", "SoundLayerLimit",     "1", "Raise SoundParameterized layer limit",                "SoundParameterized Layer Limit Extension"),
    INI_PATCH("LimitIncreases", "DLCMissionLimit",     "1", "Raise DLC / addon mission limit",                     "DLC Mission Limit Extension"),

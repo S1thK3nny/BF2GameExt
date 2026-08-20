@@ -844,6 +844,57 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             // describe there is nothing to put in front of a user, so it stays out
             // until someone can say what it fixes.
 
+            patch_set{
+               .name = "First Person Melee",
+               .patches =
+                  {
+                     // EntitySoldier::IsForcedThirdPerson returns true whenever either
+                     // weapon slot answers IsMelee, which is what pins saber heroes to
+                     // third person.  `56 57 8B F9` -> `32 C0 C3 90` = XOR AL,AL / RET.
+                     // It is __thiscall with no stack args, so a bare RET is correct.
+                     patch{0x0052B670, 0xF98B5756, 0x90C3C032},
+                     // FirstPersonRenderable::RenderSoldier ORs only 0x00080001 into the
+                     // render flags, but WeaponMelee::Render tests 0x4000000 before it
+                     // flushes the blade's particle cache.  Without this the hilt draws
+                     // in first person and the blade does not.  Top byte of the imm32.
+                     patch{0x004AA456, 0x00, 0x04, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "First Person Melee",
+               .patches =
+                  {
+                     // EntitySoldier::IsForcedThirdPerson returns true whenever either
+                     // weapon slot answers IsMelee, which is what pins saber heroes to
+                     // third person.  `56 57 8B F9` -> `32 C0 C3 90` = XOR AL,AL / RET.
+                     // It is __thiscall with no stack args, so a bare RET is correct.
+                     patch{0x004DE390, 0xF98B5756, 0x90C3C032},
+                     // FirstPersonRenderable::RenderSoldier ORs only 0x00080001 into the
+                     // render flags, but WeaponMelee::Render tests 0x4000000 before it
+                     // flushes the blade's particle cache.  Without this the hilt draws
+                     // in first person and the blade does not.  Top byte of the imm32.
+                     patch{0x005204DD, 0x00, 0x04, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "First Person Melee",
+               .patches =
+                  {
+                     // EntitySoldier::IsForcedThirdPerson returns true whenever either
+                     // weapon slot answers IsMelee, which is what pins saber heroes to
+                     // third person.  `56 57 8B F9` -> `32 C0 C3 90` = XOR AL,AL / RET.
+                     // It is __thiscall with no stack args, so a bare RET is correct.
+                     patch{0x004DE390, 0xF98B5756, 0x90C3C032},
+                     // FirstPersonRenderable::RenderSoldier ORs only 0x00080001 into the
+                     // render flags, but WeaponMelee::Render tests 0x4000000 before it
+                     // flushes the blade's particle cache.  Without this the hilt draws
+                     // in first person and the blade does not.  Top byte of the imm32.
+                     patch{0x005204DD, 0x00, 0x04, {.values_are_8bit = true}},
+                  },
+            },
+
          },
    },
 
