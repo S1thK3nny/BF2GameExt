@@ -18,15 +18,31 @@
 // rather than counts.
 //
 // Snd::SoundStream::Init is the one place that cannot be widened by rewriting
-// immediates: it *unrolls* its per-slot work six times,
+// immediates, because it does not go through the relocated arrays at all.  It
+// names the *stock* BSS addresses directly:
 //
-//     mov dword ptr [smPlayingProps + k*4], 0     ; k = 0..5
-//     or  byte  ptr [smQueue[k].mFlags], 1        ; k = 0..5
+//     mov dword ptr [0x0233A130 + k*4], 0     ; k = 0..5, unrolled
+//     mov eax, 0x0233A1F8                     ; &smQueue[0].mFlags
+//     mov ecx, 6                              ; then a counted loop:
+//     or  byte ptr [eax], 1  /  add eax, 0xC  ;   set the sorted flag
 //
-// so patching those twelve operands only ever covers slots 0..5.  Init runs on
-// every engine open and close, so the extra slots would keep a stale Properties*
-// across an engine restart and would never get the queue's sort-order flag set
-// by PblListDoubleSorted.  Prefix the function and do slots 6..N-1 ourselves.
+// (modtools 0x0088A457..0x0088A48C.  Steam unrolls the second group too, at
+// 0x00736B48/54/60/67/6E/75.  The shape differs; the problem does not.)
+//
+// Once the patch set repoints smPlayingProps and smQueue at our own buffers,
+// every one of those writes lands in the abandoned stock BSS.  So Init no longer
+// initialises ANY slot -- not just the new ones.  Slots 0..5 are as unserved as
+// slots 6..11, which is why the loop below runs over the whole range:
+//
+//   * the Properties* is never cleared, so a slot keeps a stale pointer across
+//     an engine restart, and
+//   * PblListDoubleSorted::Insert gates sorted insertion on mFlags & 1, so a
+//     queue without the bit appends at the tail.  That silently demotes stream
+//     scheduling from "nearest listener wins" to "first caller wins", and at
+//     depth > 4 it decides the wrong request gets evicted.
+//
+// Init runs on every engine open and close, so prefixing it re-does this per
+// mission load, which is exactly when it is needed.
 //
 // The queue *objects* themselves need no construction here — the CRT vector
 // ctor/dtor iterators that build smQueue are counted loops, so the patch set
@@ -56,7 +72,7 @@ void __cdecl init_extra_slots()
 {
    uint32_t* props = reinterpret_cast<uint32_t*>(audio_stream_playing_props());
 
-   for (uint32_t i = AUDIO_STREAM_SLOTS_STOCK; i < AUDIO_STREAM_SLOTS; ++i) {
+   for (uint32_t i = 0; i < AUDIO_STREAM_SLOTS; ++i) {
       props[i] = 0;
       snd_stream_queue_storage[i * kQueueStride + kQueueFlagsOff] |= kQueueSortedBit;
    }

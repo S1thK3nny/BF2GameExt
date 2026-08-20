@@ -601,6 +601,8 @@ namespace modtools {
 
    // CommandPost::SetTeam(CommandPost*, int newTeam, int oldTeam) -- __thiscall,
    // RET 8.  Detoured to survive a NULL `this`, which a mission script passing a
+   // non-CommandPost entity can produce; see entity/command_post_null_fix.cpp.
+   constexpr uintptr_t command_post_set_team        = 0x0064FBC0;
 
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 

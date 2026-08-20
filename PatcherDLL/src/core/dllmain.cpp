@@ -25,6 +25,7 @@
 #include "entity/hover_pilot_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/hero_team_switch_fix.hpp"
+#include "entity/command_post_null_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -221,6 +222,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
+      g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
       g_branchRegionDebugEnabled  = cfg.get_bool("Fixes", "BranchRegionDebug", false);
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
@@ -276,6 +278,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
+   command_post_null_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window
