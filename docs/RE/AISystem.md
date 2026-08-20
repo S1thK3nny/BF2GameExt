@@ -106,7 +106,18 @@ Each overrides `EnterState`, `UpdateState`, `ExitState`:
 
 ## AILowLevel - Locomotion & Firing
 
-The **low-level controller** that translates high-level commands into actual movement and shooting inputs. One per UnitController at `this+0x2C4`.
+The **low-level controller** that translates high-level commands into actual movement and shooting inputs. **EMBEDDED at `UnitController+0x2C4`, 232 bytes - it is not a pointer.** Reach it with `LEA`/`ADD`, never a dereference. Its `mNavigator` is at `AILowLevel+0x18`, i.e. `ctrl+0x2DC`, and THAT one is a pointer and is nullable.
+
+Verified layout of `UnitController_data` from Phantom's PDB. It sits at `+0x1CC` inside `UnitController`, which four known offsets confirm:
+
+| Field | In `_data` | Absolute | Cross-check |
+|---|---|---|---|
+| `mNextUpdateTime` | 20 | `0x1E0` | the scheduler key |
+| `mThreatManager` | 40 (204 B) | `0x1F4` | `Threat[6]` |
+| `mAgent` | 244 | `0x2C0` | nullable, see EnterState |
+| `mLowLevel` | 248 (232 B) | `0x2C4` | **embedded** |
+| `mLodState` | 480 | `0x3AC` | the LOD tier |
+| `mLodHumanPlayer` | 484 | `0x3B0` | confirms LOD keys off a human, not the camera |
 
 ### Navigation
 Uses a `Navigator` abstraction with multiple implementations:
@@ -338,10 +349,44 @@ a faster tier sooner when a player closes on them.
 
 | Hypothesis | Why it failed |
 |---|---|
-| `UnitAgent::sMemoryPool` exhaustion leaves units with no agent | Pool exhaustion cannot produce a null agent; the allocator grows or logs |
+| ~~`UnitAgent::sMemoryPool` exhaustion leaves units with no agent~~ | **RETRACTED - this elimination was wrong.** `MemoryPool::Allocate` returns the block in EAX and `XOR EAX,EAX / RET 4` at modtools `0x0080244e` on a failed `RedAllocFromHeap`, so exhaustion CAN hand back null. See the note below. |
 | The 750-entry `PathRequest` cap | `RequestPath` frees the requester's previous request first, so there is at most one live request per controller — 750 is unreachable at any real unit count |
 | The 201-slot vision ray queue (`0xc9`, not 200 - the two `PblHeap`s it feeds are `mMaxCount = 200`) | Its only producer is `UpdatePotentiallyVisible`, itself inside the already-capped high-level update, so arrival rate plateaus at ~50/pass regardless of unit count |
 | Anything O(n^2) per frame | `sUpdateFriendlyFire` and the spatial queries are linear or better; nothing all-pairs runs per frame |
+
+### Inert units: a null agent, not a slow one
+
+Distinct from the LOD story above, and matching a reported symptom - with `aimode`
+on, the occasional unit prints **nothing at all** and stands completely still.
+
+A unit that is merely LOD-demoted still prints something and still acts, just
+rarely. A unit that prints nothing has no agent state to print. The candidate
+mechanism is `UnitController+0x2C0` being null:
+
+- `MemoryPool::Allocate` (modtools `0x00802300`) returns the allocated block in
+  EAX. Its failure path is `XOR EAX,EAX / POP EBX / RET 4` at `0x0080244e`, taken
+  when `RedAllocFromHeap` cannot satisfy `mSize * mGrow`. **Allocation failure
+  yields null**, and whether the caller notices is the caller's business.
+- `UnitAgent::sMemoryPool` starts at 600 x 0x358 (`AIUtil::Init`). It grows, so 600
+  is not the ceiling - but every growth is a fresh `RedAllocFromHeap` that can fail.
+- `GetUpdateRate` already tolerates a null agent (`TEST EAX,EAX / JZ` at
+  `0x0059e7c2`, falling back to a base rate of 1.0), which shows a null agent is a
+  state the engine expects to survive rather than assert on.
+
+Two other candidates for the same symptom, neither ruled out:
+
+- **`AI::AIGoal::sMemoryPool` is only 20 entries** (`0x14`, from `AIUtil::Init`).
+  That is tiny next to 263 controllers. If goals are per-unit rather than shared,
+  a unit that cannot get one has nothing to do. Whether they are per-unit was NOT
+  established.
+- **A dropped `ListPool` entry.** `ListPool` does not grow: on overflow it warns at
+  `ListPool.h:0x5c` and discards the item. A live report showed capacity 60 against
+  2129 attempted adds, i.e. ~2069 silently dropped.
+
+All three are cheap to separate with a read-only poll of the controller list -
+print `agent`, `goal` and `command` per controller and look for the units where
+they are null.
+
 
 ---
 

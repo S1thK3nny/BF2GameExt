@@ -300,6 +300,22 @@ goal and command it is running and where its current goto point is: a flyer that
 goal keeps re-issuing a destination it is already effectively at is doing what it was told.
 Only the first case is fixed by `AIUtil::StopDist`.
 
+## First person
+
+**First person lightsabers** - Hero units force third person, and the blade is not
+drawn in the first person view. Unexplored. The pieces that exist: `_RenderLightSabre`
+(the __cdecl blade draw, already hooked for `lightsaber_illumination.cpp`) and
+`MeleeClassRender`. The questions are whether the first person arms model has the
+saber attach point at all, whether the view-model render pass is reachable for a
+hero, and whether the forced third person camera is a separate gate that would also
+have to move. Worth an hour of RE before estimating.
+
+**More first person states** - Actions that snap to third person or have no first
+person animation - rolling, sprinting, melee, entering vehicles. Wanted: an inventory
+of which states are gated and where, so the cheap ones can be separated from the ones
+needing missing animation assets. Related to the saber item above, since both come
+down to what the view model is allowed to do.
+
 ## Controller
 
 **Shell and menu navigation** - Gamepad support is gameplay only today. Every binding mode
