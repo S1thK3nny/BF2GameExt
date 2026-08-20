@@ -197,6 +197,28 @@ namespace modtools {
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate      = 0x00802300;
+   constexpr uintptr_t red_curr_heap             = 0x00CF68DC;
+   constexpr uintptr_t mempool_heap_offset       = 0x44;
+   constexpr uintptr_t mempool_free_offset       = 0x50;
+
    constexpr uintptr_t runtime_heap_global       = 0x00b30220;
    constexpr uintptr_t s_loadheap_global         = 0x00ba111c;
 
@@ -1009,6 +1031,28 @@ namespace steam {
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate      = 0x006DC370;
+   constexpr uintptr_t red_curr_heap             = 0x0093EBAC;
+   constexpr uintptr_t mempool_heap_offset       = 0x40;
+   constexpr uintptr_t mempool_free_offset       = 0x4C;
+
 
    // ---- Entity / Soldier Prone -----------------------------------------------
    constexpr uintptr_t EntitySoldier_prone       = 0x0079cfcc;
@@ -1863,6 +1907,28 @@ namespace gog {
    // ---- Memory heap management --------------------------------------------------
 
    constexpr uintptr_t red_set_current_heap           = 0x006c4ca0;
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate           = 0x006DD410;
+   constexpr uintptr_t red_curr_heap                  = 0x0094004C;
+   constexpr uintptr_t mempool_heap_offset            = 0x40;
+   constexpr uintptr_t mempool_free_offset            = 0x4C;
+
 
    // ---- Entity / Soldier Prone --------------------------------------------------
 

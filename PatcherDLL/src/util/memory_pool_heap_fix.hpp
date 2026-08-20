@@ -56,8 +56,10 @@
 // its captured heap and the live heap -- that is what proves or disproves the
 // diagnosis on a given map.
 //
-// modtools only for now; the retail addresses are not derived and the installer
-// no-ops there.
+// All three builds.  Note the retail layout differs -- the release builds drop
+// mPeak, so mHeap is +0x40 and mFree +0x4C rather than modtools' +0x44 and
+// +0x50.  Both come from the per-build table; copying the modtools offsets
+// across would read mPool as the heap index.
 // =============================================================================
 
 extern bool g_memoryPoolHeapFix;
