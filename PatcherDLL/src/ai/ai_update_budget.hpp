@@ -50,7 +50,8 @@
 // the site is an 8-bit immediate added to a sign-extended base.
 extern int g_aiUpdateBudget;
 
-// Hand-added key, deliberately absent from ini_registry.hpp: [AI] AIUpdateDiag.
+// Hand-added key, deliberately absent from ini_registry.hpp:
+// [Diagnostic] AIUpdateDiag.
 extern bool g_aiUpdateDiag;
 
 void ai_update_budget_install(uintptr_t exe_base);

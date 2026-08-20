@@ -153,8 +153,9 @@ void __cdecl hooked_mgr_update(float dt)
    // inside the simulation tick.
    if ((n % 120) == 0) sample_population();
 
-   // ~30 s at 60 Hz, and capped so a long session cannot fill the log.
-   if ((n % 1800) == 0 && s_reports < 40) {
+   // First report early so a run can be confirmed working without waiting, then
+   // every ~30 s at 60 Hz, capped so a long session cannot fill the log.
+   if ((n == 300 || (n % 1800) == 0) && s_reports < 40) {
       ++s_reports;
       report();
    }

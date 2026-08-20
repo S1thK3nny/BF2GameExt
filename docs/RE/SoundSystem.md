@@ -416,7 +416,7 @@ buffers: the probe asked for 127 and got 127, `mNumManagedVoices` reached 119,
 peak demand was 113, and all 113 were bound.
 
 `util/sound_diag.cpp` is the instrumentation the voice-pressure, gain, cursor and
-output numbers above came from. `[Fixes] SoundDiagnostic`, off by default,
+output numbers above came from. `[Diagnostic] SoundDiagnostic`, off by default,
 modtools only. It reports the voice ceiling actually in force and how many sounds
 are dropped for want of a voice, and watches the PCM leaving the engine for runs
 pinned at full scale, logging them with a timestamp and voice index. It hooks

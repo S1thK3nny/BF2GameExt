@@ -272,7 +272,7 @@ warnings. Steam and GOG have never been exercised in an actual match.
 
 Retail is also harder to check than modtools was, because it strips the `RedWarning`
 string: a failed lookup produces no `Unable to find branch region` line, or any other
-line. A retail pass has to lean on `[Fixes] BranchRegionDebug=1` and on watching units
+line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
 actually take the branch, rather than on the absence of warnings.
 
 ## Controller

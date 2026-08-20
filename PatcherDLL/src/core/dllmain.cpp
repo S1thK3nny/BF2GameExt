@@ -226,16 +226,16 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
       g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
-      // Both diagnostics are deliberately absent from ini_registry.hpp, so they do
-      // not appear in the generated INI or the user docs. The keys still work if
-      // added by hand, which is all a developer needs.
-      g_branchRegionDebugEnabled  = cfg.get_bool("Fixes", "BranchRegionDebug", false);
+      // Developer diagnostics. Deliberately absent from ini_registry.hpp, so they
+      // do not appear in the generated INI or the user docs; add the section and
+      // the key by hand to switch one on. They live in their own [Diagnostic]
+      // section so they are never confused with the shipped feature toggles.
+      g_branchRegionDebugEnabled  = cfg.get_bool("Diagnostic", "BranchRegionDebug", false);
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
-      g_soundDiagEnabled          = cfg.get_bool("Fixes", "SoundDiagnostic", false);
+      g_soundDiagEnabled          = cfg.get_bool("Diagnostic", "SoundDiagnostic", false);
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
-      // Unregistered developer key, like the other diagnostics.
-      g_aiUpdateDiag              = cfg.get_bool("AI", "AIUpdateDiag", false);
+      g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -305,7 +305,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);
-   ai_update_budget_install(exe_base); // byte-patches .text - needs the RW window      // byte-patches .text — needs the RW window
+   ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
    red_light_stale_node_fix_install(exe_base);

@@ -180,7 +180,7 @@ The engine's own id is not kept as an alias. The leading-space spelling is not
 supported and deliberately so: the feature has never worked for anyone, so there
 is no content in the wild relying on it.
 
-A diagnostic ships alongside: `[Fixes] BranchRegionDebug=0`,
+A diagnostic ships alongside: `[Diagnostic] BranchRegionDebug=0`,
 `PatcherDLL/src/entity/branch_region_debug.cpp`, modtools only, off by default.
 It changes no behaviour; it narrates `RedRegionFactory::Find`, `CreateRegion`
 and `FindByID` - which factory claims each region, the id each side derives, and

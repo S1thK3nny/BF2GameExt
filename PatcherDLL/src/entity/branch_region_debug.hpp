@@ -7,7 +7,7 @@
 // interleaved with the engine's own "Unable to find branch region" warnings so
 // the ordering between them is visible. Changes no behaviour.
 //
-// [Fixes] BranchRegionDebug, default off. modtools only.
+// [Diagnostic] BranchRegionDebug, default off. modtools only.
 
 extern bool g_branchRegionDebugEnabled;
 

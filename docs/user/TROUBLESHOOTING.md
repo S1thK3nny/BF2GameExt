@@ -199,8 +199,9 @@ verified against its expected bytes before anything is written, and a single
 mismatch switches the whole feature off and logs which site failed, so it cannot
 half-apply. That line only means the patch went in. For the ceiling actually in
 force at runtime, and for how many sounds are being dropped for want of a voice,
-add `SoundDiagnostic=1` under `[Fixes]` by hand -- it is a developer
-diagnostic and is not listed in the generated INI.
+add `SoundDiagnostic=1` under a `[Diagnostic]` section by hand -- developer
+diagnostics are not listed in the generated INI, so you add both the section
+and the key.
 
 ## Branch regions do not resolve
 
@@ -220,8 +221,8 @@ deliberately not supported now. Take the space out if you have one.
 
 Then confirm `[Fixes] BranchRegionFix` has not been set to 0; it is on by
 default. If the names are right and the fix is on, set
-`BranchRegionDebug=1`, added by hand under `[Fixes]` -- it is a developer
-diagnostic and is not listed in the generated INI. It writes every step to
+`BranchRegionDebug=1`, added by hand under a `[Diagnostic]` section -- developer
+diagnostics are not listed in the generated INI. It writes every step to
 `BF2GameExt.log` tagged `[BranchDbg]` - which factories are registered, what
 each region registered itself as, and what each lookup asked for. The debug key
 is Modtools only.

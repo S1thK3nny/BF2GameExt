@@ -38,7 +38,8 @@
 //        mid-packet.
 //
 // Counters only, and the two audio-path hooks do nothing but increment; all
-// logging happens on the engine tick.  Off by default: [Fixes] SoundDiagnostic.
+// logging happens on the engine tick.  Off by default:
+// [Diagnostic] SoundDiagnostic.
 //
 // modtools only -- the addresses are not derived for retail, and the installer
 // no-ops elsewhere.
