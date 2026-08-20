@@ -31,6 +31,7 @@
 #include "util/sound_diag.hpp"
 #include "util/voice_limit.hpp"
 #include "ai/ai_update_budget.hpp"
+#include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
@@ -236,6 +237,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
+      g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
+      g_memoryPoolHeapFix         = cfg.get_bool("Fixes", "MemoryPoolHeapFix", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -306,6 +309,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
+   memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
    red_light_stale_node_fix_install(exe_base);
