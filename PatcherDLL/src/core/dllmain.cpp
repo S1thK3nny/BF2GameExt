@@ -227,10 +227,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
       g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
-      // Developer diagnostics. Deliberately absent from ini_registry.hpp, so they
-      // do not appear in the generated INI or the user docs; add the section and
-      // the key by hand to switch one on. They live in their own [Diagnostic]
-      // section so they are never confused with the shipped feature toggles.
+      // Read-only instrumentation, in its own [Diagnostic] section so it is never
+      // confused with the shipped feature toggles. All default off.
       g_branchRegionDebugEnabled  = cfg.get_bool("Diagnostic", "BranchRegionDebug", false);
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_soundDiagEnabled          = cfg.get_bool("Diagnostic", "SoundDiagnostic", false);

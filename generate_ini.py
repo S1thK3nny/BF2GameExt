@@ -87,6 +87,11 @@ SECTION_BLURBS = OrderedDict([
      "feels and mouse players have no use for it. The tuning values are set to "
      "match the console release, so enabling it alone gives you the Xbox feel; "
      "they are exposed for anyone who wants it stronger or weaker."),
+    ("Diagnostic",
+     "Read-only instrumentation, all off by default. These only write to "
+     "`BF2GameExt.log`; none of them change how the game behaves. Turn one on "
+     "when you are chasing the specific problem it measures, then turn it back "
+     "off - some of them log every frame."),
 ])
 
 MODE_DESCRIPTIONS = OrderedDict([

@@ -133,6 +133,17 @@ Xbox-style aim assist for gamepad players, singleplayer only. **Off by default**
 | `ProximityFrictionRadius` | `0.5` | Screen-space radius for proximity slowdown |
 | `ProximityFrictionScale` | `0.4` | Min friction at dead center (0 = full stop, 1 = none) |
 
+## Diagnostic
+
+Read-only instrumentation, all off by default. These only write to `BF2GameExt.log`; none of them change how the game behaves. Turn one on when you are chasing the specific problem it measures, then turn it back off - some of them log every frame.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `SoundDiagnostic` | `0` | Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale. Modtools only |
+| `BranchRegionDebug` | `0` | Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced. Modtools only |
+| `AIUpdateDiag` | `0` | Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising. Modtools only |
+| `PoolGrowthDiag` | `0` | Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash MemoryPoolHeapFix repairs |
+
 ## Controller bindings
 
 The `[Controller.Unit]`, `[Controller.Vehicle]`, `[Controller.Flyer]`, `[Controller.Hero]` and `[Controller.Turret]` sections map physical buttons and axes to in-game actions. Every default is written into the shipped INI as a commented-out line. See [CONTROLLER.md](CONTROLLER.md) for the input and action names and the full default tables.
