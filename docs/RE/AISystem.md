@@ -195,6 +195,112 @@ A global system that scales AI parameters based on difficulty setting. Uses `mPr
 
 ---
 
+---
+
+## Why AI stand around at high unit counts
+
+Measured, not theorised. `[Diagnostic] AIUpdateDiag` instruments
+`ControllerManager::Update` and `UnitController::UpdateHighLevel`; the numbers
+below are from a real match on modtools.
+
+### The scheduler, and what it gates
+
+`ControllerManager::Update` (`0x005997a0`, `__cdecl(float dt)`) drains a
+priority queue ordered by next-update-time, servicing at most **ten** controllers
+per simulation turn. The bound is branchless:
+
+```asm
+005999c2  CALL 0x0040298c     ; AIUtil::IsUberMode()
+005999c7  NEG  AL             ; CF = 1 iff uber
+005999c9  SBB  EAX,EAX        ; 0 or 0xFFFFFFFF
+005999cb  AND  EAX,0x5a       ; 0 or 90
+005999ce  ADD  EAX,0x0a       ; -> 10, or 100 in uber mode
+00599a69  CMP  EBP,EBX / JL   ; the loop's only exit
+```
+
+That budget gates `UpdateHighLevel` (`0x005a0370`, `__thiscall(this)`, no stack
+args) — LOD, vision, the threat manager and the command FSM, i.e. everything that
+issues an ORDER. `UpdateLowLevel` (`0x0059e880`) runs **uncapped** for every
+controller every turn, ticking the navigator and the weapon trigger.
+
+So a unit that misses its slot keeps walking wherever it was already going and
+keeps shooting at whatever it already had, but never makes a NEW decision. It
+finishes its order and waits. That is what standing around is.
+
+### The budget is NOT the constraint
+
+The obvious conclusion — raise the ten — is wrong, and the measurement says so:
+
+```
+turns=7200  highLevelUpdates=10730  per turn=1.49  budget=10
+peak controllers=263  by LOD tier [0]=40 [1]=93 [2]=123 [3]=5 [4]=2
+```
+
+**1.49 updates per turn against a budget of 10.** The scheduler is running at
+about 15% of capacity with 263 AI alive. Nothing is queueing. Raising
+`[AI] AIUpdateBudget` would change nothing, because demand never reaches the cap.
+
+### The LOD tier assignment is the constraint
+
+Demand is set by each unit's LOD tier, and the tier is chosen in
+`UpdateLodState` (`0x0059f480`) by distance to the nearest **human player
+character** — it walks `Character::sCharacters` filtering `mPlayerId >= 0`, with a
+camera-visibility test only as a secondary bump. Radii are 25 and 100.
+
+| Tier | Interval | Condition | Units observed |
+|------|----------|-----------|----------------|
+| 4 HIGH | 0.25 s | within 25 of a player | **2** |
+| 3 NORMAL | 1.0 s | within 100 | **5** |
+| 2 LOW | 2.0 s | beyond | 123 |
+| 1 LOWER | 3.0 s | | 93 |
+| 0 WICKED_LOW | 4.0 s | | 40 |
+
+**256 of 263 units sit in tiers 0-2**, deciding once every two to four seconds.
+Two units in the whole match were at full rate. Nothing about that depends on
+combat — a firefight on the far side of the map is graded purely on how far it is
+from the one human, so AI fighting each other think at 0.25 Hz.
+
+Summing the tiers gives roughly 115 decisions/sec of demand against a supply of
+600/sec, which is why the budget never binds.
+
+### Tunables, all verified
+
+The demand side is where the leverage is, and the interval multipliers are the
+safest of them because they are `imm32` floats — any value fits with no
+re-encoding:
+
+| What | Site | Encoding |
+|------|------|----------|
+| Interval multipliers `{4.0, 3.0, 2.0, 1.0, 0.25}` | `0x0059e7d9`, `+8`, `+8`, `+8`, `+8` | imm32 float, any value |
+| LOD HIGH radius (25) | `0x0059e63c`, imm8 at `0x0059e63e` | max 0x7f in place; 16 bytes of `CC` padding follow for an imm32 rewrite |
+| LOD NORMAL radius (100) | `0x0059e65c`, imm8 at `0x0059e65e` | same, same padding |
+| Update budget (10) | `0x005999ce`, imm8 at `0x005999d0` | max 0x7f; sign-extended, so 0x80+ would run ZERO updates |
+| Low-level skip, all tiers | `0x0059e8a1` bytes `78 0f` | `78` -> `EB` makes it unconditional |
+
+There is headroom to spend: at 1.49/10 the budget could absorb roughly 6x more
+decisions before it binds. Halving the three slow multipliers would take demand to
+about 230/sec, still comfortably under the cap.
+
+> **Correction to an earlier note.** `AISystem.md` previously described the LOD
+> tier as picked by "distance to camera". It is distance to the nearest human
+> player character; the camera only contributes a secondary visibility bump.
+
+> **Uber mode is not a shortcut.** `SetUberMode(1)` raises the budget 10 -> 100
+> but ALSO shrinks the HIGH radius 25 -> 5 and NORMAL 100 -> 20, and cuts the
+> per-unit vision allowance. It would demote nearly everything to longer
+> intervals, plausibly making the standing-around worse at medium range.
+
+### Eliminated, so nobody re-treads them
+
+| Hypothesis | Why it failed |
+|---|---|
+| `UnitAgent::sMemoryPool` exhaustion leaves units with no agent | Pool exhaustion cannot produce a null agent; the allocator grows or logs |
+| The 750-entry `PathRequest` cap | `RequestPath` frees the requester's previous request first, so there is at most one live request per controller — 750 is unreachable at any real unit count |
+| The 200-slot vision ray queue | Its only producer is `UpdatePotentiallyVisible`, itself inside the already-capped high-level update, so arrival rate plateaus at ~50/pass regardless of unit count |
+| Anything O(n^2) per frame | `sUpdateFriendlyFire` and the spatial queries are linear or better; nothing all-pairs runs per frame |
+
+---
+
 ## AIUtil - The Kitchen Sink
 
 ~60+ static utility functions used everywhere:

@@ -275,6 +275,44 @@ string: a failed lookup produces no `Unable to find branch region` line, or any 
 line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
 actually take the branch, rather than on the absence of warnings.
 
+**AI decide far too slowly away from the player** - Measured, and it is NOT the ten-per-turn
+update budget: on a 263-unit match the scheduler ran at 1.49 of its 10, so raising
+`[AI] AIUpdateBudget` changes nothing. The constraint is the LOD tier assignment. Tier is
+chosen by distance to the nearest HUMAN PLAYER character (`UpdateLodState` 0x0059f480 walks
+`Character::sCharacters` filtering `mPlayerId >= 0`), with radii of 25 and 100 - so 256 of
+those 263 units sat in tiers 0-2, deciding once every two to four seconds. Only two units in
+the whole match were at full rate. A firefight on the far side of the map is graded purely on
+its distance from the one human, so AI fighting each other think at 0.25 Hz, which is what
+standing around actually is.
+
+The leverage is on the demand side, and the interval multipliers are the safest lever because
+they are imm32 floats that take any value with no re-encoding: `{4.0, 3.0, 2.0, 1.0, 0.25}` at
+0x0059e7d9 and every 8 bytes after. The budget has room to absorb it - halving the three slow
+multipliers takes demand from ~115/sec to ~230/sec against a supply of 600/sec. The radii
+(0x0059e63c, 0x0059e65c) are the alternative but are imm8 and capped at 127 in place.
+
+Wanted: a single INI dial over the multipliers, defaulting to stock, with the existing
+`[Diagnostic] AIUpdateDiag` used to confirm the budget still is not binding after a raise.
+See docs/RE/AISystem.md for the full measurement and the eliminated hypotheses.
+
+**AI flyers orbit instead of arriving** - Traced to `PathFollower`, not to the flyer agent.
+Three flyer-specific facts combine into a trap at the FINAL waypoint of any path: flyers are
+exempt from `CheckStuck` (0x005db240); arrival is a PLANAR test against `AIUtil::StopDist`
+(0x0058ebb0), which has no flyer case and falls through to a flat 4.0 units; and
+`GonePastDest` has a flyer-only gate (0x005d9338) that returns false beyond 10.0 units planar.
+A flyer whose turn radius keeps it outside both never registers arrival, never sets `mDone`,
+never re-enters `EnterState`, and is never flagged stuck - so it orbits that point forever. It
+applies during combat too, since `AttackPatterns::GeneratePath` uses the same follower.
+
+Compounding it, `UnitFlyAgent::EventHandler` (0x005aeea0) swallows `EVT_Damaged`,
+`EVT_Audible_CanHearEnemy`, `EVT_Grenade` and `EVT_EmptyVehicle` outright, so a flyer under
+fire never asks whether to fight back; only vision reaches combat, and never for a transport.
+
+The likely fix is a flyer case in `AIUtil::StopDist` mirroring `StopDistIntermediate`, so the
+terminal waypoint scales with the vehicle rather than using a flat 4.0. Not yet patched, and
+the step from these thresholds to "therefore it orbits" assumes a turn radius above 10 units,
+which is ODF data and unmeasured. See docs/RE/FlyerAI.md.
+
 ## Controller
 
 **Shell and menu navigation** - Gamepad support is gameplay only today. Every binding mode
