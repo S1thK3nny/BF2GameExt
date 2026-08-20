@@ -356,7 +356,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      // leading space. entity/branch_region_fix.cpp re-stamps the id from
                      // the text AFTER the separator, which is what makes the spelling a
                      // mapper would actually write, BranchRegion("dropzone1"), resolve.
-                     patch{0x00A4B5A8, 0x00821F60, 0x005E4C90}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
+                     patch{0x00A4B5A8, 0x00821F60, 0x005E4C90, {.values_are_va = true}}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
                   },
             },
 
@@ -1050,7 +1050,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      //
                      // Retail note: these builds strip the RedWarning text, so the failure
                      // is completely silent there -- no "Unable to find branch region" line.
-                     patch{0x0079d3e4, 0x006dd9d0, 0x004d0f00}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
+                     patch{0x0079d3e4, 0x006dd9d0, 0x004d0f00, {.values_are_va = true}}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
                   },
             },
 
@@ -1680,7 +1680,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      //
                      // Retail note: these builds strip the RedWarning text, so the failure
                      // is completely silent there -- no "Unable to find branch region" line.
-                     patch{0x0079c444, 0x006dc930, 0x004d0f00}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
+                     patch{0x0079c444, 0x006dc930, 0x004d0f00, {.values_are_va = true}}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
                   },
             },
 
