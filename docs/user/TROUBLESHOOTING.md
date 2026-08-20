@@ -155,6 +155,80 @@ an easy one.
 - **Read `BF2GameExt.log`.** It lists which patches applied and which were
   skipped, which usually answers this immediately.
 
+## Particle density is costing frame rate
+
+`[Particles] ParticleDensity=2` switches off the engine's distance thinning
+completely, so a distant emitter spawns as many particles as one at your feet.
+On a busy map that costs frame time, and it is the first thing to suspect if the
+game got slower after you changed this key.
+
+Level 1 is the middle setting and exists for exactly that reason. It gives full
+density near and mid-range but leaves the far field thinned, which is where the
+cost concentrates. If 2 drops your frame rate, try 1 before going back to 0.
+
+`ParticleFixes` is a separate key and is not a density control. It repairs how
+the engine batches and draws particles; `ParticleDensity` is the one that
+decides how many there are.
+
+## VoiceLimit did nothing
+
+`[LimitIncreases] VoiceLimit` is 0 by default, which keeps the stock 32; a
+count from 33 to 119 raises it. The key is Modtools only, and on Steam and GOG
+the installer no-ops and the key is ignored.
+
+Both mixing paths are raised, so on Modtools the count should climb either way.
+The two paths get there differently, and only one of them needs anything from
+your sound card:
+
+- **EAX**, meaning 5.1 or 7.1 or another audio mode that picks DirectSound
+  hardware. The extra voices are hardware buffers, so DirectSound has to have
+  some to give out. Native Windows Vista and later report zero hardware 3D
+  buffers, which is why this path in practice wants a wrapper such as DSOAL,
+  Creative ALchemy or IndirectSound.
+- **Software mixing**, which needs nothing external. The engine's own mixer
+  ships with 32 inputs and is widened to match the voice count.
+
+If the software path could not be widened - any one of its sites failing its byte
+check - it is left at 32 on purpose, because a voice that cannot get a mixer
+input takes a pool slot and then produces no sound at all, which is worse than
+stock. The log says so when that happens.
+
+The engine's own `BFront2.log` tells you whether the patch itself applied: on
+success it carries a line tagged `[VoiceLimit]` naming the count. Every site is
+verified against its expected bytes before anything is written, and a single
+mismatch switches the whole feature off and logs which site failed, so it cannot
+half-apply. That line only means the patch went in. For the ceiling actually in
+force at runtime, and for how many sounds are being dropped for want of a voice,
+set `[Fixes] SoundDiagnostic=1`.
+
+## Branch regions do not resolve
+
+Check the names first. The region has to be called `entitypathbranch <id>`, and
+the path node has to ask for the same `<id>`:
+
+```
+region:     entitypathbranch dropzone1
+path node:  BranchRegion("dropzone1")
+```
+
+The old code took the id from the separating space onward, so a region named
+`entitypathbranch dropzone1` registered itself as ` dropzone1`. That never
+resolved in any shipping build, so a path node written to match it -
+`BranchRegion(" dropzone1")` - did not work before the fix either, and is
+deliberately not supported now. Take the space out if you have one.
+
+Then confirm `[Fixes] BranchRegionFix` has not been set to 0; it is on by
+default. If the names are right and the fix is on, set
+`[Fixes] BranchRegionDebug=1`. It writes every step of resolution to
+`BF2GameExt.log` tagged `[BranchDbg]` - which factories are registered, what
+each region registered itself as, and what each lookup asked for. The debug key
+is Modtools only.
+
+On Steam and GOG the engine's missing-region warning was stripped out, so a
+branch region that never resolves is completely silent there and getting no
+warning tells you nothing. The fix is applied on all three builds, but it has
+only been verified in play on Modtools.
+
 ## Gamepad problems
 
 - The pad needs `[Controller] Enabled=1`.

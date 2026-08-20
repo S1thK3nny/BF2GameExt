@@ -27,17 +27,26 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `SoundLayerLimit` | `1` | Raise SoundParameterized layer limit |
 | `DLCMissionLimit` | `1` | Raise DLC / addon mission limit |
 | `SoundLimit` | `1` | Raise global sound limit |
-| `ParticleCacheIncrease` | `1` | Increase particle effect cache |
 | `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
 | `ComboAnimIncrease` | `1` | Raise combo animation limit |
 | `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
 | `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
+| `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32. Otherwise a count from 33 to 119; the engine's own probe, voice pool and two ceilings are all raised to match. Works in both mixing paths: under EAX (5.1/7.1 or an audio mode that selects DirectSound hardware) the extra voices are hardware buffers and DirectSound must have some to spare, while software mixing needs nothing external but costs more CPU per voice. Costs 1.4 KB per voice |
 | `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |
 | `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
 | `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
 | `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
+
+## Particles
+
+Particle effects. `ParticleFixes` repairs how the engine batches and draws them and should stay on; `ParticleDensity` decides how many it is allowed to show, and is the only setting here with a frame-time cost.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ParticleFixes` | `1` | Fix the particle engine: use all the batch caches, stop a full batch from deleting whole effects for a frame, and stop one failed frame from disabling particles for good. Turn off only to compare against stock behaviour |
+| `ParticleDensity` | `0` | How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time |
 
 ## Fixes
 
@@ -49,6 +58,10 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 | `PropGeneratorLoopFix` | `1` | Fix foliage-update crash at very high FOVs (PrismaticFlower's fix) |
 | `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
 | `SaberBlockFix` | `1` | Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock |
+| `BranchRegionFix` | `1` | Make EntityPath branch regions work. The engine calls the wrong vtable slot so no branch region is ever created, and derives the region id from one character too early. Name the region "entitypathbranch <id>" and write BranchRegion("<id>") in the path node |
+| `BranchRegionDebug` | `0` | Diagnostic. Logs every step of EntityPath branch-region resolution to the game log so a BranchRegion that will not resolve can be traced. Off by default; it is noisy and changes nothing |
+| `SoundDiagnostic` | `0` | Diagnostic. Reports to the game log how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and how often two suspected causes of the random loud burst under EAX are reached. Off by default; it hooks the audio path and changes nothing |
+| `CommandPostNullFix` | `1` | Survive a mission script pointing command post logic at something that is not a command post. Stock BF2 dereferences the null and crashes; this logs what happened and keeps playing |
 | `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |
 | `BarrelFireOriginFix` | `1` | Fire projectiles from barrel hardpoint instead of bone_head. HINT: firing from the barrel adds barrel-to-crosshair parallax, so shots may not land exactly on the reticle once ReticleCorrection re-aligns it to the 3D aim point (worst at close range and with large weapon offsets). Set ReticleCorrection=0 if barrel-origin shots feel off-point |
 | `BlurDownsizeClamp` | `1` | Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix) |

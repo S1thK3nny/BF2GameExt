@@ -194,6 +194,72 @@ regions and streams. Current state of the problem:
   existing sound entities to rebuild from it, without regions immediately overwriting the
   result.
 
+**Audio stream queue-item pool** - Raising the audio stream limit from 6 to 12 slots left
+the shared queue-item pool at 24 entries. Each slot queues to a depth of four, so the
+demand ceiling is 48 requests against a pool of 24, and running the pool dry is a null
+dereference rather than a dropped request. It cannot be grown where it sits: 24 entries of
+`0x34` bytes from `0x0233a240` end at `0x0233a720`, which is itself a live global with
+five references, so the pool has to be relocated the way the stream arrays themselves were.
+Exhaustion should also be made to degrade into dropping the request instead of crashing.
+
+**The EAX crackle - investigated, not found in BF2** - Recorded here so nobody re-treads
+it. The symptom is a random, loud, distorted burst during matches with EAX enabled. Seven
+hypotheses were tested and all seven were eliminated: five by static analysis, and the two
+that survived that by runtime instrumentation.
+
+- `DSBufferRenderer::UpdateGain` (`0x008997C0`) converts to Q15 with
+  `(int)(gain * 32767.0f) << 16` and no clamp. Refuted: 483,253 calls, every one of them
+  on the unclamped path, and the gain product never exceeded 1.0, with a maximum seen of
+  exactly 1.000. The same measurement showed flags bit `0x10` is never set, which makes
+  the float gain path unreachable dead code.
+- `StreamResampler::GetPacket` publishes `mOutputPacket.mBufferUsed` in samples on the
+  unity-rate path (`0x008A59A8`) but in bytes on the interpolating path (`0x008A5A99`),
+  while consumers read bytes. The unit mismatch is real but harmless: `mOutputPacket` is
+  refcount protected (`0x008A58B8`) and `GetPacket` returns NULL rather than overwrite a
+  held packet, and of 7084 measured unity-rate calls none had a held input packet. The
+  feared `WriteData` runaway went the same way - maximum packet cursor 110,544 against a
+  packet size of 110,592 across 1.88 million writes, so the exact-equality release works.
+
+BF2's own output never approaches full scale either: the loudest sample in a whole session
+was 9,829 of 32,767, about -10.5 dBFS, with no saturation bursts at all. No mechanism
+inside BF2 that could produce a loud burst survives. Because a driver reporting 129
+hardware 3D buffers proves a DirectSound wrapper is in use - native Vista and later report
+zero - the wrapper itself is the remaining suspect. That is a conclusion about where not
+to look rather than a fix, and the next move is measurement outside the engine. The sound
+diagnostic that shipped alongside the investigation watches the PCM leaving the engine for
+runs pinned at full scale, so a burst caught in the act would be logged with a timestamp
+and voice index.
+
+## Retail builds
+
+**Voice limit and command post null fix are modtools only** - Both patches install on
+modtools and no-op on Steam and GOG, so retail players get neither.
+
+The concurrent voice raise touches several sites at once - `gMaxVoices`, the hardware
+buffer probe's count and its array, the `Voice` pool and both voice ceilings - and only
+the modtools addresses for those have been derived. The installer verifies every site
+against its expected bytes and disables the whole feature if any one of them fails to
+match, so this is a matter of locating each site on retail, not of teaching the patch to
+tolerate a partial match. Verifying a port needs checking both mixing paths, since the
+hardware and software branches of `Engine::Open` reach the pool through different code and
+only one of them is exercised on any given machine.
+
+`CommandPost::SetTeam` is the smaller job of the two: retail lays `CommandPost` out
+differently, so the patch site has to be re-derived per build before the null guard can be
+enabled there.
+
+**Branch region fix unverified on retail** - The fix carries addresses for all three
+builds. The vtable slot correction has a vtable, a wrong slot and the real `CreateRegion`
+recorded for modtools, Steam and GOG, and the `mHashID` offset at `+0x20` that the id
+re-stamp writes is verified on modtools and on both retail builds. It has only been
+confirmed in play on modtools, though, where all 24 branch region lookups resolve with no
+warnings. Steam and GOG have never been exercised in an actual match.
+
+Retail is also harder to check than modtools was, because it strips the `RedWarning`
+string: a failed lookup produces no `Unable to find branch region` line, or any other
+line. A retail pass has to lean on `[Fixes] BranchRegionDebug=1` and on watching units
+actually take the branch, rather than on the absence of warnings.
+
 ## Controller
 
 **Shell and menu navigation** - Gamepad support is gameplay only today. Every binding mode
