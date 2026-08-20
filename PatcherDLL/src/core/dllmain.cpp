@@ -225,6 +225,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
       g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
+      // Both diagnostics are deliberately absent from ini_registry.hpp, so they do
+      // not appear in the generated INI or the user docs. The keys still work if
+      // added by hand, which is all a developer needs.
       g_branchRegionDebugEnabled  = cfg.get_bool("Fixes", "BranchRegionDebug", false);
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_soundDiagEnabled          = cfg.get_bool("Fixes", "SoundDiagnostic", false);
