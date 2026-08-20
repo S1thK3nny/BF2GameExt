@@ -4,6 +4,25 @@
 #include "core/game_build.hpp"
 
 #include <cstring>
+#include <stdio.h>
+#include <stdarg.h>
+
+// Install-time logging MUST NOT go through get_gamelog().  Every section of the
+// exe is PAGE_READWRITE for the whole installer sequence (dllmain.cpp:194), so
+// calling the engine's logger jumps into non-executable .text and raises an
+// EXEC access violation -- which is a DLL_INIT_FAILED, i.e. the game refuses to
+// start at all.  The CRT is fine; it lives in this module.
+static void install_log(const char* fmt, ...)
+{
+   FILE* f = nullptr;
+   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
+   va_list ap;
+   va_start(ap, fmt);
+   vfprintf(f, fmt, ap);
+   va_end(ap);
+   fclose(f);
+}
+
 
 // See particle_density.hpp for what this dial does and why the LOD numerator is
 // repointed rather than edited.
@@ -91,15 +110,20 @@ void particle_density_install(uintptr_t exe_base)
 
       // Sanity: the operand must currently point at a float reading 4.0, or
       // this is not the instruction we think it is.
+      //
+      // NOT resolve()d.  This value was read out of a live instruction, so the
+      // loader has already relocated it -- rebasing it a second time lands on a
+      // wild pointer.  Invisible on modtools, which loads at its preferred base
+      // and makes resolve() the identity; it bit on Steam, which does not.
       const float* stock = reinterpret_cast<const float*>(
-         resolve(exe_base, s_origNumOperand));
+         static_cast<uintptr_t>(s_origNumOperand));
       if (*stock == 4.0f) {
          const uint32_t ours = (uint32_t)(uintptr_t)&s_lodNumerator;
          std::memcpy(operand, &ours, sizeof(ours));
          s_numOperandAddr = operand;
       } else {
-         get_gamelog()("[ParticleDensity] LOD numerator at %p reads %f, expected 4.0 -- "
-                       "leaving the distance curve stock\n", (void*)stock, (double)*stock);
+         install_log("[ParticleDensity] LOD numerator at %p reads %f, expected 4.0 -- "
+                     "leaving the distance curve stock\n", (void*)stock, (double)*stock);
       }
    }
 

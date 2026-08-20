@@ -4,6 +4,25 @@
 #include "core/game_build.hpp"
 
 #include <string.h>
+#include <stdio.h>
+#include <stdarg.h>
+
+// Install-time logging MUST NOT go through get_gamelog(). Every section of the
+// exe is PAGE_READWRITE for the whole installer sequence (dllmain.cpp:194), so
+// calling the engine's logger jumps into non-executable .text and raises an EXEC
+// access violation -- which surfaces as DLL_INIT_FAILED, i.e. the game refuses
+// to start at all. The CRT is fine; it lives in this module.
+static void install_log(const char* fmt, ...)
+{
+   FILE* f = nullptr;
+   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
+   va_list ap;
+   va_start(ap, fmt);
+   vfprintf(f, fmt, ap);
+   va_end(ap);
+   fclose(f);
+}
+
 
 // See voice_limit.hpp for the mechanism and why the probe array has to move.
 
@@ -109,7 +128,7 @@ bool expect(uintptr_t exe_base, uintptr_t va, uint32_t width, uint32_t expected)
 {
    uint8_t* const p = reinterpret_cast<uint8_t*>(resolve(exe_base, va));
    if (read_at(p, width) != expected) {
-      get_gamelog()("[VoiceLimit] site %08X reads %08X, expected %08X -- feature off\n",
+      install_log("[VoiceLimit] site %08X reads %08X, expected %08X -- feature off\n",
                     (unsigned)va, read_at(p, width), expected);
       return false;
    }
@@ -162,7 +181,7 @@ void voice_limit_install(uintptr_t exe_base)
    for (int i = 0; i < kArrayRefCount; ++i) {
       uint8_t* const p = reinterpret_cast<uint8_t*>(resolve(exe_base, kArrayRefs[i].va));
       if (memcmp(p, kArrayRefs[i].lea, 7) != 0) {
-         get_gamelog()("[VoiceLimit] probe array reference %08X is not the expected LEA"
+         install_log("[VoiceLimit] probe array reference %08X is not the expected LEA"
                        " -- feature off\n", (unsigned)kArrayRefs[i].va);
          s_savedCount = 0;
          return;
@@ -173,7 +192,7 @@ void voice_limit_install(uintptr_t exe_base)
    {
       uint8_t* const p = reinterpret_cast<uint8_t*>(resolve(exe_base, kSwVoiceCountPin));
       if (memcmp(p, kSwPinExpect, 7) != 0) {
-         get_gamelog()("[VoiceLimit] software voice-count load at %08X is not the expected"
+         install_log("[VoiceLimit] software voice-count load at %08X is not the expected"
                        " MOV -- feature off\n", (unsigned)kSwVoiceCountPin);
          s_savedCount = 0;
          return;
@@ -192,7 +211,7 @@ void voice_limit_install(uintptr_t exe_base)
       if (s_probeArray) VirtualFree(s_probeArray, 0, MEM_RELEASE);
       s_pool = s_probeArray = nullptr;
       s_savedCount = 0;
-      get_gamelog()("[VoiceLimit] could not reserve %u bytes -- feature off\n",
+      install_log("[VoiceLimit] could not reserve %u bytes -- feature off\n",
                     poolBytes + probeCount * kDSBufferSize);
       return;
    }
@@ -238,7 +257,7 @@ void voice_limit_install(uintptr_t exe_base)
 
    s_installed = true;
 
-   get_gamelog()("[VoiceLimit] %d voices under EAX, 32 in software mixing"
+   install_log("[VoiceLimit] %d voices under EAX, 32 in software mixing"
                  " (pool %u bytes at %p, probe array %u entries at %p)\n",
                  n, poolBytes, s_pool, probeCount, s_probeArray);
 }
