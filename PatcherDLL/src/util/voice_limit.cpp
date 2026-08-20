@@ -8,7 +8,6 @@
 // See voice_limit.hpp for the mechanism and why the probe array has to move.
 
 int g_voiceLimit = 0;
-bool g_softwareVoices = false;
 
 namespace {
 
@@ -42,68 +41,6 @@ constexpr uintptr_t kSwCeilLoadImm32 = 0x00886BE0; // MOV EDI,0x20
 
 constexpr uintptr_t kProbeCtorCount  = 0x008866B5; // PUSH 0x28
 constexpr uintptr_t kProbeDtorCount  = 0x00886788; // PUSH 0x28
-
-// ---------------------------------------------------------------------------
-// The software mixer
-// ---------------------------------------------------------------------------
-// SoftOutput (static, 0x02331218) owns four per-input arrays laid out back to
-// back inside itself with no slack:
-//
-//   +0x0CC  gain / ramp matrix   2 * N * outChannels ints   0x200 at N=32
-//   +0x2CC  connection table     8 bytes per input          0x100
-//   +0x3CC  packet holders       8 bytes per input          0x100
-//   +0x4CC  per-input offsets    4 bytes per input          0x080
-//
-// Every runtime access goes through a pointer the mixer stores, so all four can
-// be moved to DLL-owned buffers; the addresses are only ever formed in
-// SetOutputBufferSize, as four 6-byte `LEA r32,[ESI+disp32]` that a 5-byte
-// MOV r32,imm32 plus a NOP fits inside.
-//
-// The element constructors and destructors are deliberately NOT touched. They
-// run over the original in-struct arrays with their own count of 32, which is
-// exactly correct for a region that is 32 entries wide and simply goes unused
-// afterwards. Leaving them alone also leaves the two exception-unwind funclets
-// at 0x00A120CF / 0x00A1210F correct, which would otherwise have to be found and
-// patched in lockstep. The element constructor only zeroes two dwords, and
-// VirtualAlloc hands back zeroed pages, so the replacement buffers start in the
-// state the constructor would have produced.
-//
-// Three constraints on the input count, all load-bearing:
-//
-//   * The mix pass clears the per-input bitmap with a `count >> 3` byte loop
-//     (0x008980DF..0x008980FB), so a count that is not a multiple of 8 leaves the
-//     top (count mod 8) bits stale. The mixer count is therefore always rounded
-//     UP to a multiple of 8 -- which is free, because spare inputs simply go
-//     unconnected.
-//   * The gain matrix's second plane is indexed at outChannels * count,
-//     recomputed from the CURRENT stored count on every access, so the count and
-//     the gain relocation have to land together or the very first mix writes far
-//     past a 0x200-byte matrix.
-//   * GetUnconnectedInput does NOT consult the stored count -- it has its own
-//     `CMP ESI,0x20` (0x008A0054), and since SoftOutput::ConnectInput is an
-//     unchecked thunk, that compare is the only gate on how many inputs are ever
-//     handed out.
-constexpr uintptr_t kMixerCountImm8 = 0x0089FB3C; // PUSH 0x20 -> input count
-constexpr uintptr_t kMixerGateImm8  = 0x008A0056; // CMP ESI,0x20 in GetUnconnectedInput
-
-struct MixerArray {
-   uintptr_t va;         // the LEA
-   uint8_t   lea[6];     // expected bytes
-   uint8_t   movOp;      // B8 EAX / B9 ECX / BA EDX
-   uint32_t  perEntry;   // bytes per input
-   uint32_t  multiplier; // extra factor (the gain matrix is 2 * outChannels deep)
-};
-
-// outChannels is fixed at 2 for this mixer (SetChannels(1,2) at 0x0089FB30), but
-// the buffers are sized for 8 so a build that reports more cannot overrun.
-constexpr MixerArray kMixerArrays[] = {
-   {0x0089FB3D, {0x8D, 0x8E, 0xCC, 0x02, 0x00, 0x00}, 0xB9, 8, 1},  // conn table
-   {0x0089FB4C, {0x8D, 0x96, 0xCC, 0x00, 0x00, 0x00}, 0xBA, 4, 16}, // gain matrix
-   {0x0089FB62, {0x8D, 0x86, 0xCC, 0x04, 0x00, 0x00}, 0xB8, 4, 1},  // offsets
-   {0x0089FB69, {0x8D, 0x8E, 0xCC, 0x03, 0x00, 0x00}, 0xB9, 8, 1},  // packet holders
-};
-
-constexpr int kMixerArrayCount = (int)(sizeof(kMixerArrays) / sizeof(kMixerArrays[0]));
 
 // Software mixing takes gMaxVoices as its voice count directly:
 //
@@ -153,18 +90,11 @@ uint8_t* s_leaAddr[kArrayRefCount] = {};
 uint8_t  s_savedSwPin[7] = {};
 uint8_t* s_swPinAddr = nullptr;
 
-uint8_t  s_savedMixerLea[kMixerArrayCount][6] = {};
-uint8_t* s_mixerLeaAddr[kMixerArrayCount] = {};
-uint8_t* s_mixerCountAddr = nullptr;
-uint8_t* s_mixerGateAddr = nullptr;
-uint8_t  s_savedMixerCount = 0;
-uint8_t  s_savedMixerGate = 0;
-void*    s_mixerBuffers[kMixerArrayCount] = {};
-bool     s_softwareRaised = false;
 
 void*  s_pool       = nullptr;
 void*  s_probeArray = nullptr;
 bool   s_installed  = false;
+
 
 uint32_t read_at(const uint8_t* p, uint32_t width)
 {
@@ -295,92 +225,22 @@ void voice_limit_install(uintptr_t exe_base)
       memcpy(s_leaAddr[i], patch, 7);
    }
 
-   // --- the software mixer -------------------------------------------------
-   // Rounded UP to a multiple of 8 for the bitmap clear; a mixer wider than the
-   // voice pool is harmless, the spare inputs are simply never connected.
-   const uint32_t mixerInputs = (uint32_t)((n + 7) / 8) * 8;
-
-   // SOFTWARE MIXER HAZARD -- why this is off by default.
-   //
-   // Relocating the four arrays and raising the count is correct in itself, but
-   // it exposes an unguarded path in the engine. Snd::SoftOutput::ConnectInput
-   // (0x0089FCE0) is a two-instruction thunk with no bounds check, and one of its
-   // callers reconnects a voice on a mix-config change without testing the index:
-   //
-   //   0089E44D  MOV EDX,[ESI+0x484]   ; mSoftConnIdx, -1 if it never got one
-   //   0089E453  PUSH EDX              ; pushed unchecked
-   //   0089E45A  CALL 0x0089FCE0       ; -> 00898F5A LEA EAX,[EAX+ECX*8]
-   //                                   ;    00898F61 MOV [EAX],EDX
-   //
-   // At index -1 that writes eight bytes below the table. Stock never reaches it
-   // because 32 voices fit 32 inputs exactly, so GetUnconnectedInput cannot fail.
-   // Once the pool is larger than the inputs actually available at that moment it
-   // can and does: observed as a WRITE access violation at 0x00898F61 to
-   // (table - 8) on the software-to-hardware mix-config switch at the main menu.
-   //
-   // Guarding it means detouring the reconnect path to drop -1, which is a
-   // separate piece of work. Until then the software branch stays pinned at 32,
-   // which is stock behaviour and safe.
-   bool mixerOk = g_softwareVoices && (mixerInputs <= 0x7F);
-   if (mixerOk) {
-      uint8_t* const cnt = reinterpret_cast<uint8_t*>(resolve(exe_base, kMixerCountImm8));
-      uint8_t* const gate = reinterpret_cast<uint8_t*>(resolve(exe_base, kMixerGateImm8));
-      if (*cnt != 0x20 || *gate != 0x20) mixerOk = false;
-
-      for (int i = 0; mixerOk && i < kMixerArrayCount; ++i) {
-         uint8_t* const q = reinterpret_cast<uint8_t*>(resolve(exe_base, kMixerArrays[i].va));
-         if (memcmp(q, kMixerArrays[i].lea, 6) != 0) mixerOk = false;
-         else s_mixerLeaAddr[i] = q;
-      }
-
-      for (int i = 0; mixerOk && i < kMixerArrayCount; ++i) {
-         const uint32_t bytes = mixerInputs * kMixerArrays[i].perEntry * kMixerArrays[i].multiplier;
-         s_mixerBuffers[i] = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-         if (!s_mixerBuffers[i]) mixerOk = false;
-      }
-
-      if (mixerOk) {
-         s_mixerCountAddr = cnt;
-         s_mixerGateAddr = gate;
-         s_savedMixerCount = *cnt;
-         s_savedMixerGate = *gate;
-         *cnt = (uint8_t)mixerInputs;
-         *gate = (uint8_t)mixerInputs;
-
-         for (int i = 0; i < kMixerArrayCount; ++i) {
-            memcpy(s_savedMixerLea[i], s_mixerLeaAddr[i], 6);
-            uint8_t patch[6];
-            patch[0] = kMixerArrays[i].movOp;
-            const uint32_t addr = (uint32_t)(uintptr_t)s_mixerBuffers[i];
-            memcpy(patch + 1, &addr, 4);
-            patch[5] = 0x90;              // the LEA was 6 bytes, the MOV is 5
-            memcpy(s_mixerLeaAddr[i], patch, 6);
-         }
-         s_softwareRaised = true;
-      }
-   }
-
-   if (!s_softwareRaised) {
-      // Could not widen the mixer, so software mixing must stay at 32 -- past
-      // that a voice would take a pool slot and produce nothing, which is worse
-      // than stock. Pin the software branch back to 32 and keep the EAX raise.
-      for (int i = 0; i < kMixerArrayCount; ++i) {
-         if (s_mixerBuffers[i]) VirtualFree(s_mixerBuffers[i], 0, MEM_RELEASE);
-         s_mixerBuffers[i] = nullptr;
-         s_mixerLeaAddr[i] = nullptr;
-      }
-      memcpy(s_savedSwPin, s_swPinAddr, 7);
-      memcpy(s_swPinAddr, kSwPinPatch, 7);
-   } else {
-      s_swPinAddr = nullptr; // nothing pinned, nothing to restore
-   }
+   // Software mixing stays at the stock 32. SoftOutput IS the mixer there and
+   // ships with exactly 32 inputs, so a voice past that takes a pool slot and
+   // produces nothing. Widening that mixer was implemented and reverted: the
+   // engine feeds the -1 that GetUnconnectedInput returns on failure to several
+   // unguarded consumers -- ConnectInput (0x0089FCE0) and the gain matrix
+   // (0x00897910) among them -- and in play EVERY voice failed to obtain an input
+   // once the table had filled once, 119 of 119. Guarding one consumer only moved
+   // the crash to the next. See docs/RE/SoundSystem.md.
+   memcpy(s_savedSwPin, s_swPinAddr, 7);
+   memcpy(s_swPinAddr, kSwPinPatch, 7);
 
    s_installed = true;
 
-   get_gamelog()("[VoiceLimit] %d voices, software mixing %s (pool %u bytes at %p,"
-                 " probe array %u entries at %p)\n",
-                 n, s_softwareRaised ? "raised to match" : "pinned at 32",
-                 poolBytes, s_pool, probeCount, s_probeArray);
+   get_gamelog()("[VoiceLimit] %d voices under EAX, 32 in software mixing"
+                 " (pool %u bytes at %p, probe array %u entries at %p)\n",
+                 n, poolBytes, s_pool, probeCount, s_probeArray);
 }
 
 void voice_limit_uninstall()
@@ -396,18 +256,6 @@ void voice_limit_uninstall()
 
    if (s_swPinAddr) protected_write(s_swPinAddr, s_savedSwPin, 7);
    s_swPinAddr = nullptr;
-
-   if (s_mixerCountAddr) protected_write(s_mixerCountAddr, &s_savedMixerCount, 1);
-   if (s_mixerGateAddr) protected_write(s_mixerGateAddr, &s_savedMixerGate, 1);
-   s_mixerCountAddr = s_mixerGateAddr = nullptr;
-
-   for (int i = 0; i < kMixerArrayCount; ++i) {
-      if (s_mixerLeaAddr[i]) protected_write(s_mixerLeaAddr[i], s_savedMixerLea[i], 6);
-      if (s_mixerBuffers[i]) VirtualFree(s_mixerBuffers[i], 0, MEM_RELEASE);
-      s_mixerLeaAddr[i] = nullptr;
-      s_mixerBuffers[i] = nullptr;
-   }
-   s_softwareRaised = false;
 
    // The engine is closed by now, but the pool is only referenced through the
    // immediate we just restored, so nothing can be pointing into it either way.

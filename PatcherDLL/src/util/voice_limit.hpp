@@ -54,8 +54,11 @@
 // 32 inputs, and Voice::Initialize takes one per voice.  Past 32 it gets -1 --
 // and then falls straight through to creating the voice's own DirectSound buffer
 // anyway (0089E2DF JZ -> 0089E2F2), which is what actually carries audio under
-// EAX.  So the mixer cap costs nothing in mixConfig 2.  In mixConfig 1 SoftOutput
-// IS the mixer, voices past 32 would be silent, and this feature stays off.
+// EAX.  So the mixer cap costs nothing in mixConfig 2.
+//
+// In mixConfig 1 SoftOutput IS the mixer, so the software branch is pinned back
+// to the stock 32.  Widening that mixer was implemented and then reverted: see
+// the note in voice_limit.cpp and docs/RE/SoundSystem.md.
 //
 // modtools only -- addresses are not derived for retail, and the installer
 // no-ops elsewhere.
@@ -65,13 +68,6 @@
 // the ceiling compares are sign-extended imm8, and the probe's array count is a
 // PUSH imm8 of value + 8.
 extern int g_voiceLimit;
-
-// Widen the software mixer too, so voices past 32 are audible in mixConfig 1.
-// OFF by default: see the SOFTWARE MIXER HAZARD note in voice_limit.cpp. The
-// relocation itself is correct, but the engine reconnects voices on a mix-config
-// change without testing for the -1 that GetUnconnectedInput returns when it has
-// no free input, and writes table[-1]. Do not enable until that is guarded.
-extern bool g_softwareVoices;
 
 void voice_limit_install(uintptr_t exe_base);
 void voice_limit_uninstall();

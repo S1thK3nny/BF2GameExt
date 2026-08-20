@@ -229,7 +229,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_soundDiagEnabled          = cfg.get_bool("Fixes", "SoundDiagnostic", false);
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
-      g_softwareVoices            = cfg.get_bool("LimitIncreases", "SoftwareVoices", false);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
