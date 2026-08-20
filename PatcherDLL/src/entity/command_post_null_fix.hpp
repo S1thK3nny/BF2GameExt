@@ -30,10 +30,11 @@
 // does NOT paper over the content bug -- the post still will not change team;
 // it just does not take the process down.
 //
-// modtools only for now.  The retail builds lay CommandPost out differently
-// (the modtools `LEA reg,[reg+0x1A24]` byte pattern does not occur in either
-// retail image), so their SetTeam has to be re-derived rather than ported, and
-// g_addr->command_post_set_team is 0 there -- the installer no-ops.
+// All three builds.  The retail pair lay CommandPost out differently -- the
+// capture sound is at +0xB24 rather than modtools' +0x1A24, which is why the
+// modtools `LEA reg,[reg+0x1A24]` byte pattern finds nothing there -- but the
+// guard only tests for a NULL `this`, so no offset enters this code and the same
+// hook serves every build.  Steam and GOG share one address, 0x0047E2B0.
 // =============================================================================
 
 extern bool g_commandPostNullFixEnabled;

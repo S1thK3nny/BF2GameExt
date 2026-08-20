@@ -1390,6 +1390,21 @@ namespace steam {
    // ILT thunk on retail, so this is the body itself.
    constexpr uintptr_t gamesound_stolen_callback   = 0x00538730;
 
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam -- same VA in BOTH retail builds. Identified from the
+   // ctor at 0x0047A710, which lays out exactly the fields SetTeam touches:
+   //   LEA EAX,[ESI+0x120] / PUSH 8 / PUSH 0x140   -> 0x120 + 8*0x140 = 0xB20
+   //   MOV dword [ESI+0xB20],0                     -> m_pHologram = NULL
+   //   LEA ECX,[ESI+0xB24] / CALL <ctrl ctor>      -> the capture sound
+   // The capture sound is at +0xB24 here, not modtools' +0x1A24, which is why a
+   // byte-pattern search for the modtools LEA found nothing. The guard itself
+   // only tests for a NULL `this`, so that offset never enters our code.
+   //
+   // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
+   // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
+   constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
+
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
    // Release drops 4 bytes somewhere before Properties+0x18, so every field from
    // there on sits 4 lower than on modtools.  Both derived from the same two
@@ -2091,6 +2106,21 @@ namespace gog {
    constexpr uintptr_t voice_virtual_release          = 0x005393a0;
    constexpr uintptr_t gamesound_controllable_stop    = 0x005393d0;
    constexpr uintptr_t gamesound_stolen_callback      = 0x005394a0;
+
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam -- same VA in BOTH retail builds. Identified from the
+   // ctor at 0x0047A710, which lays out exactly the fields SetTeam touches:
+   //   LEA EAX,[ESI+0x120] / PUSH 8 / PUSH 0x140   -> 0x120 + 8*0x140 = 0xB20
+   //   MOV dword [ESI+0xB20],0                     -> m_pHologram = NULL
+   //   LEA ECX,[ESI+0xB24] / CALL <ctrl ctor>      -> the capture sound
+   // The capture sound is at +0xB24 here, not modtools' +0x1A24, which is why a
+   // byte-pattern search for the modtools LEA found nothing. The guard itself
+   // only tests for a NULL `this`, so that offset never enters our code.
+   //
+   // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
+   // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
+   constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
 
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;

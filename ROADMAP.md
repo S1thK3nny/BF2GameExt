@@ -232,8 +232,23 @@ and voice index.
 
 ## Retail builds
 
-**Voice limit and command post null fix are modtools only** - Both patches install on
-modtools and no-op on Steam and GOG, so retail players get neither.
+**Voice limit is modtools only** - The patch installs on modtools and no-ops on Steam
+and GOG, so retail players do not get it. This is not an address lookup: the retail
+addresses are known, but six of the sites are encoded differently and the installer
+hardcodes the modtools forms. The clamp is a `CMOVcc` rather than a `C7 05` store and
+the `smVoices` write is split, so both operands sit at +1 instead of +6;
+`SetCentrePeakMode` uses the 6-byte general compare rather than the 5-byte accumulator
+form, moving its operand to +2; the four probe-array references are 6-byte
+`LEA r32,[EBP+disp32]` rather than 7-byte `[ESP+disp32]`, so the replacement needs one
+NOP and not two, and one of them changed target register. Worst, the software-pin site
+is a 3-byte `MOV EAX,[EBP+0x20]` against modtools' 7 bytes AND is a branch target, so
+there is no byte-for-byte replacement at all.
+
+Porting it therefore means restructuring the installer around per-build encoding
+descriptors rather than adding addresses. One further trap: the `smVoices` site's
+expected value is a POINTER, and the retail images are rebased at load, so the
+installer's own verification needs the same treatment `values_are_va` gave the patch
+table.
 
 The concurrent voice raise touches several sites at once - `gMaxVoices`, the hardware
 buffer probe's count and its array, the `Voice` pool and both voice ceilings - and only
