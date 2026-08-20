@@ -116,7 +116,39 @@ The cleanest fix is probably to give `AIUtil::StopDist` a flyer case mirroring
 vehicle rather than a flat 4.0. Raising the `0x00a2a418` gate is the smaller
 change but only rescues the overshoot path.
 
+---
+
+## Open: is the orbit a symptom, or the goal?
+
+The thresholds above are verified from bytes. What is NOT established is that
+they are the REASON a given flyer circles. A competing reading: the flyer may be
+running a defend or attack goal on an object and circling on purpose, in which
+case `StopDist` is what makes the behaviour look like an orbit rather than the
+reason it never leaves. Patching `StopDist` would then change nothing worth
+having.
+
+The two cases are distinguishable, and it is cheap to do:
+
+| | Trap | Goal-driven |
+|---|---|---|
+| Current goto point | a distant path node it never reaches | at or near the thing it is circling |
+| `mDone` | never set | set, then a new destination issued |
+| Re-entry to `EnterState` | never | every cycle |
+
+So the measurement is: for ONE circling flyer, log its current goal and command,
+its goto point, and whether `mDone` ever latches. A flyer that never sets `mDone`
+on a TRAVEL path to a distant node is the trap. A flyer whose goal keeps
+re-issuing a destination it is already effectively at is doing what it was told,
+and the interesting question moves up a layer to goal selection.
+
+`UnitFlyAgent`'s state dispatch (`0x005afe68`) and `AILowLevel::IsAtDest` are the
+two places to instrument; the LOD interval work in `AISystem.md` shows the shape
+a diagnostic like this takes.
+
+---
+
 **Status:** analysis only. Nothing here is patched, and the step from "these
 thresholds" to "therefore it orbits" depends on the vehicle's turn radius
-exceeding 10 units, which is ODF data and was not measured. The thresholds and
-the `CheckStuck` exemption are verified from bytes; the causal step is inferred.
+exceeding 10 units, which is ODF data and was not measured, AND on the orbit not
+being goal-driven in the first place. The thresholds and the `CheckStuck`
+exemption are verified from bytes; the causal step is inferred.

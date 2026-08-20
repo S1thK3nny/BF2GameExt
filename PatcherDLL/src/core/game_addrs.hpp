@@ -764,6 +764,24 @@ namespace modtools {
    // NOPing it makes the undoubled epilogue unreachable.  74 13 -> 90 90.
    constexpr uintptr_t vision_priority_player_jz  = 0x005c93a4;
 
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // The five multipliers UnitController::GetUpdateRate (0x0059E7B0, phantom
+   // 0x0078B3B0) applies to the base rate before re-queueing the controller in
+   // UpdateHighLevel.  Indexed by the LOD tier at UnitController+0x3AC: tier 0 is
+   // furthest from a human player, tier 4 nearest.  With a stock agent the base
+   // rate is 1.0, so these ARE the decision interval in seconds.
+   //
+   // These name the addresses of the FLOATS, not of the instructions holding
+   // them, because the builds encode the table differently -- modtools emits five
+   // `C7 44 24 nn <imm32>` stores into .text 8 bytes apart, retail folds tiers
+   // 0-3 into a 16-byte .rdata constant.  Naming the floats makes both identical
+   // to the patcher.
+   constexpr uintptr_t ai_lod_interval_t0        = 0x0059E7D9; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1        = 0x0059E7E1; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2        = 0x0059E7E9; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3        = 0x0059E7F1; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4        = 0x0059E7F9; // 0.25 s HIGH
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // _RenderLightSabre(PblVector3* base, PblVector3* dir, uint tex, uint glowTex,
    //                   float length, float width, uint flags) — __cdecl, ILT thunk
@@ -1609,6 +1627,19 @@ namespace steam {
    // target is a bot.  Forcing it always-taken doubles players too.
    constexpr uintptr_t vision_priority_player_jl  = 0x006710eb;
 
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // GetUpdateRate is 0x006634E0 here, same shape as modtools (agent at +0x2C0,
+   // LOD tier at +0x3AC).  Tiers 0-3 are one 16-byte .rdata constant at
+   // 0x007B28B0, loaded by the MOVAPS at 0x00663510; tier 4 is the imm32 of
+   // `MOV [EBP-8],0x3E800000` at 0x0066351B.  Rewriting the constant in place is
+   // safe -- it has exactly one xref, and its +4/+8/+0xC have none of their own,
+   // so it is not a literal pooled with unrelated code.
+   constexpr uintptr_t ai_lod_interval_t0         = 0x007B28B0; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1         = 0x007B28B4; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2         = 0x007B28B8; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3         = 0x007B28BC; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4         = 0x0066351E; // 0.25 s HIGH
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Derived 2026-08-13 against BattlefrontII.exe (Ghidra :8193).  See the
    // modtools block for what each one is; only the porting notes are here.
@@ -2245,6 +2276,18 @@ namespace gog {
    constexpr uintptr_t threat_priority_player_jz  = 0x0066ac4d;
    // ShouldRaytestUnit `JZ` — same `74 0B` as modtools and Steam (verified).
    constexpr uintptr_t threat_raytest_player_jz   = 0x0066b460;
+
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // GetUpdateRate is 0x00664580 here -- byte-identical to Steam's 0x006634E0
+   // apart from the two absolute operands.  Tiers 0-3 are the .rdata constant at
+   // 0x007B3820 (MOVAPS at 0x006645B0, verified to read 4.0/3.0/2.0/1.0); tier 4
+   // is the imm32 of `MOV [EBP-8],0x3E800000` at 0x006645BB.  Same xref check as
+   // Steam: the constant has one reference and its interior floats have none.
+   constexpr uintptr_t ai_lod_interval_t0             = 0x007B3820; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1             = 0x007B3824; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2             = 0x007B3828; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3             = 0x007B382C; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4             = 0x006645BE; // 0.25 s HIGH
 
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Ported from Steam with tools/port_gog.py, every one at score 1.00 on an

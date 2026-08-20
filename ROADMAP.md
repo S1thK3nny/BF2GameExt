@@ -259,10 +259,6 @@ tolerate a partial match. Verifying a port needs checking both mixing paths, sin
 hardware and software branches of `Engine::Open` reach the pool through different code and
 only one of them is exercised on any given machine.
 
-`CommandPost::SetTeam` is the smaller job of the two: retail lays `CommandPost` out
-differently, so the patch site has to be re-derived per build before the null guard can be
-enabled there.
-
 **Branch region fix unverified on retail** - The fix carries addresses for all three
 builds. The vtable slot correction has a vtable, a wrong slot and the real `CreateRegion`
 recorded for modtools, Steam and GOG, and the `mHashID` offset at `+0x20` that the id
@@ -275,25 +271,7 @@ string: a failed lookup produces no `Unable to find branch region` line, or any 
 line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
 actually take the branch, rather than on the absence of warnings.
 
-**AI decide far too slowly away from the player** - Measured, and it is NOT the ten-per-turn
-update budget: on a 263-unit match the scheduler ran at 1.49 of its 10, so raising
-`[AI] AIUpdateBudget` changes nothing. The constraint is the LOD tier assignment. Tier is
-chosen by distance to the nearest HUMAN PLAYER character (`UpdateLodState` 0x0059f480 walks
-`Character::sCharacters` filtering `mPlayerId >= 0`), with radii of 25 and 100 - so 256 of
-those 263 units sat in tiers 0-2, deciding once every two to four seconds. Only two units in
-the whole match were at full rate. A firefight on the far side of the map is graded purely on
-its distance from the one human, so AI fighting each other think at 0.25 Hz, which is what
-standing around actually is.
-
-The leverage is on the demand side, and the interval multipliers are the safest lever because
-they are imm32 floats that take any value with no re-encoding: `{4.0, 3.0, 2.0, 1.0, 0.25}` at
-0x0059e7d9 and every 8 bytes after. The budget has room to absorb it - halving the three slow
-multipliers takes demand from ~115/sec to ~230/sec against a supply of 600/sec. The radii
-(0x0059e63c, 0x0059e65c) are the alternative but are imm8 and capped at 127 in place.
-
-Wanted: a single INI dial over the multipliers, defaulting to stock, with the existing
-`[Diagnostic] AIUpdateDiag` used to confirm the budget still is not binding after a raise.
-See docs/RE/AISystem.md for the full measurement and the eliminated hypotheses.
+## AI
 
 **AI flyers orbit instead of arriving** - Traced to `PathFollower`, not to the flyer agent.
 Three flyer-specific facts combine into a trap at the FINAL waypoint of any path: flyers are
@@ -312,6 +290,15 @@ The likely fix is a flyer case in `AIUtil::StopDist` mirroring `StopDistIntermed
 terminal waypoint scales with the vehicle rather than using a flat 4.0. Not yet patched, and
 the step from these thresholds to "therefore it orbits" assumes a turn radius above 10 units,
 which is ODF data and unmeasured. See docs/RE/FlyerAI.md.
+
+Before patching any of that, settle whether the orbit is a SYMPTOM or the goal itself. A
+flyer running a defend or attack goal on an object may be circling on purpose, in which case
+the `StopDist` thresholds are exactly what makes the orbit look like an orbit rather than the
+reason it never leaves. The way to tell them apart is to log, for one circling flyer, which
+goal and command it is running and where its current goto point is: a flyer that never sets
+`mDone` on a TRAVEL path to a distant node is the trap described above, while a flyer whose
+goal keeps re-issuing a destination it is already effectively at is doing what it was told.
+Only the first case is fixed by `AIUtil::StopDist`.
 
 ## Controller
 

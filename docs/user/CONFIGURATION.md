@@ -100,6 +100,7 @@ Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 h
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `AIDecisionRate` | `1.0` | How often AI away from a player make a NEW decision, as a multiple of stock. The engine grades every unit by distance to the nearest human and puts anything past 100 units on a two to four second decision interval, which is what standing around looks like at range. 2.0 makes every tier think twice as often; below 1.0 slows them to buy frame time back. No tier is taken below the 0.25s the engine gives units standing next to you. Range 0.25 to 4.0 |
 | `AIUpdateBudget` | `0` | How many AI units may make a NEW decision each simulation turn. 0 keeps the stock 10. The engine services only the most overdue units and re-queues them, while movement and firing run for everyone every turn - so a unit that misses its slot keeps walking and shooting but never re-decides, which is what standing around looks like. Raising this costs frame time and only helps if the budget is actually the constraint, so measure before changing it. Range 10 to 127. Modtools only |
 | `PlayerVisionFairness` | `1` | AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock |
 | `PlayerPriorityFairness` | `1` | AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock |

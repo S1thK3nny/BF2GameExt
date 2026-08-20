@@ -271,7 +271,7 @@ re-encoding:
 
 | What | Site | Encoding |
 |------|------|----------|
-| Interval multipliers `{4.0, 3.0, 2.0, 1.0, 0.25}` | `0x0059e7d9`, `+8`, `+8`, `+8`, `+8` | imm32 float, any value |
+| Interval multipliers `{4.0, 3.0, 2.0, 1.0, 0.25}` | `0x0059e7d9`, `+8`, `+8`, `+8`, `+8` | imm32 float, any value — **shipped as `[AI] AIDecisionRate`**, see below |
 | LOD HIGH radius (25) | `0x0059e63c`, imm8 at `0x0059e63e` | max 0x7f in place; 16 bytes of `CC` padding follow for an imm32 rewrite |
 | LOD NORMAL radius (100) | `0x0059e65c`, imm8 at `0x0059e65e` | same, same padding |
 | Update budget (10) | `0x005999ce`, imm8 at `0x005999d0` | max 0x7f; sign-extended, so 0x80+ would run ZERO updates |
@@ -280,6 +280,50 @@ re-encoding:
 There is headroom to spend: at 1.49/10 the budget could absorb roughly 6x more
 decisions before it binds. Halving the three slow multipliers would take demand to
 about 230/sec, still comfortably under the cap.
+
+### The multipliers, shipped as `[AI] AIDecisionRate`
+
+The interval table is `ai/ai_decision_rate.cpp`, and it is the one AI dial that
+works on all three builds.
+
+`UnitController::GetUpdateRate` — modtools `0x0059e7b0`, steam `0x006634e0`,
+gog `0x00664580`, phantom `0x0078b3b0` — reads the agent's base rate (virtual
+`+0x48` on the agent at `UnitController+0x2c0`, or `1.0` when there is no agent)
+and multiplies it by `table[UnitController+0x3ac]`. With a stock agent the table
+IS the interval in seconds.
+
+**It has exactly one caller**, the re-queue at the tail of `UpdateHighLevel`
+(modtools `0x005a084e`):
+
+```c
+controller[0x1e0] = GameLoop::GetMissionTime() + GetUpdateRate(this);
+```
+
+That is what makes scaling it safe — the numbers feed the scheduler key and
+nothing else, so there is no second consumer to surprise.
+
+The builds encode the same five floats differently, which is why the address
+registry names the address of each FLOAT rather than of the instruction:
+
+| Build | tiers 0-3 | tier 4 |
+|---|---|---|
+| modtools | five `C7 44 24 nn <imm32>` in `.text`, `0x0059e7d9` and every `+8` | `0x0059e7f9` |
+| steam | one 16-byte `.rdata` constant at `0x007b28b0`, `MOVAPS` at `0x00663510` | imm32 at `0x0066351e` |
+| gog | same shape, constant at `0x007b3820`, `MOVAPS` at `0x006645b0` | imm32 at `0x006645be` |
+
+Rewriting the retail constant in place is safe: it carries exactly one xref, and
+its `+4`, `+8` and `+0xc` have none of their own, so it is not a literal pooled
+with unrelated code. Checked on both retail images.
+
+The patch verifies all five sites against the stock table before writing any of
+them, and clamps every result to a floor of `0.25` — the engine's own
+closest-to-player interval — so the dial only ever closes the gap between distant
+and nearby AI. It never invents a faster-than-stock rate.
+
+One second-order effect worth knowing: `UpdateLodState` runs INSIDE
+`UpdateHighLevel`, so a tier-0 unit only re-checks its own distance every four
+seconds. Shortening the intervals shortens that re-check too, so units promote to
+a faster tier sooner when a player closes on them.
 
 > **Correction to an earlier note.** `AISystem.md` previously described the LOD
 > tier as picked by "distance to camera". It is distance to the nearest human
