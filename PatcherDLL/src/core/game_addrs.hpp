@@ -843,10 +843,12 @@ namespace modtools {
 
    // ---- EntityPath branch regions ----------------------------------------------
 
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
    // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
    // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x005E4C90;
 } // namespace modtools
 
 // =============================================================================
@@ -1645,10 +1647,12 @@ namespace steam {
 
    // ---- EntityPath branch regions ----------------------------------------------
 
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
    // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
    // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x004D0F00;
 } // namespace steam
 
 // =============================================================================
@@ -2219,10 +2223,12 @@ namespace gog {
 
    // ---- EntityPath branch regions ----------------------------------------------
 
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
    // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
    // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x004D0F00;
 } // namespace gog
 
 } // namespace game_addrs

@@ -319,6 +319,48 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             },
 
             patch_set{
+               .name = "EntityPath Branch Region Fix",
+               .patches =
+                  {
+                     // EntityPath::BranchRegionFactory has its CreateRegion in the WRONG
+                     // VTABLE SLOT, so the engine never calls it and no BranchRegion is
+                     // ever constructed -- path nodes carrying BranchRegion("x") can never
+                     // resolve, in any map, on any build. Proven at runtime: the factory is
+                     // correctly registered and correctly selected by name prefix, yet
+                     // BranchRegionFactory::CreateRegion is never entered and the region
+                     // list stays empty (live=0) while lookups run.
+                     //
+                     // LoadUtil::ProcessRegionInfo dispatches through vtable SLOT 1:
+                     //     (**(code **)(*factory + 4))(desc, name)
+                     //
+                     // and every factory that works overrides that slot:
+                     //     soundstatic vtbl 0x00A2B970  slot1 = 0x00403E0E  (its own)
+                     //     danger      vtbl 0x00A47014  slot1 = 0x00405C22  (its own)
+                     //
+                     // but the branch factory leaves slot 1 as the BASE implementation and
+                     // puts its own in slot 3, which nothing calls:
+                     //     entitypathbranch vtbl 0x00A4B5A4
+                     //         slot0 0x0040FAB5 -> 0x005E4690
+                     //         slot1 0x00821F60    RedRegionFactory::CreateRegion (base,
+                     //                             builds a plain RedRegion)
+                     //         slot2 0x00821FC0    base
+                     //         slot3 0x0040DF58 -> 0x005E4C90  BranchRegionFactory::CreateRegion
+                     //
+                     // Almost certainly a signature mismatch that made the compiler append a
+                     // new virtual rather than override. Point slot 1 at the real one.
+                     //
+                     // NOTE: this set only repairs the dispatch. The id a region
+                     // registers under is hashed from strchr(name, ' ') with the pointer
+                     // left ON the space, so on its own a region named
+                     // "entitypathbranch dropzone1" answers to " dropzone1" -- with the
+                     // leading space. entity/branch_region_fix.cpp re-stamps the id from
+                     // the text AFTER the separator, which is what makes the spelling a
+                     // mapper would actually write, BranchRegion("dropzone1"), resolve.
+                     patch{0x00A4B5A8, 0x00821F60, 0x005E4C90}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
+                  },
+            },
+
+            patch_set{
                .name = "Object Limit Increase",
                .patches =
                   {
@@ -992,6 +1034,27 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             },
 
             patch_set{
+               .name = "EntityPath Branch Region Fix",
+               .patches =
+                  {
+                     // EntityPath::BranchRegionFactory puts its CreateRegion in vtable
+                     // slot 3, but LoadUtil::ProcessRegionInfo dispatches through slot 1,
+                     // which still holds the inherited base implementation (it builds a
+                     // plain RedRegion). The branch creator is therefore never called and
+                     // no BranchRegion ever exists, so every path node using
+                     // BranchRegion("id") fails to resolve. Same defect on all builds --
+                     // Ghidra even labels slot 1 here "RedRegionFactory member function
+                     // inherited by EntityPath::BranchRegionFactory".
+                     //
+                     // GOG vtable 0x0079d3e0: slot1 0x006dd9d0 (base) / slot3 -> 0x004d0f00 (branch)
+                     //
+                     // Retail note: these builds strip the RedWarning text, so the failure
+                     // is completely silent there -- no "Unable to find branch region" line.
+                     patch{0x0079d3e4, 0x006dd9d0, 0x004d0f00}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
+                  },
+            },
+
+            patch_set{
                .name = "Object Limit Increase",
                .patches =
                   {
@@ -1597,6 +1660,27 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      // but they make it easier to reach, because the spill hook deliberately
                      // uses more caches per frame and therefore requests more meshes.
                      patch{0x2D2533, 0x136, 0x122, {.file_offset = true}}, // JZ 0x006d326d -> 0x006d3259
+                  },
+            },
+
+            patch_set{
+               .name = "EntityPath Branch Region Fix",
+               .patches =
+                  {
+                     // EntityPath::BranchRegionFactory puts its CreateRegion in vtable
+                     // slot 3, but LoadUtil::ProcessRegionInfo dispatches through slot 1,
+                     // which still holds the inherited base implementation (it builds a
+                     // plain RedRegion). The branch creator is therefore never called and
+                     // no BranchRegion ever exists, so every path node using
+                     // BranchRegion("id") fails to resolve. Same defect on all builds --
+                     // Ghidra even labels slot 1 here "RedRegionFactory member function
+                     // inherited by EntityPath::BranchRegionFactory".
+                     //
+                     // Steam vtable 0x0079c440: slot1 0x006dc930 (base) / slot3 -> 0x004d0f00 (branch)
+                     //
+                     // Retail note: these builds strip the RedWarning text, so the failure
+                     // is completely silent there -- no "Unable to find branch region" line.
+                     patch{0x0079c444, 0x006dc930, 0x004d0f00}, // vtable slot 1 -> BranchRegionFactory::CreateRegion
                   },
             },
 
