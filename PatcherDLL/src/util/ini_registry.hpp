@@ -42,7 +42,6 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "SoundLayerLimit",     "1", "Raise SoundParameterized layer limit",                "SoundParameterized Layer Limit Extension"),
    INI_PATCH("LimitIncreases", "DLCMissionLimit",     "1", "Raise DLC / addon mission limit",                     "DLC Mission Limit Extension"),
    INI_PATCH("LimitIncreases", "SoundLimit",          "1", "Raise global sound limit",                            "Sound Limit Extension"),
-   INI_PATCH("LimitIncreases", "ParticleCacheIncrease","1","Increase particle effect cache",                      "Particle Cache Increase"),
    INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
    INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "1", "Raise combo animation limit",                         "Combo Anims Increase"),
    INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
@@ -53,6 +52,14 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "LODLimitExtension",  "1", "Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail",                                                       "LOD Limit Extension"),
    INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
+
+   // [Particles] — one switch for engine correctness, one dial for density.
+   // The three fix patch sets deliberately share a single key; ini_lookup_patch_set
+   // resolves each set name to the first registry row naming it, so they toggle together.
+   INI_PATCH("Particles", "ParticleFixes", "1", "Fix the particle engine: use all the batch caches, stop a full batch from deleting whole effects for a frame, and stop one failed frame from disabling particles for good. Turn off only to compare against stock behaviour", "Particle Cache Increase"),
+   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Effect Skip Fix"),
+   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Cache Reset Fix"),
+   INI_ENTRY("Particles", "ParticleDensity", "0", "How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time"),
 
    // [Fixes] — bug-fix patches
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),

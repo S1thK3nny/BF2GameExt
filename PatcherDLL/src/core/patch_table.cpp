@@ -256,6 +256,69 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
             },
 
             patch_set{
+               .name = "Particle Effect Skip Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::IsFull -- the 200-entry batch test.
+                     //
+                     // ParticleEmitterObject::Render_ calls IsFull as its first gate and
+                     // returns early when it reports full.  That early return lands on the
+                     // function's epilogue, which is PAST the FlushParticleCache and
+                     // RenderAll calls that end Render_ -- so a full batch does not just
+                     // drop one effect, it skips the very drain that would have emptied
+                     // the batch.  The batch therefore stays full and every remaining
+                     // effect in that pass takes the same early return: one full cache
+                     // silently deletes the rest of the frame's particles.  That is the
+                     // "whole explosions blink out under load" symptom.
+                     //
+                     // The threshold is raised past reach instead of being removed.  The
+                     // test is SETGE (signed), so 0x7FFFFFFF is never met, and Render_
+                     // always runs through to its RenderAll.  Particles past the batch's
+                     // real 200 are still refused by AddParticle, which drops them one at
+                     // a time -- a partial effect instead of no effect, with the flush
+                     // cadence restored for everything drawn after it.
+                     //
+                     // Single call site on all three builds (verified by xref), so nothing
+                     // else depends on this returning true.
+                     patch{0x424DF3, 0xC8, 0x7FFFFFFF, {.file_offset = true}}, // IsFull: CMP EDX,0xC8 -> 0x7FFFFFFF
+                  },
+            },
+
+            patch_set{
+               .name = "Particle Cache Reset Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::RenderAllCaches leaks its pool state when a
+                     // frame's dynamic-mesh acquisition fails.
+                     //
+                     //   0x00827768  TEST <mesh>,<mesh> / JZ 0x008278a5   <- bail
+                     //   ...
+                     //   0x00827899  s_cacheIndex  = 0                  <- SKIPPED
+                     //              currentCache = NULL                   <- SKIPPED
+                     //   0x008278a5  POP .. / RET                       <- bail lands here
+                     //
+                     // The bail jumps PAST the two resets that end the function, so
+                     // s_cacheIndex keeps whatever height it had reached and currentCache
+                     // stays pointing at a stale cache.  On the following frames
+                     // SetCurrentCache starts from that height, walks into its allocation
+                     // clamp, and sets currentCache = NULL -- after which EVERY
+                     // SubmitParticle in the game silently no-ops.  Particles stay gone
+                     // until some later RenderAllCaches happens to complete in full.
+                     //
+                     // Retargeting the branch to the reset block instead of the epilogue
+                     // makes the failure path drop that frame's particles (which it was
+                     // doing anyway) without poisoning the next one; it then falls through
+                     // into the same epilogue.  The reset block only zeroes two globals, so
+                     // reaching it early is safe.
+                     //
+                     // This is a stock engine bug, not one the cache patches introduce --
+                     // but they make it easier to reach, because the spill hook deliberately
+                     // uses more caches per frame and therefore requests more meshes.
+                     patch{0x42776A, 0x137, 0x12B, {.file_offset = true}}, // JZ 0x008278a5 -> 0x00827899
+                  },
+            },
+
+            patch_set{
                .name = "Object Limit Increase",
                .patches =
                   {
@@ -799,10 +862,39 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   {
                      // GOG .text: PointerToRawData=0x400, VirtualAddress=0x1000
                      // file_offset = RVA - 0xC00 for all .text patches (same as Steam)
-                     // Value patches (GOG FlushParticleCache uses EBP frame — no ADD ESP patch needed)
+                     // Value patches (GOG FlushParticleCache uses an EBP frame, so there is no
+                     // ADD ESP to patch — but the sort pool is EBP-relative too; see the rebase below)
                      patch{0x20EBA9, 0x0000012C, 0x000004B0, {.file_offset = true}},                                                                                             // CacheParticle: CMP EDI, 300 -> 1200
                      patch{0x20EC1A, 0x00000980, 0x000025A0, {.file_offset = true}},                                                                                             // FlushParticleCache: SUB ESP, 0x980 -> 0x25A0
                      patch{0x20EC79, 0x0000012C, 0x000004B0, {.file_offset = true}},                                                                                             // FlushParticleCache: heap.maxCount 300 -> 1200
+                     // FlushParticleCache sort-pool rebase.  Unlike modtools -- whose pool is
+                     // ESP-relative (LEA EDX,[ESP+0x34]) and therefore moves down with a larger
+                     // SUB ESP -- both retail builds address the pool from EBP
+                     // (LEA EDI,[EBP-0x988]).  Growing SUB ESP there only adds unused space
+                     // BELOW the pool: capacity stays at the vanilla 301 records while
+                     // CacheParticle above is now allowed 1200.  Index 301 then overwrites the
+                     // PblHeap object itself, 302 its mPool pointer, 303 the saved SEH handler
+                     // at EBP-0xC, 304 the SEH trylevel, and 305 the saved EBP and RETURN
+                     // ADDRESS -- a stack smash on any frame with >300 particles in front of
+                     // the camera.
+                     //
+                     // So move the pool base instead: EBP-0x25A8 holds 1201 records
+                     // (idx 0..1200, 1201*8 = 0x2588 bytes) ending exactly at the lowest local,
+                     // EBP-0x20.  SUB ESP 0x25A0 above puts ESP at EBP-0x25AC, covering the new
+                     // base with the same 4 bytes of slack the vanilla frame had.  Every
+                     // EBP-relative reference to the pool is rewritten below; the render loop
+                     // and the heap-pop helper reach it through mPool (EBP-0x18), which the
+                     // rebased LEA writes, so they need no patch.
+                     patch{0x20EC67, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // LEA EDI,[EBP-0x988]           - pool base
+                     patch{0x20EC7F, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV [EBP-0x988],0x7F7FFFFF    - pool[0].mKey sentinel
+                     patch{0x20ED46, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // COMISS XMM3,[EBP+ECX*8-0x988] - sift compare
+                     patch{0x20ED53, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV EAX,[EBP+ECX*8-0x988]     - sift read  .mKey
+                     patch{0x20ED5A, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV [EBP+EDX*8-0x988],EAX     - sift write .mKey
+                     patch{0x20ED61, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV EAX,[EBP+ECX*8-0x984]     - sift read  .mObj
+                     patch{0x20ED68, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV [EBP+EDX*8-0x984],EAX     - sift write .mObj
+                     patch{0x20ED74, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // COMISS XMM3,[EBP+ECX*8-0x988] - loop compare
+                     patch{0x20ED7F, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOVSS [EBP+EDX*8-0x988],XMM3  - insert .mKey
+                     patch{0x20ED8B, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV [EBP+EDX*8-0x984],EAX     - insert .mObj
                      // VA redirects — CacheParticle function (sCachedParticles array -> DLL static buffer)
                      patch{0x20EBBD, gog_sCachedParticles_va, g_cachedParticles_address, {.file_offset = true, .expected_is_va = true}},                                         // mPos.x/y (MOVQ, base)
                      patch{0x20EBC7, 0x01EF6648, (0x01EF6648 - gog_sCachedParticles_va) + g_cachedParticles_address, {.file_offset = true, .expected_is_va = true}},             // mPos.z
@@ -833,6 +925,69 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x2D37CA, gog_sCaches_va, g_sCaches_address, {.file_offset = true, .expected_is_va = true}},
                      // RenderAllCaches: MOV ESI, &s_caches[0].m_numVerts
                      patch{0x2D357C, 0x0096ABB0, (0x0096ABB0 - gog_sCaches_va) + g_sCaches_address, {.file_offset = true, .expected_is_va = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "Particle Effect Skip Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::IsFull -- the 200-entry batch test.
+                     //
+                     // ParticleEmitterObject::Render_ calls IsFull as its first gate and
+                     // returns early when it reports full.  That early return lands on the
+                     // function's epilogue, which is PAST the FlushParticleCache and
+                     // RenderAll calls that end Render_ -- so a full batch does not just
+                     // drop one effect, it skips the very drain that would have emptied
+                     // the batch.  The batch therefore stays full and every remaining
+                     // effect in that pass takes the same early return: one full cache
+                     // silently deletes the rest of the frame's particles.  That is the
+                     // "whole explosions blink out under load" symptom.
+                     //
+                     // The threshold is raised past reach instead of being removed.  The
+                     // test is SETGE (signed), so 0x7FFFFFFF is never met, and Render_
+                     // always runs through to its RenderAll.  Particles past the batch's
+                     // real 200 are still refused by AddParticle, which drops them one at
+                     // a time -- a partial effect instead of no effect, with the flush
+                     // cadence restored for everything drawn after it.
+                     //
+                     // Single call site on all three builds (verified by xref), so nothing
+                     // else depends on this returning true.
+                     patch{0x2D3542, 0xC8, 0x7FFFFFFF, {.file_offset = true}}, // IsFull: CMP [ECX+0x3520],0xC8 -> 0x7FFFFFFF
+                  },
+            },
+
+            patch_set{
+               .name = "Particle Cache Reset Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::RenderAllCaches leaks its pool state when a
+                     // frame's dynamic-mesh acquisition fails.
+                     //
+                     //   0x006d41d1  TEST <mesh>,<mesh> / JZ 0x006d430d   <- bail
+                     //   ...
+                     //   0x006d42f9  s_cacheIndex  = 0                  <- SKIPPED
+                     //              currentCache = NULL                   <- SKIPPED
+                     //   0x006d430d  POP .. / RET                       <- bail lands here
+                     //
+                     // The bail jumps PAST the two resets that end the function, so
+                     // s_cacheIndex keeps whatever height it had reached and currentCache
+                     // stays pointing at a stale cache.  On the following frames
+                     // SetCurrentCache starts from that height, walks into its allocation
+                     // clamp, and sets currentCache = NULL -- after which EVERY
+                     // SubmitParticle in the game silently no-ops.  Particles stay gone
+                     // until some later RenderAllCaches happens to complete in full.
+                     //
+                     // Retargeting the branch to the reset block instead of the epilogue
+                     // makes the failure path drop that frame's particles (which it was
+                     // doing anyway) without poisoning the next one; it then falls through
+                     // into the same epilogue.  The reset block only zeroes two globals, so
+                     // reaching it early is safe.
+                     //
+                     // This is a stock engine bug, not one the cache patches introduce --
+                     // but they make it easier to reach, because the spill hook deliberately
+                     // uses more caches per frame and therefore requests more meshes.
+                     patch{0x2D35D3, 0x136, 0x122, {.file_offset = true}}, // JZ 0x006d430d -> 0x006d42f9
                   },
             },
 
@@ -1316,10 +1471,39 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   {
                      // Steam .text: PointerToRawData=0x400, VirtualAddress=0x1000
                      // file_offset = RVA - 0xC00 for all .text patches
-                     // Value patches (Steam FlushParticleCache uses EBP frame — no ADD ESP patch needed)
+                     // Value patches (Steam FlushParticleCache uses an EBP frame, so there is no
+                     // ADD ESP to patch — but the sort pool is EBP-relative too; see the rebase below)
                      patch{0x20DB09, 0x0000012C, 0x000004B0, {.file_offset = true}},                                                                                             // CacheParticle: CMP EDI, 300 -> 1200
                      patch{0x20DB7A, 0x00000980, 0x000025A0, {.file_offset = true}},                                                                                             // FlushParticleCache: SUB ESP, 0x980 -> 0x25A0
                      patch{0x20DBD9, 0x0000012C, 0x000004B0, {.file_offset = true}},                                                                                             // FlushParticleCache: heap.maxCount 300 -> 1200
+                     // FlushParticleCache sort-pool rebase.  Unlike modtools -- whose pool is
+                     // ESP-relative (LEA EDX,[ESP+0x34]) and therefore moves down with a larger
+                     // SUB ESP -- both retail builds address the pool from EBP
+                     // (LEA EDI,[EBP-0x988]).  Growing SUB ESP there only adds unused space
+                     // BELOW the pool: capacity stays at the vanilla 301 records while
+                     // CacheParticle above is now allowed 1200.  Index 301 then overwrites the
+                     // PblHeap object itself, 302 its mPool pointer, 303 the saved SEH handler
+                     // at EBP-0xC, 304 the SEH trylevel, and 305 the saved EBP and RETURN
+                     // ADDRESS -- a stack smash on any frame with >300 particles in front of
+                     // the camera.
+                     //
+                     // So move the pool base instead: EBP-0x25A8 holds 1201 records
+                     // (idx 0..1200, 1201*8 = 0x2588 bytes) ending exactly at the lowest local,
+                     // EBP-0x20.  SUB ESP 0x25A0 above puts ESP at EBP-0x25AC, covering the new
+                     // base with the same 4 bytes of slack the vanilla frame had.  Every
+                     // EBP-relative reference to the pool is rewritten below; the render loop
+                     // and the heap-pop helper reach it through mPool (EBP-0x18), which the
+                     // rebased LEA writes, so they need no patch.
+                     patch{0x20DBC7, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // LEA EDI,[EBP-0x988]           - pool base
+                     patch{0x20DBDF, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV [EBP-0x988],0x7F7FFFFF    - pool[0].mKey sentinel
+                     patch{0x20DCA6, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // COMISS XMM3,[EBP+ECX*8-0x988] - sift compare
+                     patch{0x20DCB3, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV EAX,[EBP+ECX*8-0x988]     - sift read  .mKey
+                     patch{0x20DCBA, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOV [EBP+EDX*8-0x988],EAX     - sift write .mKey
+                     patch{0x20DCC1, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV EAX,[EBP+ECX*8-0x984]     - sift read  .mObj
+                     patch{0x20DCC8, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV [EBP+EDX*8-0x984],EAX     - sift write .mObj
+                     patch{0x20DCD4, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // COMISS XMM3,[EBP+ECX*8-0x988] - loop compare
+                     patch{0x20DCDF, 0xFFFFF678, 0xFFFFDA58, {.file_offset = true}}, // MOVSS [EBP+EDX*8-0x988],XMM3  - insert .mKey
+                     patch{0x20DCEB, 0xFFFFF67C, 0xFFFFDA5C, {.file_offset = true}}, // MOV [EBP+EDX*8-0x984],EAX     - insert .mObj
                      // VA redirects — CacheParticle function (sCachedParticles array -> DLL static buffer)
                      patch{0x20DB1D, steam_sCachedParticles_va, g_cachedParticles_address, {.file_offset = true, .expected_is_va = true}},                                         // mPos.x/y (MOVQ, base)
                      patch{0x20DB27, 0x01EF5128, (0x01EF5128 - steam_sCachedParticles_va) + g_cachedParticles_address, {.file_offset = true, .expected_is_va = true}},             // mPos.z
@@ -1350,6 +1534,69 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x2D272A, steam_sCaches_va, g_sCaches_address, {.file_offset = true, .expected_is_va = true}},
                      // RenderAllCaches: MOV ESI, &s_caches[0].m_numVerts
                      patch{0x2D24DC, 0x00969710, (0x00969710 - steam_sCaches_va) + g_sCaches_address, {.file_offset = true, .expected_is_va = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "Particle Effect Skip Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::IsFull -- the 200-entry batch test.
+                     //
+                     // ParticleEmitterObject::Render_ calls IsFull as its first gate and
+                     // returns early when it reports full.  That early return lands on the
+                     // function's epilogue, which is PAST the FlushParticleCache and
+                     // RenderAll calls that end Render_ -- so a full batch does not just
+                     // drop one effect, it skips the very drain that would have emptied
+                     // the batch.  The batch therefore stays full and every remaining
+                     // effect in that pass takes the same early return: one full cache
+                     // silently deletes the rest of the frame's particles.  That is the
+                     // "whole explosions blink out under load" symptom.
+                     //
+                     // The threshold is raised past reach instead of being removed.  The
+                     // test is SETGE (signed), so 0x7FFFFFFF is never met, and Render_
+                     // always runs through to its RenderAll.  Particles past the batch's
+                     // real 200 are still refused by AddParticle, which drops them one at
+                     // a time -- a partial effect instead of no effect, with the flush
+                     // cadence restored for everything drawn after it.
+                     //
+                     // Single call site on all three builds (verified by xref), so nothing
+                     // else depends on this returning true.
+                     patch{0x2D24A2, 0xC8, 0x7FFFFFFF, {.file_offset = true}}, // IsFull: CMP [ECX+0x3520],0xC8 -> 0x7FFFFFFF
+                  },
+            },
+
+            patch_set{
+               .name = "Particle Cache Reset Fix",
+               .patches =
+                  {
+                     // RedParticleRenderer::RenderAllCaches leaks its pool state when a
+                     // frame's dynamic-mesh acquisition fails.
+                     //
+                     //   0x006d3131  TEST <mesh>,<mesh> / JZ 0x006d326d   <- bail
+                     //   ...
+                     //   0x006d3259  s_cacheIndex  = 0                  <- SKIPPED
+                     //              currentCache = NULL                   <- SKIPPED
+                     //   0x006d326d  POP .. / RET                       <- bail lands here
+                     //
+                     // The bail jumps PAST the two resets that end the function, so
+                     // s_cacheIndex keeps whatever height it had reached and currentCache
+                     // stays pointing at a stale cache.  On the following frames
+                     // SetCurrentCache starts from that height, walks into its allocation
+                     // clamp, and sets currentCache = NULL -- after which EVERY
+                     // SubmitParticle in the game silently no-ops.  Particles stay gone
+                     // until some later RenderAllCaches happens to complete in full.
+                     //
+                     // Retargeting the branch to the reset block instead of the epilogue
+                     // makes the failure path drop that frame's particles (which it was
+                     // doing anyway) without poisoning the next one; it then falls through
+                     // into the same epilogue.  The reset block only zeroes two globals, so
+                     // reaching it early is safe.
+                     //
+                     // This is a stock engine bug, not one the cache patches introduce --
+                     // but they make it easier to reach, because the spill hook deliberately
+                     // uses more caches per frame and therefore requests more meshes.
+                     patch{0x2D2533, 0x136, 0x122, {.file_offset = true}}, // JZ 0x006d326d -> 0x006d3259
                   },
             },
 

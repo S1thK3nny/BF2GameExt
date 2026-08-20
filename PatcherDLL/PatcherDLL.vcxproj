@@ -167,6 +167,8 @@
     <ClInclude Include="src\render\hud_widescreen.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\water_texture_count_fix.hpp" />
+    <ClInclude Include="src\render\particle_batch_spill.hpp" />
+    <ClInclude Include="src\render\particle_density.hpp" />
     <ClInclude Include="src\weapon\anim_textures.hpp" />
     <ClInclude Include="src\weapon\lightsaber_illumination.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
@@ -234,6 +236,8 @@
     <ClCompile Include="src\render\hud_widescreen.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\water_texture_count_fix.cpp" />
+    <ClCompile Include="src\render\particle_batch_spill.cpp" />
+    <ClCompile Include="src\render\particle_density.cpp" />
     <ClCompile Include="src\weapon\anim_textures.cpp" />
     <ClCompile Include="src\weapon\lightsaber_illumination.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />

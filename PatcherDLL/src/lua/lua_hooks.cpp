@@ -21,6 +21,8 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "render/particle_batch_spill.hpp"
+#include "render/particle_density.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "entity/land_on_arrival_fix.hpp"
@@ -324,6 +326,8 @@ void lua_hooks_uninstall()
    grapple_fix_uninstall();
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
+   particle_batch_spill_uninstall();
+   particle_density_uninstall();
    anim_bank_append_uninstall();
    shield_channel_fix_uninstall();
    aim_assist_uninstall();
@@ -341,6 +345,7 @@ void lua_hooks_uninstall()
    // After it, so its deactivate_all() above is still covered by the guard.
    water_texture_count_fix_uninstall();
    red_light_stale_node_fix_uninstall();
+   // detaching it first would unpick the chain from the middle.
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

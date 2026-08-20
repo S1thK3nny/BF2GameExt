@@ -4,7 +4,7 @@
 
 #include "util/slim_vector.hpp"
 
-#define PATCH_COUNT 20
+#define PATCH_COUNT 24
 #define EXE_COUNT 3
 
 struct patch_flags {
@@ -16,6 +16,12 @@ struct patch_flags {
 
    /// Compare and write only the low byte of expected_value/replacement_value (for imm8 patches)
    bool values_are_8bit : 1 = false;
+
+   /// Compare and write only the low WORD (for imm16 patches).  Needed where the
+   /// operand is a 16-bit immediate and a 32-bit store would run into the next
+   /// instruction -- e.g. the modtools mMaxParticles clamp, whose `CMP AX,0x80`
+   /// is immediately followed by `MOV word ptr [ESI+2],AX`.
+   bool values_are_16bit : 1 = false;
 };
 
 struct patch {

@@ -31,6 +31,8 @@
 #include "render/hud_widescreen.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
+#include "render/particle_batch_spill.hpp"
+#include "render/particle_density.hpp"
 #include "weapon/anim_textures.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
@@ -215,6 +217,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
+      g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
+      g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -257,6 +261,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
    map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window
+   // Before gc_visual_limits_install: that one's log line reports the live
+   // cache-slot count, and the GC beam path depends on the spill being up.
+   particle_density_install(exe_base);     // byte-patches .text/.rdata
+   particle_batch_spill_install(exe_base); // byte-patches .text — needs the RW window
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);

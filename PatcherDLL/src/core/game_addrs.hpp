@@ -597,6 +597,11 @@ namespace modtools {
    constexpr uintptr_t console_add_command         = 0x007ed560;
    constexpr uintptr_t engine_console_reg          = 0x00a145c0; // registers "render_soldier_colliding"
 
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam(CommandPost*, int newTeam, int oldTeam) -- __thiscall,
+   // RET 8.  Detoured to survive a NULL `this`, which a mission script passing a
+
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 
    constexpr uintptr_t s_cached_particles            = 0x00B9DB78;  // sCachedParticles[300]
@@ -814,6 +819,34 @@ namespace modtools {
    constexpr uintptr_t water_bumpmap_count_store      = 0x00864A0F;
    constexpr uintptr_t water_specularmask_count_store = 0x00864B9C;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x00AD6354;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0066D5B4;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x006681AC;
+   constexpr uintptr_t emitter_max_particles_op2    = 0x006681B8;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
 } // namespace modtools
 
 // =============================================================================
@@ -1588,6 +1621,34 @@ namespace steam {
    constexpr uintptr_t water_bumpmap_count_store      = 0x0071FAB6;
    constexpr uintptr_t water_specularmask_count_store = 0x0071FBF4;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x0078AA94;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0060E554;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x0060A23F;
+   constexpr uintptr_t emitter_max_particles_op2    = 0;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
 } // namespace steam
 
 // =============================================================================
@@ -2134,6 +2195,34 @@ namespace gog {
    constexpr uintptr_t water_bumpmap_count_store      = 0x00720B86;
    constexpr uintptr_t water_specularmask_count_store = 0x00720CC4;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x0078BA3C;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0060F5F4;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x0060B2CF;
+   constexpr uintptr_t emitter_max_particles_op2    = 0;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
 } // namespace gog
 
 } // namespace game_addrs

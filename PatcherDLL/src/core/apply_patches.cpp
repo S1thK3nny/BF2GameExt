@@ -98,6 +98,14 @@ exe_identity identify_exe(const uintptr_t exe_base, const slim_vector<section_in
                                                   : exe_identity::foreign;
 }
 
+// Width of a patch's compare/write, in bytes.
+static size_t patch_value_size(const patch& patch)
+{
+   if (patch.flags.values_are_8bit) return 1;
+   if (patch.flags.values_are_16bit) return 2;
+   return sizeof(uint32_t);
+}
+
 // Verify a patch's site holds its expected original value (does not write).
 static bool verify_patch(const patch& patch, const uintptr_t exe_base,
                          const slim_vector<section_info>& sections)
@@ -112,7 +120,7 @@ static bool verify_patch(const patch& patch, const uintptr_t exe_base,
                                       ? (uint32_t)(uintptr_t)resolve(exe_base, patch.expected_value)
                                       : patch.expected_value;
 
-   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(expected_value);
+   const size_t cmp_size = patch_value_size(patch);
 
    return memeq(patch_address, cmp_size, &expected_value, cmp_size);
 }
@@ -136,7 +144,7 @@ static void write_patch(const patch& patch, const uintptr_t exe_base,
                             : (char*)resolve(exe_base, patch.address);
 
    const uint32_t replacement_value = patch_replacement(patch);
-   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(replacement_value);
+   const size_t cmp_size = patch_value_size(patch);
 
    memcpy(patch_address, &replacement_value, cmp_size);
 }
