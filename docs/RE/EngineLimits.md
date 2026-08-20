@@ -177,28 +177,66 @@ are assets (`normal_shader.xml`, `zprepass_shader.xml`), not exe-resident.
 **The "32" is `ZephyrSkeleton<32>`** — the animation system's template parameter for
 total joints, unrelated to shader constants.
 
-### Latent hazard for asset authors
+### The munger does the split, so 15 is NOT a character limit
 
-**There is no runtime clamp.** `RedRenderer::pcRenderPrimitive` (`0x00882ca0`)
-stores `numBoneMatrices = (ushort)param_7` raw from `RedSegment::m_uiNumBones` with
-no bounds check, and the dirty-range high-water is `numBoneMatrices * 3 + 50`. Bone
+The content pipeline (munger) splits a mesh into segments each referencing at most
+15 bones. Nothing in the exe clamps it — but nothing needs to, because assets never
+arrive unsplit. Confirmed by the map author, and consistent with the absence of any
+runtime check.
+
+**Therefore the shader constant file does not limit character complexity.** A
+64-joint character simply munges into more segments; the palette is uploaded per
+draw call, not per character. The cost is draw calls, not correctness. Any reasoning
+of the form "32 bones would need all 96 registers, so 32 joints is impossible" is
+wrong — that arithmetic applies to a single segment, which the munger guarantees is
+never that large.
+
+The real character ceiling is `ZephyrSkeleton<32>`. See below.
+
+### Latent hazard, for hand-built assets only
+
+`RedRenderer::pcRenderPrimitive` (`0x00882ca0`) stores
+`numBoneMatrices = (ushort)param_7` raw from `RedSegment::m_uiNumBones` with no
+bounds check, and the dirty-range high-water is `numBoneMatrices * 3 + 50`. Bone
 index 15 writes c96/c97/c98 — straight into `m_iMinConstantSet` and
 `m_iMaxConstantSet`.
 
-So a hand-authored segment with 16+ bones **silently corrupts engine state before
-D3D ever rejects the oversized `SetVertexShaderConstantF`**. The 15-bone split is
-enforced entirely by the content pipeline, not the exe. This is a memory-corruption
-path reachable from mod assets, worth knowing independently of any bone-count work.
+So a segment with 16+ bones **silently corrupts engine state before D3D ever
+rejects the oversized `SetVertexShaderConstantF`**. For munged assets this is
+unreachable. It only matters for anything hand-built that bypasses the pipeline.
 
-### Related caps, none of them binding
+### The actual blocker: `SoldierAnimator`'s layout
 
 `ZephyrSkeleton<64>`, `ZephyrPoseStatic<64>`, `ZephyrPoseDyn<64>` and
 `ZephyrAnimInst<64>` **already ship and are already used**, by `EntityWalker`
-(`0x005914f0`) and `EntityTrap` (`0x0058e510`) — so the animation half of a 64-joint
-character exists. It is unusable for characters because `SoldierAnimator`
-(`0x00751590`) embeds the `<32>` objects by value at fixed offsets, and switching
-would grow it by 7808 bytes and shift every member above `+0xD0`. It would also buy
-nothing visually, because the renderer still cannot skin more than 15 per segment.
+(`0x005914f0`) and `EntityTrap` (`0x0058e510`). The animation half of a 64-joint
+character exists today.
+
+What stops characters using it is `SoldierAnimator` (8240 bytes), which embeds all
+four `<32>` objects **by value**, from the PDB layout:
+
+| Offset | Size | Member |
+|---|---|---|
+| 88 | 4 | `PblBitVector<32> mUpperBodyAnimMask` |
+| 92 | 4 | `PblBitVector<32> mLowerBodyAnimMask` |
+| 208 | 2064 | `ZephyrSkeleton<32> mZephyrSkeleton` |
+| 2272 | 900 | `ZephyrPoseStatic<32> mZephyrPoseStatic` |
+| 3172 | 2480 | `ZephyrPoseDyn<32> mZephyrPoseDynUpper` |
+| 5652 | 2480 | `ZephyrPoseDyn<32> mZephyrPoseDynLower` |
+| 8132+ | — | everything else |
+
+Two independent 32s, and both must move together:
+
+1. **Layout.** Switching to `<64>` grows the object by roughly 7808 bytes and shifts
+   every member above offset 208. Those displacements are baked as literals across
+   thousands of instructions. This is a structural rewrite, not a byte patch.
+2. **Bitmask width.** `mUpperBodyAnimMask` / `mLowerBodyAnimMask` are
+   `PblBitVector<32>` — 4 bytes, **one bit per joint**. Joint 32 aliases onto joint
+   0 exactly the way command post 16 aliases onto post 0. Widening them is part of
+   the same rewrite, and missing it would silently mis-mask the upper/lower body
+   split rather than fail loudly.
+
+The renderer is NOT a blocker — see the munger note above.
 
 Others: `ZephyrJointSet` is `{uchar m_puJoints[32]; uchar m_puSkinSets[16]; uchar
 m_uNumJoints; uchar m_uNumSkinSets}` — a true 32 ceiling with a uchar count.
