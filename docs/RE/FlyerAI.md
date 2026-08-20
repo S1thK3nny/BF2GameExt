@@ -118,6 +118,35 @@ change but only rescues the overshoot path.
 
 ---
 
+## RESOLVED: the observed circling was missing map data
+
+The map being tested had **no flyer paths authored**, so there was nothing for the
+AI to follow. Reported by the map's author, 2026-08-20. Everything below this line
+about `StopDist` and `GonePastDest` is still true of the binary, but it was NOT the
+cause of the behaviour that prompted the investigation, and patching `AIUtil::StopDist`
+would not have changed it.
+
+Keep the threshold analysis: it is verified, and it would matter for a flyer that DOES
+have a path and still fails to arrive. But it is no longer a candidate fix for
+"my flyers circle", which should first be answered with "does the map have flyer paths".
+
+**What the engine does with no path is not established.** Worth knowing, because it
+would decide whether a fallback is worth building:
+
+- `UnitFlyAgent`'s FLY state has no failed-path branch of its own. The two
+  `IsNavigatorFailedPath` consumers found are `UnitTrooperAgent::UpdateStatePostVision`
+  (phantom `0x00795D86`, infantry) and nothing on the flyer path.
+- The engine already has a path-free movement mode: `AILowLevel::SetNavigator_GotoDirect`
+  (phantom `0x00481050`), used by `UnitFlyAgent::DoFlyDirect` (`0x00791210`) for
+  `AttackPatterns` mode 17 FLYDIRECT, and by `UnitRandomAgent::PickRandomDest`
+  (`0x00793CC0`). So flying to a point without a path network is something the engine
+  can already do - it is simply not what the FLY state chooses.
+- A plausible feature, NOT built and NOT costed: have the FLY state fall back to
+  `GotoDirect` when the path request fails, so flyers work on maps with no flyer path
+  network. That would make flyers usable on maps that never authored one.
+
+---
+
 ## Open: is the orbit a symptom, or the goal?
 
 The thresholds above are verified from bytes. What is NOT established is that

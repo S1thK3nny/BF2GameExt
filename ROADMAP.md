@@ -273,32 +273,19 @@ actually take the branch, rather than on the absence of warnings.
 
 ## AI
 
-**AI flyers orbit instead of arriving** - Traced to `PathFollower`, not to the flyer agent.
-Three flyer-specific facts combine into a trap at the FINAL waypoint of any path: flyers are
-exempt from `CheckStuck` (0x005db240); arrival is a PLANAR test against `AIUtil::StopDist`
-(0x0058ebb0), which has no flyer case and falls through to a flat 4.0 units; and
-`GonePastDest` has a flyer-only gate (0x005d9338) that returns false beyond 10.0 units planar.
-A flyer whose turn radius keeps it outside both never registers arrival, never sets `mDone`,
-never re-enters `EnterState`, and is never flagged stuck - so it orbits that point forever. It
-applies during combat too, since `AttackPatterns::GeneratePath` uses the same follower.
+**Flyers on maps with no flyer paths** - The circling investigated at length in
+docs/RE/FlyerAI.md turned out to be a map with no flyer paths authored, not an engine
+fault. The `AIUtil::StopDist` / `GonePastDest` threshold analysis there is verified and
+still stands, but it was not the cause and is no longer a priority.
 
-Compounding it, `UnitFlyAgent::EventHandler` (0x005aeea0) swallows `EVT_Damaged`,
-`EVT_Audible_CanHearEnemy`, `EVT_Grenade` and `EVT_EmptyVehicle` outright, so a flyer under
-fire never asks whether to fight back; only vision reaches combat, and never for a transport.
-
-The likely fix is a flyer case in `AIUtil::StopDist` mirroring `StopDistIntermediate`, so the
-terminal waypoint scales with the vehicle rather than using a flat 4.0. Not yet patched, and
-the step from these thresholds to "therefore it orbits" assumes a turn radius above 10 units,
-which is ODF data and unmeasured. See docs/RE/FlyerAI.md.
-
-Before patching any of that, settle whether the orbit is a SYMPTOM or the goal itself. A
-flyer running a defend or attack goal on an object may be circling on purpose, in which case
-the `StopDist` thresholds are exactly what makes the orbit look like an orbit rather than the
-reason it never leaves. The way to tell them apart is to log, for one circling flyer, which
-goal and command it is running and where its current goto point is: a flyer that never sets
-`mDone` on a TRAVEL path to a distant node is the trap described above, while a flyer whose
-goal keeps re-issuing a destination it is already effectively at is doing what it was told.
-Only the first case is fixed by `AIUtil::StopDist`.
+The remaining idea is a feature rather than a fix: `UnitFlyAgent`'s FLY state has no
+failed-path branch, while the engine already has a path-free movement mode in
+`AILowLevel::SetNavigator_GotoDirect` (phantom 0x00481050), used by `DoFlyDirect` for
+combat strafing and by `UnitRandomAgent::PickRandomDest`. Falling back to it when the
+path request fails would make flyers usable on maps that never authored a flyer path
+network. Not costed. Would need the failed-path signal (`AILowLevel` navigator failed
+flag) wired into the FLY state, and modtools offsets only - retail EntityFlyer interior
+offsets differ.
 
 ## First person
 
