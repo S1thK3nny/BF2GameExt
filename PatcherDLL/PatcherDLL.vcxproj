@@ -163,6 +163,8 @@
     <ClInclude Include="src\controller\aim_assist.hpp" />
     <ClInclude Include="src\util\ini_registry.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
+    <ClInclude Include="src\util\sound_diag.hpp" />
+    <ClInclude Include="src\util\voice_limit.hpp" />
     <ClInclude Include="src\util\enable_sound_warnings.hpp" />
     <ClInclude Include="src\util\error_dialog_fix.hpp" />
     <ClInclude Include="src\render\blur_downsize_clamp.hpp" />
@@ -225,6 +227,8 @@
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\util\audio_stream_limit.cpp" />
+    <ClCompile Include="src\util\sound_diag.cpp" />
+    <ClCompile Include="src\util\voice_limit.cpp" />
     <ClCompile Include="src\util\enable_sound_warnings.cpp" />
     <ClCompile Include="src\util\game_logging.cpp" />
     <ClCompile Include="src\loading_screen\config_parser.cpp" />

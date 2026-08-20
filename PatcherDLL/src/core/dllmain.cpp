@@ -28,6 +28,8 @@
 #include "entity/command_post_null_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
+#include "util/sound_diag.hpp"
+#include "util/voice_limit.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
@@ -225,6 +227,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
       g_branchRegionDebugEnabled  = cfg.get_bool("Fixes", "BranchRegionDebug", false);
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
+      g_soundDiagEnabled          = cfg.get_bool("Fixes", "SoundDiagnostic", false);
+      g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -285,6 +289,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);
+   voice_limit_install(exe_base);  // byte-patches .text/.data - needs the RW window
+   sound_diag_install(exe_base);
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
    award_disable_install(exe_base);

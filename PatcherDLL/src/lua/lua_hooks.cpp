@@ -26,6 +26,8 @@
 #include "entity/command_post_null_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
+#include "util/sound_diag.hpp"
+#include "util/voice_limit.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "entity/land_on_arrival_fix.hpp"
@@ -351,7 +353,11 @@ void lua_hooks_uninstall()
    // After it, so its deactivate_all() above is still covered by the guard.
    water_texture_count_fix_uninstall();
    red_light_stale_node_fix_uninstall();
+   // Last of the Snd::EngineBase::Update hooks to come off: it went on
+   // before the saber lights did, so it is the inner detour of the two and
    // detaching it first would unpick the chain from the middle.
+   sound_diag_uninstall();
+   voice_limit_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
