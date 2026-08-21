@@ -355,6 +355,32 @@ That path looks correct and is unrelated to the `SndHero*` slots.
 ## Limits
 
 **Attached effects past 64** - Capped at **255 no matter what**, and not recommended.
+
+WHAT ACTUALLY CONSUMES A SLOT, traced 2026-08-21. `AttachedEffectsClass::SetProperty` has
+exactly ONE caller, `EntityGeometryClass::SetProperty`, and `BuildAttachedEffectsClass` has
+exactly one, `EntityGeometryClass::PostReadSetup` - which drains the table and sets
+`s_uiNumAttached = 0`. So the 64 is **per geometry class**, accumulated across that one ODF's
+property read and flushed at the end of it.
+
+It is a stage-then-commit design; of the five property hashes only two increment:
+
+| Hash | Parses | Count |
+|---|---|---|
+| `0x576b09cd` | `"%s %s"` effect + bone | **+1** |
+| `0x3be7b80a` | `"%s %f %f"` bone + offsets | **+1** |
+| `0x6a6c7e0d` | effect name -> `_Find` in the 256-slot effect table | stages only |
+| `0xa9d0d48b` | odf name, must be an `EntityLight` | stages only |
+| `0x51e2c845` | `atoi` -> dynamic flag | none |
+
+So one attachment is typically TWO ODF lines but ONE slot: the limit is ~64 attached
+effects/lights on a single object, which is why normal content never approaches it.
+
+**CORRECTION.** An earlier note here claimed an inflated count "leaks from a non-geometry ODF
+into the next geometry class". That is WRONG and was never true: the only path into the counter
+is `EntityGeometryClass::SetProperty`, so a non-geometry ODF cannot contribute at all.
+
+Not to be confused with `EntityProp`'s own separate attachment cap, which has its own warning
+("EntityProp '%s' AttachToHardPoint '%s' too many attached odfs (max %d)") and its own array.
 `AttachedEffectsClass::m_uiNumAttached` is a `uint:8`: the count is written with a BYTE store
 (modtools `0x004C1BF6 MOV byte [EBP+4],AL`, Phantom `0x00490376`) and all three consumer loops
 read it back masked `& 0xFF`, so a 300-effect class silently becomes a 44-effect one. Past 255
