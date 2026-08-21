@@ -75,6 +75,14 @@
 //     for a MOV imm32; it is pinned with `PUSH 0x20 / POP EAX` instead, which is
 //     exactly 3 bytes and leaves ESP unchanged.
 //
+// RELOCATION.  The stock pool address is the only EXPECTED VALUE in this feature
+// that is itself an address, and the imm32 holding it carries a .reloc entry, so
+// on a rebased image it reads base-adjusted rather than link-time.  Steam loads
+// at 0x000E0000 in practice, not its preferred 0x00400000, which made the check
+// compare 0x006B8420 against 0x009D8420 and refuse the whole feature.  The
+// expectation is resolved through the load base for that reason.  Every other
+// site here holds a plain integer the loader never touches.
+//
 // Steam and GOG share the command-line clamp addresses exactly but NOT the
 // gMaxVoices global, and their call sites push the neighbouring globals in a
 // different order -- GOG is not Steam plus a fixed delta, and both were read

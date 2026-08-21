@@ -232,7 +232,14 @@ void voice_limit_install(uintptr_t exe_base)
       expect(exe_base, S.gMaxVoices,      4, 0x20)            &&  // 0
       expect(exe_base, S.clampCmpImm8,    1, 0x20)            &&  // 1
       expect(exe_base, S.clampValImm32,   4, 0x20)            &&  // 2
-      expect(exe_base, S.poolPtrImm32,    4, S.poolPtrExpect) &&  // 3
+      // RELOCATION.  poolPtrExpect is an ADDRESS, and the only expectation here
+      // that is one -- every other site holds a plain integer (0x20, 0xA800,
+      // 0x28) that the loader never touches.  The imm32 carries a .reloc entry,
+      // so on a rebased image it reads base-adjusted, not the link-time value.
+      // Steam loads at 0x000E0000 in practice, which made this compare
+      // 0x006B8420 against 0x009D8420 and correctly refuse the whole feature.
+      expect(exe_base, S.poolPtrImm32, 4,
+             (uint32_t)(uintptr_t)resolve(exe_base, S.poolPtrExpect)) &&  // 3
       expect(exe_base, S.openBound,       4, 0xA800)          &&  // 4
       expect(exe_base, S.updateBound,     4, 0xA800)          &&  // 5
       expect(exe_base, S.closeBound,      4, 0xA800)          &&  // 6
