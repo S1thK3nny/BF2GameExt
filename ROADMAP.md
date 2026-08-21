@@ -604,6 +604,43 @@ no-ops.
 
 ## Debugging
 
+**Content budget report ("what did I actually put in this map?")** - requested 2026-08-21. A
+census of the things a MODDER AUTHORS, reported as occupancy against the ceiling, because the
+ceilings are invisible until you hit them. Deliberately NOT a runtime profiler: voices, AI
+reservations and the particle/renderer caches are engine state the author does not control, so
+they are out of scope.
+
+The neat framing: **report against every ceiling BF2GameExt already knows how to raise.**
+Everything in `[LimitIncreases]` is a limit we have already located, so the ceiling half is
+mostly free. Candidate metrics, all author-controlled:
+
+  effect classes (256) - the headline, and it settles the softlock question on its own
+  object count (1024 / 2048)      combo animations (30 / 90)
+  high-res animations             string pool
+  sound layers                    DLC missions
+  GC visual limits                command posts (16)
+  attached effects per class (64) tentacles per class (4)
+
+**Where the work actually is.** Knowing each ceiling is easy - we patch them. Knowing current
+OCCUPANCY is the new reverse engineering, and it differs per subsystem:
+  - Hash tables are trivial and self-verifying: scan the key slots and count non-zero. Use this
+    wherever possible rather than trusting a stored counter, which may be a different field than
+    you think (`_head._pObject` vs `_iCount` already burned us once).
+  - Others need a live counter global located per build, three times over.
+  - `s_uiNumAttached` is drained per class, so a live read is meaningless - it needs a hook to
+    record the PEAK across a level load.
+
+**Triggering.** The debug console is modtools-only (gated in `lua_hooks.cpp`), and the user
+tests on Steam retail, so a console-only command would not run where it is most needed. Ship one
+census function behind several triggers: the console command on modtools, plus a Lua binding
+that works on all three builds and can be called from a mission script.
+
+**Not mod-addable, do not include:** effect FACTORIES (32 slots, ~26 used by built-in effect
+managers) are engine types registered by `FLEffect::InitAll`, not content. Worth knowing the
+headroom is thin, but an author cannot change it.
+
+
+
 **All diagnostics are now on all three builds.** `AIUpdateDiag`, `SoundDiagnostic` and
 `BranchRegionDebug` were ported 2026-08-21; the VoiceVirtual offsets were verified identical on
 retail rather than assumed, and the full teardown is in `docs/RE/SoundSystem.md`.
