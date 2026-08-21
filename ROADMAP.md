@@ -329,6 +329,18 @@ That path looks correct and is unrelated to the `SndHero*` slots.
 
 ## Limits
 
+**AI reservation pool past 127** - `[LimitIncreases] ReservationPoolSize` now raises
+`ReserveManager::sList` from 60 to at most 127, which is a hard encoding ceiling: the count
+reaches the allocator through a `PUSH imm8` on every build and `6A ib` is sign-extended, so 0x80
+and above makes the count negative, the allocation ~4 GB, `new[]` return NULL and the first
+`Reserve` write through NULL. Going higher means re-encoding that push as `PUSH imm32`: a 31-byte
+in-place rewrite on modtools, where the 24 bytes of `0xCC` at `0x005C6228` are confirmed free, and
+three spare bytes on retail, where the push at Steam `0x00630146` is followed immediately by
+`LEA EDI,[EAX+4]`. Only worth doing if 127 is measured to still saturate - and note the warning's
+own number cannot measure that, since `mPeak` counts rejected adds since level load rather than
+live demand. Every query is a linear scan on `mLength`, so the real cost of a large pool is frame
+time, not the 24 bytes per entry.
+
 **Command posts past 16, single player only** - Multiplayer is closed: it is a wire format, not
 an array bound. `REL_CHANGECOMMANDPOSTTEAMS` packs 2 bits per post into a uint32 `mTeamBits`,
 1 bit per post into a uint16 `mAliveBits`, and every net reference to a post is a 4-bit index

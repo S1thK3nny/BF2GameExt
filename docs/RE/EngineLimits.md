@@ -6,6 +6,10 @@ Three fixed limits investigated 2026-08-20. Addresses are modtools unless stated
 
 ## 1. `ReserveManager::sList` — the 60-entry reservation pool
 
+> **Shipped** as `[LimitIncreases] ReservationPoolSize` (default 127), implemented in
+> `PatcherDLL/src/ai/reservation_pool.cpp`. All eight retail immediates below were re-read
+> from the images before the patcher was written and all held `0x3C`.
+
 The source of `List pool is full; raise count from 60 to at least 2129`.
 
 `ListPool<ReserveManager::ReserveStruct,int>`, capacity `0x3C` = 60, element 24

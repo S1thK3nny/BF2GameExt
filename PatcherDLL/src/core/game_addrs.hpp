@@ -781,6 +781,33 @@ namespace modtools {
    constexpr uintptr_t ai_lod_interval_t2        = 0x0059E7E9; // 2.00 s LOW
    constexpr uintptr_t ai_lod_interval_t3        = 0x0059E7F1; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4        = 0x0059E7F9; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // ReserveManager::sList is a ListPool<ReserveStruct,int> of capacity 60 with a
+   // 24-byte element.  It holds every AI reservation claim (RT_REPAIR, RT_BOARD,
+   // RT_ATTACK, RT_FORMATION, RT_HeavyWeapons).  When it fills, Append drops the
+   // claim and logs `List pool is full; raise count from 60 to at least N` -- the
+   // flood users see on large-AI maps.  Overflow is fail-safe: the guard is an
+   // equality test and nothing is written out of bounds, so the cost is lost
+   // reservations and log spam, not corruption.  (The N in that message is NOT a
+   // demand figure -- mPeak counts rejected adds since level load, so it measures
+   // how long the pool has been starved.  See docs/RE/EngineLimits.md.)
+   //
+   // ReserveManager::Init is 0x005C6200, pool pointer 0x00B8F414.  modtools keeps
+   // the ListPool ctor out of line at 0x005C60F0 and derives everything there from
+   // the single pushed count:
+   //   005C60F9  LEA EAX,[ESI+ESI*2]     ; 3n
+   //   005C60FC  LEA ECX,[EAX*8+4]       ; 24n+4 bytes to allocate
+   //   005C6104  MOV [EDI+0xC],ESI       ; mPoolSize
+   //   005C611D  MOV [EAX],ESI           ; array cookie
+   // so ONE byte -- the imm8 of `6A 3C` at 0x005C620E -- is the whole patch, and
+   // there are no folded sites to keep in step.
+   //
+   // `6A ib` sign-extends, so 0x7F = 127 is the in-place ceiling.  Writing
+   // 0x80-0xFF makes the count negative: the allocation request becomes ~4 GB,
+   // new[] returns NULL, and the ctor stores mElements = NULL after mPoolSize was
+   // already written negative -- the first Reserve then writes through NULL.
+   constexpr uintptr_t reserve_pool_count_push    = 0x005C620F; // imm8 of PUSH 0x3C
+
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
    // Ordnance::Collide plays the generic impact sound only when
@@ -1661,6 +1688,27 @@ namespace steam {
    constexpr uintptr_t ai_lod_interval_t2         = 0x007B28B8; // 2.00 s LOW
    constexpr uintptr_t ai_lod_interval_t3         = 0x007B28BC; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4         = 0x0066351E; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // The same 60-entry ReserveManager::sList (pool pointer 0x01EAEFF8, Init
+   // 0x0062F550), but retail INLINES and constant-folds the ListPool ctor at
+   // 0x006300E0, and Init's `PUSH ECX` at 0x0062F581 pushes an uninitialised
+   // register -- the argument is dead.  Porting the modtools one-byte patch to
+   // "the push" here is a silent no-op; all four folded copies must move together:
+   //   006300FC  B8 3C000000     MOV EAX,0x3C        ; x 0x18 = bytes to allocate
+   //   0063010B  C7 46 0C 3C...  MOV [ESI+0xC],0x3C  ; mPoolSize
+   //   00630146  6A 3C           PUSH 0x3C           ; element count, to the
+   //                                                 ; array-construct helper
+   //   0063014B  C7 00 3C000000  MOV [EAX],0x3C      ; array cookie
+   // A partial write is far worse than none -- mPoolSize larger than the
+   // allocation is a heap overrun -- so reservation_pool.cpp verifies all four
+   // before writing any.  The nearby `MOV EDX,0x18` and `PUSH 0x18` are the
+   // element SIZE, not the count; do not touch them.  The push is still imm8, so
+   // 127 remains the ceiling for the whole set.
+   constexpr uintptr_t reserve_pool_count_push    = 0x00630147; // imm8, max 0x7F
+   constexpr uintptr_t reserve_pool_count_alloc   = 0x006300FD; // imm32
+   constexpr uintptr_t reserve_pool_count_field   = 0x0063010E; // imm32
+   constexpr uintptr_t reserve_pool_count_cookie  = 0x0063014D; // imm32
+
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
    // Ordnance::Collide plays the generic impact sound only when
@@ -2332,6 +2380,16 @@ namespace gog {
    constexpr uintptr_t ai_lod_interval_t2             = 0x007B3828; // 2.00 s LOW
    constexpr uintptr_t ai_lod_interval_t3             = 0x007B382C; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4             = 0x006645BE; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // Byte-identical to Steam apart from the absolute operands: pool pointer
+   // 0x01EB04AC, Init 0x006305F0, folded ListPool ctor 0x00631180.  Same rule --
+   // the count is folded into four places and they must move together, and the
+   // neighbouring 0x18 operands are the element size rather than the count.
+   constexpr uintptr_t reserve_pool_count_push    = 0x006311E7; // imm8, max 0x7F
+   constexpr uintptr_t reserve_pool_count_alloc   = 0x0063119D; // imm32
+   constexpr uintptr_t reserve_pool_count_field   = 0x006311AE; // imm32
+   constexpr uintptr_t reserve_pool_count_cookie  = 0x006311ED; // imm32
+
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
    // Ordnance::Collide plays the generic impact sound only when
