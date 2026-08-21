@@ -271,6 +271,46 @@ string: a failed lookup produces no `Unable to find branch region` line, or any 
 line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
 actually take the branch, rather than on the absence of warnings.
 
+## Limits
+
+**Command posts past 16, single player only** - Multiplayer is closed: it is a wire format, not
+an array bound. `REL_CHANGECOMMANDPOSTTEAMS` packs 2 bits per post into a uint32 `mTeamBits`,
+1 bit per post into a uint16 `mAliveBits`, and every net reference to a post is a 4-bit index
+(`WriteBits(pkt, mPostIndex, 4)`). Post 16 writes bit 32 of a 32-bit field; x86 masks the shift
+by `&0x1f` so it silently ALIASES ONTO POST 0. Widening changes packet length and there is no
+version negotiation on that event.
+
+Single player is feasible, and the earlier "HUD::ElementMap is the blocker" framing is
+avoidable. `HUD::ElementMap` embeds `mPost[16]`, `mPostScale[16]`, `mPostText[16]` and
+`mPostSelect[16]` INLINE with displacements baked into the accessors, so growing them is a
+structural rewrite - but it is not necessary. Leave the HUD at 16 and grow only the game-side
+arrays: the HUD iterates its own 16 and indexes `gPost[i]`, so it stays in bounds as long as
+`gPost` has at least 16. Posts 17+ then work but do not appear on map or radar.
+
+Sites involved (NOT byte-verified, scope before building):
+- `sPostArray` client/host, modtools `0x00B93B58` / `0x00B93B98`, retail both `0x01E308A0` /
+  `0x01E308E0`. Base imm32s at modtools `0x0064972F`, `0x00649820`, `0x00649850`;
+  retail `0x0047AA51`, `0x0047AB20`.
+- memset size: modtools `0x00649723` imm32 (any value); retail `0x0047AA40` `6A 40` imm8
+  sign-extended, so max 0x7F = 31 slots without re-encoding.
+- `CommandPostItor::operator_bool` - the funnel ~20 AI/spawn/HUD callers pass through. TWO
+  immediates, both must move: modtools `0x00650035` and `0x0065004E`; Steam/GOG `0x0047F8B5`
+  and `0x0047F8C7`. imm8, max 0x7F.
+- `TargetManager::_gPost[16]` (Phantom `0x00C4DCE8`, 48 B/elem) relocatable via its pointer at
+  `0x00A9A1B4`. **`AddPost` `0x00773F10` uses `0x10` as BOTH a loop bound AND a no-free-slot
+  sentinel across three coordinated occurrences** - a partial patch turns "no slot" into an
+  out-of-bounds write.
+- `PlayerStats::AddKill` `0x007217C0` - two loops, `!= 0x40` (byte count) and `< 0x10` (index).
+
+Fix regardless of any of this: `CommandPost::BuildPost` (modtools `0x0064FDF0`) checks
+`83 FF 10` at `0x0064FF13`, logs "Exceeded %d command posts!" and then **writes out of bounds
+anyway**. Retail stripped the check entirely, so post 17 on a retail host already overwrites the
+`sActivePostCount` pointer today.
+
+THE FOOTGUN: a static byte patch cannot tell single player from multiplayer. Enabled online it
+corrupts post ownership silently. This needs a runtime `netEnabled` check, so it is a hook, not
+a table patch.
+
 ## AI
 
 **Flyers on maps with no flyer paths** - The circling investigated at length in
@@ -346,6 +386,30 @@ in cockpit first person.
   `RedModel::Render` could not be located on retail.
 - TRAP: the one-byte alternative on modtools is at `0x00535EAA`, NOT `0x00535EA8`.
   `0x00535EA8` is `84 C0`; writing `EB` there gives `EB C0`, a backward jump, instant crash.
+
+### First person weapon and sync states, if this is ever revisited
+
+Distinct from the swing-animation work above and not costed. The first person weapon has its
+own state machine that does not track the third person one, so reload, fire, charge, deflect
+and melee read as two separate characters doing two different things. What a fix would need:
+
+- The FP state index comes from `FirstPersonRenderable::UpdateSoldier` and is derived from the
+  weapon's own fire state plus `Weapon+0xAC` bit 1 (the SignalFire latch, consumed and cleared
+  in the same frame). The third person side runs off `SoldierAnimator` with its own timers.
+  Nothing reconciles the two.
+- FPR playback fields are known: `m_pkAnim +0x1534`, `m_fAnimSpeed +0x154C`, `m_fCurT +0x1550`,
+  `m_fLastT +0x1554`, `m_bLoop +0x155E`, `m_bAnimFinished +0x1560`, `mBlendFactor +0x1564`.
+  Third person upper body: `SoldierAnimator +0x1600` `m_fCurT`, `+0x160E` `m_bLoop`,
+  `+0x1610` `m_bAnimFinished`, `+0x15E4` `m_pkAnim`. `SoldierAnimator` is `EntitySoldier+0x760`.
+- So phase sync is expressible as a per-frame float copy, but the two use DIFFERENT skeletons
+  (FP has ~8 joints, the character has ZephyrSkeleton<32>), so the animations are not the same
+  asset and matching phase does not by itself match pose.
+- Do NOT poke `FPR+0x1534` directly - `ZephyrAnimInst<32>::SetAnim` rebuilds the joint index
+  tables. Go through `FirstPersonRenderable::SetAnimation` (modtools `0x004A9B80`, thiscall,
+  `RET 8`).
+
+Shelved with the rest of first person; the engine's FP is built around a floating arms model
+and reconciling it with the body is the same fight documented above.
 
 ### Dedicated first person animation, if this is ever revisited
 
