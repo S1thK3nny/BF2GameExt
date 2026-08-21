@@ -1086,9 +1086,13 @@ the same flag on `Voice` is a copy that gets overwritten every tick.
 
 ## The `LoadDisplay` struct tail is wrong in Phantom's PDB (corrected 2026-08-21)
 
-Phantom declares `LoadDisplay` as **7500** bytes. It is **7504**, and everything from `0x1C28`
-onward sits **4 bytes later** than the PDB says. There is one undeclared 4-byte member at
-**`0x1C28`**, between `m_titleBarTimer` and `m_models`.
+Phantom declares `LoadDisplay` as **7496** bytes (stored, `packing=true`). It is **7504**, and
+the array/counter tail sits **8 bytes later** than the PDB says.
+
+**Read the STORED struct, not `get_struct_layout`'s output.** That tool renders a padded view
+with different offsets - it reports size 7500 and `m_randomBackDrop` at `0x1C10` - which is not
+what the database holds and led to a first, wrong diagnosis of "+4 at 0x1C28". The stored
+component offsets are the ones to compare against.
 
 Ground truth, read from the instruction operands of `LoadDisplay::LoadDataChunk`
 (Phantom `0x00634F20`) rather than from the decompiler:
@@ -1105,19 +1109,33 @@ and `LoadDisplay::LoadData` (`0x00634E80`) zeroes exactly `[ESI+0x1D44]`, `[ESI+
 Those chain consistently and confirm the array SIZES are right (10 / 50 / 10):
 `0x1C2C + 40 = 0x1C54`, `+200 = 0x1D1C`, `+40 = 0x1D44`, then three counters, ending at `0x1D50`.
 
-| Field | PDB says | Actual |
-|---|---|---|
-| *(undeclared member)* | — | `0x1C28` |
-| `m_models[10]` | `0x1C28` | `0x1C2C` |
-| `m_textures[50]` | `0x1C50` | `0x1C54` |
-| `m_skeletons[10]` | `0x1D18` | `0x1D1C` |
-| `m_numModels` | `0x1D40` | `0x1D44` |
-| `m_numTextures` | `0x1D44` | `0x1D48` |
-| `m_numSkeletons` | `0x1D48` | `0x1D4C` |
-| `sizeof` | 7500 | **7504** |
+| Field | stored | actual | shift |
+|---|---|---|---|
+| `m_randomBackDropFileName` | `0xA0` | `0xA0` | **0** |
+| `m_randomBackDrop` | `0x1C0C` | `0x1C10` | **+4** |
+| `m_models[10]` | `0x1C24` | `0x1C2C` | **+8** |
+| `m_textures[50]` | `0x1C4C` | `0x1C54` | +8 |
+| `m_skeletons[10]` | `0x1D14` | `0x1D1C` | +8 |
+| `m_numModels` | `0x1D3C` | `0x1D44` | +8 |
+| `m_numTextures` | `0x1D40` | `0x1D48` | +8 |
+| `m_numSkeletons` | `0x1D44` | `0x1D4C` | +8 |
+| `sizeof` | 7496 | **7504** | +8 |
 
-`m_randomBackDrop` at `0x1C10` is correct (`MOV [ESI+0x1C10],EAX` in `LoadData`), which is what
-localises the missing member to `0x1C28`.
+So there are **TWO** undeclared 4-byte gaps, not one.
+
+**Gap B is localised.** `0x1C2C - 0x1C10 = 28` bytes separate `m_randomBackDrop` from `m_models`,
+but a `bool` plus padding plus five floats accounts for only 24 - so one 4-byte member sits
+between `m_titleBarTimer` and `m_models`.
+
+**Gap A is NOT localised.** The struct is verified correct at `0xA0`
+(`CMP byte [ESI+0xA0],0` / `LEA ECX,[ESI+0xA0]` for `m_randomBackDropFileName` in `LoadData`) and
+verified wrong by 4 at `0x1C0C`. Nothing between those two points has been checked against an
+instruction operand, and that is a 7 KB span. Do not guess where it goes; find another field
+whose offset can be read out of code first.
+
+**`packing = true` on the stored struct.** Ghidra computes offsets itself when packing is
+enabled, so inserted `undefined` members will not necessarily land where they are put. Correcting
+this properly probably means switching the struct to non-packed first.
 
 **Symptom of the bad struct:** the decompiler compensates rather than failing, so
 `LoadDataChunk` renders as `m_models[i + 2]`, `m_textures[i + 2]`, `m_skeletons[i + 2]` and
