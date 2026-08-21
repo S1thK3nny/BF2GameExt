@@ -289,32 +289,58 @@ offsets differ.
 
 ## First person
 
-**True first person** - CHOSEN DIRECTION as of 2026-08-21. Put the camera on the player's
-own head and render the REAL third-person body, instead of a separate first-person arms
-model. The payoff is large: every existing third-person animation plays correctly, so
-lightsaber combo swings authored in `.combo` files work with zero new assets, and no hero
-needs an FP mesh.
+**True first person** - TRIED AND SHELVED 2026-08-21. Put the camera on the player's own
+head and render the REAL third-person body, so every existing third-person animation plays,
+including lightsaber combo swings, with zero new assets.
 
-Already shipped and confirmed in play: `[Features] FirstPersonMelee` unlocks first person
-for melee/saber units (`EntitySoldier::IsForcedThirdPerson` -> return false, plus a
-particle-flush bit so the blade draws).
+Shipped as `[Features] TrueFirstPersonBody` and tested. **It does not work as built** and the
+toggle is marked broken; leave it at 0. Symptom: the full third-person body renders and the
+camera stays in third person, so saber heroes went back to third person entirely.
 
-The load-bearing find: the "do not draw my own body" rule is ONE conditional inside
-`EntitySoldier::Render` (phantom `0x00575380`):
+WHY, and this is the useful part. The patch neutered the tail call in
+`EntitySoldier::RenderTrackable` (modtools `0x0052A3A6`, 8 bytes -> `MOV AL,1` + NOPs):
 
-```asm
-00575582  3B C6           CMP EAX,ESI          ; entity rendered vs entity viewed
-00575584  0F 84 7B350000  JZ  0x00578B05       ; skip the ENTIRE body render
+```c
+bool EntitySoldier::RenderTrackable(...) {
+   if (alive && !flagged) {
+      if (aiming && ZoomFirstPerson(w) && myViewport) return false;  // scope hide
+      if (IsRtti(PassengerSlot))                      return false;  // passenger hide
+      return Trackable::RenderTrackable(this, param_2);              // <- skipped
+   }
+   return true;
+}
 ```
 
-Kill that JZ and the body renders. A byte search for the surrounding sequence finds
-NOTHING on modtools - different codegen - so the other builds need structural lookup, not
-pattern matching.
+`Trackable::RenderTrackable` is NOT a pure cull predicate - it is one of the consumers of
+`IsFirstPersonView` and participates in driving the first person path. Skipping it removes
+first person rather than merely un-hiding the body.
 
-Remaining unknowns, in rough risk order: sourcing the camera from the third-person head
-joint instead of the FP model's `hp_camera` hardpoint; hiding the player's own head;
-near-plane clipping at body distance; and animation-driven view shake once the camera
-rides a bone.
+NEXT ATTEMPT should do the opposite: let the call run and patch the decision INSIDE
+`Trackable::RenderTrackable` - modtools `0x004BAE03` `74 15` -> `EB 15`, Steam `0x006589E4`
+`74 16` -> `EB 16`, GOG `0x00659A84` `74 16` -> `EB 16`, Phantom `0x0077C061`. Known cost:
+it un-hides vehicle hulls in cockpit first person, which now looks like the cheaper price.
+
+Worth keeping from the scoping work, all verified:
+- **The camera does not need moving.** It is already a static per-stance eye offset
+  (`sEyePointOffset[0] = 0.06, 1.70, 0.00`) transformed by the entity root - already at eye
+  height and already free of animation shake. The head-bone mounting I expected to need does
+  not exist as a problem.
+- **The body is already submitted every frame at alpha 0**, not skipped. That is why the
+  player's shadow has always been correct.
+- **Aim is already the camera ray** in first person
+  (`Aimer::SetSoldierInfo(firePos, mEyeDir)`), so shots go where the crosshair is even when
+  the body animation points the weapon elsewhere.
+- **The near plane is 0.7 m** (`RedCamera::SetPerspective(0.7, 120.0)` from
+  `CameraManager::SetNumCameras`; modtools imm32 `0x004A110B`, Steam `0x0044EC55`, GOG
+  `0x0044EC35`). At 0.7 it hides head and torso for free. Pulling it to 0.1 to stop the arms
+  being sliced is what EXPOSES the head - and head-hiding is unresolved on Steam/GOG because
+  `RedModel::Render` was never located on retail.
+- Trap recorded: the one-byte alternative on modtools is at `0x00535EAA`, NOT `0x00535EA8`.
+  `0x00535EA8` is `84 C0`; writing `EB` there yields `EB C0`, a backward jump, and an
+  instant crash.
+
+Also note the animation looked wrong even where the body did render, so a second problem
+likely waits behind the camera one.
 
 **Dedicated first person (deferred, not abandoned)** - The alternative: keep the separate
 FP arms model and author first-person animations per swing. Deferred in favour of true FP,
