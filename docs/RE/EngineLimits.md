@@ -86,6 +86,37 @@ imm32 `0x0063014d`. GOG: `0x0063119d`, `0x006311ae`, `0x006311e7`, `0x006311ed`.
 > **Trap:** Phantom `0x0073a827` is `74 3C`, a JZ displacement, not a capacity. A
 > blind byte-replace of `3C` across Init corrupts control flow.
 
+### Measured outcome, and the other pools (2026-08-21)
+
+**The warning string is shared by all ELEVEN `ListPool<T>` instantiations**, so the capacity
+printed in it is the only thing identifying which pool overflowed. Measured on a live Steam
+session before and after the raise:
+
+| Log | from capacity 60 | from capacity 5 |
+|---|---|---|
+| pre-fix | **1998** | 40 |
+| post-fix | **0** | 2 |
+
+So the reservation pool was ~98% of the flood and is now silent; a capacity-5 pool remains and
+fires twice during level load (peak 6 then 7 = two rejected adds), interleaved with texture
+loading and command-post setup.
+
+**How to identify any of them cheaply.** The pools are passed as `this` rather than being named
+globals, so static identification is awkward — but each template instantiation is compiled
+separately and passes its OWN compile-time string to `RedWarning::SetLogData`, even though every
+one reports the same `ListPool.h(92)`:
+
+| `Append` (modtools) | element size | timestamp |
+|---|---|---|
+| `0x005C62A0` (ReserveManager) | 0x18 | `15:23:19` |
+| `0x005D8660` | 0x0C | `15:23:11` |
+| `0x007448D0` | 0x04 | `15:23:17` |
+| `0x00497EA0` | 0x04 | `15:24:23` |
+
+The other seven are `0x00593D00`, `0x005C8640`, `0x005C8869`, `0x00497FB0`, `0x00597770`,
+`0x00744D40`, `0x00744DB0`. One hook on `SetLogData` that records the timestamp whenever the
+file is `ListPool.h` would name any overflowing pool exactly, without reverse-engineering each.
+
 ### Cost
 
 Memory is trivial (60x24+4 = 1444 B). Frame time is the real cost: every query is a
