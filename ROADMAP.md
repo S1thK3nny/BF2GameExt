@@ -630,10 +630,19 @@ OCCUPANCY is the new reverse engineering, and it differs per subsystem:
   - `s_uiNumAttached` is drained per class, so a live read is meaningless - it needs a hook to
     record the PEAK across a level load.
 
-**Triggering.** The debug console is modtools-only (gated in `lua_hooks.cpp`), and the user
-tests on Steam retail, so a console-only command would not run where it is most needed. Ship one
-census function behind several triggers: the console command on modtools, plus a Lua binding
-that works on all three builds and can be called from a mission script.
+**Triggering.** One census function behind three triggers, in order of importance:
+
+  1. **Periodic, every ~30 s** - the default, works on every build, needs no user action. This is
+     the one that matters on retail, and a 30 s cadence also catches anything that grows during
+     play rather than only the load-time picture.
+  2. **Lua binding** - on demand, and note this works on ALL THREE BUILDS, not just modtools:
+     Lua is the mission scripting engine and is present everywhere. Callable from a mission
+     script, so it covers retail where there is no console.
+  3. **Debug console command** - modtools only (the console is gated in `lua_hooks.cpp`), but
+     free to add since it calls the same function.
+
+The periodic print is what makes this useful for the softlock hunt specifically: it prints the
+effect-class occupancy seconds before the reported freeze, on the build the freeze happens on.
 
 **Not mod-addable, do not include:** effect FACTORIES (32 slots, ~26 used by built-in effect
 managers) are engine types registered by `FLEffect::InitAll`, not content. Worth knowing the
