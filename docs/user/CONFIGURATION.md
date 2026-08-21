@@ -35,7 +35,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
-| `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32. Otherwise a count from 33 to 119; the engine's own probe, voice pool and two ceilings are all raised to match. Works in both mixing paths: under EAX (5.1/7.1 or an audio mode that selects DirectSound hardware) the extra voices are hardware buffers and DirectSound must have some to spare, while software mixing needs nothing external but costs more CPU per voice. Costs 1.4 KB per voice. Modtools only |
+| `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32. Otherwise a count from 33 to 119; the engine's own probe, voice pool and two ceilings are all raised to match. Works in both mixing paths: under EAX (5.1/7.1 or an audio mode that selects DirectSound hardware) the extra voices are hardware buffers and DirectSound must have some to spare, while software mixing needs nothing external but costs more CPU per voice. Costs 1.4 KB per voice |
 | `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |
 | `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
 | `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |

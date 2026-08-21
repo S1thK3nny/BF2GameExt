@@ -360,6 +360,62 @@ The renderer is embedded in the voice at `Voice + 0xe8` (`0x0089e326`), which is
 how a renderer `this` seen in an audio-path hook is turned back into a voice
 index.
 
+### Retail sites (ported 2026-08-21)
+
+Every address below was read from its own image; none was derived by offset from
+another build. `Snd::Engine::Open` was identified by its nine-parameter signature
+and its eight reads of `smVoices`, the pool bounds by the `0xA800` immediate
+(`32 * sizeof(Voice)`, and `sizeof(Voice)` is `0x540` on all three builds), and
+`gMaxVoices` by being parameter 7 at the call site *and* by carrying the same
+`sscanf` / clamp-to-`[8,32]` shape.
+
+| Site | modtools | Steam | GOG |
+|---|---|---|---|
+| `Snd::Engine::Open` | `0x00886420` | `0x00731E90` | `0x00732F80` |
+| `VoiceManager::Open` | `0x00882C20` | `0x00734400` | `0x007354F0` |
+| `gMaxVoices` | `0x00ADD474` | `0x007E68E8` | `0x007E78E4` |
+| clamp `CMP` imm8 | `0x00446A4F` | `0x00479E47` | `0x00479E47` |
+| clamp value imm32 | `0x00446A5C` | `0x00479E49` | `0x00479E49` |
+| pool ptr imm32 | `0x00882C49` | `0x00734428` | `0x00735518` |
+| stock pool | `0x00EDFE18` | `0x009D8420` | `0x009D98C0` |
+| Open bound | `0x00882CF7` | `0x007344B6` | `0x007355A6` |
+| Update bound | `0x00882825` | `0x00734605` | `0x007356F5` |
+| Close bound | `0x00882B5A` | `0x00733F39` | `0x00735029` |
+| CentrePeak bound | `0x008851A0` | `0x00732C4D` | `0x00733D3D` |
+| HW ceil `CMP`/load | `0x00886B58` / `0x00886B62` | `0x00732628` / `0x00732632` | `0x00733718` / `0x00733722` |
+| SW ceil `CMP`/load | `0x00886BDA` / `0x00886BE0` | `0x007326AB` / `0x007326AF` | `0x0073379B` / `0x0073379F` |
+| probe ctor / dtor count | `0x008866B5` / `0x00886788` | `0x00732146` / `0x0073222B` | `0x00733236` / `0x0073331B` |
+| probe array refs | `0x008866B8`, `0x008866F0`, `0x00886738`, `0x0088678B` | `0x00732149`, `0x00732183`, `0x007321D6`, `0x0073222E` | `0x00733239`, `0x00733273`, `0x007332C6`, `0x0073331E` |
+| SW voice-count pin | `0x00886BB0` | `0x00732681` | `0x00733771` |
+
+Three differences that would each have silently broken a copied patch:
+
+1. **The upper clamp is a `CMOVG` on retail.** `CMP EAX,0x20 / MOV ECX,0x20 /
+   CMOVG EAX,ECX / MOV [gMaxVoices],EAX`, against modtools' `CMP EAX,0x20 / JLE /
+   MOV [gMaxVoices],0x20`. Both operands still have to move, but not one byte of
+   the encoding is shared.
+2. **The probe array is EBP-relative on retail**, so all four references carry the
+   *same* displacement (`LEA EAX,[EBP-0x1250]`, 6 bytes) where modtools has four
+   *different* ESP-relative ones (7 bytes) because ESP moves underneath it. The
+   replacement `MOV EAX,imm32` is 5 bytes either way, so the NOP padding differs.
+3. **The software voice count is only 3 bytes on retail** — `MOV EAX,[EBP+0x20]`
+   against modtools' 7-byte `MOV EBX,[ESP+0x12C4]`. There is no room for a
+   `MOV r32,imm32`, so it is pinned with `PUSH 0x20 / POP EAX` (`6A 20 58`),
+   which is exactly 3 bytes and stack-neutral.
+
+Steam and GOG share the command-line clamp addresses exactly, but **not** the
+`gMaxVoices` global, and their `Engine::Open` call sites push the two neighbouring
+globals in the opposite order — so GOG is not Steam plus a fixed delta. The
+`+0x10F0` delta that does hold across the sound engine breaks down completely in
+the command-line and data regions.
+
+The pool cannot grow in place on any build: stream storage begins exactly `0xA800`
+after it every time (modtools, Steam `0x009D8420 -> 0x009E2C20`, GOG
+`0x009D98C0 -> 0x009E40C0`), which is why both the pool and the probe array are
+relocated to process-lifetime `VirtualAlloc` commits.
+
+Retail is **untested in play** — only byte-verified.
+
 ---
 
 ## The EAX crackle - investigated, not found in BF2

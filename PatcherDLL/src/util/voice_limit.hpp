@@ -60,8 +60,25 @@
 // to the stock 32.  Widening that mixer was implemented and then reverted: see
 // the note in voice_limit.cpp and docs/RE/SoundSystem.md.
 //
-// modtools only -- addresses are not derived for retail, and the installer
-// no-ops elsewhere.
+// ALL THREE BUILDS.  Retail was located structurally rather than by pattern --
+// Engine::Open by its nine-parameter signature and its eight reads of smVoices,
+// the pool bounds by the 0xA800 immediate, gMaxVoices by being parameter 7 at
+// the call site and by carrying the same sscanf/clamp-to-[8,32] shape.  Three
+// things there are genuinely different, and each would have silently broken a
+// copied patch:
+//
+//   * The upper clamp is a CMOVG (`CMP EAX,0x20 / MOV ECX,0x20 / CMOVG EAX,ECX`)
+//     where modtools has `CMP / JLE / MOV [g],0x20`.
+//   * The probe array is EBP-relative, so all four references share ONE
+//     displacement instead of four, and each LEA is 6 bytes rather than 7.
+//   * The software voice count is `MOV EAX,[EBP+0x20]`, only 3 bytes, too short
+//     for a MOV imm32; it is pinned with `PUSH 0x20 / POP EAX` instead, which is
+//     exactly 3 bytes and leaves ESP unchanged.
+//
+// Steam and GOG share the command-line clamp addresses exactly but NOT the
+// gMaxVoices global, and their call sites push the neighbouring globals in a
+// different order -- GOG is not Steam plus a fixed delta, and both were read
+// from their own images.
 // =============================================================================
 
 // 0 = stock (32).  Otherwise the desired voice count, clamped to [33, 119]:
