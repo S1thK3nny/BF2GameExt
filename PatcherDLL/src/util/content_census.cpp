@@ -222,6 +222,15 @@ void content_census_report()
       }
    }
 
+   if (g_addr->entity_class_count != 0) {
+      __try {
+         const uint32_t classes =
+            *reinterpret_cast<const uint32_t*>(resolve(s_exeBase, g_addr->entity_class_count));
+         census_log("[Census]   entity classes  %u", classes);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+   }
+
    if (g_addr->branch_region_count != 0) {
       __try {
          const uint32_t regions =

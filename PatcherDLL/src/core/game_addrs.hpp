@@ -862,6 +862,22 @@ namespace modtools {
    // (0x005E4BD5) and decremented by its dtor (0x005E4630).
    constexpr uintptr_t branch_region_count        = 0x00AD3460;
 
+   // Factory<Entity,EntityClass,EntityDesc>::sList - the registry every ODF
+   // class lands in: soldiers, vehicles, props, command posts, lights.  A
+   // PblList based at 0x00ACD2C4, so _iCount is at +0x10.
+   //
+   // Verified two ways.  Factory<...>::Find (0x00452000) walks it:
+   //   MOV EAX,[0x00ACD2C8]   ; sList._head._pNext, i.e. base+4
+   //   MOV ECX,[EAX+0xC]      ; node->_pObject
+   //   MOV EAX,[EAX+0x4]      ; node = node->_pNext
+   // and 0x00ACD2D4 carries exactly the read-write pattern of a list count,
+   // from the four PblList add/remove sites at 0x004D0720/0x004D07F0/
+   // 0x004D0B50/0x004D0C20.
+   //
+   // The sibling registries (Weapon, Ordnance, Explosion) have NOT been located
+   // yet and are deliberately absent rather than guessed.
+   constexpr uintptr_t entity_class_count         = 0x00ACD2D4;
+
 
 
 

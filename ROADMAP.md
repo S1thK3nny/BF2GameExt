@@ -627,6 +627,25 @@ no-ops.
 
 ## Debugging
 
+**Locate the remaining class registries** - the census reports entity classes from
+`Factory<Entity,EntityClass,EntityDesc>::sList` (modtools count at `0x00ACD2D4`, verified from
+`Factory::Find` at `0x00452000` walking `[0x00ACD2C8]`). The sibling registries were NOT found by
+the same sweep and are still missing:
+
+  `Factory<Weapon,WeaponClass,WeaponDesc>` · `Factory<Ordnance,OrdnanceClass,OrdnanceDesc>` ·
+  `Factory<Ordnance,ExplosionClass,OrdnanceDesc>`
+
+A byte sweep for the `MOV EAX,[imm32] / MOV ECX,[EAX+0xC] / TEST ECX,ECX` walk shape found six
+distinct list globals on modtools; two are identified (entity classes `0x00ACD2C4`, branch
+regions `0x00AD3450`) and four are not: `0x00AC69F0` (FUN_0044B8B0), `0x00AD388C` (FUN_004C1190,
+FUN_00601F30), `0x00AD3A60` (FUN_00603F30, FUN_006059D0), `0x00AD43BC` (FUN_004DD880, a `Read`).
+Identify those four before adding them - a list whose contents are unknown is not a metric.
+
+Bucketing entity classes by type (soldier / vehicle / prop / CP) is also open: each class exposes
+`IsRtti(hash)`, which the engine itself uses to test for `EntityLightClass`, and
+`EntityClass_data.mFilename[32]` at +28 carries the ODF name, so the report could name them
+rather than just counting.
+
 **Content budget report ("what did I actually put in this map?")** - requested 2026-08-21. A
 census of the things a MODDER AUTHORS, reported as occupancy against the ceiling, because the
 ceilings are invisible until you hit them. Deliberately NOT a runtime profiler: voices, AI
