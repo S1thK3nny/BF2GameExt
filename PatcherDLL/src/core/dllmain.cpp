@@ -32,6 +32,7 @@
 #include "util/voice_limit.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
@@ -239,6 +240,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_impactSoundWaterFix       = cfg.get_bool("Fixes", "ImpactSoundWaterFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
+      g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
@@ -315,6 +317,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
+   content_census_install(exe_base);   // read-only; starts its own reporting thread
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those

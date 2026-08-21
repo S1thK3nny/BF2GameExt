@@ -127,6 +127,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    // them change behaviour, and all default off.
    INI_ENTRY("Diagnostic", "SoundDiagnostic",   "0", "Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale"),
    INI_ENTRY("Diagnostic", "BranchRegionDebug", "0", "Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced"),
+   INI_ENTRY("Diagnostic", "ContentCensus", "0", "Print a budget of the content this map actually loaded, against the limits the engine imposes, every N seconds. 0 is off; 30 is a sensible value. Reports effect classes used out of 256 - a ceiling worth watching, because the engine neither warns nor clamps when it fills, it simply hangs. Counted two independent ways so a wrong reading shows up as a disagreement rather than as a confident wrong number. Also callable from a mission script as GameExtContentCensus()"),
    INI_ENTRY("Diagnostic", "AIUpdateDiag",      "0", "Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising"),
    INI_ENTRY("Diagnostic", "PoolGrowthDiag",    "0", "Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash MemoryPoolHeapFix repairs"),
 };

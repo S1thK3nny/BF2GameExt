@@ -193,6 +193,7 @@
     <ClCompile Include="src\ai\ai_fairness.cpp" />
     <ClCompile Include="src\ai\ai_decision_rate.cpp" />
     <ClCompile Include="src\ai\reservation_pool.cpp" />
+    <ClCompile Include="src\util\content_census.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />

@@ -30,6 +30,7 @@
 #include "util/voice_limit.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
@@ -366,6 +367,7 @@ void lua_hooks_uninstall()
    impact_sound_water_fix_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
+   content_census_uninstall();
    ai_update_budget_uninstall();
    memory_pool_heap_fix_uninstall();
 

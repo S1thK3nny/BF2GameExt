@@ -817,6 +817,20 @@ namespace modtools {
    // loop's `CMP EBP,EBX / JL` never runs a single update, so the ceiling is 0x7F.
    //   005999CE  83 C0 0A     ADD EAX,0x0A   ; imm8 at 005999D0
    constexpr uintptr_t ai_update_budget_imm8      = 0x005999D0;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // FLEffect::s_EffectClasses, a PblHashTable laid out as
+   // `{int _iNumEntries; uint _uiTable[512];}` -- 256 KEY slots then 256 value
+   // slots -- so the COUNTER IS AT THE KEY ARRAY MINUS 4, not at the end of the
+   // table. Verified from the registrar's own increment,
+   // `FF 05 B055CF00  INC dword [0x00CF55B0]` inside FLEffect::Read.
+   //
+   // One slot per DISTINCT effect class name; duplicates are refused by the
+   // registrar's own _Find, so reuse costs nothing. In practice one slot per
+   // loaded .fx file. There is NO capacity guard, and the probe that checks for
+   // duplicates has no iteration cap -- see the header for what overflowing does.
+   constexpr uintptr_t fx_effect_classes_count    = 0x00CF55B0;
+   constexpr uintptr_t fx_effect_classes_table    = 0x00CF55B4;
+
 
 
 
@@ -1739,6 +1753,12 @@ namespace steam {
    // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
    // must be reached by fixed VA and never by a pattern scan.
    constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // Counter verified from `FF 05 40D1EB01  INC dword [0x01EBD140]` in
+   // FLEffect::Read (0x00526DB0). Key array follows at +4.
+   constexpr uintptr_t fx_effect_classes_count    = 0x01EBD140;
+   constexpr uintptr_t fx_effect_classes_table    = 0x01EBD144;
+
 
 
 
@@ -2441,6 +2461,12 @@ namespace gog {
    // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
    // must be reached by fixed VA and never by a pattern scan.
    constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // Counter verified from `FF 05 F0E5EB01  INC dword [0x01EBE5F0]` in
+   // FLEffect::Read (same VA as Steam, different global). Key array follows at +4.
+   constexpr uintptr_t fx_effect_classes_count    = 0x01EBE5F0;
+   constexpr uintptr_t fx_effect_classes_table    = 0x01EBE5F4;
+
 
 
 
