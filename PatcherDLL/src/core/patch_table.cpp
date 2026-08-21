@@ -956,6 +956,106 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "True First Person Body",
+               .patches =
+                  {
+                     // Render the player's OWN body in first person, so third-person
+                     // animation -- including lightsaber combo swings -- is what you see.
+                     //
+                     // The body is NOT skipped in stock first person: it is submitted every
+                     // frame at alpha 0, which is why the shadow has always been correct.
+                     // The cull lives in Trackable::RenderTrackable, reached from
+                     // EntitySoldier::RenderTrackable's TAIL CALL.  Neutering just that tail
+                     // call preserves EntitySoldier's own earlier early-outs -- the
+                     // ZoomFirstPerson scope hide and the PassengerSlot hide -- which the
+                     // cruder one-byte alternative would discard, drawing your body behind a
+                     // sniper scope.
+                     //
+                     // `MOV AL,1` + NOPs: return true, skip the call.  Stack stays balanced
+                     // because the skipped push was the callee's only argument and the callee
+                     // cleaned it with RET 4.  Exact-length overwrite, no relocation.  The
+                     // only nearby branch is a JNZ that jumps BACKWARD, so nothing lands
+                     // inside the rewritten window.
+                     patch{0x0052A3A6, 0x57, 0xB0, {.values_are_8bit = true}},
+                     patch{0x0052A3A7, 0x8B, 0x01, {.values_are_8bit = true}},
+                     patch{0x0052A3A8, 0xCE, 0x90, {.values_are_8bit = true}},
+                     patch{0x0052A3A9, 0xE8, 0x90, {.values_are_8bit = true}},
+                     patch{0x0052A3AA, 0x89, 0x90, {.values_are_8bit = true}},
+                     patch{0x0052A3AB, 0x8E, 0x90, {.values_are_8bit = true}},
+                     patch{0x0052A3AC, 0xEE, 0x90, {.values_are_8bit = true}},
+                     patch{0x0052A3AD, 0xFF, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "True First Person Body",
+               .patches =
+                  {
+                     // Render the player's OWN body in first person, so third-person
+                     // animation -- including lightsaber combo swings -- is what you see.
+                     //
+                     // The body is NOT skipped in stock first person: it is submitted every
+                     // frame at alpha 0, which is why the shadow has always been correct.
+                     // The cull lives in Trackable::RenderTrackable, reached from
+                     // EntitySoldier::RenderTrackable's TAIL CALL.  Neutering just that tail
+                     // call preserves EntitySoldier's own earlier early-outs -- the
+                     // ZoomFirstPerson scope hide and the PassengerSlot hide -- which the
+                     // cruder one-byte alternative would discard, drawing your body behind a
+                     // sniper scope.
+                     //
+                     // `MOV AL,1` + NOPs: return true, skip the call.  Stack stays balanced
+                     // because the skipped push was the callee's only argument and the callee
+                     // cleaned it with RET 4.  Exact-length overwrite, no relocation.  The
+                     // only nearby branch is a JNZ that jumps BACKWARD, so nothing lands
+                     // inside the rewritten window.
+                     patch{0x004F3576, 0xFF, 0xB0, {.values_are_8bit = true}},
+                     patch{0x004F3577, 0x75, 0x01, {.values_are_8bit = true}},
+                     patch{0x004F3578, 0x08, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F3579, 0x8B, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357A, 0xCF, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357B, 0xE8, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357C, 0xE0, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357D, 0x64, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357E, 0x16, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357F, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "True First Person Body",
+               .patches =
+                  {
+                     // Render the player's OWN body in first person, so third-person
+                     // animation -- including lightsaber combo swings -- is what you see.
+                     //
+                     // The body is NOT skipped in stock first person: it is submitted every
+                     // frame at alpha 0, which is why the shadow has always been correct.
+                     // The cull lives in Trackable::RenderTrackable, reached from
+                     // EntitySoldier::RenderTrackable's TAIL CALL.  Neutering just that tail
+                     // call preserves EntitySoldier's own earlier early-outs -- the
+                     // ZoomFirstPerson scope hide and the PassengerSlot hide -- which the
+                     // cruder one-byte alternative would discard, drawing your body behind a
+                     // sniper scope.
+                     //
+                     // `MOV AL,1` + NOPs: return true, skip the call.  Stack stays balanced
+                     // because the skipped push was the callee's only argument and the callee
+                     // cleaned it with RET 4.  Exact-length overwrite, no relocation.  The
+                     // only nearby branch is a JNZ that jumps BACKWARD, so nothing lands
+                     // inside the rewritten window.
+                     patch{0x004F3576, 0xFF, 0xB0, {.values_are_8bit = true}},
+                     patch{0x004F3577, 0x75, 0x01, {.values_are_8bit = true}},
+                     patch{0x004F3578, 0x08, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F3579, 0x8B, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357A, 0xCF, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357B, 0xE8, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357C, 0x40, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357D, 0x54, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357E, 0x16, 0x90, {.values_are_8bit = true}},
+                     patch{0x004F357F, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
          },
    },
 

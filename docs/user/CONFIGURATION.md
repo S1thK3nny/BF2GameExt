@@ -23,6 +23,7 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `TrueFirstPersonBody` | `0` | See your own body in first person instead of a separate pair of arms, so real third person animation plays - including lightsaber combo swings, for free. EXPERIMENTAL and incomplete: the separate first person arms are still drawn on top, and your weapon points where the body animation puts it rather than at the crosshair (shots still go where you aim). Torso and head are hidden by the camera near plane, not by design. Needs FirstPersonMelee and cockpit camera. Set 1 to enable |
 | `FirstPersonMelee` | `0` | Let units carrying a melee weapon use first person, lightsaber heroes included - stock BF2 forces third person for anyone holding one, and draws only the hilt if you get there anyway. OFF by default: it applies to every melee unit, and most heroes have no first person model authored, so they borrow whatever hands their class defines. Needs cockpit camera enabled to see any effect. Set 1 to enable |
 | `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
 | `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
