@@ -271,6 +271,62 @@ string: a failed lookup produces no `Unable to find branch region` line, or any 
 line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
 actually take the branch, rather than on the absence of warnings.
 
+## Sound
+
+**Only the first hero per team gets its SndHero* VO** - reported in play, mechanism located
+2026-08-21, NOT yet fixed.
+
+The four hero ODF params `SndHeroSelectable`, `SndHeroSpawned`, `SndHeroDefeated` and
+`SndHeroKiller` land in PER-TEAM arrays of three on `HeroMessageDisplay`, not on the hero
+class:
+
+| global | phantom addr |
+|---|---|
+| `mHeroesUnlocked` | `0x00B26BB4` |
+| `mHeroUnlocked` | `0x00B26BB8` |
+| `mHeroSelectable` | `0x00B26BC4` |
+| `mHeroSpawned` | `0x00B26BD0` |
+| `mHeroDefeated` | `0x00B26BDC` |
+
+Every one of them is written ONLY in `HeroMessageDisplay::Create` (writes at `0x005EAC92`,
+`0x005EACBD`, `0x005EACDF`, `0x005EAD01`, `0x005EAD23`) and in `Destroy`. There is one slot per
+team, so whichever hero class populates it first owns those sounds for the whole round. Playback
+then just reads the slot - `PlayHeroSoundUnlock` `0x005EB3F0`, `PlayHeroSoundSelectable`
+`0x005EB170`, `PlayHeroSoundSpawn` `0x005EB1A0`, `PlayHeroSoundDefeat` `0x005EB0D0`.
+`ScriptCB_SetSoundEffect` (`0x00664758` region) can also overwrite them from script.
+
+**Very likely the same root as a second confirmed bug.** `Team::GetHeroClass` (phantom
+`0x00775D50`) is a linear scan that returns the FIRST class in the team's `mClassArray` whose
+`GameObjectClass+0x78` has bit 1 set - it has no idea which hero is actually active:
+
+```c
+for (i = 0; i < mClassCount; i++) {
+   pGVar2 = mClassArray[i];
+   if (pGVar2 && (pGVar2->field_0x78 & 2) && pGVar2->mLabel)
+      return pGVar2;            // first match, always
+}
+```
+
+`Lua_Callbacks::SetHeroClass` (`0x00653680`) just appends via `Team::AddSpecialClass`, so the
+first `SetHeroClass` call in the mission script wins permanently. Its three consumers are all
+wrong with multiple heroes per side: `Character::GetHeroName` (`0x0049DDA0` - takes the name
+from `GetHeroClass(team)` instead of from the character's OWN class, so hero 2 displays under
+hero 1's name), `NetGame::AddKillMessage` (`0x0066E69A`), and `PlayHeroSoundSpawn`
+(`0x005EB24F`).
+
+PROPOSED FIX, not built: hook `Team::GetHeroClass` and, when a hero is currently active for that
+team, return that unit's actual class, falling back to the stock scan. Resolve the active hero
+from `netHeroPlayerID[team]` / `netHeroAIID[team]`, which `PlayHeroSoundSpawn` already uses. That
+one hook fixes the name and the kill message. Whether it also fixes the VO depends on confirming
+that `HeroMessageDisplay::Create` sources those five sounds via `GetHeroClass` - READ `Create`
+(`0x005EAC50` region) FIRST; if it instead reads from a script-set or team-registration path, the
+VO needs its own fix, most likely re-populating the slots when the active hero changes.
+
+NOT the same thing: `ScriptCB_EnableHeroVO` (`0x006656D0`) only sets
+`EntitySoldier::sEnableAnnouncementVO` (`0x00A8EDF3`), read once in `EntitySoldier::Init` at
+`0x0056FA5D`, which gates a VO member on the spawning soldier's OWN class (`mClass+0x1464`).
+That path looks correct and is unrelated to the `SndHero*` slots.
+
 ## Limits
 
 **Command posts past 16, single player only** - Multiplayer is closed: it is a wire format, not
