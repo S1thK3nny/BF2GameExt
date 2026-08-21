@@ -326,11 +326,39 @@ hooked with a per-frame save/overwrite/restore of the global `mAnim[48]`. That i
 injection point - anything expressible as "put a different ZephyrAnim* in this slot this
 frame" is nearly free.
 
-The wall is the animation table: `mAnim[48]` is weaponclass*11 + state, 4 classes x 11
-states = 44 used, so a fifth weapon-class row does not fit. There is no slot named "attack
-3 of a 5-hit combo". Swings would have to be mapped onto existing slots or written into
-the playing instance directly, bypassing the table. Also unresolved: `Combo::Deflect` has a
-pool count of only 4, and first person would need its own deflect state.
+**The animation table is NOT the wall - an earlier assessment here was wrong.** Mapped
+2026-08-21 and verified: every saber attack routes the FP machine to exactly one slot,
+`mAnim[24]` = TOOL(2)*11 + SHOOT1(2), and it re-reads that slot with `force=true` on every
+new attack state. So "which swing is this" is expressible as "which `ZephyrAnim*` is in
+slot 24 during this hook call" - exactly the shape the existing save/overwrite/restore hook
+already implements. No second hook, no extra table row, no bypassing the state machine.
+
+The per-swing key is a single byte: `WeaponMelee+0x1AB` (`m_uiAnimIndex`, confirmed at
+`WeaponMelee_data+0x6B` with the `_data` base at `0x140`). `EnterState` writes it from
+`Combo::State+0x28` BEFORE setting `mState=FIRE`, so it already names the swing that is
+starting when the hook runs. **Deflects come free** - they overwrite the same byte.
+
+Retrigger mechanism: `WeaponMelee::EnterState` -> `EnterFire` -> `Weapon::SignalFire` sets
+the `Weapon+0xAC` bit-1 latch that `UpdateSoldier` consumes and clears in the same frame
+(modtools `004a9dcc AND EAX,0xfffffffd` / `004a9dd1 MOV [EDI+0xac],EAX`).
+
+Structural limit that remains: a combo state with no Attack (recovery, `mState=OVERHEAT`)
+sets no latch, so the FP hands cannot be redirected mid-recovery - they finish the current
+swing and fall through to IDLE/RUN.
+
+BUILD-DIVERGENCE TRAPS, both the exact class that has caused crashes here before:
+- `_GetWeaponClassFromWeapon` is **__fastcall (weapon in ECX) on modtools** but **__cdecl
+  on Phantom**. Do not share the signature across builds.
+- `MELEE_BASE` is **0x86 on modtools**, 0x87 on Phantom; "none" sentinel 0xA4 vs 0xA5.
+  Never hardcode Phantom's. Call `IsWeaponMeleeAnimIndex` (modtools `0x00588A30`) and
+  `GetAnimFromAnimIndex` (`0x00588AD0`) rather than inlining the constant.
+
+SAFETY RULES from the mapping: never write NULL into an `mAnim[]` slot -
+`ZephyrPoseDyn<32>::Update` null-derefs `anim+8`. Gate on `m_u16NumJoints <= 32`. Do not
+poke `FPR+0x1534` directly; `ZephyrAnimInst<32>::SetAnim` rebuilds joint index tables.
+A shortcut via `EntitySoldier+0xA00` was offered and REJECTED - it is a render-pass latch
+read in the sim pass, never cleared on idle, so it reports the last swing forever.
+
 
 **More first person states** - Actions that snap to third person or have no first
 person animation - rolling, sprinting, melee, entering vehicles. Wanted: an inventory
