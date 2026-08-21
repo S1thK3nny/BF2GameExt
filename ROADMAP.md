@@ -289,13 +289,48 @@ offsets differ.
 
 ## First person
 
-**First person lightsabers** - Hero units force third person, and the blade is not
-drawn in the first person view. Unexplored. The pieces that exist: `_RenderLightSabre`
-(the __cdecl blade draw, already hooked for `lightsaber_illumination.cpp`) and
-`MeleeClassRender`. The questions are whether the first person arms model has the
-saber attach point at all, whether the view-model render pass is reachable for a
-hero, and whether the forced third person camera is a separate gate that would also
-have to move. Worth an hour of RE before estimating.
+**True first person** - CHOSEN DIRECTION as of 2026-08-21. Put the camera on the player's
+own head and render the REAL third-person body, instead of a separate first-person arms
+model. The payoff is large: every existing third-person animation plays correctly, so
+lightsaber combo swings authored in `.combo` files work with zero new assets, and no hero
+needs an FP mesh.
+
+Already shipped and confirmed in play: `[Features] FirstPersonMelee` unlocks first person
+for melee/saber units (`EntitySoldier::IsForcedThirdPerson` -> return false, plus a
+particle-flush bit so the blade draws).
+
+The load-bearing find: the "do not draw my own body" rule is ONE conditional inside
+`EntitySoldier::Render` (phantom `0x00575380`):
+
+```asm
+00575582  3B C6           CMP EAX,ESI          ; entity rendered vs entity viewed
+00575584  0F 84 7B350000  JZ  0x00578B05       ; skip the ENTIRE body render
+```
+
+Kill that JZ and the body renders. A byte search for the surrounding sequence finds
+NOTHING on modtools - different codegen - so the other builds need structural lookup, not
+pattern matching.
+
+Remaining unknowns, in rough risk order: sourcing the camera from the third-person head
+joint instead of the FP model's `hp_camera` hardpoint; hiding the player's own head;
+near-plane clipping at body distance; and animation-driven view shake once the camera
+rides a bone.
+
+**Dedicated first person (deferred, not abandoned)** - The alternative: keep the separate
+FP arms model and author first-person animations per swing. Deferred in favour of true FP,
+but worth keeping because it gives finer control over how the weapon reads on screen.
+
+What is already in the repo for it: a custom ODF property `FirstPersonAnimationBank` lets
+a soldier class name its own FP bank, and `FirstPersonRenderable::UpdateSoldier` is already
+hooked with a per-frame save/overwrite/restore of the global `mAnim[48]`. That is the
+injection point - anything expressible as "put a different ZephyrAnim* in this slot this
+frame" is nearly free.
+
+The wall is the animation table: `mAnim[48]` is weaponclass*11 + state, 4 classes x 11
+states = 44 used, so a fifth weapon-class row does not fit. There is no slot named "attack
+3 of a 5-hit combo". Swings would have to be mapped onto existing slots or written into
+the playing instance directly, bypassing the table. Also unresolved: `Combo::Deflect` has a
+pool count of only 4, and first person would need its own deflect state.
 
 **More first person states** - Actions that snap to third person or have no first
 person animation - rolling, sprinting, melee, entering vehicles. Wanted: an inventory
