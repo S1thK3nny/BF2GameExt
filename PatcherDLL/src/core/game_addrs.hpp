@@ -830,6 +830,38 @@ namespace modtools {
    // duplicates has no iteration cap -- see the header for what overflowing does.
    constexpr uintptr_t fx_effect_classes_count    = 0x00CF55B0;
    constexpr uintptr_t fx_effect_classes_table    = 0x00CF55B4;
+   // ---- Memory census: heaps and regions (util/content_census.cpp) ------------
+   // READ THE HEAP TABLE, DO NOT CALL THE GETTERS.  The engine's accessors are
+   // trivial wrappers over this table, and on retail 8 of the 12 getters
+   // `mem` uses were dead-stripped (DumpMemoryUsage was their only caller and it
+   // does not exist there).  Reading the table needs no calls, so there is no
+   // calling-convention risk, and it yields largest-contiguous-free even where
+   // RedGetHeapLargestFree is gone.
+   //
+   // The layout is not inferred -- the surviving accessors spell it out:
+   //   RedGetHeapSize 0x007E2DB0:
+   //     MOV ECX,[0x00CF68E0]        ; the table POINTER
+   //     LEA EAX,[EAX+EAX*8]         ; i*9, then *4 => stride 0x24
+   //     MOV EAX,[ECX+EAX*4+0x14]    ; size at +0x14
+   //   RedGetMaxHeaps 0x007E2CD0:  MOV EAX,[0x00CF68E4]   ; just the count
+   //   RedGetHeapFree 0x007E2D60 walks the free list from +0x04 summing the
+   //     node size at +0x08 -- so largest-free is the same walk with max.
+   //
+   // HeapObj, stride 0x24: +0x00 start, +0x04 free.first, +0x08 free.last,
+   //   +0x0C used.first, +0x10 used.last, +0x14 size, +0x18 char* name,
+   //   +0x1C align, +0x20 frozen, +0x21 permanent.
+   // Tag (list node), 12 bytes: +0x00 prev, +0x04 next, +0x08 size (INCLUDING
+   //   its own 12-byte header).
+   constexpr uintptr_t red_heap_table_ptr         = 0x00CF68E0;
+   constexpr uintptr_t red_heap_count             = 0x00CF68E4;
+
+   // EntityPath::BranchRegion::sList is a PblList based at 0x00AD3450; _iCount
+   // is at +0x10.  NOT 0x00AD345C -- that is _head._pObject, which on a list
+   // HEAD is structurally always null and has no read-write reference anywhere
+   // in the image.  Verified: the count is incremented by BranchRegion's ctor
+   // (0x005E4BD5) and decremented by its dtor (0x005E4630).
+   constexpr uintptr_t branch_region_count        = 0x00AD3460;
+
 
 
 
