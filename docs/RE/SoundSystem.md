@@ -416,6 +416,57 @@ relocated to process-lifetime `VirtualAlloc` commits.
 
 Retail is **untested in play** — only byte-verified.
 
+### VoiceVirtual layout on retail, and a bug this exposed (2026-08-21)
+
+The diagnostic's manager walk was ported to retail only after the offsets were
+re-derived from retail's own instruction arithmetic. **They are identical on all
+three builds**, and each was cross-checked against Phantom's PDB:
+
+| Offset | modtools | Steam | GOG |
+|---|---|---|---|
+| node -> object adjust | `-0x94` | `-0x94` | `-0x94` |
+| `VoiceVirtual::mVoice` | `+0xA0` | `+0xA0` | `+0xA0` |
+| `Mgr::mActiveList` (head) | `+0x00` | `+0x00` | `+0x00` |
+| `Mgr::mInactiveList` | `+0x0C` | `+0x0C` | `+0x0C` |
+| `Mgr::mVoiceList` | `+0x18` | `+0x18` | `+0x18` |
+| `Mgr::mNumManagedVoices` | `+0x1C` | `+0x1C` | `+0x1C` |
+| `smVoiceVirtualManager` | `0x02331170` | `0x007E3450` | `0x007E4450` |
+
+The `0x90` vs `0x94` split is real and must not be "tidied": `&mNode` is object
+`+0x90`, but `PblListDoubleSorted` links pointers to `Node+4`, so every value you
+walk is object `+0x94`.
+
+Three things a porter must not get wrong. **The list terminator is a sentinel
+pointer, not NULL** - stop on `p == MGR+0x00`, and never dereference it, because
+`MGR+0x00 - 0x94` is not an object. **`mNumManagedVoices` is a live budget**, not
+a constant 32: it is 0 before Open and after shutdown, otherwise the command-line
+voice count. And **there is more than one VoiceVirtualManager** - `EngineBase::Update`
+calls `VoiceVirtualManager::Update` twice, once on a manager reached from the list
+at Steam `0x007E3860`, once on `smVoiceVirtualManager` itself.
+
+#### The renderer-to-voice map was wrong on every build
+
+`sound_diag.cpp` turned a `DSBufferRenderer*` back into a pool slot with
+`voice = renderer - 0xE8`, on the stated belief that the renderer is embedded at
+`Voice + 0xE8`. **It is not.** Phantom's PDB gives `Snd::Voice` offset 232 (`0xE8`)
+as `StreamRenderer mRenderer`, size 748 (`0x2EC`); `DSBufferRenderer` is a
+different class of 416 (`0x1A0`) bytes. So every voice index this diagnostic ever
+printed was garbage. It never crashed only because the result was range-checked
+against the pool and almost always rejected.
+
+The replacement does not subtract at all. It **scans the pool and matches
+pointers**, accepting either arm of the conditional in
+`StreamRenderer::ConnectInternal` (heap-allocated, pointer at StreamRenderer
+`+0xF8`; or constructed in place at `+0xFC`). A match is proof; a wrong
+assumption degrades to "unknown" instead of a confident wrong index, which is
+precisely the failure mode that shipped before.
+
+`DSBufferRenderer::UpdateGain` and `WriteData` are Steam `0x0073E490` /
+`0x0073EB00` and GOG `0x0073F580` / `0x0073FBF0`. UpdateGain takes its float on
+the **stack** at `[EBP+0xC]` (`RET 8`) on retail - it is NOT the XMM0 private
+convention that applies to `ControllerManager::Update`; do not generalise that
+one. `mGain` is `+0x2C` and the Q15 gain pair `+0x190`/`+0x198` on all builds.
+
 ---
 
 ## The EAX crackle - investigated, not found in BF2

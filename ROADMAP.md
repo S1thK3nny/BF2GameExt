@@ -578,34 +578,25 @@ no-ops.
 
 ## Debugging
 
-**Port the remaining two diagnostics to retail** - `AIUpdateDiag` was ported 2026-08-21; these two
-were scoped the same day and are not blocked, only unfinished.
+**All diagnostics are now on all three builds.** `AIUpdateDiag`, `SoundDiagnostic` and
+`BranchRegionDebug` were ported 2026-08-21; the VoiceVirtual offsets were verified identical on
+retail rather than assumed, and the full teardown is in `docs/RE/SoundSystem.md`.
 
-`SoundDiagnostic` - five of seven addresses are already in hand from the VoiceLimit port:
-mixConfig (Steam `0x009CFDAC`, GOG `0x009D124C`), dwFreeHw3DStreamingBuffers (Steam
-`0x009D7DF8`, GOG `0x009D9298`), smVoices (Steam `0x009D8414`), `Snd::EngineBase::Update`
-(Steam `0x00734590`, GOG `0x00735680`), and smVoiceVirtualManager on Steam (`0x007E3450`,
-from `MOV [EDX+0x78],imm32` at `0x007344A7`). Still needed: `DSBufferRenderer::UpdateGain`
-and `WriteData` on both builds, and the GOG manager.
+Two defects in the shipped modtools diagnostics were found and fixed on the way:
 
-**The blocker is not the addresses, it is the struct layout.** The VoiceVirtualManager walk
-depends on `object = node - 0x94` and `mVoice = object + 0xA0`, and those offsets were already
-gotten wrong ONCE on modtools - the first version reported 93 bound voices out of a pool of 32.
-Retail's layout has not been verified, and a wrong node offset means wild reads in the audio
-path every frame. Verify `VoiceVirtualManager::Update`'s own walk on retail before porting;
-do not carry the modtools offsets across on faith.
+- `BranchRegionDebug`'s live count read `0x00AD345C`, which is `sList._head._pObject` and on a
+  list HEAD is structurally always null. It has no read-write reference in the image. The count
+  is `_iCount` at `0x00AD3460`, written by `BranchRegion`'s ctor and dtor. **Every `(live=%u)`
+  the module ever printed was a hardcoded zero.**
+- `SoundDiagnostic` mapped a renderer back to a voice with `voice = renderer - 0xE8`, believing
+  a `DSBufferRenderer` was embedded at `Voice + 0xE8`. Phantom's PDB says that offset holds a
+  `StreamRenderer` (748 bytes) and `DSBufferRenderer` is a different 416-byte class, so every
+  voice index printed was garbage. It now scans the pool and matches pointers, so a wrong
+  assumption yields "unknown" rather than a confident wrong answer.
 
-`BranchRegionDebug` - needs five addresses and one is already mapped: `CreateRegion` is
-`branch_region_create`, retail `0x004D0F00` on both builds. The other four are
-`RedRegionFactory::sList` (modtools `0x00E5F578`), the list count (`0x00AD345C`),
-`Find` (`0x008224C0`) and `FindByID` (`0x005E4C20`). `FindByID` is small and distinctive - it
-walks the factory list from `[global+0xC]` comparing `+0x20` against the id - so it is findable
-from xrefs to whichever global retail's `CreateRegion` uses. Note the debug module uses a
-different list global (`0x00E5F578`) from the one `FindByID` reads (`0x00AD3454`).
-
-
-
-**Add warnings before crashing due to missing chunks** - The engine will crash if a chunk is missing from the map, but it does not log a warning at all. There's no real reason to do this, except it caught me off guard a few times and I want my revenge on the engine. The warning should include the chunk details.
+Still open, and deliberately not guessed: GOG's `smRendererList` head, GOG `smTimeElapsed`,
+GOG `DSBufferRenderer::SetFormat`, and the GOG voice-count command-line global were never read
+out of the GOG image. None is needed by the shipped diagnostics.
 
 ## Will not do
 

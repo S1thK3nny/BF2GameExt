@@ -144,8 +144,8 @@ Read-only instrumentation, all off by default. These only write to `BF2GameExt.l
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `SoundDiagnostic` | `0` | Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale. Modtools only |
-| `BranchRegionDebug` | `0` | Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced. Modtools only |
+| `SoundDiagnostic` | `0` | Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale |
+| `BranchRegionDebug` | `0` | Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced |
 | `AIUpdateDiag` | `0` | Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising |
 | `PoolGrowthDiag` | `0` | Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash MemoryPoolHeapFix repairs |
 

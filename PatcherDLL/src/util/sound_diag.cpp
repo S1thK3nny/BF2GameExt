@@ -59,9 +59,23 @@ constexpr uint32_t  kVoiceStride  = 0x540;
 // fine; the counter was not.
 constexpr int       kMaxPoolSlots = 128;
 
-// The renderer is embedded at Voice + 0xE8 (0089E326 LEA ECX,[ESI+0xE8] in
-// Voice::Initialize), so a renderer `this` can be turned back into a voice index.
-constexpr uint32_t kVoiceToRenderer = 0xE8;
+// Voice + 0xE8 is a **StreamRenderer**, NOT a DSBufferRenderer.  Confirmed in
+// Phantom's PDB: Snd::Voice offset 232 (0xE8) is `StreamRenderer mRenderer`,
+// size 748 (0x2EC), while DSBufferRenderer is 416 (0x1A0).  The two are
+// different classes.
+//
+// So the old `voice = renderer - 0xE8` was wrong on EVERY build, and every voice
+// index this diagnostic ever printed was garbage.  It did not crash only because
+// the result was range-checked against the pool and almost always rejected.
+constexpr uint32_t kVoiceToStreamRenderer = 0xE8;
+
+// Inside StreamRenderer, the DSBufferRenderer is reached one of two ways -- they
+// are the two arms of the same conditional in StreamRenderer::ConnectInternal:
+// heap-allocated with the pointer stored at +0xF8, or constructed in place at
+// +0xFC.  voice_index_of accepts either and treats a match as the proof, so a
+// wrong guess here yields "unknown" rather than a confident wrong index.
+constexpr uint32_t kSrRendererPtr     = 0xF8;
+constexpr uint32_t kSrRendererInPlace = 0xFC;
 
 constexpr uintptr_t kSndUpdate  = 0x008827B0; // Snd::EngineBase::Update
 constexpr uintptr_t kUpdateGain = 0x008997C0; // Snd::DSBufferRenderer::UpdateGain
@@ -71,15 +85,16 @@ constexpr uintptr_t kWriteData  = 0x0089A120; // Snd::DSBufferRenderer::WriteDat
 // Per-build addresses.  A build with any entry still zero does not install, so
 // this file's behaviour is unchanged for a build that has not been ported.
 //
-// The struct OFFSETS above (kMgrListHead, kVVNodeOffset, kVVVoice,
-// kVoiceToRenderer, kRendererGain*) are deliberately NOT in here yet: whether
-// they hold on retail is the open question, and the note at kVoiceManager
-// records that this exact class of offset was already wrong once.  They become
-// per-build the moment retail is shown to differ.
+// The struct OFFSETS above are NOT per-build, and that is now a VERIFIED result
+// rather than an assumption: the node-to-object adjust (-0x94), mVoice (+0xA0),
+// mNumManagedVoices (+0x1C) and the active-list head (+0x00) are identical on
+// modtools, Steam and GOG, each proven from the retail instruction arithmetic
+// and cross-checked against Phantom's PDB layout.
 //
-// Steam/GOG entries below were read from their own images during the VoiceLimit
-// port; smVoices on GOG, the GOG manager, and UpdateGain/WriteData on both are
-// still pending.
+// Every retail address below was read from its own image. GOG is NOT Steam plus
+// a delta -- nine different Steam-to-GOG deltas were measured across these two
+// features alone (0x0, 0xF78, 0xFB0, 0x1000, 0x10A0, 0x10F0, 0x14A0), so any
+// address here that looks like arithmetic on its neighbour is a coincidence.
 // ---------------------------------------------------------------------------
 struct SndSites {
    uintptr_t mixConfig;
@@ -96,10 +111,10 @@ constexpr SndSites kSndModtools = {
    kSndUpdate, kUpdateGain, kWriteData,
 };
 constexpr SndSites kSndSteam = {
-   0x009CFDAC, 0x009D7DF8, 0x007E3450, 0x009D8414, 0x00734590, 0, 0,
+   0x009CFDAC, 0x009D7DF8, 0x007E3450, 0x009D8414, 0x00734590, 0x0073E490, 0x0073EB00,
 };
 constexpr SndSites kSndGOG = {
-   0x009D124C, 0x009D9298, 0, 0, 0x00735680, 0, 0,
+   0x009D124C, 0x009D9298, 0x007E4450, 0x009D98B4, 0x00735680, 0x0073F580, 0x0073FBF0,
 };
 
 const SndSites* s_snd = nullptr;
@@ -233,18 +248,42 @@ void bump_max(volatile LONG* slot, LONG value)
    }
 }
 
-// Turn a renderer `this` back into a pool slot index, or 0xFFFFFFFF if it is not
-// one of the pool voices.
+// How many pool slots are worth walking.  mNumManagedVoices is a LIVE BUDGET,
+// not a constant 32: it is 0 before Open and after shutdown, and otherwise the
+// command-line voice count (8..32 stock, higher with [LimitIncreases] VoiceLimit).
+// Never hardcode 32 here.
+uint32_t pool_slots()
+{
+   if (!g_voiceManager) return 0;
+   uint32_t n = *reinterpret_cast<uint32_t*>(g_voiceManager + kMgrNumManaged);
+   if (n == 0 || n > (uint32_t)kMaxPoolSlots) n = (uint32_t)kMaxPoolSlots;
+   return n;
+}
+
+// Turn a DSBufferRenderer `this` back into a pool slot index, or 0xFFFFFFFF if it
+// is not one of the pool voices.
+//
+// This SEARCHES the pool and matches pointers rather than subtracting a fixed
+// offset.  That is deliberate: the previous version subtracted 0xE8 on the belief
+// that a DSBufferRenderer was embedded there, which was wrong, and the failure
+// mode of a wrong subtraction is a confident wrong index.  A search can only ever
+// return a slot it actually matched, so a wrong assumption degrades to "unknown".
+//
+// Cost is a scan of at most kMaxPoolSlots pointer compares, in a diagnostic that
+// is off by default.
 uint32_t voice_index_of(void* renderer)
 {
-   if (!g_voicesPtr || !*g_voicesPtr) return 0xFFFFFFFFu;
-   const uint8_t* const pool = *g_voicesPtr;
-   const uint8_t* const voice = static_cast<uint8_t*>(renderer) - kVoiceToRenderer;
-   if (voice < pool) return 0xFFFFFFFFu;
-   const uintptr_t offset = static_cast<uintptr_t>(voice - pool);
-   if (offset % kVoiceStride != 0) return 0xFFFFFFFFu;
-   const uint32_t index = static_cast<uint32_t>(offset / kVoiceStride);
-   return (index < kMaxPoolSlots) ? index : 0xFFFFFFFFu;
+   if (!renderer || !g_voicesPtr || !*g_voicesPtr) return 0xFFFFFFFFu;
+   const uint8_t* const pool  = *g_voicesPtr;
+   const uint32_t       slots = pool_slots();
+
+   for (uint32_t i = 0; i < slots; ++i) {
+      const uint8_t* const sr =
+         pool + static_cast<uintptr_t>(i) * kVoiceStride + kVoiceToStreamRenderer;
+      if (*reinterpret_cast<void* const*>(sr + kSrRendererPtr) == renderer) return i;
+      if (static_cast<const void*>(sr + kSrRendererInPlace) == renderer) return i;
+   }
+   return 0xFFFFFFFFu;
 }
 
 // Both audio-path hooks take __fastcall's ECX/EDX so a __thiscall with stack

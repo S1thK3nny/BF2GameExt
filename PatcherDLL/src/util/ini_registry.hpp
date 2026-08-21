@@ -125,8 +125,8 @@ inline constexpr IniEntry g_ini_registry[] = {
    // ---- Diagnostic ---------------------------------------------------------
    // Read-only instrumentation. Each one only writes to BF2GameExt.log; none of
    // them change behaviour, and all default off.
-   INI_ENTRY("Diagnostic", "SoundDiagnostic",   "0", "Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale. Modtools only"),
-   INI_ENTRY("Diagnostic", "BranchRegionDebug", "0", "Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced. Modtools only"),
+   INI_ENTRY("Diagnostic", "SoundDiagnostic",   "0", "Report how many sound voices this machine actually gets, how many sounds are being dropped for want of one, and watch the mixed output for bursts pinned at full scale"),
+   INI_ENTRY("Diagnostic", "BranchRegionDebug", "0", "Log every step of EntityPath branch-region resolution, so a BranchRegion that will not resolve can be traced"),
    INI_ENTRY("Diagnostic", "AIUpdateDiag",      "0", "Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising"),
    INI_ENTRY("Diagnostic", "PoolGrowthDiag",    "0", "Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash MemoryPoolHeapFix repairs"),
 };

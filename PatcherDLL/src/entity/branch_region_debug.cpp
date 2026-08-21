@@ -66,11 +66,19 @@ uint32_t pbl_hash(const char* s)
 
 typedef void*(__cdecl* fn_Find_t)(const char* name);
 typedef void*(__stdcall* fn_CreateRegion_t)(void* desc, const char* name);
-typedef void*(__cdecl* fn_FindByID_t)(uint32_t hash);
+// FindByID's CONVENTION DIFFERS BY BUILD and this is not cosmetic.  modtools
+// takes the id on the stack (`005E4C2C MOV EDX,[ESP+4]`); both retail builds
+// take it in ECX (`004D0E50 CMP [EDX+0x20],ECX`, and the stack is never read).
+// A __cdecl hook on retail would log an id read from unrelated caller stack AND
+// leave ECX indeterminate for the trampoline, so the lookup itself would go
+// nondeterministic -- while the log claimed to be diagnosing it.  The stack
+// stays balanced either way, so it would not crash; it would lie.
+typedef void*(__cdecl* fn_FindByID_cdecl_t)(uint32_t hash);
+typedef void*(__fastcall* fn_FindByID_fastcall_t)(uint32_t hash, uint32_t edx);
 
 fn_Find_t         g_origFind         = nullptr;
 fn_CreateRegion_t g_origCreateRegion = nullptr;
-fn_FindByID_t     g_origFindByID     = nullptr;
+void*             g_origFindByID     = nullptr; // cast per build, see above
 
 // PblList<BranchRegion>::_iCount, so every line reports how many branch regions
 // exist at that instant.
@@ -95,13 +103,27 @@ struct DbgSites {
    uintptr_t findByID;
 };
 
+// listCount was 0x00AD345C and that was WRONG.  BranchRegion::sList is a PblList,
+// `{ Node _head { +0 _pList, +4 _pNext, +8 _pPrev, +0xC _pObject }; +0x10 _iCount }`
+// based at 0x00AD3450 -- so 0x00AD345C is `_head._pObject`, which on a list HEAD
+// is structurally always null.  It has no read-write reference anywhere in the
+// image.  The count is +0x10 = 0x00AD3460, and that one IS incremented by
+// BranchRegion's constructor (0x005E4BD5) and decremented by its destructor
+// (0x005E4630).  Every `(live=%u)` this module has ever printed on modtools was
+// a hardcoded zero.
 constexpr DbgSites kDbgModtools = {
-   0x00AD345C, 0x00E5F578, 0x00E5F57C, 0x008224C0, 0x005E4C90, 0x005E4C20,
+   0x00AD3460, 0x00E5F578, 0x00E5F57C, 0x008224C0, 0x005E4C90, 0x005E4C20,
 };
-// TODO(retail): pending verification, see ROADMAP `## Debugging`.  CreateRegion
-// is already known to be 0x004D0F00 on both retail builds.
-constexpr DbgSites kDbgSteam = {0, 0, 0, 0, 0x004D0F00, 0};
-constexpr DbgSites kDbgGOG   = {0, 0, 0, 0, 0x004D0F00, 0};
+// Retail.  Every address read from its own image.  Note defaultFactory is NOT
+// factoryListHead + 4 here -- that relationship is a modtools coincidence; on
+// retail the two live in different sections entirely, and the value comes from
+// the `MOV EAX,imm32` at the tail of Find.
+constexpr DbgSites kDbgSteam = {
+   0x007EB810, 0x007DF740, 0x0099E7EC, 0x006DC9A0, 0x004D0F00, 0x004D0E40,
+};
+constexpr DbgSites kDbgGOG = {
+   0x007EC810, 0x007E0740, 0x0099FC8C, 0x006DDA40, 0x004D0F00, 0x004D0E40,
+};
 
 const DbgSites* s_dbg = nullptr;
 
@@ -176,11 +198,27 @@ void* __stdcall hooked_create_region(void* desc, const char* name)
    return result;
 }
 
-void* __cdecl hooked_find_by_id(uint32_t hash)
+void* __cdecl hooked_find_by_id_cdecl(uint32_t hash)
 {
-   void* result = g_origFindByID(hash);
+   void* result = reinterpret_cast<fn_FindByID_cdecl_t>(g_origFindByID)(hash);
    dbg_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
    return result;
+}
+
+// Retail. edx is passed straight back through so the trampoline sees exactly the
+// register state the caller set up.
+void* __fastcall hooked_find_by_id_fastcall(uint32_t hash, uint32_t edx)
+{
+   void* result = reinterpret_cast<fn_FindByID_fastcall_t>(g_origFindByID)(hash, edx);
+   dbg_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
+   return result;
+}
+
+PVOID find_by_id_detour()
+{
+   return (g_build == GameBuild::Modtools)
+             ? reinterpret_cast<PVOID>(&hooked_find_by_id_cdecl)
+             : reinterpret_cast<PVOID>(&hooked_find_by_id_fastcall);
 }
 
 } // namespace
@@ -214,13 +252,13 @@ void branch_region_debug_install(uintptr_t exe_base)
 
    g_origFind         = (fn_Find_t)resolve(exe_base, D.find);
    g_origCreateRegion = (fn_CreateRegion_t)resolve(exe_base, D.createRegion);
-   g_origFindByID     = (fn_FindByID_t)resolve(exe_base, D.findByID);
+   g_origFindByID     = resolve(exe_base, D.findByID);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    const LONG a1 = DetourAttach(reinterpret_cast<PVOID*>(&g_origFind), hooked_find);
    const LONG a2 = DetourAttach(reinterpret_cast<PVOID*>(&g_origCreateRegion), hooked_create_region);
-   const LONG a3 = DetourAttach(reinterpret_cast<PVOID*>(&g_origFindByID), hooked_find_by_id);
+   const LONG a3 = DetourAttach(&g_origFindByID, find_by_id_detour());
    const LONG rc = DetourTransactionCommit();
 
    dbg_log("[BranchDbg] install: Find=%p CreateRegion=%p FindByID=%p count=%p"
@@ -239,7 +277,7 @@ void branch_region_debug_uninstall()
    DetourUpdateThread(GetCurrentThread());
    DetourDetach(reinterpret_cast<PVOID*>(&g_origFind), hooked_find);
    DetourDetach(reinterpret_cast<PVOID*>(&g_origCreateRegion), hooked_create_region);
-   DetourDetach(reinterpret_cast<PVOID*>(&g_origFindByID), hooked_find_by_id);
+   DetourDetach(&g_origFindByID, find_by_id_detour());
    DetourTransactionCommit();
    g_origFind = nullptr;
 }
