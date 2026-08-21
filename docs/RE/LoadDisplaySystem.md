@@ -1081,3 +1081,66 @@ Retiring clears the VoiceVirtual's loop flag rather than cutting the voice off, 
 sounds finish the pass they are playing instead of clicking. See
 [SoundSystem.md](SoundSystem.md) for the ownership model, the stop paths, and why
 the same flag on `Voice` is a copy that gets overwritten every tick.
+
+---
+
+## The `LoadDisplay` struct tail is wrong in Phantom's PDB (corrected 2026-08-21)
+
+Phantom declares `LoadDisplay` as **7500** bytes. It is **7504**, and everything from `0x1C28`
+onward sits **4 bytes later** than the PDB says. There is one undeclared 4-byte member at
+**`0x1C28`**, between `m_titleBarTimer` and `m_models`.
+
+Ground truth, read from the instruction operands of `LoadDisplay::LoadDataChunk`
+(Phantom `0x00634F20`) rather than from the decompiler:
+
+| Chunk | count operand | array base operand |
+|---|---|---|
+| `'modl'` `0x6C646F6D` | `MOV EAX,[EDI+0x1D44]` | `MOV [ESI+0x1C2C],EAX` |
+| `'tex_'` `0x5F786574` | `MOV EDX,[EDI+0x1D48]` | `MOV [EDI+EDX*4+0x1C54],EAX` |
+| `'skel'` `0x6C656B73` | `MOV EAX,[EDI+0x1D4C]` | `MOV [ESI+0x1D1C],EAX` |
+
+and `LoadDisplay::LoadData` (`0x00634E80`) zeroes exactly `[ESI+0x1D44]`, `[ESI+0x1D48]`,
+`[ESI+0x1D4C]`.
+
+Those chain consistently and confirm the array SIZES are right (10 / 50 / 10):
+`0x1C2C + 40 = 0x1C54`, `+200 = 0x1D1C`, `+40 = 0x1D44`, then three counters, ending at `0x1D50`.
+
+| Field | PDB says | Actual |
+|---|---|---|
+| *(undeclared member)* | — | `0x1C28` |
+| `m_models[10]` | `0x1C28` | `0x1C2C` |
+| `m_textures[50]` | `0x1C50` | `0x1C54` |
+| `m_skeletons[10]` | `0x1D18` | `0x1D1C` |
+| `m_numModels` | `0x1D40` | `0x1D44` |
+| `m_numTextures` | `0x1D44` | `0x1D48` |
+| `m_numSkeletons` | `0x1D48` | `0x1D4C` |
+| `sizeof` | 7500 | **7504** |
+
+`m_randomBackDrop` at `0x1C10` is correct (`MOV [ESI+0x1C10],EAX` in `LoadData`), which is what
+localises the missing member to `0x1C28`.
+
+**Symptom of the bad struct:** the decompiler compensates rather than failing, so
+`LoadDataChunk` renders as `m_models[i + 2]`, `m_textures[i + 2]`, `m_skeletons[i + 2]` and
+reaches the counters as `*(int *)(this + 1)` and `this[1].m_missionHash` — and it attributes the
+MODEL counter to `m_numSkeletons`. None of that is a game bug; it is all the 4-byte shift.
+
+This is a second instance of the rule in [[ghidra-instance-layout]]: **Phantom's PDB is
+authoritative for NAMES, not for LAYOUT.** `TentacleSimulator` was the first (608 in the PDB,
+616 on all three shipping builds).
+
+### The arrays are UNBOUNDED
+
+`LoadDataChunk` has **no bounds check on any of the three arrays**. Every path is: read the
+count, store at that index, increment. There is no `CMP` against 10, 50 or 10 anywhere in the
+function; the only loop is the texture de-duplication, which compares pointers, not indices.
+
+So a loading-screen `.lvl` carrying more assets than the arrays hold overruns them, and the
+overflow order is self-compounding:
+
+- models past 10 spill into `m_textures`
+- textures past 50 spill into `m_skeletons`
+- **skeletons past 10 spill into the counters themselves** — `m_skeletons[10]` lands exactly on
+  `m_numModels` at `0x1D44`, after which the corruption drives its own indices
+
+Author-reachable from map content, silent, and present on every build. Worth a clamp, and worth
+reporting in the content census as models/textures/skeletons against 10/50/10.
