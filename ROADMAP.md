@@ -644,6 +644,29 @@ OCCUPANCY is the new reverse engineering, and it differs per subsystem:
 The periodic print is what makes this useful for the softlock hunt specifically: it prints the
 effect-class occupancy seconds before the reported freeze, on the build the freeze happens on.
 
+**HASHES ARE READABLE - use `StringDB`.** Scanning a hash table yields keys, not names, which
+would make the report useless for finding WHICH effect is the problem. The engine already solves
+this: `StringDB::Store(hash, str)` (Phantom `0x00773620`) copies the string into the string pool
+and records hash -> pointer in `mMap`, a 4096-slot table. So
+`_Find(StringDB::mMap._uiTable, 0x2000, hash)` gives the original name back for anything that
+was stored. `StringDB::Remove` is at `0x00773600`.
+
+For names that never went through StringDB, the fallback is one hook on
+`PblHash::PblHash(PblHash* out, const char* str)` - every name the game hashes passes through
+it, so we can build a complete reverse map ourselves. Noisy during load, fine for a diagnostic.
+
+**StringDB is itself a metric worth reporting**, and a purely authored one: `mMap._iNumEntries`
+against 4096, plus string pool bytes used against `mPoolSize`. It has its own warning,
+"String pool is full: %i pool is not big enough!", and it is the same limit
+`[LimitIncreases] StringPoolIncrease` already raises.
+
+**Third instance of the uncapped-probe hang.** `StringDB::Store` calls the same
+`PblHashTableCode::_Store`, so a StringDB map at 4096 distinct strings would spin forever
+exactly like the effect table at 256. That is now three tables sharing one defect
+(`s_EffectClasses`, `s_EffectFactories`, `StringDB::mMap`), which argues the real fix is a probe
+counter inside `_Find`/`_Store` rather than per-table capacity guards - though that changes
+behaviour for every hash table in the game and needs care.
+
 **Not mod-addable, do not include:** effect FACTORIES (32 slots, ~26 used by built-in effect
 managers) are engine types registered by `FLEffect::InitAll`, not content. Worth knowing the
 headroom is thin, but an author cannot change it.
