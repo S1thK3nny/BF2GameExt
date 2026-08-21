@@ -866,6 +866,56 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "Attached Effects Overflow Fix",
+               .patches =
+                  {
+                     // AttachedEffectsClass keeps s_aAttachClassData[64] plus a
+                     // 32-bit s_uiNumAttached.  Both appending SetProperty
+                     // handlers guard their TABLE store with `CMP count,0x40`,
+                     // but the full-table path then falls into a shared tail:
+                     //
+                     //   004C28C9  A1 D4A2B700   MOV  EAX,[s_uiNumAttached]
+                     //   004C28CE  40            INC  EAX
+                     //   004C28CF  50            PUSH EAX          ; the %d arg
+                     //   004C28D0  68 2C88A300   PUSH "AttachEffects: too many
+                     //                                 effects - increase to %d"
+                     //   004C28D5  A3 D4A2B700   MOV  [s_uiNumAttached],EAX  <== BUG
+                     //   004C28DA  E8 ........   CALL RedWarning
+                     //
+                     // The increment exists to be the printf argument; writing it
+                     // BACK is the defect.  Nothing is stored in the table, so the
+                     // counter runs ahead of the data and BuildAttachedEffectsClass
+                     // then copies N*20 bytes out of a 1280-byte array -- a pure
+                     // over-read of adjacent .bss.  BuildEffects walks the ghost
+                     // entries and dereferences their null pOdfClass with no check
+                     // (0x004C25C7 `MOV EDX,[ECX]`), so the real symptom is an
+                     // access violation reading 0x00000000 during level load.
+                     //
+                     // NOPping the write-back makes the engine refuse effects past
+                     // 64 and keep going -- which is exactly what the retail builds
+                     // already do: their optimizer dropped this store along with the
+                     // RedWarning, so every retail increment is immediately followed
+                     // by `CMP EAX,0x40 / JNC`.  Verified on both; there is no
+                     // retail site to patch.
+                     //
+                     // Safe as a bare NOP run: EAX was already incremented and
+                     // pushed one instruction earlier, the CALL is __cdecl and the
+                     // single ADD ESP,0x1C afterwards pops all seven pushed dwords,
+                     // so stack balance is untouched.  No branch target lands inside
+                     // the five bytes.  Cosmetic: the warning now always says
+                     // "increase to 65".
+                     //
+                     // Do NOT touch the legitimate in-range advances at 0x004C2865
+                     // and 0x004C29AF.
+                     patch{0x004C28D5, 0xA3, 0x90, {.values_are_8bit = true}},
+                     patch{0x004C28D6, 0xD4, 0x90, {.values_are_8bit = true}},
+                     patch{0x004C28D7, 0xA2, 0x90, {.values_are_8bit = true}},
+                     patch{0x004C28D8, 0xB7, 0x90, {.values_are_8bit = true}},
+                     patch{0x004C28D9, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
          },
    },
 

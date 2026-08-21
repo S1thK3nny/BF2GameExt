@@ -18,10 +18,14 @@ namespace {
 // ---------------------------------------------------------------------------
 // modtools sites
 // ---------------------------------------------------------------------------
-// The budget immediate.  `ADD EAX,0x0A` is 83 /0 with a SIGN-EXTENDED imm8, so
-// the in-place ceiling is 0x7F -- 0x80 and above would read as negative and the
-// loop's `CMP EBP,EBX / JL` would then never run a single update.
-constexpr uintptr_t kBudgetImm8 = 0x005999D0;
+// The budget immediate lives in game_addrs: modtools writes the SIGN-EXTENDED
+// imm8 of `ADD EAX,0x0A`, retail writes the imm32 of `MOV ESI,0x0A` that feeds
+// its CMOVNZ.  Both are clamped to the same 10..127 range -- retail's imm32 has
+// no encoding ceiling, but measurement puts real demand under 8, so a wider
+// range on one build only would be a difference in the INI with no difference in
+// the game.
+constexpr int kMinBudget = 10;
+constexpr int kMaxBudget = 127;
 
 // ControllerManager::Update itself, and the queue it drains.  0x00B8EE70 holds a
 // POINTER to the list object; the object's +4 is the first node, each node's +4
@@ -47,8 +51,9 @@ int  s_peakControllers = 0;
 int  s_peakTierCount[5] = {};
 int  s_reports = 0;
 
-uint8_t* s_budgetAddr = nullptr;
-uint8_t  s_budgetOrig = 0;
+uint8_t* s_budgetAddr  = nullptr;
+uint32_t s_budgetOrig  = 0;
+uint32_t s_budgetWidth = 0;
 
 // Signatures READ from the images, not inferred:
 //   0x005997A0  ControllerManager::Update  __cdecl (float dt)   -- a free
@@ -165,27 +170,44 @@ void __cdecl hooked_mgr_update(float dt)
 
 void ai_update_budget_install(uintptr_t exe_base)
 {
-   if (g_build != GameBuild::Modtools) return;
-
    // --- the dial -----------------------------------------------------------
+   // Runs on every build that names the immediate.  The width IS the build
+   // difference: naming the two operands separately keeps the caller from having
+   // to know which codegen it is looking at.
    if (g_aiUpdateBudget > 0) {
-      int n = g_aiUpdateBudget;
-      if (n < 10) n = 10;   // below stock there is nothing to gain
-      if (n > 0x7F) n = 0x7F;
+      const uintptr_t va    = g_addr->ai_update_budget_imm8 ? g_addr->ai_update_budget_imm8
+                                                            : g_addr->ai_update_budget_imm32;
+      const uint32_t  width = g_addr->ai_update_budget_imm8 ? 1u : 4u;
 
-      uint8_t* const site = reinterpret_cast<uint8_t*>(resolve(exe_base, kBudgetImm8));
-      if (*site == 0x0A) {
-         s_budgetAddr = site;
-         s_budgetOrig = *site;
-         *site = (uint8_t)n;
+      if (va == 0) {
+         diag_log("[AIBudget] no budget immediate for this build -- left stock");
       } else {
-         diag_log("[AIBudget] budget site %08X reads %02X, expected 0A -- left stock",
-                  (unsigned)kBudgetImm8, *site);
+         int n = g_aiUpdateBudget;
+         if (n < kMinBudget) n = kMinBudget;   // below stock there is nothing to gain
+         if (n > kMaxBudget) n = kMaxBudget;
+
+         uint8_t* const site = reinterpret_cast<uint8_t*>(resolve(exe_base, va));
+         uint32_t       cur  = 0;
+         memcpy(&cur, site, width);
+
+         if (cur == 0x0A) {
+            s_budgetAddr  = site;
+            s_budgetOrig  = cur;
+            s_budgetWidth = width;
+            const uint32_t v = (uint32_t)n;
+            memcpy(site, &v, width);
+         } else {
+            diag_log("[AIBudget] budget site %08X reads %u, expected 10 -- left stock",
+                     (unsigned)va, cur);
+         }
       }
    }
 
    // --- the measurement ----------------------------------------------------
+   // Hooks ControllerManager::Update and UpdateHighLevel, whose addresses are
+   // only mapped for modtools.
    if (!g_aiUpdateDiag) return;
+   if (g_build != GameBuild::Modtools) return;
 
    g_listSlot      = reinterpret_cast<uint8_t**>(resolve(exe_base, kUnitControllerList));
    g_origMgrUpdate = reinterpret_cast<fn_mgr_update_t>(resolve(exe_base, kControllerMgrUpdate));
@@ -218,6 +240,6 @@ void ai_update_budget_uninstall()
    }
 
    // Sections are re-protected by now, so this cannot be a plain store.
-   if (s_budgetAddr) protected_write(s_budgetAddr, &s_budgetOrig, 1);
+   if (s_budgetAddr) protected_write(s_budgetAddr, &s_budgetOrig, s_budgetWidth);
    s_budgetAddr = nullptr;
 }

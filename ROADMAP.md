@@ -6,6 +6,31 @@ is shipped. For what the DLL actually does today, see
 
 ## Bugs
 
+**Unbounded hash probe - the best candidate for the GUI freeze** - `PblHashTableCode::_Find` is
+an open-addressing probe that walks backwards with wraparound and has NO iteration cap. Its only
+two exits are "key matches" and "slot is zero", so a table that is 100% full plus a lookup for an
+absent key spins forever on the main thread - GUI frozen, audio still playing, which is the
+reported signature. Verified disassembly, modtools `0x007E1A40` (loop `0x007E1A62`-`0x007E1A75`,
+`JNZ` back with no counter); Steam `0x00726E00` (loop `0x00726E28`), GOG `0x00727ED0` (loop
+`0x00727EF8`), Phantom `0x00864330`, `_Store` same shape at `0x008644D0`.
+
+Reachable from `AttachedEffectsClass::SetProperty`, which calls
+`_Find(FLEffect::s_EffectClasses._uiTable, 0x200, effectNameHash)` - 256 key slots. `FLEffect::Read`
+registers through `_Store` and tracks `_iNumEntries` but NEVER compares it to capacity; there is no
+"too many effect classes" guard anywhere in the image. So a mod with 256+ distinct effect classes
+fills the table, and the next lookup of a name that is not in it - exactly what a missing or
+typo'd `AttachEffect` line produces - hangs during level load. Callers: modtools `0x004C2942` /
+`0x004C2AFD`, Steam `0x004477DF` / `0x004478E7`, GOG `0x004477BF` / `0x004478C7`. Tables: modtools
+`0x00CF55B4`, Steam `0x01EBD144`, GOG `0x01EBE5F4`.
+
+**NOT YET LINKED TO THE OBSERVED FREEZE.** The loop is byte-confirmed to exist and to be
+uncapped, but nothing yet proves it is what the user hit - its trigger is a full effect-class
+table, which is a separate condition from the 64-entry attachment overflow fixed in
+`[Fixes] AttachedEffectsOverflowFix`. Next step is to instrument `_iNumEntries` against 256 at
+level load rather than to patch anything. A cap would need a probe counter, which means a hook
+rather than a byte patch, and refusing a lookup changes behaviour for every hash table in the
+game - `_Find` is generic.
+
 **LODs break under freecam** - Models pop to the wrong detail level, or drop out entirely,
 while the camera is detached. The LOD selection almost certainly scores against the player
 entity or the game camera rather than the active render camera, so once freecam moves away
@@ -328,6 +353,21 @@ NOT the same thing: `ScriptCB_EnableHeroVO` (`0x006656D0`) only sets
 That path looks correct and is unrelated to the `SndHero*` slots.
 
 ## Limits
+
+**Attached effects past 64** - Capped at **255 no matter what**, and not recommended.
+`AttachedEffectsClass::m_uiNumAttached` is a `uint:8`: the count is written with a BYTE store
+(modtools `0x004C1BF6 MOV byte [EBP+4],AL`, Phantom `0x00490376`) and all three consumer loops
+read it back masked `& 0xFF`, so a 300-effect class silently becomes a 44-effect one. Past 255
+means growing the object from 8 bytes and re-laying out the `bDynamic` bit at bit 8.
+(`uiNumParams` is `uint:7`, its own separate ceiling.)
+
+There is also no room after the array - modtools' next byte at `0x00B7A7D8` is `s_bDynamic`,
+Phantom's next dword at `0x00ABC058` is the counter itself - so the table has to be relocated to
+a fresh `20*NEW` allocation, and roughly twenty baked-in absolute displacements rewritten per
+build: the six `CMP ...,0x40` sites (modtools `0x004C27B8`, `0x004C285B`, `0x004C28A5`,
+`0x004C29AC`, `0x004C29E0`, `0x004C2ACF`), the memcpy source constant at `0x004C1C20`
+(`MOV ESI,0xB7A2D8`), and every `0x00B7A2C8/CC/D8/DC/E0` displacement in `SetProperty`.
+Recommendation: leave it at 64 and let it refuse, which is what the shipped fix does.
 
 **AI reservation pool past 127** - `[LimitIncreases] ReservationPoolSize` now raises
 `ReserveManager::sList` from 60 to at most 127, which is a hard encoding ceiling: the count

@@ -41,13 +41,26 @@
 // sits below, the budget is not the constraint and raising it would only burn
 // frame time.  Measure before choosing a number.
 //
-// modtools only -- the same quota exists in the retail builds but is compiled
-// with CMOVcc rather than this NEG/SBB idiom, so its address has to be derived
-// separately.  The installer no-ops where the address is 0.
+// THE DIAL RUNS ON ALL THREE BUILDS; the diagnostic is modtools-only, because it
+// hooks ControllerManager::Update and UpdateHighLevel and those addresses are not
+// mapped for retail.  Retail compiles the same quota with CMOVcc instead of the
+// NEG/SBB idiom above, and gives the non-uber value its own imm32:
+//
+//   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- NOT the dial
+//   00486408  BE 0A000000     MOV    ESI,0x0A   ; the dial
+//   0048640D  0F 45 F1        CMOVNZ ESI,ECX
+//
+// Same VA and same bytes on Steam and GOG.  Beware the ray-test budget 356 bytes
+// later at 0x0048656D, which differs only in its opcode byte -- see game_addrs.
+// The installer no-ops where the address is 0.
 // =============================================================================
 
-// 0 = stock (10 per turn).  Otherwise the desired budget, clamped to [10, 127]:
-// the site is an 8-bit immediate added to a sign-extended base.
+// 0 = stock (10 per turn).  Otherwise the desired budget, clamped to [10, 127].
+// modtools needs that ceiling -- its site is a sign-extended imm8, and 0x80 would
+// read negative and stop every high-level update.  Retail's imm32 has no such
+// limit, but it is held to the same range deliberately: measured demand sits
+// under 8, so a wider range on one build only would be a difference in the INI
+// with no difference in the game.
 extern int g_aiUpdateBudget;
 
 // Hand-added key, deliberately absent from ini_registry.hpp:

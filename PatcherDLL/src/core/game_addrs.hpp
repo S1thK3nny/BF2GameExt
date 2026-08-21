@@ -807,6 +807,17 @@ namespace modtools {
    // new[] returns NULL, and the ctor stores mElements = NULL after mPoolSize was
    // already written negative -- the first Reserve then writes through NULL.
    constexpr uintptr_t reserve_pool_count_push    = 0x005C620F; // imm8 of PUSH 0x3C
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // ControllerManager::Update (0x005997A0) drains the UnitController queue but
+   // lets only N controllers run UpdateHighLevel per simulation turn; movement and
+   // firing still run for everyone.  modtools folds the choice branchlessly --
+   // `NEG AL / SBB EAX,EAX / AND EAX,0x5A / ADD EAX,0x0A`, i.e. 10 normally and
+   // 0x5A+0x0A = 100 in uber mode -- so the writable operand is the imm8 of
+   // `83 C0 0A`.  It is SIGN-EXTENDED: at 0x80 the budget reads negative and the
+   // loop's `CMP EBP,EBX / JL` never runs a single update, so the ceiling is 0x7F.
+   //   005999CE  83 C0 0A     ADD EAX,0x0A   ; imm8 at 005999D0
+   constexpr uintptr_t ai_update_budget_imm8      = 0x005999D0;
+
 
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
@@ -1708,6 +1719,27 @@ namespace steam {
    constexpr uintptr_t reserve_pool_count_alloc   = 0x006300FD; // imm32
    constexpr uintptr_t reserve_pool_count_field   = 0x0063010E; // imm32
    constexpr uintptr_t reserve_pool_count_cookie  = 0x0063014D; // imm32
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // Retail compiles the same choice with CMOVNZ and a DEDICATED imm32 for the
+   // non-uber value, so this is a plain 4-byte write with no sign-extension trap:
+   //   004863FC  E8 ..........   CALL   AIUtil::IsUberMode
+   //   00486401  84 C0           TEST   AL,AL
+   //   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- DO NOT TOUCH
+   //   00486408  BE 0A000000     MOV    ESI,0x0A   ; the dial, imm32 at 00486409
+   //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
+   //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
+   // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
+   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
+   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
+   // mapped here.
+   //
+   // DECOY, 356 bytes later in the same function: 0x0048656D is
+   // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /
+   // IMUL EAX,ESI, which is the RAY-TEST budget (Phantom's "RayTests" profiler
+   // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
+   // must be reached by fixed VA and never by a pattern scan.
+   constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+
 
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
@@ -2389,6 +2421,27 @@ namespace gog {
    constexpr uintptr_t reserve_pool_count_alloc   = 0x0063119D; // imm32
    constexpr uintptr_t reserve_pool_count_field   = 0x006311AE; // imm32
    constexpr uintptr_t reserve_pool_count_cookie  = 0x006311ED; // imm32
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // Retail compiles the same choice with CMOVNZ and a DEDICATED imm32 for the
+   // non-uber value, so this is a plain 4-byte write with no sign-extension trap:
+   //   004863FC  E8 ..........   CALL   AIUtil::IsUberMode
+   //   00486401  84 C0           TEST   AL,AL
+   //   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- DO NOT TOUCH
+   //   00486408  BE 0A000000     MOV    ESI,0x0A   ; the dial, imm32 at 00486409
+   //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
+   //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
+   // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
+   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
+   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
+   // mapped here.
+   //
+   // DECOY, 356 bytes later in the same function: 0x0048656D is
+   // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /
+   // IMUL EAX,ESI, which is the RAY-TEST budget (Phantom's "RayTests" profiler
+   // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
+   // must be reached by fixed VA and never by a pattern scan.
+   constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+
 
 
    // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
