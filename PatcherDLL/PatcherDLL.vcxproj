@@ -217,6 +217,7 @@
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp" />
+    <ClCompile Include="src\weapon\impact_sound_water_fix.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />

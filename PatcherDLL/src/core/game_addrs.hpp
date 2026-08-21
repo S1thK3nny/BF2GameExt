@@ -782,6 +782,28 @@ namespace modtools {
    constexpr uintptr_t ai_lod_interval_t3        = 0x0059E7F1; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4        = 0x0059E7F9; // 0.25 s HIGH
 
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x0060526A;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x00843DB0;
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // _RenderLightSabre(PblVector3* base, PblVector3* dir, uint tex, uint glowTex,
    //                   float length, float width, uint flags) — __cdecl, ILT thunk
@@ -1640,6 +1662,28 @@ namespace steam {
    constexpr uintptr_t ai_lod_interval_t3         = 0x007B28BC; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4         = 0x0066351E; // 0.25 s HIGH
 
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x005F7B5E;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x006CEA90;
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Derived 2026-08-13 against BattlefrontII.exe (Ghidra :8193).  See the
    // modtools block for what each one is; only the porting notes are here.
@@ -2288,6 +2332,28 @@ namespace gog {
    constexpr uintptr_t ai_lod_interval_t2             = 0x007B3828; // 2.00 s LOW
    constexpr uintptr_t ai_lod_interval_t3             = 0x007B382C; // 1.00 s NORMAL
    constexpr uintptr_t ai_lod_interval_t4             = 0x006645BE; // 0.25 s HIGH
+
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x005F8BFE;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x006CFB30;
 
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Ported from Steam with tools/port_gog.py, every one at score 1.00 on an

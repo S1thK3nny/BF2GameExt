@@ -29,6 +29,7 @@
 #include "util/sound_diag.hpp"
 #include "util/voice_limit.hpp"
 #include "ai/ai_decision_rate.hpp"
+#include "weapon/impact_sound_water_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
@@ -361,6 +362,7 @@ void lua_hooks_uninstall()
    // detaching it first would unpick the chain from the middle.
    sound_diag_uninstall();
    voice_limit_uninstall();
+   impact_sound_water_fix_uninstall();
    ai_decision_rate_uninstall();
    ai_update_budget_uninstall();
    memory_pool_heap_fix_uninstall();
