@@ -6,6 +6,29 @@ is shipped. For what the DLL actually does today, see
 
 ## Bugs
 
+**Tentacle fields are unclamped and overrun fixed arrays** - found 2026-08-21 while scoping the
+9-tentacle feature; independent of it and worth fixing on its own. Both tentacle properties on
+`EntitySoldierClass` are bitfields at `+0x8BC` that accept more than the arrays can hold, and
+NEITHER is clamped on any build:
+
+- `NumTentacles`, 3 bits (mask `0x380`, extracted `SHR 7 / AND 7`) accepts **0-7**, but `tPos`
+  and `oldPos` are dimensioned for **4**. Values 5-7 pass straight through and `DoTentacles`
+  writes past the arrays.
+- `BonesPerTentacle`, 4 bits (mask `0x3C00`) accepts **0-15**, but the per-frame bone array is
+  a fixed 4x5 on the STACK. Values >= 6 overrun it; on Steam `0x006558F0` it first destroys the
+  spill locals holding the live row pointer and loop counters, so the corruption compounds, then
+  reaches saved `EBP` and the return address. On modtools `0x0056F4E0` the array is at
+  `[ESP+0x20..0x70)` and `[ESP+0x6C]` is the saved return address.
+
+modtools at least WARNS (`"Too many tentacles!"` `0x00A40FE8` via `0x00541CD3 CMP EAX,4 / JBE`,
+`"Too many bones per tentacle!"` `0x00A412E4` via `0x0053FBF5 CMP EAX,5`) - but the `JBE` only
+skips the warning, it never clamps. **Retail compiled both checks out entirely**, strings and
+all, so a mod hits this with zero diagnostic.
+
+No stock ODF exceeds either limit, so it is latent - but it is a stack smash reachable from a
+plain ODF typo. A clamp at the store site is cheap and length-neutral (edit the `AND` mask) and
+should be done regardless of whether the 9-tentacle feature ever happens.
+
 **Unbounded hash probe - the best candidate for the GUI freeze** - `PblHashTableCode::_Find` is
 an open-addressing probe that walks backwards with wraparound and has NO iteration cap. Its only
 two exits are "key matches" and "slot is zero", so a table that is 100% full plus a lookup for an
