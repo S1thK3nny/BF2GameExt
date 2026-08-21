@@ -67,6 +67,43 @@ constexpr uintptr_t kSndUpdate  = 0x008827B0; // Snd::EngineBase::Update
 constexpr uintptr_t kUpdateGain = 0x008997C0; // Snd::DSBufferRenderer::UpdateGain
 constexpr uintptr_t kWriteData  = 0x0089A120; // Snd::DSBufferRenderer::WriteData
 
+// ---------------------------------------------------------------------------
+// Per-build addresses.  A build with any entry still zero does not install, so
+// this file's behaviour is unchanged for a build that has not been ported.
+//
+// The struct OFFSETS above (kMgrListHead, kVVNodeOffset, kVVVoice,
+// kVoiceToRenderer, kRendererGain*) are deliberately NOT in here yet: whether
+// they hold on retail is the open question, and the note at kVoiceManager
+// records that this exact class of offset was already wrong once.  They become
+// per-build the moment retail is shown to differ.
+//
+// Steam/GOG entries below were read from their own images during the VoiceLimit
+// port; smVoices on GOG, the GOG manager, and UpdateGain/WriteData on both are
+// still pending.
+// ---------------------------------------------------------------------------
+struct SndSites {
+   uintptr_t mixConfig;
+   uintptr_t hw3dFreeBuffers;
+   uintptr_t voiceManager;
+   uintptr_t voicesPtr;
+   uintptr_t sndUpdate;
+   uintptr_t updateGain;
+   uintptr_t writeData;
+};
+
+constexpr SndSites kSndModtools = {
+   kMixConfig, kHw3dFreeBuffers, kVoiceManager, kVoicesPtr,
+   kSndUpdate, kUpdateGain, kWriteData,
+};
+constexpr SndSites kSndSteam = {
+   0x009CFDAC, 0x009D7DF8, 0x007E3450, 0x009D8414, 0x00734590, 0, 0,
+};
+constexpr SndSites kSndGOG = {
+   0x009D124C, 0x009D9298, 0, 0, 0x00735680, 0, 0,
+};
+
+const SndSites* s_snd = nullptr;
+
 constexpr uint32_t kRendererGain     = 0x2C;  // the float UpdateGain multiplies by
 constexpr uint32_t kRendererFlags    = 0x18C; // bit 0x10 picks float gain over Q15
 constexpr uint32_t kRendererPktRead  = 0x168; // WriteData's cursor into the packet
@@ -474,19 +511,32 @@ void sound_diag_install(uintptr_t exe_base)
 {
    if (!g_soundDiagEnabled) return;
 
-   if (g_build != GameBuild::Modtools) {
-      diag_log("[SndDiag] install skipped: not the modtools build");
+   switch (g_build) {
+   case GameBuild::Modtools: s_snd = &kSndModtools; break;
+   case GameBuild::Steam:    s_snd = &kSndSteam;    break;
+   case GameBuild::GOG:      s_snd = &kSndGOG;      break;
+   default:
+      diag_log("[SndDiag] install skipped: unknown build");
+      return;
+   }
+   const SndSites& S = *s_snd;
+
+   // All or nothing.  Half of this diagnostic is worse than none of it: the
+   // voice walk would report confident nonsense against a null manager.
+   if (!S.mixConfig || !S.hw3dFreeBuffers || !S.voiceManager || !S.voicesPtr ||
+       !S.sndUpdate || !S.updateGain || !S.writeData) {
+      diag_log("[SndDiag] install skipped: this build is not ported yet");
       return;
    }
 
-   g_mixConfig       = reinterpret_cast<uint32_t*>(resolve(exe_base, kMixConfig));
-   g_hw3dFreeBuffers = reinterpret_cast<uint32_t*>(resolve(exe_base, kHw3dFreeBuffers));
-   g_voiceManager    = reinterpret_cast<uint8_t*>(resolve(exe_base, kVoiceManager));
-   g_voicesPtr       = reinterpret_cast<uint8_t**>(resolve(exe_base, kVoicesPtr));
+   g_mixConfig       = reinterpret_cast<uint32_t*>(resolve(exe_base, S.mixConfig));
+   g_hw3dFreeBuffers = reinterpret_cast<uint32_t*>(resolve(exe_base, S.hw3dFreeBuffers));
+   g_voiceManager    = reinterpret_cast<uint8_t*>(resolve(exe_base, S.voiceManager));
+   g_voicesPtr       = reinterpret_cast<uint8_t**>(resolve(exe_base, S.voicesPtr));
 
-   g_origSndUpdate  = reinterpret_cast<fn_snd_update_t>(resolve(exe_base, kSndUpdate));
-   g_origUpdateGain = reinterpret_cast<fn_update_gain_t>(resolve(exe_base, kUpdateGain));
-   g_origWriteData  = reinterpret_cast<fn_write_data_t>(resolve(exe_base, kWriteData));
+   g_origSndUpdate  = reinterpret_cast<fn_snd_update_t>(resolve(exe_base, S.sndUpdate));
+   g_origUpdateGain = reinterpret_cast<fn_update_gain_t>(resolve(exe_base, S.updateGain));
+   g_origWriteData  = reinterpret_cast<fn_write_data_t>(resolve(exe_base, S.writeData));
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

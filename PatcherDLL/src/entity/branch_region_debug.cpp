@@ -74,6 +74,37 @@ fn_FindByID_t     g_origFindByID     = nullptr;
 
 // PblList<BranchRegion>::_iCount, so every line reports how many branch regions
 // exist at that instant.
+// Per-build sites.  Retail is filled in as it is verified; a build whose entry
+// is still zero simply does not install, so this file's behaviour is unchanged
+// for any build that has not been ported yet.
+//
+// NOTE the three globals are DIFFERENT THINGS and are easy to conflate:
+//   listCount       modtools 0x00AD345C - the live branch-region count
+//   factoryListHead modtools 0x00E5F578 - RedRegionFactory::sList, the terminator
+//                                          node of the factory list
+//   (FindByID itself reads a third global, modtools 0x00AD3454, eight bytes below
+//    listCount.)
+// The factory walk also assumes  factory = node - 8  and  prefix = node - 4,
+// which are layout facts and need their own confirmation per build.
+struct DbgSites {
+   uintptr_t listCount;
+   uintptr_t factoryListHead;
+   uintptr_t defaultFactory;
+   uintptr_t find;
+   uintptr_t createRegion;
+   uintptr_t findByID;
+};
+
+constexpr DbgSites kDbgModtools = {
+   0x00AD345C, 0x00E5F578, 0x00E5F57C, 0x008224C0, 0x005E4C90, 0x005E4C20,
+};
+// TODO(retail): pending verification, see ROADMAP `## Debugging`.  CreateRegion
+// is already known to be 0x004D0F00 on both retail builds.
+constexpr DbgSites kDbgSteam = {0, 0, 0, 0, 0x004D0F00, 0};
+constexpr DbgSites kDbgGOG   = {0, 0, 0, 0, 0x004D0F00, 0};
+
+const DbgSites* s_dbg = nullptr;
+
 uint32_t* g_listCount = nullptr;
 
 uint32_t live_count()
@@ -94,6 +125,7 @@ bool interesting(const char* name)
 // only strlen(prefix) bytes -- so a shorter prefix registered earlier wins, and
 // an EMPTY (non-null) prefix matches every region name in the world.
 uint8_t* g_factoryListHead = nullptr; // &sList (the terminator node)
+void*    g_defaultFactory  = nullptr;
 
 void dump_factory_list()
 {
@@ -111,7 +143,7 @@ void dump_factory_list()
       node = *(uint8_t**)node;
    }
    dbg_log("[BranchDbg] --- end of factory list (default factory = %p) ---",
-           (void*)(uintptr_t)0x00E5F57C);
+           g_defaultFactory);
 }
 
 void* __cdecl hooked_find(const char* name)
@@ -157,17 +189,32 @@ void branch_region_debug_install(uintptr_t exe_base)
 {
    if (!g_branchRegionDebugEnabled) return;
 
-   if (g_build != GameBuild::Modtools) {
-      dbg_log("[BranchDbg] install skipped: not the modtools build");
+   switch (g_build) {
+   case GameBuild::Modtools: s_dbg = &kDbgModtools; break;
+   case GameBuild::Steam:    s_dbg = &kDbgSteam;    break;
+   case GameBuild::GOG:      s_dbg = &kDbgGOG;      break;
+   default:
+      dbg_log("[BranchDbg] install skipped: unknown build");
+      return;
+   }
+   const DbgSites& D = *s_dbg;
+
+   // All or nothing.  A partially-mapped build would hook some of the chain and
+   // walk a null list for the rest, which reads as "the feature is broken"
+   // rather than "the feature is not ported here".
+   if (!D.listCount || !D.factoryListHead || !D.defaultFactory ||
+       !D.find || !D.createRegion || !D.findByID) {
+      dbg_log("[BranchDbg] install skipped: this build is not ported yet");
       return;
    }
 
-   g_listCount       = (uint32_t*)resolve(exe_base, 0x00AD345C);
-   g_factoryListHead = (uint8_t*)resolve(exe_base, 0x00E5F578); // RedRegionFactory::sList
+   g_listCount       = (uint32_t*)resolve(exe_base, D.listCount);
+   g_factoryListHead = (uint8_t*)resolve(exe_base, D.factoryListHead); // RedRegionFactory::sList
+   g_defaultFactory  = resolve(exe_base, D.defaultFactory);
 
-   g_origFind         = (fn_Find_t)resolve(exe_base, 0x008224C0);
-   g_origCreateRegion = (fn_CreateRegion_t)resolve(exe_base, 0x005E4C90);
-   g_origFindByID     = (fn_FindByID_t)resolve(exe_base, 0x005E4C20);
+   g_origFind         = (fn_Find_t)resolve(exe_base, D.find);
+   g_origCreateRegion = (fn_CreateRegion_t)resolve(exe_base, D.createRegion);
+   g_origFindByID     = (fn_FindByID_t)resolve(exe_base, D.findByID);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
