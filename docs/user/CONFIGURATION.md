@@ -38,6 +38,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `SoldierHeightCeiling` | `0` | Stop killing soldiers that go above world height 1000. Stock BF2 kills any soldier whose Y passes 1000 - including on spawn - which caps how tall a map can be. Flyers were never affected: the check exists only in the soldier update. The floor at -1000, the fall-speed kill and the +/-2500 horizontal walls are left alone. Cost: a soldier that genuinely escapes upward is never cleaned up and keeps ticking. Set 1 to enable |
 | `HeapExtension` | `1` | Extend RedMemory heap size |
 | `SoundLayerLimit` | `1` | Raise SoundParameterized layer limit |
 | `DLCMissionLimit` | `1` | Raise DLC / addon mission limit |

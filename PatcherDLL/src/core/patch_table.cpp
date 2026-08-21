@@ -895,6 +895,67 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "Soldier Height Ceiling Removal",
+               .patches =
+                  {
+                     // EntitySoldier::Update runs an inline world-bounds block; its last
+                     // test is `pos.Y > 1000.0f -> "Unit flew over world" -> Kill()`.
+                     // The constant is 1000.0f, NOT 1024 -- verified at 0x00A331B0
+                     // (`00 00 7A 44`).  That float is a shared .rdata pool entry with 33
+                     // other readers, so it must NOT be edited; the branch goes instead.
+                     //
+                     //   00546679  D8 1D B031A300  FCOMP dword [0x00A331B0]
+                     //   0054667F  DF E0           FNSTSW AX
+                     //   00546681  F6 C4 41        TEST AH,0x41
+                     //   00546684  75 48           JNZ  -> taken when Y <= 1000, skips Kill
+                     //
+                     // JNZ -> JMP makes the skip unconditional.  The floor (-1000), the
+                     // fall-speed kill (-60) and the horizontal walls (+/-2500) are left
+                     // alone -- only the ceiling goes.
+                     patch{0x00546684, 0x75, 0xEB, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "Soldier Height Ceiling Removal",
+               .patches =
+                  {
+                     // Retail compiles the same block with the cold path hoisted out of
+                     // line, so the ceiling test is `JA` TO the Kill rather than a `JNZ`
+                     // around it.  NOP the whole 6-byte branch.
+                     //
+                     //   004E96D8  0F 2F 1D 40337B00  COMISS XMM3,[0x007B3340]  ; 1000.0f
+                     //   004E96DF  0F 87 1C390000     JA -> out-of-line Kill block
+                     //
+                     // GOG.  Constant verified `00 00 7A 44` at 0x007B3340.
+                     patch{0x004E96DF, 0x0F, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E0, 0x87, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E1, 0x1C, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E2, 0x39, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E3, 0x00, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E4, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "Soldier Height Ceiling Removal",
+               .patches =
+                  {
+                     // Steam.  Byte-identical to GOG apart from the constant's address.
+                     // Constant verified `00 00 7A 44` at 0x007B23C8.
+                     //
+                     //   004E96D8  0F 2F 1D C8237B00  COMISS XMM3,[0x007B23C8]  ; 1000.0f
+                     //   004E96DF  0F 87 1C390000     JA -> out-of-line Kill block
+                     patch{0x004E96DF, 0x0F, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E0, 0x87, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E1, 0x1C, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E2, 0x39, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E3, 0x00, 0x90, {.values_are_8bit = true}},
+                     patch{0x004E96E4, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
          },
    },
 
