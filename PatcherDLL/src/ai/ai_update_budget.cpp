@@ -27,18 +27,41 @@ namespace {
 constexpr int kMinBudget = 10;
 constexpr int kMaxBudget = 127;
 
-// ControllerManager::Update itself, and the queue it drains.  0x00B8EE70 holds a
+// ControllerManager::Update itself, and the queue it drains.  The global holds a
 // POINTER to the list object; the object's +4 is the first node, each node's +4
 // is the next, and +0xC is the UnitController payload.  The list doubles as its
 // own tail sentinel -- the terminator's payload slot is null, which is the exit
-// the engine's own loop tests for (0x005999F6 TEST ESI,ESI).
-constexpr uintptr_t kControllerMgrUpdate = 0x005997A0;
-constexpr uintptr_t kUnitControllerList  = 0x00B8EE70;
+// the engine's own loop tests for (modtools 0x005999F6 TEST ESI,ESI).
+//
+// The node offsets, the next-update-time key at +0x1E0 and the LOD tier at
+// +0x3AC are IDENTICAL on all three builds -- verified from the live encodings,
+// not assumed.
+//
+// UpdateHighLevel is __fastcall(this) on every build, and on every build it is
+// the function that tail-calls GetUpdateRate; that is how the retail ones were
+// identified rather than by any byte pattern.  Note the retail loop calls it
+// FIRST and modtools calls it second, so call ORDER is not an identifier here.
+struct DiagSites {
+   uintptr_t mgrUpdate;
+   uintptr_t list;
+   uintptr_t updateHighLevel;
+   bool      mgrUpdateFloatInXmm0;
+};
+
+// THE CONVENTION DIFFERS AND IT IS NOT OPTIONAL.  modtools' Update is a plain
+// __cdecl taking its float on the stack.  Both retail builds were compiled with
+// whole-program optimisation, which gave this internal function a private
+// convention: it reads the delta straight out of XMM0 and never touches
+// [EBP+8].  Hooking it with the modtools prototype would hand the counter
+// garbage and, worse, let the compiler clobber XMM0 before the original ever
+// sees it.  Retail therefore goes through a naked shim that preserves XMM0 and
+// tail-jumps to the trampoline.  See hooked_mgr_update_xmm0 below.
+constexpr DiagSites kDiagModtools = {0x005997A0, 0x00B8EE70, 0x005A0370, false};
+constexpr DiagSites kDiagSteam    = {0x00486370, 0x01E30934, 0x00663970, true};
+constexpr DiagSites kDiagGOG      = {0x00486370, 0x01E31DCC, 0x00664A10, true};
+
 constexpr uint32_t  kNodeNext            = 0x04;
 constexpr uint32_t  kNodePayload         = 0x0C;
-
-// UnitController::UpdateHighLevel -- the thing the budget actually rations.
-constexpr uintptr_t kUpdateHighLevel = 0x005A0370;
 
 constexpr uint32_t kLodTier = 0x3AC; // UnitController's LOD tier, 0..4
 
@@ -57,7 +80,8 @@ uint32_t s_budgetWidth = 0;
 
 // Signatures READ from the images, not inferred:
 //   0x005997A0  ControllerManager::Update  __cdecl (float dt)   -- a free
-//               function taking one stack argument, NOT a method.
+//               function taking one stack argument, NOT a method.  MODTOOLS
+//               ONLY: retail passes that float in XMM0 instead (see DiagSites).
 //   0x005A0370  UnitController::UpdateHighLevel  __thiscall (this)  -- ECX only,
 //               NO stack arguments, so it RETs 0.
 // Getting the second wrong is not survivable: declaring a stack argument it does
@@ -70,6 +94,8 @@ fn_mgr_update_t g_origMgrUpdate = nullptr;
 fn_high_level_t g_origHighLevel = nullptr;
 
 uint8_t** g_listSlot = nullptr;
+
+const DiagSites* s_diag = nullptr;
 
 void diag_log(const char* fmt, ...)
 {
@@ -148,6 +174,52 @@ void __fastcall hooked_high_level(void* self, void* edx)
    g_origHighLevel(self, edx);
 }
 
+// The per-turn bookkeeping, with no argument of its own so it can be shared by
+// both the modtools hook and the retail shim.  Split out precisely so the shim
+// has something plain to call while XMM0 is parked on the stack.
+void count_turn_pre()
+{
+   InterlockedIncrement(&s_turns);
+}
+
+void count_turn_post()
+{
+   const LONG n = s_turns;
+
+   // Sampling rather than every turn: the walk is O(controllers) and this runs
+   // inside the simulation tick.
+   if ((n % 120) == 0) sample_population();
+
+   if ((n == 300 || (n % 1800) == 0) && s_reports < 40) {
+      ++s_reports;
+      report();
+   }
+}
+
+// Retail only.  ControllerManager::Update takes its delta in XMM0, so the hook
+// cannot be an ordinary C function: the compiler is free to use XMM registers
+// for anything, and the original would then be handed a corrupted delta.  This
+// saves XMM0 across the counting work and TAIL-JUMPS to the trampoline, so the
+// original sees the exact stack and register state the caller set up.
+__declspec(naked) void hooked_mgr_update_xmm0()
+{
+   // Only XMM0 is an input: the original writes ECX, EDX and EAX before ever
+   // reading them (verified at Steam 0x0048638B), so clobbering the caller-saved
+   // integer registers across these calls is safe. The stack is left exactly as
+   // the caller built it -- retail's Update takes NO stack argument.
+   __asm {
+      sub    esp, 16
+      movups [esp], xmm0          // park the delta
+      call   count_turn_pre
+      movups xmm0, [esp]          // restore before the original runs
+      add    esp, 16
+      mov    eax, g_origMgrUpdate // the trampoline, which Detours rewrites
+      call   eax
+      call   count_turn_post
+      ret
+   }
+}
+
 void __cdecl hooked_mgr_update(float dt)
 {
    const LONG n = InterlockedIncrement(&s_turns);
@@ -204,18 +276,31 @@ void ai_update_budget_install(uintptr_t exe_base)
    }
 
    // --- the measurement ----------------------------------------------------
-   // Hooks ControllerManager::Update and UpdateHighLevel, whose addresses are
-   // only mapped for modtools.
    if (!g_aiUpdateDiag) return;
-   if (g_build != GameBuild::Modtools) return;
 
-   g_listSlot      = reinterpret_cast<uint8_t**>(resolve(exe_base, kUnitControllerList));
-   g_origMgrUpdate = reinterpret_cast<fn_mgr_update_t>(resolve(exe_base, kControllerMgrUpdate));
-   g_origHighLevel = reinterpret_cast<fn_high_level_t>(resolve(exe_base, kUpdateHighLevel));
+   switch (g_build) {
+   case GameBuild::Modtools: s_diag = &kDiagModtools; break;
+   case GameBuild::Steam:    s_diag = &kDiagSteam;    break;
+   case GameBuild::GOG:      s_diag = &kDiagGOG;      break;
+   default:
+      diag_log("[AIBudget] diagnostic: unknown build -- not installed");
+      return;
+   }
+   const DiagSites& D = *s_diag;
+
+   g_listSlot      = reinterpret_cast<uint8_t**>(resolve(exe_base, D.list));
+   g_origMgrUpdate = reinterpret_cast<fn_mgr_update_t>(resolve(exe_base, D.mgrUpdate));
+   g_origHighLevel = reinterpret_cast<fn_high_level_t>(resolve(exe_base, D.updateHighLevel));
+
+   // Retail's Update takes its delta in XMM0, so it gets the naked shim; only
+   // modtools may use the plain C hook.
+   PVOID const mgrDetour = D.mgrUpdateFloatInXmm0
+                              ? reinterpret_cast<PVOID>(&hooked_mgr_update_xmm0)
+                              : reinterpret_cast<PVOID>(&hooked_mgr_update);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   const LONG a1 = DetourAttach(reinterpret_cast<PVOID*>(&g_origMgrUpdate), hooked_mgr_update);
+   const LONG a1 = DetourAttach(reinterpret_cast<PVOID*>(&g_origMgrUpdate), mgrDetour);
    const LONG a2 = DetourAttach(reinterpret_cast<PVOID*>(&g_origHighLevel), hooked_high_level);
    const LONG rc = DetourTransactionCommit();
 
@@ -233,7 +318,10 @@ void ai_update_budget_uninstall()
 
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
-      DetourDetach(reinterpret_cast<PVOID*>(&g_origMgrUpdate), hooked_mgr_update);
+      DetourDetach(reinterpret_cast<PVOID*>(&g_origMgrUpdate),
+                   s_diag && s_diag->mgrUpdateFloatInXmm0
+                      ? reinterpret_cast<PVOID>(&hooked_mgr_update_xmm0)
+                      : reinterpret_cast<PVOID>(&hooked_mgr_update));
       DetourDetach(reinterpret_cast<PVOID*>(&g_origHighLevel), hooked_high_level);
       DetourTransactionCommit();
       g_origMgrUpdate = nullptr;
