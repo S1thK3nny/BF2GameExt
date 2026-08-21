@@ -289,108 +289,79 @@ offsets differ.
 
 ## First person
 
-**True first person** - TRIED AND SHELVED 2026-08-21. Put the camera on the player's own
-head and render the REAL third-person body, so every existing third-person animation plays,
-including lightsaber combo swings, with zero new assets.
+**SHELVED 2026-08-21, both approaches, by the map author's judgement after testing.**
+Neither `FirstPersonMelee` nor `TrueFirstPersonBody` ships any more - both patch sets and
+both INI keys were removed. The verdict: BF2's first person is built around a floating arms
+model, the camera is a static eye offset with no head tracking, and it reads as janky for a
+saber hero no matter which route you take. Fixing it properly means rewriting the first
+person system, not patching it.
 
-Shipped as `[Features] TrueFirstPersonBody` and tested. **It does not work as built** and the
-toggle is marked broken; leave it at 0. Symptom: the full third-person body renders and the
-camera stays in third person, so saber heroes went back to third person entirely.
+Everything below is preserved so a future attempt does not start from zero. All addresses
+were verified from bytes.
 
-WHY, and this is the useful part. The patch neutered the tail call in
-`EntitySoldier::RenderTrackable` (modtools `0x0052A3A6`, 8 bytes -> `MOV AL,1` + NOPs):
+### What worked
 
-```c
-bool EntitySoldier::RenderTrackable(...) {
-   if (alive && !flagged) {
-      if (aiming && ZoomFirstPerson(w) && myViewport) return false;  // scope hide
-      if (IsRtti(PassengerSlot))                      return false;  // passenger hide
-      return Trackable::RenderTrackable(this, param_2);              // <- skipped
-   }
-   return true;
-}
-```
+Saber heroes CAN be put in first person, and the blade CAN be made to draw:
+- `EntitySoldier::IsForcedThirdPerson` returns true whenever either weapon slot answers
+  `IsMelee`, which is what pins them to third person. modtools `0x0052B670`, Steam and GOG
+  both `0x004DE390`, all four bytes `56 57 8B F9` -> `32 C0 C3 90`. It is `__thiscall` with
+  no stack args, so a bare RET is correct. Global side effect: un-forces third person for
+  every melee unit, Wookiees and Tuskens included.
+- `FirstPersonRenderable::RenderSoldier` ORs only `0x00080001` into the render flags, but
+  `WeaponMelee::Render` tests `0x4000000` before flushing the blade's particle cache.
+  Top byte of that imm32: modtools `0x004AA456`, Steam and GOG `0x005204DD`, `0x00` -> `0x04`.
+  Without it the hilt draws and the blade does not.
+- Needs the cockpit camera enabled in player options, or nothing looks different.
+- A hero also needs a `FirstPerson` ODF line AND its `FPM\<side>\<lvl>.lvl` actually built.
+  Most stock saber heroes have no `FirstPerson` line at all - only the blaster heroes do,
+  plus Luke Jedi. A model present in memory via another req is NOT enough; the FP path loads
+  `FPM\<token>.lvl` specifically.
 
-`Trackable::RenderTrackable` is NOT a pure cull predicate - it is one of the consumers of
-`IsFirstPersonView` and participates in driving the first person path. Skipping it removes
-first person rather than merely un-hiding the body.
+### Why true first person failed
 
-NEXT ATTEMPT should do the opposite: let the call run and patch the decision INSIDE
+`TrueFirstPersonBody` neutered the tail call in `EntitySoldier::RenderTrackable`
+(modtools `0x0052A3A6`, 8 bytes -> `MOV AL,1` + NOPs). That call is NOT a pure cull
+predicate: `Trackable::RenderTrackable` consumes `IsFirstPersonView` and participates in
+driving the first person path, so skipping it removed first person rather than un-hiding the
+body. Result was a full third-person body with a third-person camera.
+
+The inverted approach, untried: let the call run and patch the decision INSIDE
 `Trackable::RenderTrackable` - modtools `0x004BAE03` `74 15` -> `EB 15`, Steam `0x006589E4`
-`74 16` -> `EB 16`, GOG `0x00659A84` `74 16` -> `EB 16`, Phantom `0x0077C061`. Known cost:
-it un-hides vehicle hulls in cockpit first person, which now looks like the cheaper price.
+and GOG `0x00659A84` `74 16` -> `EB 16`, Phantom `0x0077C061`. Cost: un-hides vehicle hulls
+in cockpit first person.
 
-Worth keeping from the scoping work, all verified:
-- **The camera does not need moving.** It is already a static per-stance eye offset
-  (`sEyePointOffset[0] = 0.06, 1.70, 0.00`) transformed by the entity root - already at eye
-  height and already free of animation shake. The head-bone mounting I expected to need does
-  not exist as a problem.
-- **The body is already submitted every frame at alpha 0**, not skipped. That is why the
+### Facts worth keeping
+
+- The FP camera is a static per-stance eye offset, `sEyePointOffset[0] = 0.06, 1.70, 0.00`,
+  transformed by the entity root. Already at eye height, already free of animation shake -
+  and, per testing, this is exactly why it looks wrong: there is no head motion at all.
+- The body is already submitted every frame at alpha 0 rather than skipped, which is why the
   player's shadow has always been correct.
-- **Aim is already the camera ray** in first person
-  (`Aimer::SetSoldierInfo(firePos, mEyeDir)`), so shots go where the crosshair is even when
-  the body animation points the weapon elsewhere.
-- **The near plane is 0.7 m** (`RedCamera::SetPerspective(0.7, 120.0)` from
+- Aim is already the camera ray (`Aimer::SetSoldierInfo(firePos, mEyeDir)`), so shots go
+  where the crosshair is regardless of where the body animation points the weapon.
+- Camera near plane is 0.7 m (`RedCamera::SetPerspective(0.7, 120.0)` from
   `CameraManager::SetNumCameras`; modtools imm32 `0x004A110B`, Steam `0x0044EC55`, GOG
-  `0x0044EC35`). At 0.7 it hides head and torso for free. Pulling it to 0.1 to stop the arms
-  being sliced is what EXPOSES the head - and head-hiding is unresolved on Steam/GOG because
-  `RedModel::Render` was never located on retail.
-- Trap recorded: the one-byte alternative on modtools is at `0x00535EAA`, NOT `0x00535EA8`.
-  `0x00535EA8` is `84 C0`; writing `EB` there yields `EB C0`, a backward jump, and an
-  instant crash.
+  `0x0044EC35`). It hides head and torso for free; pulling it to 0.1 to stop the arms being
+  sliced is what exposes the head. Head-hiding was never resolved on Steam or GOG because
+  `RedModel::Render` could not be located on retail.
+- TRAP: the one-byte alternative on modtools is at `0x00535EAA`, NOT `0x00535EA8`.
+  `0x00535EA8` is `84 C0`; writing `EB` there gives `EB C0`, a backward jump, instant crash.
 
-Also note the animation looked wrong even where the body did render, so a second problem
-likely waits behind the camera one.
+### Dedicated first person animation, if this is ever revisited
 
-**Dedicated first person (deferred, not abandoned)** - The alternative: keep the separate
-FP arms model and author first-person animations per swing. Deferred in favour of true FP,
-but worth keeping because it gives finer control over how the weapon reads on screen.
+The animation table is NOT the obstacle, contrary to an earlier assessment here. Every saber
+attack routes to one slot, `mAnim[24]` = TOOL(2)*11 + SHOOT1(2), re-read with `force=true` on
+every new attack state. The per-swing key is one byte, `WeaponMelee+0x1AB` (`m_uiAnimIndex`,
+confirmed at `WeaponMelee_data+0x6B` with the `_data` base at `0x140`), written by
+`EnterState` from `Combo::State+0x28` BEFORE `mState=FIRE`. Deflects overwrite the same byte,
+so they come free. The project already has the injection point: `FirstPersonAnimationBank` as
+a custom ODF property, and a per-frame save/overwrite/restore of `mAnim[48]` around
+`FirstPersonRenderable::UpdateSoldier`.
 
-What is already in the repo for it: a custom ODF property `FirstPersonAnimationBank` lets
-a soldier class name its own FP bank, and `FirstPersonRenderable::UpdateSoldier` is already
-hooked with a per-frame save/overwrite/restore of the global `mAnim[48]`. That is the
-injection point - anything expressible as "put a different ZephyrAnim* in this slot this
-frame" is nearly free.
-
-**The animation table is NOT the wall - an earlier assessment here was wrong.** Mapped
-2026-08-21 and verified: every saber attack routes the FP machine to exactly one slot,
-`mAnim[24]` = TOOL(2)*11 + SHOOT1(2), and it re-reads that slot with `force=true` on every
-new attack state. So "which swing is this" is expressible as "which `ZephyrAnim*` is in
-slot 24 during this hook call" - exactly the shape the existing save/overwrite/restore hook
-already implements. No second hook, no extra table row, no bypassing the state machine.
-
-The per-swing key is a single byte: `WeaponMelee+0x1AB` (`m_uiAnimIndex`, confirmed at
-`WeaponMelee_data+0x6B` with the `_data` base at `0x140`). `EnterState` writes it from
-`Combo::State+0x28` BEFORE setting `mState=FIRE`, so it already names the swing that is
-starting when the hook runs. **Deflects come free** - they overwrite the same byte.
-
-Retrigger mechanism: `WeaponMelee::EnterState` -> `EnterFire` -> `Weapon::SignalFire` sets
-the `Weapon+0xAC` bit-1 latch that `UpdateSoldier` consumes and clears in the same frame
-(modtools `004a9dcc AND EAX,0xfffffffd` / `004a9dd1 MOV [EDI+0xac],EAX`).
-
-Structural limit that remains: a combo state with no Attack (recovery, `mState=OVERHEAT`)
-sets no latch, so the FP hands cannot be redirected mid-recovery - they finish the current
-swing and fall through to IDLE/RUN.
-
-BUILD-DIVERGENCE TRAPS, both the exact class that has caused crashes here before:
-- `_GetWeaponClassFromWeapon` is **__fastcall (weapon in ECX) on modtools** but **__cdecl
-  on Phantom**. Do not share the signature across builds.
-- `MELEE_BASE` is **0x86 on modtools**, 0x87 on Phantom; "none" sentinel 0xA4 vs 0xA5.
-  Never hardcode Phantom's. Call `IsWeaponMeleeAnimIndex` (modtools `0x00588A30`) and
-  `GetAnimFromAnimIndex` (`0x00588AD0`) rather than inlining the constant.
-
-SAFETY RULES from the mapping: never write NULL into an `mAnim[]` slot -
-`ZephyrPoseDyn<32>::Update` null-derefs `anim+8`. Gate on `m_u16NumJoints <= 32`. Do not
-poke `FPR+0x1534` directly; `ZephyrAnimInst<32>::SetAnim` rebuilds joint index tables.
-A shortcut via `EntitySoldier+0xA00` was offered and REJECTED - it is a render-pass latch
-read in the sim pass, never cleared on idle, so it reports the last swing forever.
-
-
-**More first person states** - Actions that snap to third person or have no first
-person animation - rolling, sprinting, melee, entering vehicles. Wanted: an inventory
-of which states are gated and where, so the cheap ones can be separated from the ones
-needing missing animation assets. Related to the saber item above, since both come
-down to what the view model is allowed to do.
+Build-divergence traps for that work: `_GetWeaponClassFromWeapon` is `__fastcall` (weapon in
+ECX) on modtools but `__cdecl` on Phantom; `MELEE_BASE` is `0x86` on modtools and `0x87` on
+Phantom. Never write NULL into an `mAnim[]` slot - `ZephyrPoseDyn<32>::Update` null-derefs
+`anim+8`.
 
 ## Controller
 
