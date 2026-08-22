@@ -3,16 +3,17 @@
 #include <stdint.h>
 
 // =============================================================================
-// Grappling Hook Landing Fix
+// Grappling Hook
 //
-// The engine's OrdnanceGrapplingHook::Update removes the soldier's collision
-// body on arrival and replaces it with a soft body, leaving the soldier stuck.
-// This hook wraps Update and restores normal collision after a successful
-// grapple arrival.
+// Re-enables the cut grappling hook by repairing the engine's own
+// implementation rather than replacing it.  Three defects are fixed:
+//   - the cable renders untextured,
+//   - the pull animation is driven with an invalid animation id,
+//   - the soldier can be left with no collision body.
 //
-// Call grapple_fix_install()   from lua_hooks_install().
-// Call grapple_fix_uninstall() from lua_hooks_uninstall().
+// Modtools only.  Call grapple_install() from lua_hooks_install() and
+// grapple_uninstall() from lua_hooks_uninstall().
 // =============================================================================
 
-void grapple_fix_install(uintptr_t exe_base);
-void grapple_fix_uninstall();
+void grapple_install(uintptr_t exe_base);
+void grapple_uninstall();

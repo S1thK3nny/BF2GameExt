@@ -61,6 +61,12 @@ namespace modtools {
    // inherits WeaponCannon::Fire (0x626490) — so the same hook applies unchanged.
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0xA53B58;
 
+   // And on WeaponGrapplingHook (vtable 0xA53318), another WeaponCannon subclass
+   // with its own vtable.  It overrides neither OverrideAimer nor Render, so both
+   // slots hold the same vanilla thunks the cannon's do, and the same hook applies
+   // -- which is what puts the hook itself on the barrel hardpoint.
+   constexpr uintptr_t weapon_grapple_vftable_override_aimer = 0xA53388;
+
    // Weapon::OverrideAimer implementation and thunk
    constexpr uintptr_t weapon_override_aimer_impl  = 0x61CEE0;
    constexpr uintptr_t weapon_override_aimer_thunk = 0x4068DE;
@@ -71,6 +77,7 @@ namespace modtools {
    // thunk.  See docs/RE/barrel-fire-origin.md ("Reflection regions").
    constexpr uintptr_t weapon_cannon_vftable_render   = 0xA524F4;
    constexpr uintptr_t weapon_launcher_vftable_render = 0xA53B74;
+   constexpr uintptr_t weapon_grapple_vftable_render  = 0xA533A4;
    constexpr uintptr_t weapon_render_impl             = 0x61DFA0;
    constexpr uintptr_t weapon_render_thunk            = 0x4072BB;
 
@@ -552,31 +559,61 @@ namespace modtools {
 
    // ---- Physics / Body Management (extended) ---------------------------------
 
-   constexpr uintptr_t remove_body                 = 0x0042ac60;
-   constexpr uintptr_t add_item_body               = 0x0042dd00;
-   constexpr uintptr_t vec_scale                   = 0x004294b0;
+   // CollisionObject methods, __fastcall(CollisionObject* = entity + 0x0C).
+   constexpr uintptr_t coll_is_in_list             = 0x00436c90;
+   constexpr uintptr_t coll_add_soft               = 0x00435de0;
 
    // ---- Weapon / Grappling Hook -----------------------------------------------
+   //
+   // The class is OrdnanceGrapplingHook (356 bytes; Build allocates 0x164).
+   // Do NOT confuse it with the 316-byte ordnance class at 0x0060FAB0 /
+   // 0x0060FB50 / vtable 0x00A50E98 -- that is a different class entirely.
 
    constexpr uintptr_t grapple_update              = 0x0060f380;
    constexpr uintptr_t grapple_dtor                = 0x0060ef90;
-   constexpr uintptr_t grapple_check_fire          = 0x0062c760;
-   constexpr uintptr_t grapple_ord_render          = 0x0060fb80;
-   constexpr uintptr_t grapple_set_property        = 0x0060EC60;
-   constexpr uintptr_t grapple_set_visibility      = 0x005297b0;
-   constexpr uintptr_t grapple_rtti_hash           = 0x00b7e098;
-   constexpr uintptr_t grapple_rso_vtable          = 0x00A50E98;
+   constexpr uintptr_t grapple_move_soldier        = 0x0060e9f0;
+   constexpr uintptr_t grapple_hook_failure        = 0x0060e950;  // starts the retraction
+   constexpr uintptr_t grapple_set_property        = 0x0060ec60;  // OrdnanceGrapplingHookClass
+   constexpr uintptr_t grapple_check_fire          = 0x0062c760;  // WeaponGrapplingHook::CheckFire
+
+   // The pair of CMPs in OrdnanceGrapplingHook::Collide that decide which surfaces
+   // the hook may stick to: COLL_STATIC (0x10) and COLL_RIGID (8), else HookFailure.
+   constexpr uintptr_t grapple_collide_type_test   = 0x0060f10d;
+   constexpr uintptr_t grapple_rtti_hash           = 0x00b7e098;  // EntitySoldier RTTI hash
+
+   // OrdnanceGrapplingHook::PlatformInit / PlatformCleanup: build and release the
+   // static cable shader.  Init reads sTextureHash, so changing that and running
+   // the pair swaps the cable's texture.
+   constexpr uintptr_t grapple_platform_init       = 0x006d0910;
+   constexpr uintptr_t grapple_platform_cleanup    = 0x006d0970;
+
+
+   // OrdnanceGrapplingHook::Render, displayable vtable 0x00A50D40 slot 19.  Draws
+   // the cable and nothing else, so the hook head is never on screen.
+   constexpr uintptr_t grapple_render              = 0x006d14d0;
+
+   // OrdnanceBullet::Render, the base every bullet ordnance inherits.  Draws
+   // mModel (OrdnanceBulletClass+0x10C) on a matrix built from the ordnance
+   // velocity, so the model points where it is travelling.  The grapple's own
+   // slot 19 is the cable renderer above and never chains to this, which is why it
+   // needs calling by hand.
+   //
+   // NOT 0x0060FB80: that is OrdnanceGrenade::Render, which draws the model on an
+   // identity matrix and gates on OrdnanceGrenadeClass::mAlignVertical at +0x1A5 --
+   // past the end of the 368-byte OrdnanceGrapplingHookClass.
+   constexpr uintptr_t ordnance_bullet_render      = 0x00609950;
+
+   // Engine cable renderer.  Render() (displayable vtable 0x00A50D40 slot 19 ->
+   // 0x006D14D0) draws the cable through sShader, which PlatformInit builds from
+   // sTextureHash.  Shipping builds dropped the line that fills sTextureHash in,
+   // so it stays 0 and the cable draws untextured.
+   constexpr uintptr_t grapple_cable_texture_hash  = 0x00b91a38;  // sTextureHash
 
    // ---- Weapon / Shield ---------------------------------------------------------
 
    constexpr uintptr_t weapon_update                = 0x0061D850;  // Weapon::Update
    constexpr uintptr_t weapon_shield_update         = 0x0063F360;  // WeaponShield::Update
    constexpr uintptr_t soldier_enter_controllable   = 0x005448D0;  // EntitySoldier::EnterControllable
-
-   // ---- Spline / Cable Rendering ----------------------------------------------
-
-   constexpr uintptr_t spline_build                = 0x0083e720;
-   constexpr uintptr_t cable_render                = 0x006d2370;
 
    // ---- Debug / Visualization --------------------------------------------------
 

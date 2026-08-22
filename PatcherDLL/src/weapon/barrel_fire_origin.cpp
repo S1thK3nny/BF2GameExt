@@ -19,17 +19,25 @@
 // one of them — there is no WeaponLauncher::Fire at all — so it reaches
 // WeaponCannon::Fire and the same aimer this hook writes, no logic changes needed.
 //
+// WeaponGrapplingHook (ClassLabel "grapplinghookweapon") is a third such subclass
+// and gets the same treatment on modtools, where the grappling hook is enabled.
+// It overrides only CheckFire, SetOrdnance and the net pair, so both slots hold
+// the same vanilla thunks — and because OrdnanceGrapplingHook takes its start
+// point from the aimer this hook relocates, the hook itself leaves the barrel
+// rather than the soldier's head.
+//
 // =============================================================================
 
 bool g_useBarrelFireOrigin = true;
 
 // Patched vtable slots + the originals they displaced (file-local; nothing else
 // touches them).  Two slots per weapon class — OverrideAimer (0x70) and Render
-// (0x8C) — on WeaponCannon and WeaponLauncher, the latter being a WeaponCannon
-// subclass with its own vtable that overrides seven slots.  Fire is not among
-// them, so it reaches WeaponCannon::Fire and the same aimer the hook writes, and
-// neither class overrides Render, so both Render slots hold the same function.
-static const int kMaxPatchedSlots = 4;
+// (0x8C) — on WeaponCannon, WeaponLauncher and (modtools only)
+// WeaponGrapplingHook, the latter two being WeaponCannon subclasses with their own
+// vtables.  Neither overrides Fire, so both reach WeaponCannon::Fire and the same
+// aimer the hook writes, and none overrides Render, so every Render slot holds the
+// same function.
+static const int kMaxPatchedSlots = 6;
 static void** s_slot[kMaxPatchedSlots] = {};
 static void*  s_orig[kMaxPatchedSlots] = {};
 static int    s_slotCount = 0;
@@ -452,6 +460,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
 {
    uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, scopeVA;
    uintptr_t cannonRenderVA, launcherRenderVA, renderImplVA, renderThunkVA;
+   uintptr_t grappleVA = 0, grappleRenderVA = 0;
    bool rayHitIsRelease;
    switch (g_build) {
    case GameBuild::Modtools:
@@ -467,6 +476,9 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       rayHitIsRelease = false;   // plain __cdecl, result in ST(0)
       scopeVA = game_addrs::modtools::scope_display_instance;
       s_misAimingOff = 0x160;
+      // Grappling hook is modtools-only; the other builds have no address for it.
+      grappleVA       = game_addrs::modtools::weapon_grapple_vftable_override_aimer;
+      grappleRenderVA = game_addrs::modtools::weapon_grapple_vftable_render;
       break;
 
    case GameBuild::Steam:
@@ -515,6 +527,9 @@ void barrel_fire_origin_install(uintptr_t exe_base)
                      (void*)&hooked_cannon_OverrideAimer);
    patch_vtable_slot(exe_base, launcherVA, aimer_impl, aimer_thunk,
                      (void*)&hooked_cannon_OverrideAimer);
+   if (grappleVA)
+      patch_vtable_slot(exe_base, grappleVA, aimer_impl, aimer_thunk,
+                        (void*)&hooked_cannon_OverrideAimer);
 
    // Render: the hook forwards to whatever it displaced, so the forward pointer
    // has to be published before either slot is claimed — a render can land on us
@@ -538,6 +553,9 @@ void barrel_fire_origin_install(uintptr_t exe_base)
                         (void*)&hooked_weapon_Render);
       patch_vtable_slot(exe_base, launcherRenderVA, render_impl, render_thunk,
                         (void*)&hooked_weapon_Render);
+      if (grappleRenderVA)
+         patch_vtable_slot(exe_base, grappleRenderVA, render_impl, render_thunk,
+                           (void*)&hooked_weapon_Render);
    }
 }
 

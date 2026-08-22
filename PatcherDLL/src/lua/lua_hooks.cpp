@@ -293,7 +293,7 @@ void lua_hooks_install(uintptr_t exe_base)
 
    if (g_build == GameBuild::Modtools) {
       // These installers still target raw modtools VAs / inline patch sites.
-      grapple_fix_install(exe_base);
+      grapple_install(exe_base);
       DebugCommandRegistry::install(exe_base);
    }
 
@@ -321,7 +321,7 @@ void lua_hooks_uninstall()
    flyer_boost_anim_uninstall();
    cloth_collision_fix_uninstall();
    disguise_ext_uninstall();
-   grapple_fix_uninstall();
+   grapple_uninstall();
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
    anim_bank_append_uninstall();

@@ -145,9 +145,9 @@ Identifying a grenade at the push site is the part that needs care. `ClassLabel 
 sits on the *weapon* ODF; what flies is an ordnance instance from a separate ordnance ODF,
 so nothing at the push site sees that label. Walking back to the spawning weapon to test it
 would work but is blanket, catching any weapon that borrowed the label. Preferred is an opt
-in property on the ordnance class: the grappling hook already adds `PullSpeed` and `MaxRange`
-that way through `OrdnanceClass::SetProperty`, and an `Ordnance` carries its `OrdnanceClass*`
-at `+0x30`, so the lookup is solved. What it must not be is the ordnance ClassLabel, which
+in property on the ordnance class: `OrdnanceGrapplingHookClass::SetProperty` already reads
+`SoldierAnimation` that way, and an `Ordnance` carries its `OrdnanceClass*` at `+0x30`, so
+the lookup is solved. What it must not be is the ordnance ClassLabel, which
 would sweep up rockets, mines and anything else on the same label.
 
 ## Rendering
