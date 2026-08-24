@@ -240,6 +240,7 @@ struct Registry {
 struct ClassRec {
    uint32_t obj, mId, mParent;
    uint32_t rootId;
+   uint32_t vptr;          // the object's C++ type, used to attribute self-roots
    uint8_t  constructing;
 };
 
@@ -250,6 +251,7 @@ struct WalkResult {
    uint32_t fam[FAM_COUNT];
    uint32_t constructing, unlinking, orphan, cycle, unknownRoot;
    uint32_t unnamed, truncated, mismatch;
+   uint32_t byType;        // attributed by vptr because the chain could not
    char     err[192];      // non-empty => walk aborted; err says exactly why
    // Distinct roots we could not name, so the report can say WHICH ones rather
    // than only how many. Eight is plenty: a handful of unknown roots is a
@@ -335,6 +337,7 @@ bool collect(const Registry& R, WalkResult* W, uint32_t* outCount)
          s_rec[n].mId          = *reinterpret_cast<const uint32_t*>(obj + kFacId);
          s_rec[n].mParent      = *reinterpret_cast<const uint32_t*>(obj + kFacParent);
          s_rec[n].rootId       = 0;
+         s_rec[n].vptr         = (uint32_t)vptr;
          s_rec[n].constructing = (vft != 0 && vptr == vft) ? 1 : 0;
          ++n;
 
@@ -353,10 +356,59 @@ bool collect(const Registry& R, WalkResult* W, uint32_t* outCount)
    return false;
 }
 
+// A vptr -> family map LEARNED from this same pass, not baked into a table.
+//
+// Not every CreateClass records a parent: some route to EntityClass::EntityClass
+// (modtools 0x004D0B50), which zeroes +0x14 at 0x004D0B6B. A class made that way
+// has mParent == 0, so it becomes its OWN root and no chain can attribute it --
+// com_amb_soundstatic400m, com_rum_atmos and the cloth icons all behave this way.
+//
+// But such a class is the same C++ class as the built-in root of its type, so
+// its vptr matches that root's. Reading the vptr of each of the 46 built-ins
+// gives a type map derived from the game's own data, with nothing hardcoded and
+// nothing to drift per build. A vptr shared by roots of DIFFERENT families is
+// marked ambiguous and never used -- an unattributed class is a finding, a
+// wrongly attributed one is a lie.
+struct VtypeEntry { uint32_t vptr; uint8_t family; bool ambiguous; };
+VtypeEntry s_vtype[64];
+uint32_t   s_vtypeCount;
+
+void learn_vtypes(const Registry& R, uint32_t n)
+{
+   s_vtypeCount = 0;
+   for (uint32_t i = 0; i < n; ++i) {
+      if (s_rec[i].mParent != 0 || s_rec[i].constructing) continue;
+      const Root* const r = find_root(R, s_rec[i].mId);
+      if (r == nullptr) continue;                     // a self-root, not a built-in
+      bool merged = false;
+      for (uint32_t k = 0; k < s_vtypeCount; ++k) {
+         if (s_vtype[k].vptr != s_rec[i].vptr) continue;
+         if (s_vtype[k].family != r->family) s_vtype[k].ambiguous = true;
+         merged = true;
+         break;
+      }
+      if (!merged && s_vtypeCount < 64) {
+         s_vtype[s_vtypeCount].vptr      = s_rec[i].vptr;
+         s_vtype[s_vtypeCount].family    = r->family;
+         s_vtype[s_vtypeCount].ambiguous = false;
+         ++s_vtypeCount;
+      }
+   }
+}
+
+const VtypeEntry* find_vtype(uint32_t vptr)
+{
+   for (uint32_t k = 0; k < s_vtypeCount; ++k)
+      if (s_vtype[k].vptr == vptr) return s_vtype[k].ambiguous ? nullptr : &s_vtype[k];
+   return nullptr;
+}
+
 // Pass 2: resolve parents and bucket, entirely inside our own arrays.  No live
 // pointer is dereferenced here, so nothing in this pass can fault or hang.
 void bucket(const Registry& R, WalkResult* W, uint32_t n)
 {
+   learn_vtypes(R, n);
+
    for (uint32_t i = 0; i < kIndexSlots; ++i) s_idx[i] = -1;
    for (uint32_t i = 0; i < n; ++i) {
       uint32_t slot = (s_rec[i].obj >> 2) & (kIndexSlots - 1);
@@ -390,6 +442,15 @@ void bucket(const Registry& R, WalkResult* W, uint32_t n)
       s_rec[i].rootId = s_rec[cur].mId;
       const Root* root = find_root(R, s_rec[i].rootId);
       if (root == nullptr) {
+         // The chain gave a root we cannot name. Before calling it unknown, ask
+         // what C++ class the object actually is -- that answers the question
+         // the parent chain could not.
+         const VtypeEntry* const vt = find_vtype(s_rec[i].vptr);
+         if (vt != nullptr) {
+            ++W->byType;
+            if (R.families) ++W->fam[vt->family];
+            continue;
+         }
          ++W->unknownRoot;
          bool seen = false;
          for (uint32_t k = 0; k < W->unkDistinct; ++k)
@@ -729,6 +790,13 @@ void report_registries()
          census_log("[Census]     %s: %u constructing, %u unlinking, %u orphan,"
                     " %u cycle, %u unknown-root",
                     L, R.constructing, R.unlinking, R.orphan, R.cycle, R.unknownRoot);
+
+      // Say how the breakdown was reached. A class whose CreateClass never
+      // recorded a parent can only be attributed by its C++ type, and the
+      // reader deserves to know which figures came from which route.
+      if (R.byType != 0)
+         census_log("[Census]     %s: %u of those attributed by type"
+                    " (their CreateClass records no parent)", L, R.byType);
 
       if (R.unnamed || R.truncated || R.mismatch)
          census_log("[Census]     %s: %u unnamed, %u names longer than 31 chars,"
