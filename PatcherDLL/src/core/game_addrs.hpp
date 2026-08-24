@@ -862,21 +862,62 @@ namespace modtools {
    // (0x005E4BD5) and decremented by its dtor (0x005E4630).
    constexpr uintptr_t branch_region_count        = 0x00AD3460;
 
-   // Factory<Entity,EntityClass,EntityDesc>::sList - the registry every ODF
-   // class lands in: soldiers, vehicles, props, command posts, lights.  A
-   // PblList based at 0x00ACD2C4, so _iCount is at +0x10.
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Four Factory<> registries, one per authored content kind.  Each is a
+   // PblList HEAD, so for every one of them:
+   //     _pNext (where a walk starts) = head + 0x04
+   //     _iCount                      = head + 0x10
+   // Only the head is stored; deriving the other two keeps them impossible to
+   // mismatch.  That matters here -- BranchRegionDebug read _head._pObject
+   // (head+0xC) believing it was _iCount and printed zero for its entire life.
+   // Every head below was read as raw image bytes and is the self-circular
+   // five-dword block `head, head, head, 0, 0`.
    //
-   // Verified two ways.  Factory<...>::Find (0x00452000) walks it:
-   //   MOV EAX,[0x00ACD2C8]   ; sList._head._pNext, i.e. base+4
-   //   MOV ECX,[EAX+0xC]      ; node->_pObject
-   //   MOV EAX,[EAX+0x4]      ; node = node->_pNext
-   // and 0x00ACD2D4 carries exactly the read-write pattern of a list count,
-   // from the four PblList add/remove sites at 0x004D0720/0x004D07F0/
-   // 0x004D0B50/0x004D0C20.
-   //
-   // The sibling registries (Weapon, Ordnance, Explosion) have NOT been located
-   // yet and are deliberately absent rather than guessed.
-   constexpr uintptr_t entity_class_count         = 0x00ACD2D4;
+   // The registered OBJECT sits at node - 4 (the PblList node is embedded at
+   // object+4), and carries mParent +0x14, mId +0x18, mNetIndex +0x1C.  Those
+   // three are written BEFORE the node becomes reachable -- verified from the
+   // entity ctor at 0x004D0C20, where +0x14/+0x18/+0x1C are stored at
+   // 0x004D0C43..0x004D0C4F but the forward link that makes the node findable
+   // is not written until 0x004D0CBA.  The vptr is written LAST, which is why
+   // the census may never call a virtual on a walked object.
+   constexpr uintptr_t entity_class_head          = 0x00ACD2C4;
+   constexpr uintptr_t weapon_class_head          = 0x00AD43BC;
+   constexpr uintptr_t ordnance_class_head        = 0x00AD3A60;
+   constexpr uintptr_t explosion_class_head       = 0x00AD388C;
+
+   // Offset of the char[32] ODF name inside the registered object.  Each class
+   // kind put it in a different place, so there is one per registry rather than
+   // a shared constant.  EntityClass::Read (0x004D0830) proves the entity one:
+   // it hashes the TYPE-chunk buffer into mId and then strlcpy's that same
+   // buffer to obj+0x20, which makes `fnv1a_or20(name) == mId` a self-check
+   // that can only match.  NOTE: the modtools Ghidra database has mFilename at
+   // 24, which is wrong -- decompiler output naming mFilename at +0x18 is
+   // actually reading mId.
+   constexpr uintptr_t entity_class_name_off      = 0x20;
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+   constexpr uintptr_t ordnance_class_name_off    = 0x28;
+   constexpr uintptr_t explosion_class_name_off   = 0x20;
+
+   // The Factory<> BASE vftable for each registry.  An object still carrying
+   // one of these is mid-construction or mid-destruction: reachable, with valid
+   // mParent/mId, but with no name yet and only THREE vtable slots.  The census
+   // uses these to label such nodes, never to call through them.
+   constexpr uintptr_t factory_vft_entity         = 0x00A38D18;
+   constexpr uintptr_t factory_vft_weapon         = 0x00A51D24;
+   constexpr uintptr_t factory_vft_ordnance       = 0x00A50264;
+   constexpr uintptr_t factory_vft_explosion      = 0x00A50090;
+
+   // .rdata bounds, used as a sanity gate on a walked object's vptr.  A vptr
+   // outside this range means the node is not a live class object and the walk
+   // stops rather than reporting a number built from garbage.
+   constexpr uintptr_t rdata_lo                   = 0x00A2A000;
+   constexpr uintptr_t rdata_hi                   = 0x00AC3000;
+
+   // GamePathFactory::sList._iCount.  Reported as a bare COUNT and never
+   // walked: the path-chunk parser declares a factory in a STACK LOCAL and
+   // links that frame into this global list once per `path` record, so
+   // dereferencing a node here can mean reading another thread's live stack.
+   constexpr uintptr_t path_factory_count         = 0x00AC6A00;
 
 
 
@@ -1807,6 +1848,34 @@ namespace steam {
    constexpr uintptr_t fx_effect_classes_count    = 0x01EBD140;
    constexpr uintptr_t fx_effect_classes_table    = 0x01EBD144;
 
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Same four Factory<> registries as modtools, same node layout, same
+   // derivation: _pNext = head + 0x04, _iCount = head + 0x10.  Every head below
+   // was read as raw image bytes and is the self-circular `head,head,head,0,0`
+   // block.  Object fields mParent +0x14, mId +0x18, mNetIndex +0x1C are
+   // build-invariant (verified from the retail ctors at 0x00491E70 and 0x00491EF0).
+   //
+   // THE NAMES ARE MOSTLY ABSENT HERE, and that is a real difference rather than
+   // an unlocated address.  Retail EntityClass is 0x60 bytes and +0x20 holds
+   // mLabel, a wchar_t* -- reading it as a char[32] yields interleaved NULs.
+   // Only WeaponClass kept its name buffer, at +0x30, and WeaponClass::Read at 0x0067A390 (PUSH 0x20 / LEA EAX,[EDI+0x30] / strlcpy) proves it.
+   // Entity, ordnance and explosion name offsets are therefore deliberately
+   // absent so the census omits the column rather than printing wide-char soup.
+   constexpr uintptr_t entity_class_head          = 0x007EC55C;
+   constexpr uintptr_t weapon_class_head          = 0x007EC5A4;
+   constexpr uintptr_t ordnance_class_head        = 0x007EC590;
+   constexpr uintptr_t explosion_class_head       = 0x007EC570;
+
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+
+   constexpr uintptr_t factory_vft_entity         = 0x00799318;
+   constexpr uintptr_t factory_vft_weapon         = 0x007B0298;
+   constexpr uintptr_t factory_vft_ordnance       = 0x007AC47C;
+   constexpr uintptr_t factory_vft_explosion      = 0x0079E8AC;
+   constexpr uintptr_t rdata_lo                   = 0x0076B000;
+   constexpr uintptr_t rdata_hi                   = 0x007DD800;
+
+
 
 
 
@@ -2514,6 +2583,35 @@ namespace gog {
    // FLEffect::Read (same VA as Steam, different global). Key array follows at +4.
    constexpr uintptr_t fx_effect_classes_count    = 0x01EBE5F0;
    constexpr uintptr_t fx_effect_classes_table    = 0x01EBE5F4;
+
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Same four Factory<> registries as modtools, same node layout, same
+   // derivation: _pNext = head + 0x04, _iCount = head + 0x10.  Every head below
+   // was read as raw image bytes and is the self-circular `head,head,head,0,0`
+   // block.  Object fields mParent +0x14, mId +0x18, mNetIndex +0x1C are
+   // build-invariant (verified from the retail ctors at 0x00491E79, whose C7 01 B8 A2 79 00 stores the base vftable).
+   //
+   // THE NAMES ARE MOSTLY ABSENT HERE, and that is a real difference rather than
+   // an unlocated address.  Retail EntityClass is 0x60 bytes and +0x20 holds
+   // mLabel, a wchar_t* -- reading it as a char[32] yields interleaved NULs.
+   // Only WeaponClass kept its name buffer, at +0x30, and the same 13-byte sequence, occurring exactly once, at 0x0067B430 proves it.
+   // Entity, ordnance and explosion name offsets are therefore deliberately
+   // absent so the census omits the column rather than printing wide-char soup.
+   constexpr uintptr_t entity_class_head          = 0x007ED4EC;
+   constexpr uintptr_t weapon_class_head          = 0x007ED534;
+   constexpr uintptr_t ordnance_class_head        = 0x007ED520;
+   constexpr uintptr_t explosion_class_head       = 0x007ED500;
+
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+
+   constexpr uintptr_t factory_vft_entity         = 0x0079A2B8;
+   constexpr uintptr_t factory_vft_weapon         = 0x007B1210;
+   constexpr uintptr_t factory_vft_ordnance       = 0x007AD3E8;
+   // factory_vft_explosion was not read on this build -- deliberately absent.
+   // Only the `constructing` label is lost; the .rdata vptr gate still works.
+   constexpr uintptr_t rdata_lo                   = 0x0076C000;
+   constexpr uintptr_t rdata_hi                   = 0x007DF000;
+
 
 
 

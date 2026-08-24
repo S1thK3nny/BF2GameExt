@@ -241,6 +241,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
+      g_contentCensusNames        = cfg.get_bool("Diagnostic", "ContentCensusNames", false);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);

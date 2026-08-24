@@ -69,6 +69,12 @@
 // the Lua entry point still works. [Diagnostic] ContentCensus.
 extern int g_contentCensusInterval;
 
+// Append a per-class listing -- ODF name, base class, id -- to the report.
+// Fires only when the entity class count has CHANGED since the last listing,
+// so it costs one block per level load rather than one per tick.
+// [Diagnostic] ContentCensusNames.
+extern bool g_contentCensusNames;
+
 // Build and write one report to the log. Safe to call from any thread.
 void content_census_report();
 
