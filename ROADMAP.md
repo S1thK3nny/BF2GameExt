@@ -53,6 +53,14 @@ NOT the cause: a zero roll energy cost. It removes the roll lockout entirely (se
 `docs/RE/EnergyBar.md`) so the path runs far more often, but it is an exposure multiplier, not
 a memory-safety mechanism.
 
+**PARKED 2026-08-22, not closed.** The crash has happened exactly once and has not recurred
+before or since, and the user attributes the surrounding behaviour to ODF parameters allowing
+looping rolls - which is correct for the ROLLING, since a zero cost makes `SpendEnergy` skip its
+entire body. It does not explain the access violation. The unbounded table read and the
+NULL-only guard are still there regardless of whether anything triggers them again. Do not
+re-open this as an active hunt without a second occurrence; if one arrives, the one-line test is
+`[LimitIncreases] ComboAnimIncrease=0`.
+
 **Tentacle fields are unclamped and overrun fixed arrays** - found 2026-08-21 while scoping the
 9-tentacle feature; independent of it and worth fixing on its own. Both tentacle properties on
 `EntitySoldierClass` are bitfields at `+0x8BC` that accept more than the arrays can hold, and
