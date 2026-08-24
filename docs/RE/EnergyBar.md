@@ -101,3 +101,28 @@ strings in the image, so the mapping from key name to hash has not been establis
 Recovery uses `<=`, so reaching exactly `EnergyOverheat` clears the latch.
 
 `gUnlimitedEnergyAll` bypasses `SpendEnergy` entirely.
+
+## A cost of ZERO disables the bar for that action entirely
+
+The guard in `SpendEnergy` is `cost > 0.0`, not `cost >= 0.0`:
+
+    if (!gUnlimitedEnergyAll && cost > 0.0) { ...latch check, subtract, latch set... }
+    return true;                                  // unconditional
+
+With `cost == 0` (or negative) the whole body is skipped. The latch is neither **tested** nor
+**set**, and the function still returns `true`. So the action is always permitted no matter how
+overheated the bar is - a zero cost does not mean "free but still gated", it means "not gated".
+
+`EntitySoldier::RollUsingEnergy` (modtools `0x0057A0C0`) is the concrete case:
+
+    if (EnergyBar::SpendEnergy(&mEnergyBar, mClass->mEnergyCostRoll))   // +0xA50
+       if (Roll()) return true;
+       else AddEnergy(mEnergyCostRoll);                                 // refund
+    return false;
+
+so `mEnergyCostRoll == 0` yields unlimited back-to-back rolling, and no amount of `EnergyOverheat`
+or `EnergyMax` tuning can restrain it. The roll ODF key is **`EnergyCostRoll`** (recovered by
+hashing candidates against the constant, using the PblHash FNV-1a variant).
+
+Zero also leaves `m_fEnergyMin` alone: `SetPropertyEnergyCost` only widens the floor when
+`-m_fEnergyMin < cost`, and `m_fEnergyMin` is never positive.

@@ -6,6 +6,53 @@ is shipped. For what the DLL actually does today, see
 
 ## Bugs
 
+**Upper-body animation lookup has NO upper bound and only a NULL guard on the result** -
+found 2026-08-21 from a user crash while rolling. Access violation at
+`SoldierAnimator::UpdateUpperBodyAnimation` +0xD (modtools `0x0057897D`, `MOV EAX,[EBX]`)
+with `param_2` = `0xF4F2D887`, i.e. a garbage non-NULL pointer.
+
+The producer is `SoldierAnimatorClass::GetUpperBodyAnimation` (modtools `0x0057DD40`), which is
+a raw table read with no rejection path at all:
+
+    EDX = map * 0x12E
+    EAX = idx * 2                       ; idx is a uchar, so 0..255
+    EDX += EAX
+    if (EAX < 0x10C) return [ECX + EDX*4 + 0x24];   ; idx <  134
+    else             return [ECX + EDX*4 - 0x6C];   ; idx >= 134
+
+Both branches return something. Nothing compares `idx` against a populated count, so an index
+that was never filled in yields whatever dword happens to sit at that offset.
+
+The consumer, `SoldierAnimator::UpdateActionAnimation` (`0x0057AFD0`), guards only against NULL:
+
+    0057B127  MOV EAX,[ESI+0x2014]      ; anim kind
+    0057B12D  CMP EAX,0x7
+    0057B130  JNZ 0057B154
+    0057B134  MOV AL,[ESI+0x2018]       ; anim index byte
+    0057B13A  CMP AL,0xA4               ; the "no animation" sentinel
+    0057B13C  JZ  0057B1DF              ; ...skip
+    0057B14D  CALL GetUpperBodyAnimation
+    0057B16F  MOV EDI,EAX
+    0057B171  TEST EDI,EDI
+    0057B173  JZ  0057B1DF              ; NULL-ONLY guard
+    0057B18E  PUSH EDI
+    0057B19B  CALL UpdateUpperBodyAnimation   ; derefs immediately
+
+So a non-NULL garbage slot reaches the deref unchecked. **Our `Combo Anims Increase` patch set
+moves that sentinel from `0xA4` (164) to `0xFE` (254) at three sites inside this very function**
+(file offsets `0x17b02c+1`, `0x17b13a+1`, `0x17b1ca+6`), so index 164 stops being rejected here
+and becomes a live table index. That is the leading suspect and the A/B test is one INI line:
+`[LimitIncreases] ComboAnimIncrease=0`.
+
+Second, weaker suspect on the same path: `soldier_prone.cpp`'s `hooked_SetAction` forces
+`mAction` to `CROUCH_TO_PRONE`/`PRONE_TO_STAND`/`PRONE_TO_CROUCH` (27/28/29), values vanilla
+`SetAction` never writes. A class with no prone animations authored could resolve those to an
+unpopulated index. Gated on `g_proneEnabled`, so it is separately testable.
+
+NOT the cause: a zero roll energy cost. It removes the roll lockout entirely (see
+`docs/RE/EnergyBar.md`) so the path runs far more often, but it is an exposure multiplier, not
+a memory-safety mechanism.
+
 **Tentacle fields are unclamped and overrun fixed arrays** - found 2026-08-21 while scoping the
 9-tentacle feature; independent of it and worth fixing on its own. Both tentacle properties on
 `EntitySoldierClass` are bitfields at `+0x8BC` that accept more than the arrays can hold, and
