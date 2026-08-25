@@ -735,6 +735,21 @@ the same 13-byte sequence occurs exactly once in GOG at `0x0067B430`). Retail `E
 so entity/ordnance/explosion name offsets are deliberately absent for those builds and the census
 omits the column rather than printing garbage.
 
+**A vehicle registers one EntityClass PER PASSENGER SEAT**, all carrying the vehicle's own name
+and therefore the same `mId`. Confirmed 2026-08-22 from a live map by the project owner, and
+visible in the census listing: `republic_fly_transport` and `cis_fly_transport` each showed seven
+extra registrations, the bombers two and one, `republic_walk_atte` two, `republic_hover_tank` and
+the turrets one each. Only the first of the set is reachable through the class chain; the rest are
+parentless, which is why they read as unknown roots before this was understood.
+
+Two consequences the census now handles:
+- **Equal `mId` means equal ODF name means the same authored thing**, so an unattributed record
+  can adopt the family of any sibling sharing its `mId`. That is the third and strongest
+  attribution route - it cannot be fooled by a shared vtable the way the type route could - and
+  it runs last because it needs something else to have resolved a sibling first.
+- **The raw registration count overstates authored content.** The census reports distinct `mId`
+  count alongside it, so "397 classes" is separated from "N distinct ODF names".
+
 Still open on this thread: whether any entity class is created outside `CreateBaseEntityClasses`
 and `EntityClass::Read`. `CreateClass` is a vtable slot so static xrefs cannot close it. The
 census answers it empirically - a root whose `mId` is not one of the 46 prints as

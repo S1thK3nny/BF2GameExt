@@ -134,11 +134,18 @@ constexpr uint32_t kNodeToObj  = 0x04;  // _pObject == node - 4, always
 constexpr uint32_t kFacParent  = 0x14;  // Factory<> object fields
 constexpr uint32_t kFacId      = 0x18;
 constexpr uint32_t kNameMax    = 32;
+constexpr uint32_t kMaxUnkListed = 24;  // distinct unknown roots listed
+constexpr uint8_t  kFamNone     = 0xFF; // not attributed by any route
+constexpr uint8_t  kFamExcluded = 0xFE; // orphan or cycle, not bucketable
 
 enum Family { FAM_SOLDIER, FAM_VEHICLE, FAM_TURRET, FAM_BUILDING,
               FAM_CMDPOST, FAM_PICKUP, FAM_SCENERY, FAM_COUNT };
 
 struct Root { uint32_t hash; const char* name; uint8_t family; };
+
+const char* const kFamilyLabel[FAM_COUNT] = {
+   "soldier", "vehicle", "turret", "building", "commandpost", "pickup", "scenery"
+};
 
 // The 46 built-in entity roots, in creation order, from
 // GameState::CreateBaseEntityClasses (modtools 0x0044CDA0, Steam 0x00539F60 --
@@ -241,6 +248,9 @@ struct ClassRec {
    uint32_t obj, mId, mParent;
    uint32_t rootId;
    uint32_t vptr;          // the object's C++ type, used to attribute self-roots
+   uint32_t rootRec;       // record index of the root the chain landed on
+   uint8_t  family;        // kFamNone / kFamExcluded / a Family value
+   uint8_t  route;         // 0 chain, 1 type, 2 name-sibling, 3 unresolved
    uint8_t  constructing;
 };
 
@@ -252,14 +262,16 @@ struct WalkResult {
    uint32_t constructing, unlinking, orphan, cycle, unknownRoot;
    uint32_t unnamed, truncated, mismatch;
    uint32_t byType;        // attributed by vptr because the chain could not
+   uint32_t byName;        // attributed by an mId sibling (passenger slots)
+   uint32_t distinct;      // distinct mIds, i.e. distinct ODF names
    char     err[192];      // non-empty => walk aborted; err says exactly why
    // Distinct roots we could not name, so the report can say WHICH ones rather
-   // than only how many. Eight is plenty: a handful of unknown roots is a
-   // finding, hundreds would mean the mechanism itself is wrong.
-   uint32_t unkId[8];
-   uint32_t unkCount[8];
-   uint32_t unkRec[8];
-   char     unkName[8][kNameMax + 1];
+   // than only how many. A handful of unknown roots is a
+   // finding, and the cap keeps a pathological case from flooding the log.
+   uint32_t unkId[kMaxUnkListed];
+   uint32_t unkCount[kMaxUnkListed];
+   uint32_t unkRec[kMaxUnkListed];
+   char     unkName[kMaxUnkListed][kNameMax + 1];
    uint32_t unkDistinct;
 };
 
@@ -418,7 +430,11 @@ void bucket(const Registry& R, WalkResult* W, uint32_t n)
       }
    }
 
+   // Route 1: the parent chain. Route 2: the C++ type. Anything still
+   // unattributed is left at kFamNone for route 3 below.
    for (uint32_t i = 0; i < n; ++i) {
+      s_rec[i].family = kFamNone;
+      s_rec[i].route  = 3;
       if (s_rec[i].constructing) ++W->constructing;
 
       uint32_t cur = i, hops = 0;
@@ -436,34 +452,75 @@ void bucket(const Registry& R, WalkResult* W, uint32_t n)
          if (found < 0) { ++W->orphan; broken = true; break; }
          cur = (uint32_t)found;
       }
-      if (broken) continue;
-      if (!resolved) { ++W->cycle; continue; }
+      if (broken)    { s_rec[i].family = kFamExcluded; continue; }
+      if (!resolved) { ++W->cycle; s_rec[i].family = kFamExcluded; continue; }
 
       s_rec[i].rootId = s_rec[cur].mId;
-      const Root* root = find_root(R, s_rec[i].rootId);
-      if (root == nullptr) {
-         // The chain gave a root we cannot name. Before calling it unknown, ask
-         // what C++ class the object actually is -- that answers the question
-         // the parent chain could not.
-         const VtypeEntry* const vt = find_vtype(s_rec[i].vptr);
-         if (vt != nullptr) {
-            ++W->byType;
-            if (R.families) ++W->fam[vt->family];
-            continue;
-         }
+      s_rec[i].rootRec = cur;
+
+      const Root* const root = find_root(R, s_rec[i].rootId);
+      if (root != nullptr) { s_rec[i].family = root->family; s_rec[i].route = 0; continue; }
+
+      // The chain gave a root we cannot name. Ask what C++ class the object
+      // actually is -- that answers the question the parent chain could not.
+      const VtypeEntry* const vt = find_vtype(s_rec[i].vptr);
+      if (vt != nullptr) { s_rec[i].family = vt->family; s_rec[i].route = 1; ++W->byType; }
+   }
+
+   // Route 3: adopt from a name-sibling.
+   //
+   // A vehicle with passenger positions registers ONE EntityClass PER SEAT, all
+   // carrying the vehicle's own name and therefore the same mId -- confirmed
+   // against a live map, where republic_fly_transport and cis_fly_transport each
+   // showed seven extra registrations and the bombers, walkers and hover tanks
+   // showed the smaller counts their seat layouts imply. Only the first of them
+   // is reachable through the class chain; the rest are parentless.
+   //
+   // Equal mId means equal ODF name means the same authored thing, so a sibling
+   // that IS attributed settles it. This is the strongest of the three routes --
+   // it cannot be fooled by a shared vtable the way route 2 could -- but it runs
+   // last because it can only work once something else has resolved a sibling.
+   for (uint32_t i = 0; i < n; ++i) {
+      if (s_rec[i].family != kFamNone) continue;
+      for (uint32_t j = 0; j < n; ++j) {
+         if (j == i || s_rec[j].mId != s_rec[i].mId) continue;
+         if (s_rec[j].family >= kFamNone) continue;        // itself unresolved
+         s_rec[i].family = s_rec[j].family;
+         s_rec[i].route  = 2;
+         ++W->byName;
+         break;
+      }
+   }
+
+   // Tally, and count how many DISTINCT ODF names are behind the registrations.
+   // s_idx is finished with as an object index by now, so it is rebuilt here as
+   // an mId set rather than claiming another 32 KB.
+   for (uint32_t i = 0; i < kIndexSlots; ++i) s_idx[i] = -1;
+   for (uint32_t i = 0; i < n; ++i) {
+      if (s_rec[i].family == kFamExcluded) continue;
+
+      if (s_rec[i].family == kFamNone) {
          ++W->unknownRoot;
          bool seen = false;
          for (uint32_t k = 0; k < W->unkDistinct; ++k)
             if (W->unkId[k] == s_rec[i].rootId) { ++W->unkCount[k]; seen = true; break; }
-         if (!seen && W->unkDistinct < 8) {
+         if (!seen && W->unkDistinct < kMaxUnkListed) {
             W->unkId[W->unkDistinct]    = s_rec[i].rootId;
             W->unkCount[W->unkDistinct] = 1;
-            W->unkRec[W->unkDistinct]   = cur;   // the root's own record
+            W->unkRec[W->unkDistinct]   = s_rec[i].rootRec;
             ++W->unkDistinct;
          }
-         continue;
+      } else if (R.families) {
+         ++W->fam[s_rec[i].family];
       }
-      if (R.families) ++W->fam[root->family];
+
+      uint32_t slot = (s_rec[i].mId >> 2) & (kIndexSlots - 1);
+      for (uint32_t probe = 0; probe < kIndexSlots; ++probe) {   // BOUNDED
+         const int32_t k = s_idx[slot];
+         if (k < 0) { s_idx[slot] = (int32_t)i; ++W->distinct; break; }
+         if (s_rec[k].mId == s_rec[i].mId) break;                // already seen
+         slot = (slot + 1) & (kIndexSlots - 1);
+      }
    }
 }
 
@@ -711,9 +768,17 @@ void dump_class_names(const Registry& R, uint32_t n)
             name[0] = 0;
          }
       }
-      census_log("[Census]     %-24s %-22s id=0x%08X",
+      // Show what the class RESOLVED to and how. The chain root alone is not
+      // enough: a class attributed by type or by an mId sibling has no nameable
+      // root, and printing "(unknown root)" for it would contradict the summary.
+      static const char* const kRoute[4] = { "chain", "type", "name", "UNRESOLVED" };
+      const uint8_t fam = s_rec[i].family;
+      census_log("[Census]     %-24s %-13s %-11s via %-10s id=0x%08X",
                  name[0] != 0 ? name : "(no name on this build)",
-                 root != nullptr ? root->name : "(unknown root)",
+                 root != nullptr ? root->name : "-",
+                 (fam < FAM_COUNT) ? kFamilyLabel[fam]
+                                   : (fam == kFamExcluded ? "(excluded)" : "(none)"),
+                 kRoute[s_rec[i].route < 4 ? s_rec[i].route : 3],
                  s_rec[i].mId);
    }
 }
@@ -794,9 +859,19 @@ void report_registries()
       // Say how the breakdown was reached. A class whose CreateClass never
       // recorded a parent can only be attributed by its C++ type, and the
       // reader deserves to know which figures came from which route.
-      if (R.byType != 0)
-         census_log("[Census]     %s: %u of those attributed by type"
-                    " (their CreateClass records no parent)", L, R.byType);
+      if (R.byType != 0 || R.byName != 0)
+         census_log("[Census]     %s: %u attributed by type, %u by an identical"
+                    " ODF name (their CreateClass records no parent)",
+                    L, R.byType, R.byName);
+
+      // A vehicle with passenger positions registers one class PER SEAT under
+      // the vehicle's own name, so the raw registration count overstates how
+      // much was actually authored. Both numbers are worth having: the first is
+      // what the engine is holding, the second is what you wrote.
+      if (R.distinct != 0 && R.distinct != R.scanned)
+         census_log("[Census]     %s: %u distinct ODF names, %u extra registration(s)"
+                    " -- vehicle passenger slots and the like",
+                    L, R.distinct, R.scanned - R.distinct);
 
       if (R.unnamed || R.truncated || R.mismatch)
          census_log("[Census]     %s: %u unnamed, %u names longer than 31 chars,"
@@ -811,7 +886,8 @@ void report_registries()
                     L, R.unkId[k],
                     R.unkName[k][0] != 0 ? R.unkName[k] : "(no name)", R.unkCount[k]);
       if (R.unknownRoot != 0 && R.unkDistinct == 8)
-         census_log("[Census]     %s: (more than 8 distinct unknown roots -- listing capped)", L);
+         census_log("[Census]     %s: (more than %u distinct unknown roots -- listing capped)",
+                    L, kMaxUnkListed);
    }
 
    // Optional per-class listing. Fires when the entity count has changed since
