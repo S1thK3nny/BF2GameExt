@@ -29,6 +29,7 @@
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
+#include "render/hud_weapon_icon_fix.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "weapon/anim_textures.hpp"
@@ -222,6 +223,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_lightsaberLightRadius = cfg.get_float("Lightsaber", "LightsaberLightRadius", 4.0f);
       g_lightsaberLightIntensity = cfg.get_float("Lightsaber", "LightsaberLightIntensity", 1.0f);
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
+      g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -259,6 +261,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
+   hud_weapon_icon_fix_install(exe_base);
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window

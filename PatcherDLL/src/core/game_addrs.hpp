@@ -726,6 +726,19 @@ namespace modtools {
    constexpr uintptr_t hud_reticle_fadd_operand     = 0x006834D9; // FADD [1.0] operand at +2
    constexpr uintptr_t hud_reticle_fmul_operand     = 0x006834E5; // FMUL [0.5] operand at +2
 
+   // ---- HUD weapon icon arbitration (hud_weapon_icon_fix.cpp) ------------------
+   // EventInput is the handler each TransformNameMesh registers.  On a mapping
+   // miss it does not stay quiet - it resolves the raw hash out of
+   // RedModel::_HashTable and sends that model on, so with two extraweapons .hud
+   // files the last one parsed wins.  Layout: mEventInput +0x1C, mEventClassOutput
+   // +0x30, mMapping +0x38, mNumMappings +0x3C, list node +0x40.  __cdecl(Event*,
+   // TransformNameMesh*); FindNameMesh is __thiscall(this, uint) RET 4.
+   // Full write-up: docs/RE/HUDSystem.md.  Derived in the MemExt Ghidra program,
+   // NOT from E:\BF2_Modtools\BF2_modtools.exe, which is a different build.
+   constexpr uintptr_t hud_tnm_event_input          = 0x006BB610;
+   constexpr uintptr_t hud_tnm_find_name_mesh       = 0x006BB230;
+   constexpr uintptr_t hud_tnm_list                 = 0x00AD8A10; // sTransformNameMeshList
+
    // ---- Combat awards (award_disable.cpp) --------------------------------------
    // bool __thiscall MedalsMgr::IsAwardAvailable(MedalsMgr*, int index) — the one
    // gate every award effect reads.  Body is
@@ -1488,6 +1501,16 @@ namespace steam {
    constexpr uintptr_t hud_screen_height            = 0x0093E4A8;
    constexpr uintptr_t hud_reticle_mulss_patch      = 0x006308F6; // start of 24-byte MULSS..ADDSS region
 
+   // ---- HUD weapon icon arbitration (see modtools namespace) -------------------
+   // Retail strips the RedWarning strings but keeps RTTI: type descriptor
+   // ".?AVTransformNameMesh@HUD@@" 0x007F2814 -> COL 0x007C0600 -> vtable
+   // 0x007A35D8 -> ctor 0x005675E0, which pushes EventInput into mEventInput and
+   // links +0x40 into the list.  Same offsets as modtools; EventInput still ends
+   // in a bare RET (__cdecl) and FindNameMesh in RET 4, checked on the disasm.
+   constexpr uintptr_t hud_tnm_event_input          = 0x00567AB0;
+   constexpr uintptr_t hud_tnm_find_name_mesh       = 0x00567A60;
+   constexpr uintptr_t hud_tnm_list                 = 0x007EBABC;
+
    // ---- Lua core / character system (ported 2026-07-20) ------------------------
    // Character slot layout is build-INVARIANT (verified via Lua_Callbacks::
    // GetCharacterUnit 0x58fcd0 / GetCharacterTeam 0x58f820: stride 0x1B0,
@@ -1720,6 +1743,15 @@ namespace gog {
    constexpr uintptr_t hud_screen_width             = 0x0093F944;
    constexpr uintptr_t hud_screen_height            = 0x0093F948;
    constexpr uintptr_t hud_reticle_mulss_patch      = 0x00631996;
+
+   // ---- HUD weapon icon arbitration (see modtools/steam namespaces) ------------
+   // Same RTTI route: descriptor 0x007F3CB4 -> vtable 0x007A4418 -> ctor
+   // 0x00568360.  Bodies byte-identical to Steam, so the prologue guards are
+   // shared.  Derived independently: the Steam+0x10A0 rule does not hold here
+   // (EventInput is +0xD80, the list global +0xFD0).
+   constexpr uintptr_t hud_tnm_event_input          = 0x00568830;
+   constexpr uintptr_t hud_tnm_find_name_mesh       = 0x005687E0;
+   constexpr uintptr_t hud_tnm_list                 = 0x007ECA8C;
 
    // =========================================================================
    // Ported from the Steam namespace with tools/port_gog.py (2026-07-26).

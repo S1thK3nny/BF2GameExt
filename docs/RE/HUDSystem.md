@@ -262,37 +262,47 @@ A misspelled event name is therefore silent in release: the element simply never
 
 ### Address table
 
+> **Modtools column corrected 2026-08-26.** The first version of this table was
+> derived from `E:\BF2_Modtools\BF2_modtools.exe`, which is a **different build**
+> from the one this project targets (`GameData\BattlefrontII.Debug.FullScreen.1080.exe`,
+> the image the MemExt Ghidra program matches). Every modtools address below was
+> re-derived against the correct image; entries marked "not re-derived" came from
+> the wrong-image set and have been cleared rather than left as landmines.
+
 | Symbol | Phantom | Modtools |
 |---|---|---|
-| `HUD::EventClass::Create` | `0x0060F400` | `0x006BB130` (thunk `0x0040A35D`) |
-| `HUD::EventClass::EventClass` | `0x0060F250` | |
-| `HUD::EventClass::FindByHashID` | `0x0060F4D0` | `0x006BB1F0` (thunk `0x004077B6`) |
+| `HUD::EventClass::Create` | `0x0060F400` | `0x006AD8A0` (thunk `0x0040A394`) |
+| `HUD::EventClass::EventClass` | `0x0060F250` | `0x006AD740` |
+| `HUD::EventClass::FindByHashID` | `0x0060F4D0` | not re-derived |
 | `HUD::EventClass::AddRef` | `0x0060F3F0` | |
 | `HUD::EventClass::RemoveRef` | `0x0060F7C0` | |
 | `HUD::EventClass::DestroyAll` | `0x0060F480` | |
 | `HUD::EventClass::RegisterEventHandler` | `0x0060F760` | |
 | `HUD::EventClass::UnregisterEventHandler` | `0x0060F870` | |
 | `HUD::EventClass::Send` | `0x0060F800` | inlined into `Event::Send` |
-| `HUD::EventClass::sList` | `0x009D9EE0` | `0x00AF07FC` |
-| `HUD::Event::Send` | `0x0060F7F0` | `0x006BB3F0` (thunk `0x00409881`) |
+| `HUD::EventClass::sList` | `0x009D9EE0` | not re-derived |
+| `HUD::Event::Send` | `0x0060F7F0` | `0x006ADA90` |
 | `HUD::Event::SendDelayed` | `0x0060F840` | |
 | `HUD::EventHandler::Init` | `0x0060F740` | |
 | `HUD::EventHandler::HandleEvent` | `0x0060F720` | |
 | `HUD::EventQueue::AddEvent` | `0x0060F940` | |
-| `HUD::EventQueue::Update` | `0x0060FA40` (thunk `0x004064F6`) | `0x006BB680` |
-| `HUD::gEventList` | | `0x00BDB110` (32 x 12 bytes) |
+| `HUD::EventQueue::Update` | `0x0060FA40` (thunk `0x004064F6`) | not re-derived |
+| `HUD::gEventList` | | not re-derived |
 | `HUD::RemoveAllEvents` | `0x0060FA20` | |
-| `HUD::Item::CreateEventA` | `0x00617370` | `0x006C5210` (thunk `0x00412995`) |
-| `HUD::Item::ReadEvent` | `0x00617E30` | `0x006C5100` |
-| `HUD::Item::GetFilteredEventName` | `0x00617540` | `0x006C5010` (thunk `0x0040944E`) |
+| `HUD::Item::CreateEventA` | `0x00617370` | not re-derived |
+| `HUD::Item::ReadEvent` | `0x00617E30` | not re-derived |
+| `HUD::Item::GetFilteredEventName` | `0x00617540` | not re-derived |
 | `HUD::Item::SetEventFilter` | `0x00618080` | |
-| `HUD::GameEvents::Open` | `0x00611F90` | `0x006BC950` (thunk `0x004164FF`) |
+| `HUD::GameEvents::Open` | `0x00611F90` | `0x006AEF00` |
 | `HUD::GameEvents::Update` | `0x00613390` (thunk `0x0040DEE0`) | |
-| `HUD::Manager::Open` | `0x00619970` | `0x006C7D50` |
-| `HUD::Manager::Load` | `0x00619510` (thunk `0x004180BB`) | `0x006C77D0` |
-| `HUD::Manager::Update` | `0x0061A270` | `0x006C6290` |
+| `HUD::Manager::Open` | `0x00619970` | not re-derived |
+| `HUD::Manager::Load` | `0x00619510` (thunk `0x004180BB`) | not re-derived |
+| `HUD::Manager::Update` | `0x0061A270` | not re-derived |
 | `HUD::Manager::Close` | `0x00619070` | |
 | `HUD::Alloc` | `0x00619030` | |
+| `HUD::Event::GetClass` | | `0x006AD590` (`mov eax,[ecx]`) |
+| `HUD::Event::GetData` | | `0x006AD5A0` (`mov ecx,[ecx+4]`) |
+| `HUD::EventClass::GetType` | | `0x006AD410` (`mov eax,[ecx+4]`) |
 
 ---
 
@@ -616,6 +626,278 @@ Phantom.
 The editor writes its output to `GameData\Data\` (or the VirtualStore redirect).
 
 ---
+
+---
+
+## Collections: how the HUD does "N of something"
+
+There is no repeater or list primitive, and there is no `post%d.*` / `marker%d.*` event
+family. The engine's idiom for a variable-length collection is different, and it is
+worth understanding before designing anything dynamic:
+
+> **one event carrying an index, plus a fixed-size array of pre-built child elements
+> owned by a specialised element class.**
+
+`ElementMap` is the clearest case. `player1.map.refreshPost` is `type_Uint` and its
+payload is the **command post index**:
+
+```cpp
+void __cdecl HUD::ElementMap::EventRefreshPost(Event* e, void* self) {
+    if (EventClass::GetType(e->GetClass()) != type_Uint) return;
+    uint i = e->GetData().uintValue;
+    if (i > 0xF) return;                       // hard cap
+    CommandPost* cp = TargetManager::gPost[i].actor;
+    ...
+}
+```
+
+The element then owns parallel 16-entry arrays of icon/text sub-elements, seeded from
+the `PostLarge` / `PostSmall` / `PostSpawn`, `PostSelect*` and `PostText*` templates in
+the `.hud` file. Same pattern for `EventRefreshTarget` and `EventRefreshMarker`.
+
+`ElementVehicleSeating`, `ElementTarget` and `ObjectiveList` are the other collection
+classes; `ElementMultilineText` is the same trick for text lines.
+
+### Command posts specifically
+
+| Fact | Detail |
+|---|---|
+| Storage | `TargetManager::gPost[16]`, `Post` = 48 bytes (`CommandPost* actor` + `MapParams`) |
+| Hard cap | **16**, checked in both `ElementMap::GetPost` (`i < 0x10`) and `EventRefreshPost` (`i > 0xF` rejects) |
+| Post team | `GameObject+0x234`, the 4-bit signed `mTeam` bitfield (see `team_count_hard_limit`) |
+| Icon colour | `GetPlayerTeam(this)->mColor[postTeam]` - the palette is **relative to the viewing player**, which is what makes `ColorFriendly` work |
+| Contested flash | when `post->actor->mHoldTeam != postTeam`, crossfades between the two team colours on `fmod(GetMissionTime(), 0.25)`, 0.125 s each direction |
+| Hide all | `player1.map.hideCPs` -> `ElementMap::EventPostHide` -> `HideCommandPosts` |
+
+The only HUD events that mention command posts are the six
+`player1.commandPost.{charge,disable,color,disputeColor,disputeEnable,disputeDisable}`,
+and they all describe the **single post the player is currently capturing**, not the set.
+
+So a per-CP display already exists and is genuinely dynamic - it is the minimap's post
+icons. What does not exist is any way to render that set outside `ElementMap` from
+data, because only `ElementMap` knows how to walk `TargetManager::gPost`.
+
+Lua already has the state: `GetCommandPostTeam`, `GetCommandPostCaptureRegion`,
+`GetCommandPostBleedValue`. It has no channel to push it at the HUD.
+
+### Building a custom command-post strip
+
+Tier 2 work, and small. Do **not** try to mimic the index-carrying pattern - a generic
+`Element` cannot demultiplex an index. Register one event per post per field instead:
+
+```cpp
+// from a GameEvents::Open detour, after calling the original
+for (int i = 1; i <= 16; ++i) {
+    gCP[i].color    = EventClass::Create(type_Color,  "commandpost%d.teamColor", i);
+    gCP[i].present  = EventClass::Create(type_Bool,   "commandpost%d.present",   i);
+    gCP[i].disputed = EventClass::Create(type_Bool,   "commandpost%d.disputed",  i);
+    gCP[i].name     = EventClass::Create(type_String, "commandpost%d.name",      i);
+}
+```
+
+then pump them from a `GameEvents::Update` detour by walking `TargetManager::gPost`,
+sending only on change (the engine's own `GameEvents` helpers all do change-detection
+against a cached `gPlayerData` copy; copy that discipline or every element re-renders
+every frame). 64 extra `EventClass` objects is 2 KB plus names.
+
+A `.hud` file can then lay out sixteen groups with `EventEnable("commandpost3.present")`
+and `EventColor("commandpost3.teamColor")` and get a real capture-status strip.
+
+---
+
+## The floating weapon icon bug (community `extraweapons.hud` fixes)
+
+The community fix for custom-weapon HUD icons is a pair of items per weapon channel:
+
+1. a `TransformNameMesh` mapping each custom weapon mesh name to `com_inv_mesh`, wired
+   `EventInput("player1.weaponN.change")` -> `EventOutput("player1.weaponN.mesh")`, which
+   blanks the **stock** icon element;
+2. the mod's own `Model3D` bound to the raw `EventMesh("player1.weaponN.change")` with
+   `Scale(0,0,0)` as the default and a hand-placed `MeshInfo` per supported weapon.
+
+Loading two such fixes breaks both. The cause is the miss path in the transform.
+
+### Root cause
+
+```cpp
+void __cdecl HUD::TransformNameMesh::EventInput(Event* e, void* self) {
+    uint hash = 0;
+    if (EventClass::GetType(e->GetClass()) == type_Uint) hash = e->GetData().uintValue;
+    if (self->mEventClassOutput == 0) return;        // +0x30
+    if (hash == 0) return;
+    if (self->mNumMappings != 0) {                   // +0x3C
+        NameMesh* nm = FindNameMesh(self, hash);     // bsearch over mMapping (+0x38)
+        if (nm) {
+            RedModel* m = NameMesh::GetMesh(nm, Item::GetName(self));
+            if (m) goto send;
+        }
+    }
+    // ---- MISS PATH: not silent ----
+    RedModel* m = PblHashTableCode::_Find(RedModel::_HashTable, 0x800, hash);
+    if (!m) return;
+    m->flags |= 1;
+send:
+    Event ev(self->mEventClassOutput, m);
+    ev.Send();
+}
+```
+
+On a lookup miss the transform does **not** stay quiet. It resolves the incoming hash as
+a `RedModel` and sends the **original, unmapped mesh** to its output event.
+
+`EventClass::RegisterEventHandler` appends at the tail and `EventClass::Send` walks head
+to tail, so handlers fire in registration order and **the last-parsed `.hud` file wins**.
+With two fixes bound to the same input and output events:
+
+| Weapon | Mod A (has mapping) | Mod B (no mapping) | Result today |
+|---|---|---|---|
+| A's weapon | sends `com_inv_mesh` | falls through, sends the real mesh | B wins - stock icon reappears **and** A's own `Model3D` draws it: the double icon |
+| B's weapon | falls through | sends `com_inv_mesh` | A fires first, B second, correct by luck |
+| neither | falls through | falls through | same value twice, harmless |
+
+The same defect breaks **stock** remaps, which is independently testable: stock
+`hudtransforms.hud` maps `cis_weap_inf_wrist_trishot` -> `hud_cis_trishot`. Any
+extraweapons fix loaded after it has no entry for the trishot, falls through, and
+re-sends the world mesh. Load one of these fixes and the CIS wrist trishot icon should
+show the world model instead of its HUD icon.
+
+`NameMesh::GetMesh` returning null (mapping present, mesh not in the `.req`) takes the
+same fallback path, so a broken mapping produces the identical symptom. On Phantom it
+first logs `"TransformNameMesh %s : unable to find model %s associated with name %s"`,
+gated once per entry by `mDisplayedWarning`.
+
+### The fix: mapped beats unmapped
+
+**Shipped, and confirmed working on modtools.** One detour on `TransformNameMesh::EventInput`.
+Before running the original: if this transform has no mapping for the hash, but some
+other transform sharing the same `mEventClassOutput` does, return without sending.
+
+Implemented in `PatcherDLL/src/render/hud_weapon_icon_fix.cpp`, INI `[Fixes] WeaponIconFix`.
+
+```cpp
+static void __cdecl hooked_TNM_EventInput(HudEvent* e, void* self)
+{
+   if (EventClass_GetType(e->cls) == type_Uint) {
+      unsigned hash  = e->d.u;
+      void*    myOut = *(void**)((char*)self + 0x30);
+      if (hash && myOut && !FindNameMesh(self, hash)) {
+         // walk sTransformNameMeshList; the node sits at item + 0x40
+         for (Node* n = *(Node**)kList; n != (Node*)kList; n = n->next) {
+            void* t = (char*)n - 0x40;
+            if (t == self) continue;
+            if (*(void**)((char*)t + 0x30) != myOut) continue;
+            NameMesh* nm = FindNameMesh(t, hash);
+            if (nm && NameMesh_GetMesh(nm, Item_GetName(t)))
+               return;                    // someone real will answer; stay quiet
+         }
+      }
+   }
+   orig_TNM_EventInput(e, self);
+}
+```
+
+Properties:
+
+- **Order independent.** Whichever file loads last no longer decides.
+- **No data changes.** Existing mod `.hud` files are fixed as shipped, with no
+  cooperation between mod authors.
+- **Backward compatible.** One transform behaves identically. No transform having the
+  mapping still yields the passthrough. Two transforms both mapping the same weapon is a
+  genuine conflict and stays last-wins.
+- **Repairs the stock remaps** as a side effect.
+- Cost is an O(N) walk only on the miss path, only on weapon change, with N = the number
+  of `TransformNameMesh` items (single digits in practice).
+
+`FindNameMesh` builds a stack `NameMesh`, `Init`s it with `(hash, 0, false)` and
+`bsearch`es `mMapping`; it mutates nothing, so calling it speculatively on other
+transforms is safe.
+
+The alternative - merging duplicate transforms at load time so only one handler ever
+registers - gives a cleaner runtime but is more invasive and makes the 256-entry cap
+shared across all mods.
+
+### Addresses
+
+Modtools came from the MemExt Ghidra program. Steam and GOG were located through
+RTTI, which survives on retail even though the RedWarning strings do not: the type
+descriptor `.?AVTransformNameMesh@HUD@@` leads to the COL, the COL to the vtable,
+and the two stores of that vtable are the constructor and the deleting destructor.
+The constructor then hands over everything else, since it pushes `EventInput` into
+`mEventInput` and links `+0x40` into the list:
+
+```
+005675F4  mov [esi],0x7A35D8      <- vtable            (Steam)
+005675FA  lea ecx,[esi+0x40]      <- mTransformNameMeshNode
+0056761B  mov eax,[0x7EBABC]      }  push-front link into
+00567623  mov [0x7EBABC],ecx      }  sTransformNameMeshList
+00567629  lea ecx,[esi+0x1C]      <- mEventInput
+0056762C  push 0x567AB0           <- EventInput
+```
+
+| Symbol | Phantom | Modtools | Steam | GOG |
+|---|---|---|---|---|
+| `TransformNameMesh::EventInput` | `0x0061C8E0` | `0x006BB610` | `0x00567AB0` | `0x00568830` |
+| `TransformNameMesh::FindNameMesh` | `0x0061CA00` | `0x006BB230` | `0x00567A60` | `0x005687E0` |
+| `sTransformNameMeshList` | `0x009D9F90` | `0x00AD8A10` | `0x007EBABC` | `0x007ECA8C` |
+| `TransformNameMesh::TransformNameMesh` | | | `0x005675E0` | `0x00568360` |
+| `TransformNameMesh` vtable | | | `0x007A35D8` | `0x007A4418` |
+| `TransformNameMesh::FindByHashID` | `0x0061C9B0` | `0x006BB6F0` | | |
+| `TransformNameMesh::ReadData` | `0x0061CD50` | contains `0x006BBA06` | | |
+| `NameMesh::GetMesh` | `0x0061CA60` | `0x006BB350` (thunk `0x0040AB46`) | `0x005674A0` | |
+| `NameMesh::Init(name, meshName)` | `0x0061CB80` | `0x006BB740` | | |
+| `Item::GetName` | `0x00617850` | `0x006B6190` (unverified) | | |
+| `RedModel::_HashTable` | not derived | `0x00D4D964` | `0x0093EBDC` | |
+
+Conventions were read off the disassembly on every build rather than assumed, which
+matters because retail is LTCG: `EventInput` ends in a **bare `RET`** (so `__cdecl`,
+two stack args) and `FindNameMesh` ends in **`RET 4`** (`__thiscall(this, uint)`) on
+all three. The accessor offsets check out identically everywhere:
+
+| | Phantom | Modtools | Steam |
+|---|---|---|---|
+| `Event::GetClass` -> `mClass +0x00` | | `0x006AD590` | `0x0055E120` |
+| `EventClass::GetType` -> `mType +0x04` | | `0x006AD410` | `0x0055DDE0` |
+| `Event::GetData` -> `mData +0x04` | | `0x006AD5A0` | `0x0055E130` |
+
+The install byte-guards ten bytes of both prologues. There are two codegens: the
+modtools debug build frames on ESP, the retail builds frame on EBP, and Steam and
+GOG are byte-identical across those ten bytes.
+
+```
+modtools  EventInput    83 EC 08 53 56 8B 74 24 14 57
+modtools  FindNameMesh  83 EC 14 56 8B F1 8D 4C 24 04
+retail    EventInput    55 8B EC 8B 55 08 83 EC 08 8B
+retail    FindNameMesh  55 8B EC 83 EC 14 56 8B F1 8D
+```
+
+A mismatch declines the install and writes the bytes it found to `BF2GameExt.log`.
+
+`TransformNameMesh` layout: `mMapping` `+0x38`, `mNumMappings` `+0x3C`,
+`mTransformNameMeshNode` `+0x40`, `mInheritNames[16]` `+0x44`, `mNumInheritNames`
+`+0x84`. Inherited from `Transform`: `mEventInput` `+0x1C`, `mEventClassOutput` `+0x30`.
+`NameMesh` is 20 bytes: `mHashID +0x00`, `mMesh +0x04`, `mName +0x08`, `mMeshName +0x0C`,
+bitfield `+0x10` (bit0 `mDisplayedWarning`, bit1 `mInherited`, bit2 `mMeshIsID`).
+
+### Two undocumented things found on the way
+
+**`TransformNameMesh` has an inheritance keyword.** Inside a `TransformNameMesh` block,
+a nested `TransformNameMesh("otherItemName")` line (hash `0x67C3C715`, the same hash as
+the type keyword) resolves that name through `FindByHashID` and **copies every one of its
+`NameMesh` entries into this one**, flagged `mInherited`. Up to 16 inherit names are
+recorded in `mInheritNames` so `WriteData` round-trips them.
+
+This is a real composition mechanism, but it does not fix the bug on its own: both
+transforms still register and both still send, so it only helps if the last-loaded one
+inherits all the others. It is also blunted in practice because every shipped
+extraweapons fix names its transform `player1weapon1` / `player1weapon2`, exactly like
+stock `hudtransforms.hud`, and `FindByHashID` returns the first match - so mods would
+have to rename their transforms before they could inherit each other.
+
+**`NameMesh` entries are capped at 256 per transform.** `TransformNameMesh::Read` builds
+the table in a 256-entry stack scratch array, and `ReadData` warns
+`"HUD TransformNameMesh can only store %d NameMeshs"` and silently drops anything past
+255. Inherited entries count against the same budget. For reference the largest shipped
+community table is `995_extraweapons.hud` at 70 entries.
 
 ## Open questions
 
