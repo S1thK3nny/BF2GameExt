@@ -739,6 +739,16 @@ namespace modtools {
    constexpr uintptr_t hud_tnm_find_name_mesh       = 0x006BB230;
    constexpr uintptr_t hud_tnm_list                 = 0x00AD8A10; // sTransformNameMeshList
 
+   // ---- In-game HUD editor (hud_editor_disable.cpp) -----------------------------
+   // HUD::Editor::KeyboardEvent — vtable slot 2 of the Editor's RedInputEventHandler
+   // base (modtools vtable 0x00A5C290, slot 0x00A5C298 -> ILT thunk 0x00404066).
+   // The ONLY way into the editor: on a KEYCHAR (event type 2) of 0x12 with
+   // modifier bit 0 set it flips Editor::SetMode between 1 and 2, and SetMode has
+   // no other callers besides Editor::Update's own mode bookkeeping.
+   // __thiscall, five stack dwords, RET 0x14.
+   // Listed for reference only — the modtools editor works and is NOT patched.
+   constexpr uintptr_t hud_editor_keyboard_event    = 0x00690E70;
+
    // ---- Combat awards (award_disable.cpp) --------------------------------------
    // bool __thiscall MedalsMgr::IsAwardAvailable(MedalsMgr*, int index) — the one
    // gate every award effect reads.  Body is
@@ -1511,6 +1521,12 @@ namespace steam {
    constexpr uintptr_t hud_tnm_find_name_mesh       = 0x00567A60;
    constexpr uintptr_t hud_tnm_list                 = 0x007EBABC;
 
+   // ---- In-game HUD editor (hud_editor_disable.cpp) -----------------------------
+   // HUD::Editor::KeyboardEvent — Editor vtable 0x007A0578 (read out of the ctor's
+   // `MOV [EDI],0x7a0578` at 0x00544CC2), slot 2 = 0x007A0580.  Body is byte-for-byte
+   // the modtools one; single vtable xref, so it is not a COMDAT-folded shared thunk.
+   constexpr uintptr_t hud_editor_keyboard_event    = 0x00546E20;
+
    // ---- Lua core / character system (ported 2026-07-20) ------------------------
    // Character slot layout is build-INVARIANT (verified via Lua_Callbacks::
    // GetCharacterUnit 0x58fcd0 / GetCharacterTeam 0x58f820: stride 0x1B0,
@@ -1752,6 +1768,11 @@ namespace gog {
    constexpr uintptr_t hud_tnm_event_input          = 0x00568830;
    constexpr uintptr_t hud_tnm_find_name_mesh       = 0x005687E0;
    constexpr uintptr_t hud_tnm_list                 = 0x007ECA8C;
+
+   // ---- In-game HUD editor (hud_editor_disable.cpp) -----------------------------
+   // Same route as Steam: ctor 0x005459E0 writes vtable 0x007A13D4, slot 2 =
+   // 0x007A13DC.  First 24 bytes identical to Steam, so the guard is shared.
+   constexpr uintptr_t hud_editor_keyboard_event    = 0x00547B70;
 
    // =========================================================================
    // Ported from the Steam namespace with tools/port_gog.py (2026-07-26).

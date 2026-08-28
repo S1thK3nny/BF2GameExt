@@ -190,6 +190,9 @@
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\hud_editor_disable.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -355,6 +358,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_editor_disable.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp">

@@ -616,14 +616,69 @@ live nudging, and a "generate `.hud` file" writer (`Item::Write` / `Element::Wri
 one `WriteData` per class). `gEditor` is constructed unconditionally in
 `Manager::Open`; only the 1 MB `HUDEditHeap` is gated on `__RedDebugHeap != -1`.
 
-`Editor::KeyboardEvent` on Phantom toggles `mMode` between `mode_Disabled` and
+`Editor::KeyboardEvent` toggles `mMode` between `mode_Disabled` and
 `mode_SelectElement` on a `KEYCHAR` of `0x12` with modifier bit 0 set, and toggles the
-backdrop on `'0'`. Community documentation for the modtools debug build
+backdrop on `'0'`. Verified on Phantom, on modtools (ctor `0x0068F310` writes vtable
+`0x00A5C290` and `mMode = 1`) and on both retail builds, whose two bodies are
+byte-for-byte identical to each other. Community documentation for the modtools debug build
 (`data_HUD/HUD Tutorial.txt` by Anakin) gives the toggle as Ctrl+E, so the exact
 binding on the shipped modtools build should be re-checked rather than taken from
 Phantom.
 
 The editor writes its output to `GameData\Data\` (or the VirtualStore redirect).
+
+### It is still live on retail
+
+The whole editor is present and reachable on Steam and GOG. `Manager::Open` builds
+`gEditor` unconditionally there too, and `Editor::Update`'s `mMode - 1` jump table
+still has all four arms including the mode-2 navigation code. The navigation input
+path is intact as well: the button-to-key mapper (steam `FUN_00546D30`) maps its 14
+button indices to the same DirectInput scancodes (`0xCB` left, `0xCD` right, `0xC8` up,
+`0xD0` down, numpad `0x4B/0x4D/0x48/0x50`, `HOME/END/PGUP/PGDN/DEL/INS`) and reads
+them out of `joystick + 0x2608`, which `FLInputManager` populates on retail
+(`FUN_0052AA20`: `if (GetNumKeyboards()) kbd = GetKeyboard(0)`).
+
+So nothing statically explains why the editor cannot be driven on retail - the
+reported behaviour is that it opens and then does not respond. The untested
+candidate is `SetMode`'s own bail-out: entering mode 2 does
+
+```
+mFile = ConfigFile::GetFirst();
+if (mFile == 0 || mFile->[0x0C] == 0) mMode = 1;   // silent revert
+if (mFile == 0) goto resume;
+mHighlight(); GameLoop::Pause();                    // runs anyway
+... Enable(this, true);
+```
+
+which, on an empty config list, pauses the game and shows the editor while leaving
+`mMode` at 1, so `Editor::Update` falls through to its no-op arm. That would need a
+runtime check to confirm, and it does not explain a second toggle press failing.
+
+Either way the retail-facing consequence is the same: `SetMode(2)` calls
+`GameLoop::Pause()`, so the player freezes the game behind a tool they cannot use.
+
+### Removal on retail (`hud_editor_disable.cpp`)
+
+`Editor::SetMode` has exactly two callers - `Editor::Update` (its own bookkeeping,
+which only ever re-applies the static `sMode`) and `Editor::KeyboardEvent` - so
+`KeyboardEvent` is the single door in. BF2GameExt overwrites its entry with its own
+epilogue (`C2 14 00`, `RET 0x14`) on Steam and GOG:
+
+| Build | `Editor::Editor` | vtable (from the ctor's own store) | slot 2 = `KeyboardEvent` |
+|---|---|---|---|
+| Modtools | `0x0068F310` | `0x00A5C290` | `0x00690E70` (via ILT `0x00404066`) - **not patched** |
+| Steam | `0x00544C90` | `0x007A0578` | `0x00546E20` |
+| GOG | `0x005459E0` | `0x007A13D4` | `0x00547B70` |
+
+Each has exactly one vtable xref, so none is a COMDAT-folded body shared with
+another class. With the key dead, `sMode` never leaves its BSS `0`, and the first
+`Editor::Update` after each `Manager::Open` drives `mMode` 1 -> 0 through
+`SetMode(0)` exactly as it already did.
+
+**Do not disable the editor by skipping its construction in `Manager::Open`.**
+`Manager::Close` calls `gEditor`'s vtable slot 0 with no null check
+(`(**(code **)*gEditor)(0)` at modtools `0x006B8250`), so a null `gEditor` turns a
+dead feature into a crash on map teardown.
 
 ---
 
@@ -909,5 +964,7 @@ community table is `995_extraweapons.hud` at 70 entries.
   `0xBDBFD84F`, `0x5D23BD7D`, `0x04ABB610` in `Element::ReadData` / `ViewPort::ReadData`
   are unresolved. The two `ViewPort` ones are almost certainly `Viewport1Enable` /
   `Viewport4Position`-shaped names; brute-force against the formula above.
-- Whether the editor's keyboard path is reachable on retail, which would make it a
-  shipped-build layout tool rather than a modtools-only one.
+- Why the editor cannot be navigated on retail, given that the code, the input
+  mapping and the keyboard device are all present. See
+  [It is still live on retail](#it-is-still-live-on-retail); needs a runtime check
+  of `ConfigFile::GetFirst()->[0x0C]` at the moment `SetMode(2)` runs.
