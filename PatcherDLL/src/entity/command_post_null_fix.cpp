@@ -7,8 +7,6 @@
 
 // See command_post_null_fix.hpp for the crash this guards.
 
-bool g_commandPostNullFixEnabled = true;
-
 // CommandPost::SetTeam(CommandPost* this, int newTeam, int oldTeam) -- __thiscall,
 // RET 8.  Taken as __fastcall so ECX arrives as the first parameter; EDX is
 // unused by the original and is passed straight through.
@@ -42,7 +40,6 @@ static void __fastcall hooked_set_team(void* ecx, void* edx, int a, int b)
 
 void command_post_null_fix_install(uintptr_t exe_base)
 {
-   if (!g_commandPostNullFixEnabled) return;
    if (g_addr->command_post_set_team == 0) return; // not derived for this build
 
    g_origSetTeam = reinterpret_cast<fn_SetTeam_t>(resolve(exe_base, g_addr->command_post_set_team));

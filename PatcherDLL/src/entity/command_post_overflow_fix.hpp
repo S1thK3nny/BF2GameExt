@@ -82,7 +82,6 @@
 // prologue, not ported.
 // =============================================================================
 
-extern bool g_commandPostOverflowFix;
 
 void command_post_overflow_fix_install(uintptr_t exe_base);
 void command_post_overflow_fix_uninstall();

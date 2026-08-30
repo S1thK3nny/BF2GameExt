@@ -37,7 +37,6 @@
 // hook serves every build.  Steam and GOG share one address, 0x0047E2B0.
 // =============================================================================
 
-extern bool g_commandPostNullFixEnabled;
 
 void command_post_null_fix_install(uintptr_t exe_base);
 void command_post_null_fix_uninstall();

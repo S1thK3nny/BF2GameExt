@@ -557,8 +557,6 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       renderThunkVA    = game_addrs::modtools::weapon_render_thunk;
       rayHitVA   = game_addrs::modtools::collision_manager_ray_hit;
       rayHitIsRelease = false;   // plain __cdecl, result in ST(0)
-      scopeVA = game_addrs::modtools::scope_display_instance;
-      s_misAimingOff = 0x160;
       // Grappling hook is modtools-only; the other builds have no address for it.
       grappleVA       = game_addrs::modtools::weapon_grapple_vftable_override_aimer;
       grappleRenderVA = game_addrs::modtools::weapon_grapple_vftable_render;

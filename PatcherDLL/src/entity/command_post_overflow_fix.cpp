@@ -8,8 +8,6 @@
 // See command_post_overflow_fix.hpp for the crash, the mechanism, and why the
 // clamp reclaims a slot rather than refusing the registration.
 
-bool g_commandPostOverflowFix = true;
-
 namespace {
 
 constexpr int kMaxPosts = 16;   // sPostArray is a fixed 16 entries on every build
@@ -103,13 +101,13 @@ fn_fastcall_t s_origFastcall = nullptr;
 
 void* __cdecl hooked_cdecl(void* entity, void* cpClass)
 {
-   if (g_commandPostOverflowFix) clamp_registration(cpClass);
+   clamp_registration(cpClass);
    return s_origCdecl(entity, cpClass);
 }
 
 void* __fastcall hooked_fastcall(void* entity, void* cpClass)
 {
-   if (g_commandPostOverflowFix) clamp_registration(cpClass);
+   clamp_registration(cpClass);
    return s_origFastcall(entity, cpClass);
 }
 

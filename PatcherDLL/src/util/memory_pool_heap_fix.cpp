@@ -9,7 +9,6 @@
 
 // See memory_pool_heap_fix.hpp for the mechanism and why the retarget is safe.
 
-bool g_memoryPoolHeapFix = true;
 bool g_poolGrowthDiag    = false;
 
 namespace {
@@ -78,7 +77,7 @@ void __fastcall hooked_allocate(void* self, void* edx, uint32_t size)
 
       // Only act when the captured heap is not the one that is actually live.
       // If the diagnosis is wrong this never fires and nothing changes.
-      if (g_memoryPoolHeapFix && live >= 0 && captured != live) {
+      if (live >= 0 && captured != live) {
          *reinterpret_cast<int32_t*>(pool + g_heapOffset) = live;
          InterlockedIncrement(&s_retargets);
       }
@@ -91,7 +90,6 @@ void __fastcall hooked_allocate(void* self, void* edx, uint32_t size)
 
 void memory_pool_heap_fix_install(uintptr_t exe_base)
 {
-   if (!g_memoryPoolHeapFix && !g_poolGrowthDiag) return;
    if (g_addr->memory_pool_allocate == 0 || g_addr->red_curr_heap == 0) return;
 
    g_heapOffset = (uint32_t)g_addr->mempool_heap_offset;

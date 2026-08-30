@@ -234,8 +234,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
-      g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
-      g_commandPostOverflowFix    = cfg.get_bool("Fixes", "CommandPostOverflowFix", true);
       // Read-only instrumentation, in its own [Diagnostic] section so it is never
       // confused with the shipped feature toggles. All default off.
       g_branchRegionDebugEnabled  = cfg.get_bool("Diagnostic", "BranchRegionDebug", false);
@@ -250,7 +248,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
-      g_memoryPoolHeapFix         = cfg.get_bool("Fixes", "MemoryPoolHeapFix", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);

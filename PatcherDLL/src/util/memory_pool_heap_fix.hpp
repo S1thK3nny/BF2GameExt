@@ -62,7 +62,6 @@
 // across would read mPool as the heap index.
 // =============================================================================
 
-extern bool g_memoryPoolHeapFix;
 
 // Hand-added key, deliberately absent from ini_registry.hpp:
 // [Diagnostic] PoolGrowthDiag.

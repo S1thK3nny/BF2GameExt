@@ -15,7 +15,10 @@ Automatic binary patches applied on load:
 - **Audio Stream Limit** - Raises the number of audio streams that can be open at once from 6 to 12, removing the `Maximum number of open audio streams exceeded` failure when a mission script calls `OpenAudioStream` more than six times. Each stream carries its own ~3.4 MB of decode buffers, so the 12-slot array reserves about 40 MB of *virtual address space*. Turn this off if a heavy mod is running out of address space. INI: `[LimitIncreases] AudioStreamLimit=1`
 
   **Caveat:** the shared fire-and-forget request pool stays at 24 entries, so a script queueing sounds on all 12 streams at once can still hit that older limit. Exceeding it drops the queued request rather than failing the stream.
-- **Particle Cache** - Increases the cached particle limit from 300 to 1200
+- **Particle Cache** - Increases the cached particle limit from 300 to 1200. Now part of the particle fixes below rather than its own switch. INI: `[Particles] ParticleFixes=1`
+- **Concurrent Sound Limit** - Raises how many sounds can be audible at once from the stock 32 to as many as 119, so a busy firefight stops dropping shots, footsteps and voice lines. Off by default because the extra voices have to come from somewhere: under EAX (5.1/7.1, or any audio mode using hardware) they are taken from your sound device and it must have some spare, while software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice. INI: `[LimitIncreases] VoiceLimit=0`
+- **AI Reservation Pool** - Squads book vehicle seats, repair points, attack slots and formation positions out of a single 60-entry pool. On a busy map it fills, units stop being handed work, and the log fills with `List pool is full`. Raised to 127 for 1.6 KB. INI: `[LimitIncreases] ReservationPoolSize=127`
+- **Soldier Height Ceiling** - Stock BF2 kills any soldier who goes higher than 1000 units, including on spawn, which caps how tall a map can be built. Flyers were never affected. Off by default, because a soldier who genuinely escapes upward is then never cleaned up. INI: `[LimitIncreases] SoldierHeightCeiling=0` *(off by default)*
 - **Object Limit** - Doubles the active object table from 1024 to 2048 slots, raising how many objects a map can have alive at once
 - **Combo Animation Limit** - Increases from 30 to 90 entries, with an expanded animation index range
 - **High-Res Animation Limit** - Increases from 50 to 12,800 entries
@@ -40,6 +43,13 @@ Automatic binary patches applied on load:
 General engine bug fixes, several of them ported from PrismaticFlower's upstream. Build restrictions and INI keys are noted per entry:
 
 - **PropGenerator Loop Fix** - The procedural foliage system could read past the end of its object array at very high fields of view and crash. The patch restores the missing bounds check. INI: `[Fixes] PropGeneratorLoopFix=1`
+- **Particle Fixes** - Effects stop dropping out when a lot of them are on screen at once, and particles stop switching off for the rest of the session after a single bad frame. INI: `[Particles] ParticleFixes=1`
+- **Particle Density** - Controls how much the game thins particle effects out with distance. `1` keeps full density near and mid-range and lets an effect that asks for more than 128 particles have them; `2` removes distance thinning entirely. Higher costs frame time. INI: `[Particles] ParticleDensity=0` *(stock by default)*
+- **Memory Pool Heap Fix** - A map could crash the first time one of its memory pools needed to grow, because the pool was still handing out memory that had been released at the end of the level load. A mission script can dodge this with `SetMemoryPool`, but only if you still have the script, so this covers maps whose source is lost. Always on.
+- **Command Post Null Fix** - A mission script pointing command post logic at something that is not a command post crashed the game. It now logs what happened and keeps playing. Always on.
+- **Attached Effects Overflow Fix** - A model carrying more than 64 attached effects built its class from whatever memory sat after the array and killed the level while spawning them. The extras are now refused cleanly, which is what the retail builds already do. Nothing changes for a model within the limit. Modtools only, always on.
+- **EntityPath Branch Regions** - The `BranchRegion` property on a path node never did anything in stock BF2; no branch region was ever created, so a path could not fork. Name the region `entitypathbranch <id>` and write `BranchRegion("<id>")` in the path node. INI: `[Fixes] BranchRegionFix=1`
+- **Impact Sound Fix** - On a map with no water, anything happening below world height 0 made no impact sound at all. Maps that do have water still go quiet under the surface. INI: `[Fixes] ImpactSoundWaterFix=1`
 - **Chunk Push Fix** - When an explosion sweeps up a soldier, the engine rolls the class's chunk frequency to decide whether the body breaks apart into chunks. If that roll passes it flags the body and returns immediately, before the explosion's push is ever applied, so a body that gibs simply drops where it stood while a body that does not gets thrown. The fix lets the push run either way, so chunked bodies are flung by the blast like everything else. INI: `[Fixes] ChunkPushFix=1`
 - **Terrain Texture Fix** - The terrain shader caches two textures that only get assigned on maps that have a terrain detail map. Going from a map with one to a map without one in the same session left the shader pointing at freed memory, producing garbage terrain or a crash. The fix re-resolves both textures before every terrain load so they are always valid. Also fixes an upstream copy-paste bug that fed the wrong texture into one of the two slots. INI: `[Fixes] TerrainTextureFix=1`
 - **Game Logging Enablement** - Retail builds ship the engine's `BFront2.log` file logging compiled in but switched off. This turns it back on without needing the `/log` command line flag, which is useful for diagnosing crashes and mod issues. No effect on Modtools, which always logs. INI: `[Features] GameLogging=0` *(off by default)*
@@ -82,7 +92,8 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 ## Weapon Systems
 
-- **Barrel Fire Origin Fix** - Fixes projectiles spawning from `bone_head` instead of `hp_fire` on `cannon` and `launcher` weapons, so shots come out of the actual barrel hardpoint. Aim stays true while zoomed: the shot is re-aimed at whatever it would have hit from the default origin, so moving the muzzle never costs accuracy. Turns itself off while a sniper scope is on screen, where the barrel is not visible anyway. INI: `[Fixes] BarrelFireOriginFix=1`
+- **Command Post Overflow Fix** - The game keeps room for exactly sixteen command posts and never checks before adding the seventeenth, so it writes one slot past the end and hands whatever engine value happens to live there to a command post as its own address. That is an instant crash, and it is reachable in stock play because destroying a post empties its slot without giving the count back - so a long session that cycles posts creeps up to the limit even on a map with far fewer than sixteen. This reuses an abandoned slot where one exists, and otherwise binds to an existing post rather than crashing. INI: `[Fixes] CommandPostOverflowFix=1`
+- **Barrel Fire Origin Fix** - Fixes projectiles spawning from `bone_head` instead of `hp_fire` on `cannon` and `launcher` weapons, so shots come out of the actual barrel hardpoint, and re-aims them so moving the muzzle costs no accuracy. **This changes aim behaviour, not just where the bolt appears.** Stock BF2 converges a third-person shot onto the camera line at only about 65 units, so past that its own shots drift off the crosshair - wider the further you shoot. This resolves what you are actually pointing at and aims there, so shots land on the crosshair at every range. It also removes the small hipfire offset first person has in stock, where the shot leaves parallel to your view rather than along it. Shots into open sky or across water converge far down the line you are pointing at, so the bolt still leaves the barrel. AI shots needing more correction than the AI aim system can hold are left stock rather than forced. INI: `[Fixes] BarrelFireOriginFix=1`
 
   <img width="1800" alt="BarrelFireOriginFix" src="../images/BarrelFireOriginFix.jpg" />
 
@@ -112,6 +123,9 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 ## AI Systems
 
+- **AI Decision Rate** - Distant AI look like they are standing around, because stock BF2 only lets a unit away from a player pick a new goal every two to four seconds. This is a multiple of that rate: `2.0` makes them think twice as often, below `1.0` slows them down to buy frame time back. AI next to you are unaffected. Range 0.25 to 4.0. INI: `[AI] AIDecisionRate=1.0`
+- **AI Update Budget** - Only ten AI may pick a new goal per turn in stock BF2. A unit that misses its turn keeps walking and shooting but never re-decides, which is the other half of what standing around looks like. Raising this costs frame time and only helps if the budget is what is actually holding them back, so check with `[Diagnostic] AIUpdateDiag` first. `0` keeps the stock 10, otherwise 10 to 127. INI: `[AI] AIUpdateBudget=0` *(stock by default)*
+
 - **Dead Body Shooting Control** - In the vanilla game, Alliance units break off to walk up to and fire on nearby soldier corpses. A fun feature implemented by Pandemic, but it does hinder the gameplay experience as they are dead focused on the corpses. Two INI toggles control this:
   - `[Features] DisableDeadBodyShooting=1` *(default on)* - Stops the behaviour entirely for every side, so no one ever shoots dead bodies. Overrides the all factions toggle.
   - `[Features] DeadBodyShootingAllFactions=1` *(default off)* - Extends the behaviour to all factions instead of just Alliance. Ignored while `DisableDeadBodyShooting=1`.
@@ -128,6 +142,19 @@ retail builds have no command console to add them to.
 - `RenderHoverSprings` - Visualise hover vehicle spring compression with coloured wireframe spheres
 - `ShowWeaponRanges` - Draw weapon AI range circles (MinRange, OptimalRange, MaxRange) around soldiers
 - `memwatch` - Reverse-engineering aid. Arms a CPU hardware data breakpoint on an address and reports every distinct piece of code that reads or writes it, with a register snapshot and a best-effort call stack per accessor. Up to four addresses at once, since that is how many debug registers x86 has. `memwatch [u]<hexaddr> [len] [r|w|rw]` to arm, bare `memwatch` to report and disarm, `memwatch clear` to drop all watches. A plain address is a runtime one; the `u` prefix takes an unrelocated address straight out of Ghidra and rebases it for you. Reported accessor and caller addresses are unrelocated, so they paste back into Ghidra as is. See [MemWatchRE.md](../RE/MemWatchRE.md)
+
+## Diagnostics
+
+Developer reporting, all off by default and all under `[Diagnostic]` in the INI. They only log; none of them change how the game plays.
+
+| Key | Reports |
+|-----|---------|
+| `ContentCensus` | What this map actually loaded against the limits the engine imposes, every N seconds. Set it to a number of seconds; `30` is sensible. Effect classes are worth watching in particular, because the engine neither warns nor clamps when that one fills, it simply hangs. Also callable from a mission script as `GameExtContentCensus()`. |
+| `ContentCensusNames` | Turns the census from a count into an inventory, listing every entity class the map loaded by ODF name and base class, once per level load. Needs `ContentCensus` on, and names are only stored on the Modtools build. |
+| `SoundDiagnostic` | How many sound voices this machine actually gets, how many sounds are being dropped for want of one, and whether the mixed output is clipping. Use it before setting `VoiceLimit`. |
+| `AIUpdateDiag` | How many AI are getting a decision each turn against how many want one. This is what says whether `AIUpdateBudget` is worth raising. |
+| `PoolGrowthDiag` | Every memory pool growth, with the pool name and the heaps involved. |
+| `BranchRegionDebug` | Every step of EntityPath branch region resolution, for tracing a `BranchRegion` that will not resolve. |
 
 ## Controller Support
 
