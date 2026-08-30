@@ -2,6 +2,8 @@
 
 See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
+Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference.
+
 ## Engine Limit Extensions
 
 Automatic binary patches applied on load:

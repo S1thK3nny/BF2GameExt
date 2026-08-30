@@ -16,6 +16,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 
 - **[Tutorials](docs/tutorials/README.md)** - step-by-step guides with munge-ready example assets
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
+- **[ODF Properties](docs/user/ODF_PROPERTIES.md)** - custom properties for soldier, weapon, ordnance and vehicle classes
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
 
 
