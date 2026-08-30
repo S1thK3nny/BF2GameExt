@@ -27,23 +27,19 @@
 //     register conventions, so the limit immediates are patched in place
 //     instead of detouring).
 //
-// Part 2 — RedParticleRenderer cache spill (why beams alone never worked):
-// both Render() functions feed RedParticleRenderer::SubmitParticle, which
-// batches into 15 static caches keyed by (texture, blend, flags), each capped
-// at 200 particle entries.  Every pathway beam costs 3-4 entries in the SAME
-// cache (one shared texture), so rendering silently stopped at ~50-66 beams
-// no matter how large the beam buffer was.  We detour SubmitParticle: when
-// the current cache can't fit a new logical particle (submit type 0/1), we
-// spill to another cache slot with the same key — reusing an earlier spill
-// cache with room, else claiming a fresh slot.  RenderAll() draws each cache
-// independently, so duplicate-key caches render fine.  Overflow beyond the
-// cache pool degrades to the vanilla drop behaviour.
+// Part 2 — RedParticleRenderer cache spill: both Render() functions feed
+// RedParticleRenderer::SubmitParticle, which batches into static caches keyed
+// by (texture, blend, flags), each capped at 200 entries.  Every pathway beam
+// costs 3-4 entries in the SAME cache (one shared texture), so rendering
+// silently stopped at ~50-66 beams no matter how large the beam buffer was.
 //
-// The pool size depends on the "Particle Cache Increase" patch set: it
-// redirects the cache array to the DLL's 120-slot g_sCaches_storage but never
-// raised SetCurrentCache's 15-slot allocation clamp — when we detect the
-// redirect is live we finish the job (clamp 15 -> 120) and spill across all
-// 120 slots; with the redirect disabled we spill within the exe's 15.
+// That half now lives in render/particle_batch_spill.cpp and installs
+// independently of this feature, because it is not a galaxy-map fix at all —
+// it governs every particle in the game.  It used to sit behind this file's
+// INI key and its verify_and_apply() gate, so turning GC limits off, or any
+// one of ~16 unrelated galaxy-map sites failing to verify, silently took the
+// world particle batching down with it.  GC is a consumer of that module now.
+//
 // =============================================================================
 
 extern bool g_gcVisualLimitsEnabled;

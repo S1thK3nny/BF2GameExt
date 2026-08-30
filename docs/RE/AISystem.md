@@ -106,7 +106,18 @@ Each overrides `EnterState`, `UpdateState`, `ExitState`:
 
 ## AILowLevel - Locomotion & Firing
 
-The **low-level controller** that translates high-level commands into actual movement and shooting inputs. One per UnitController at `this+0x2C4`.
+The **low-level controller** that translates high-level commands into actual movement and shooting inputs. **EMBEDDED at `UnitController+0x2C4`, 232 bytes - it is not a pointer.** Reach it with `LEA`/`ADD`, never a dereference. Its `mNavigator` is at `AILowLevel+0x18`, i.e. `ctrl+0x2DC`, and THAT one is a pointer and is nullable.
+
+Verified layout of `UnitController_data` from Phantom's PDB. It sits at `+0x1CC` inside `UnitController`, which four known offsets confirm:
+
+| Field | In `_data` | Absolute | Cross-check |
+|---|---|---|---|
+| `mNextUpdateTime` | 20 | `0x1E0` | the scheduler key |
+| `mThreatManager` | 40 (204 B) | `0x1F4` | `Threat[6]` |
+| `mAgent` | 244 | `0x2C0` | nullable, see EnterState |
+| `mLowLevel` | 248 (232 B) | `0x2C4` | **embedded** |
+| `mLodState` | 480 | `0x3AC` | the LOD tier |
+| `mLodHumanPlayer` | 484 | `0x3B0` | confirms LOD keys off a human, not the camera |
 
 ### Navigation
 Uses a `Navigator` abstraction with multiple implementations:
@@ -192,6 +203,190 @@ A global system that scales AI parameters based on difficulty setting. Uses `mPr
 
 ### Space Assault cheats
 `SpaceAssault_CheatLikeABastard`, `SpaceAssault_RandomFlyerKill`, `SpaceAssault_RandomCritSysDamage` - the AI literally cheats in space assault mode by randomly killing player fighters and damaging critical systems on a timer.
+
+---
+
+---
+
+## Why AI stand around at high unit counts
+
+Measured, not theorised. `[Diagnostic] AIUpdateDiag` instruments
+`ControllerManager::Update` and `UnitController::UpdateHighLevel`; the numbers
+below are from a real match on modtools.
+
+### The scheduler, and what it gates
+
+`ControllerManager::Update` (`0x005997a0`, `__cdecl(float dt)`) drains a
+priority queue ordered by next-update-time, servicing at most **ten** controllers
+per simulation turn. The bound is branchless:
+
+```asm
+005999c2  CALL 0x0040298c     ; AIUtil::IsUberMode()
+005999c7  NEG  AL             ; CF = 1 iff uber
+005999c9  SBB  EAX,EAX        ; 0 or 0xFFFFFFFF
+005999cb  AND  EAX,0x5a       ; 0 or 90
+005999ce  ADD  EAX,0x0a       ; -> 10, or 100 in uber mode
+00599a69  CMP  EBP,EBX / JL   ; the loop's only exit
+```
+
+That budget gates `UpdateHighLevel` (`0x005a0370`, `__thiscall(this)`, no stack
+args) — LOD, vision, the threat manager and the command FSM, i.e. everything that
+issues an ORDER. `UpdateLowLevel` (`0x0059e880`) runs **uncapped** for every
+controller every turn, ticking the navigator and the weapon trigger.
+
+So a unit that misses its slot keeps walking wherever it was already going and
+keeps shooting at whatever it already had, but never makes a NEW decision. It
+finishes its order and waits. That is what standing around is.
+
+### The budget is NOT the constraint
+
+The obvious conclusion — raise the ten — is wrong, and the measurement says so:
+
+```
+turns=7200  highLevelUpdates=10730  per turn=1.49  budget=10
+peak controllers=263  by LOD tier [0]=40 [1]=93 [2]=123 [3]=5 [4]=2
+```
+
+**1.49 updates per turn against a budget of 10.** The scheduler is running at
+about 15% of capacity with 263 AI alive. Nothing is queueing. Raising
+`[AI] AIUpdateBudget` would change nothing, because demand never reaches the cap.
+
+### The LOD tier assignment is the constraint
+
+Demand is set by each unit's LOD tier, and the tier is chosen in
+`UpdateLodState` (`0x0059f480`) by distance to the nearest **human player
+character** — it walks `Character::sCharacters` filtering `mPlayerId >= 0`, with a
+camera-visibility test only as a secondary bump. Radii are 25 and 100.
+
+| Tier | Interval | Condition | Units observed |
+|------|----------|-----------|----------------|
+| 4 HIGH | 0.25 s | within 25 of a player | **2** |
+| 3 NORMAL | 1.0 s | within 100 | **5** |
+| 2 LOW | 2.0 s | beyond | 123 |
+| 1 LOWER | 3.0 s | | 93 |
+| 0 WICKED_LOW | 4.0 s | | 40 |
+
+**256 of 263 units sit in tiers 0-2**, deciding once every two to four seconds.
+Two units in the whole match were at full rate. Nothing about that depends on
+combat — a firefight on the far side of the map is graded purely on how far it is
+from the one human, so AI fighting each other think at 0.25 Hz.
+
+Summing the tiers gives roughly 115 decisions/sec of demand against a supply of
+600/sec, which is why the budget never binds.
+
+### Tunables, all verified
+
+The demand side is where the leverage is, and the interval multipliers are the
+safest of them because they are `imm32` floats — any value fits with no
+re-encoding:
+
+| What | Site | Encoding |
+|------|------|----------|
+| Interval multipliers `{4.0, 3.0, 2.0, 1.0, 0.25}` | `0x0059e7d9`, `+8`, `+8`, `+8`, `+8` | imm32 float, any value — **shipped as `[AI] AIDecisionRate`**, see below |
+| LOD HIGH radius (25) | `0x0059e63c`, imm8 at `0x0059e63e` | max 0x7f in place; 16 bytes of `CC` padding follow for an imm32 rewrite |
+| LOD NORMAL radius (100) | `0x0059e65c`, imm8 at `0x0059e65e` | same, same padding |
+| Update budget (10) | `0x005999ce`, imm8 at `0x005999d0` | max 0x7f; sign-extended, so 0x80+ would run ZERO updates |
+| Low-level skip, all tiers | `0x0059e8a1` bytes `78 0f` | `78` -> `EB` makes it unconditional |
+
+There is headroom to spend: at 1.49/10 the budget could absorb roughly 6x more
+decisions before it binds. Halving the three slow multipliers would take demand to
+about 230/sec, still comfortably under the cap.
+
+### The multipliers, shipped as `[AI] AIDecisionRate`
+
+The interval table is `ai/ai_decision_rate.cpp`, and it is the one AI dial that
+works on all three builds.
+
+`UnitController::GetUpdateRate` — modtools `0x0059e7b0`, steam `0x006634e0`,
+gog `0x00664580`, phantom `0x0078b3b0` — reads the agent's base rate (virtual
+`+0x48` on the agent at `UnitController+0x2c0`, or `1.0` when there is no agent)
+and multiplies it by `table[UnitController+0x3ac]`. With a stock agent the table
+IS the interval in seconds.
+
+**It has exactly one caller**, the re-queue at the tail of `UpdateHighLevel`
+(modtools `0x005a084e`):
+
+```c
+controller[0x1e0] = GameLoop::GetMissionTime() + GetUpdateRate(this);
+```
+
+That is what makes scaling it safe — the numbers feed the scheduler key and
+nothing else, so there is no second consumer to surprise.
+
+The builds encode the same five floats differently, which is why the address
+registry names the address of each FLOAT rather than of the instruction:
+
+| Build | tiers 0-3 | tier 4 |
+|---|---|---|
+| modtools | five `C7 44 24 nn <imm32>` in `.text`, `0x0059e7d9` and every `+8` | `0x0059e7f9` |
+| steam | one 16-byte `.rdata` constant at `0x007b28b0`, `MOVAPS` at `0x00663510` | imm32 at `0x0066351e` |
+| gog | same shape, constant at `0x007b3820`, `MOVAPS` at `0x006645b0` | imm32 at `0x006645be` |
+
+Rewriting the retail constant in place is safe: it carries exactly one xref, and
+its `+4`, `+8` and `+0xc` have none of their own, so it is not a literal pooled
+with unrelated code. Checked on both retail images.
+
+The patch verifies all five sites against the stock table before writing any of
+them, and clamps every result to a floor of `0.25` — the engine's own
+closest-to-player interval — so the dial only ever closes the gap between distant
+and nearby AI. It never invents a faster-than-stock rate.
+
+One second-order effect worth knowing: `UpdateLodState` runs INSIDE
+`UpdateHighLevel`, so a tier-0 unit only re-checks its own distance every four
+seconds. Shortening the intervals shortens that re-check too, so units promote to
+a faster tier sooner when a player closes on them.
+
+> **Correction to an earlier note.** `AISystem.md` previously described the LOD
+> tier as picked by "distance to camera". It is distance to the nearest human
+> player character; the camera only contributes a secondary visibility bump.
+
+> **Uber mode is not a shortcut.** `SetUberMode(1)` raises the budget 10 -> 100
+> but ALSO shrinks the HIGH radius 25 -> 5 and NORMAL 100 -> 20, and cuts the
+> per-unit vision allowance. It would demote nearly everything to longer
+> intervals, plausibly making the standing-around worse at medium range.
+
+### Eliminated, so nobody re-treads them
+
+| Hypothesis | Why it failed |
+|---|---|
+| ~~`UnitAgent::sMemoryPool` exhaustion leaves units with no agent~~ | **RETRACTED - this elimination was wrong.** `MemoryPool::Allocate` returns the block in EAX and `XOR EAX,EAX / RET 4` at modtools `0x0080244e` on a failed `RedAllocFromHeap`, so exhaustion CAN hand back null. See the note below. |
+| The 750-entry `PathRequest` cap | `RequestPath` frees the requester's previous request first, so there is at most one live request per controller — 750 is unreachable at any real unit count |
+| The 201-slot vision ray queue (`0xc9`, not 200 - the two `PblHeap`s it feeds are `mMaxCount = 200`) | Its only producer is `UpdatePotentiallyVisible`, itself inside the already-capped high-level update, so arrival rate plateaus at ~50/pass regardless of unit count |
+| Anything O(n^2) per frame | `sUpdateFriendlyFire` and the spatial queries are linear or better; nothing all-pairs runs per frame |
+
+### Inert units: a null agent, not a slow one
+
+Distinct from the LOD story above, and matching a reported symptom - with `aimode`
+on, the occasional unit prints **nothing at all** and stands completely still.
+
+A unit that is merely LOD-demoted still prints something and still acts, just
+rarely. A unit that prints nothing has no agent state to print. The candidate
+mechanism is `UnitController+0x2C0` being null:
+
+- `MemoryPool::Allocate` (modtools `0x00802300`) returns the allocated block in
+  EAX. Its failure path is `XOR EAX,EAX / POP EBX / RET 4` at `0x0080244e`, taken
+  when `RedAllocFromHeap` cannot satisfy `mSize * mGrow`. **Allocation failure
+  yields null**, and whether the caller notices is the caller's business.
+- `UnitAgent::sMemoryPool` starts at 600 x 0x358 (`AIUtil::Init`). It grows, so 600
+  is not the ceiling - but every growth is a fresh `RedAllocFromHeap` that can fail.
+- `GetUpdateRate` already tolerates a null agent (`TEST EAX,EAX / JZ` at
+  `0x0059e7c2`, falling back to a base rate of 1.0), which shows a null agent is a
+  state the engine expects to survive rather than assert on.
+
+Two other candidates for the same symptom, neither ruled out:
+
+- **`AI::AIGoal::sMemoryPool` is only 20 entries** (`0x14`, from `AIUtil::Init`).
+  That is tiny next to 263 controllers. If goals are per-unit rather than shared,
+  a unit that cannot get one has nothing to do. Whether they are per-unit was NOT
+  established.
+- **A dropped `ListPool` entry.** `ListPool` does not grow: on overflow it warns at
+  `ListPool.h:0x5c` and discards the item. A live report showed capacity 60 against
+  2129 attempted adds, i.e. ~2069 silently dropped.
+
+All three are cheap to separate with a read-only poll of the controller list -
+print `agent`, `goal` and `command` per controller and look for the units where
+they are null.
+
 
 ---
 

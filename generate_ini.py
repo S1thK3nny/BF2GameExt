@@ -52,6 +52,10 @@ SECTION_BLURBS = OrderedDict([
     ("LimitIncreases",
      "Engine limit patches. All are on by default and all are safe to leave on; "
      "they only raise a ceiling, they do not change behaviour below it."),
+    ("Particles",
+     "Particle effects. `ParticleFixes` repairs how the engine batches and draws "
+     "them and should stay on; `ParticleDensity` decides how many it is allowed "
+     "to show, and is the only setting here with a frame-time cost."),
     ("Fixes",
      "Bug fixes for engine defects. On by default. Each one is guarded by a byte "
      "check against the stock instruction bytes, so a patch that does not "
@@ -83,6 +87,11 @@ SECTION_BLURBS = OrderedDict([
      "feels and mouse players have no use for it. The tuning values are set to "
      "match the console release, so enabling it alone gives you the Xbox feel; "
      "they are exposed for anyone who wants it stronger or weaker."),
+    ("Diagnostic",
+     "Read-only instrumentation, all off by default. These only write to "
+     "`BF2GameExt.log`; none of them change how the game behaves. Turn one on "
+     "when you are chasing the specific problem it measures, then turn it back "
+     "off - some of them log every frame."),
 ])
 
 MODE_DESCRIPTIONS = OrderedDict([
@@ -313,7 +322,13 @@ def verify_prose(entries, modes, inputs, actions):
 def group_sections(entries):
     """Group registry entries by section, preserving source order."""
     sections = OrderedDict()
+    seen = set()
     for section, key, default, comment in entries:
+        # Several patch sets may map to one key on purpose (they toggle
+        # together); emit that key once, keeping the first, documented row.
+        if (section, key) in seen:
+            continue
+        seen.add((section, key))
         sections.setdefault(section, []).append((key, default, comment))
     return sections
 

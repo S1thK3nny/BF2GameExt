@@ -199,8 +199,18 @@ static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
     default: break;
     }
 
-    appendf(buf, sizeof(buf), len, "=== EXCEPTION %08X%s at EIP=%08X (%s)\r\n",
-            code, codeName, (unsigned)c->Eip, loc);
+    // Local wall-clock stamp.  The log is opened for APPEND and survives across
+    // sessions, so without this there is no telling today's crash from one three
+    // weeks old -- which is the first question asked of every report.  GetLocalTime
+    // is safe here: a kernel call with no allocation and no CRT locks, so it cannot
+    // deadlock in a handler that may have interrupted the CRT mid-operation.
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    appendf(buf, sizeof(buf), len,
+            "=== EXCEPTION %08X%s at EIP=%08X (%s)  [%04u-%02u-%02u %02u:%02u:%02u.%03u]\r\n",
+            code, codeName, (unsigned)c->Eip, loc,
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+            st.wMilliseconds);
 
     if (code == EXCEPTION_ACCESS_VIOLATION &&
         xp->ExceptionRecord->NumberParameters >= 2) {

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "util/content_census.hpp"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
@@ -1565,7 +1566,18 @@ struct lua_func_entry {
    lua_CFunction func;
 };
 
+// Dump the content budget on demand. Works on every build -- Lua is the mission
+// scripting engine and is present everywhere, whereas the `~` console is
+// modtools-only, so this is the only on-demand route that works on retail.
+static int lua_ContentCensus(lua_State* L)
+{
+   (void)L;
+   content_census_report();
+   return 0;
+}
+
 static const lua_func_entry custom_functions[] = {
+   { "ContentCensus",         lua_ContentCensus },
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },

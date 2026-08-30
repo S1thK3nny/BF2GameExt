@@ -1081,3 +1081,84 @@ Retiring clears the VoiceVirtual's loop flag rather than cutting the voice off, 
 sounds finish the pass they are playing instead of clicking. See
 [SoundSystem.md](SoundSystem.md) for the ownership model, the stop paths, and why
 the same flag on `Voice` is a copy that gets overwritten every tick.
+
+---
+
+## The `LoadDisplay` struct tail is wrong in Phantom's PDB (corrected 2026-08-21)
+
+Phantom declares `LoadDisplay` as **7496** bytes (stored, `packing=true`). It is **7504**, and
+the array/counter tail sits **8 bytes later** than the PDB says.
+
+**Read the STORED struct, not `get_struct_layout`'s output.** That tool renders a padded view
+with different offsets - it reports size 7500 and `m_randomBackDrop` at `0x1C10` - which is not
+what the database holds and led to a first, wrong diagnosis of "+4 at 0x1C28". The stored
+component offsets are the ones to compare against.
+
+Ground truth, read from the instruction operands of `LoadDisplay::LoadDataChunk`
+(Phantom `0x00634F20`) rather than from the decompiler:
+
+| Chunk | count operand | array base operand |
+|---|---|---|
+| `'modl'` `0x6C646F6D` | `MOV EAX,[EDI+0x1D44]` | `MOV [ESI+0x1C2C],EAX` |
+| `'tex_'` `0x5F786574` | `MOV EDX,[EDI+0x1D48]` | `MOV [EDI+EDX*4+0x1C54],EAX` |
+| `'skel'` `0x6C656B73` | `MOV EAX,[EDI+0x1D4C]` | `MOV [ESI+0x1D1C],EAX` |
+
+and `LoadDisplay::LoadData` (`0x00634E80`) zeroes exactly `[ESI+0x1D44]`, `[ESI+0x1D48]`,
+`[ESI+0x1D4C]`.
+
+Those chain consistently and confirm the array SIZES are right (10 / 50 / 10):
+`0x1C2C + 40 = 0x1C54`, `+200 = 0x1D1C`, `+40 = 0x1D44`, then three counters, ending at `0x1D50`.
+
+| Field | stored | actual | shift |
+|---|---|---|---|
+| `m_randomBackDropFileName` | `0xA0` | `0xA0` | **0** |
+| `m_randomBackDrop` | `0x1C0C` | `0x1C10` | **+4** |
+| `m_models[10]` | `0x1C24` | `0x1C2C` | **+8** |
+| `m_textures[50]` | `0x1C4C` | `0x1C54` | +8 |
+| `m_skeletons[10]` | `0x1D14` | `0x1D1C` | +8 |
+| `m_numModels` | `0x1D3C` | `0x1D44` | +8 |
+| `m_numTextures` | `0x1D40` | `0x1D48` | +8 |
+| `m_numSkeletons` | `0x1D44` | `0x1D4C` | +8 |
+| `sizeof` | 7496 | **7504** | +8 |
+
+So there are **TWO** undeclared 4-byte gaps, not one.
+
+**Gap B is localised.** `0x1C2C - 0x1C10 = 28` bytes separate `m_randomBackDrop` from `m_models`,
+but a `bool` plus padding plus five floats accounts for only 24 - so one 4-byte member sits
+between `m_titleBarTimer` and `m_models`.
+
+**Gap A is NOT localised.** The struct is verified correct at `0xA0`
+(`CMP byte [ESI+0xA0],0` / `LEA ECX,[ESI+0xA0]` for `m_randomBackDropFileName` in `LoadData`) and
+verified wrong by 4 at `0x1C0C`. Nothing between those two points has been checked against an
+instruction operand, and that is a 7 KB span. Do not guess where it goes; find another field
+whose offset can be read out of code first.
+
+**`packing = true` on the stored struct.** Ghidra computes offsets itself when packing is
+enabled, so inserted `undefined` members will not necessarily land where they are put. Correcting
+this properly probably means switching the struct to non-packed first.
+
+**Symptom of the bad struct:** the decompiler compensates rather than failing, so
+`LoadDataChunk` renders as `m_models[i + 2]`, `m_textures[i + 2]`, `m_skeletons[i + 2]` and
+reaches the counters as `*(int *)(this + 1)` and `this[1].m_missionHash` — and it attributes the
+MODEL counter to `m_numSkeletons`. None of that is a game bug; it is all the 4-byte shift.
+
+This is a second instance of the rule in [[ghidra-instance-layout]]: **Phantom's PDB is
+authoritative for NAMES, not for LAYOUT.** `TentacleSimulator` was the first (608 in the PDB,
+616 on all three shipping builds).
+
+### The arrays are UNBOUNDED
+
+`LoadDataChunk` has **no bounds check on any of the three arrays**. Every path is: read the
+count, store at that index, increment. There is no `CMP` against 10, 50 or 10 anywhere in the
+function; the only loop is the texture de-duplication, which compares pointers, not indices.
+
+So a loading-screen `.lvl` carrying more assets than the arrays hold overruns them, and the
+overflow order is self-compounding:
+
+- models past 10 spill into `m_textures`
+- textures past 50 spill into `m_skeletons`
+- **skeletons past 10 spill into the counters themselves** — `m_skeletons[10]` lands exactly on
+  `m_numModels` at `0x1D44`, after which the corruption drives its own indices
+
+Author-reachable from map content, silent, and present on every build. Worth a clamp, and worth
+reporting in the content census as models/textures/skeletons against 10/50/10.

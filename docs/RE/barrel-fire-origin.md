@@ -16,9 +16,13 @@ more.
 
 **Working:**
 - Barrel fire origin override — bolts come from gun barrel in both first and third person
-- Direction convergence while zoomed — the barrel origin stays active at every zoom
-  level, and `Aimer::mDirection` is re-aimed at the point the vanilla ray would hit,
-  found with `CollisionManager::RayHit` (see below)
+- **Direction convergence at EVERY zoom level, for the local player and for AI**
+  (2026-08-22). Previously convergence ran only while zoomed, gated on
+  `Controllable::mIsAiming`. Unzoomed you got the barrel origin with the vanilla
+  direction — a ray parallel to the vanilla one, displaced by the whole
+  barrel-to-eyepoint vector. That is invisible on a carbine and plainly visible on a
+  long weapon, which shot low at hipfire and came good the moment you zoomed.
+  See [Convergence, two paths](#convergence-two-paths).
 - Reflection regions — the mirrored duplicate draw no longer contaminates
   `mFirePointMatrix`; see [Reflection regions](#reflection-regions)
 - First-person zoom still reverts to the vanilla aimer (`mFirePointMatrix` goes stale)
@@ -306,11 +310,117 @@ Controllable + 0x34          → Tracker* (via Trackable::mTracker)
 Tracker + 0x14               → bool mIsFirstPersonView
 ```
 
-Behaviour:
+Behaviour (corrected 2026-08-22 — zoom no longer gates anything):
 - Scope texture on screen → vanilla aimer, fix fully off
-- Unzoomed, any camera → barrel fire origin, vanilla direction
-- Zoomed without a scope texture → barrel fire origin + converged direction
-- First-person zoom → vanilla aimer (`mFirePointMatrix` goes stale)
+- First person, zoomed or not → vanilla aimer (`mFirePointMatrix` goes stale, so the
+  barrel position is not trustworthy)
+- Third person, any zoom, local player → barrel origin + raycast convergence
+- Third person, any zoom, AI or remote human → barrel origin + fixed-distance
+  convergence, no raycast
+
+## Convergence: aim at the impact point on the CROSSHAIR line
+
+Rewritten 2026-08-25 after three rounds of play testing. The previous design converged on
+`mRootPos + mDirection * T` -- a point on the **vanilla aimer's own line** -- and spent its
+effort choosing `T`. That was wrong twice over, and both showed up in play as *"distant shots
+land to the right of the reticule"*:
+
+- **The vanilla aimer line is not the crosshair line.** `UpdateWeaponAndAimer` converges the
+  fire point onto the camera axis at only `TrackOffset.z + 2 + 60*frac`, i.e. about 5..65 units
+  (`_DAT_00A2A4B0 = 2.0`, `_DAT_00A35984 = 60.0`, modtools). Past ~65 units the *vanilla* shot
+  itself drifts as `q * (1 - r/64.8)`, and reproducing it faithfully reproduces the drift.
+- **A clean `RayHit` miss returns `frac == 1.0` exactly**, which the old code accepted, so every
+  miss converged at 501 units. Mask `0x9A` does not include water (`0x100`), so firing across
+  water with nothing solid behind was a guaranteed miss.
+
+Both are the same error class: a convergence point **further away** than the thing being shot
+at, which leaves residual error on the *barrel* side. Note the sign -- a nearer object
+intercepting the ray would push the residual the other way, so "something in the way" cannot
+produce this report.
+
+The fix stops computing `T`:
+
+```
+d0    = dot(mRootPos - A, E) + 0.35        // start ahead of the muzzle's projection
+frac  = RayHit(A + E*d0, E, 500, &hitObj, ...)
+t = 500                                            // no usable hit -> the far end
+if (hitObj && 0 < frac <= 1 && frac*500 > 1.5) t = frac * 500
+P = A + E*(d0 + t)
+```
+
+`hitObj` is the engine's own sentinel -- `RayHit` zeroes it on entry and writes it only on an
+accepted hit, so a clean miss returns `frac == 1.0` with `hitObj` null and cannot be told from a
+hit at maximum range by `frac` alone.
+
+**Falling back to the far end is safe here and was not safe before**, and the difference is
+which line the ray follows. The old ray ran along the *aimer's* line, which diverges from the
+crosshair past ~65 units, so it could miss a target the player was plainly aiming at -- and
+converging at 501 then left residual on the barrel side, which is the drift this rewrite fixes.
+This ray follows the *crosshair* line, and soldiers, vehicles, terrain and statics are all in
+the `0x9A` mask, so a miss means the line really is empty: there is nothing within 500 units to
+be inaccurate against, and bailing would cost the barrel origin for no accuracy gain.
+
+### Which line is the crosshair on? Measure it.
+
+No `Tracker` read, no `ScopeDisplay` read, no camera predicate:
+
+```
+along = dot(mAimStart - mEyePoint, mEyeDir)
+A     = (0.05 < along < 0.40) ? mEyePoint    // first person, hipfire: along == t.z
+                              : mAimStart    // third person: along == 0 identically
+```
+
+`mEyePoint` is written unconditionally at the top of `UpdateWeaponAndAimer` before any branch.
+In third person `mAimStart` is pushed along `E` until `dot(mAimStart - mEyePoint, E) == 0`
+identically. In first-person hipfire `mAimStart = mEyePoint + E*t.z + right*t.x +
+cross(E,right)*t.y`, and both lateral terms are perpendicular to `E`, so the scalar is exactly
+`t.z` from `sEyePointRelativeWeaponOffset` (modtools `0x00ACE384`: 0.25 stand, 0.25 crouch,
+0.15 prone). One scalar identifies the branch, build-invariantly.
+
+### It also fixes a vanilla first-person bug
+
+In unzoomed first person the stance table puts the shot on a ray **parallel** to the crosshair,
+displaced about 0.12 right and 0.10 down -- 31 mrad at 5 units, 8 mrad at 20, negligible at 300.
+Aiming down sights drops both lateral terms, which is exactly why zooming "fixed" it. The
+direction correction needs no barrel data, so it applies there too and is an algebraic no-op in
+ADS, where the vanilla origin already lies on the aim line.
+
+### Two paths, by who is shooting
+
+| who | target point | rays |
+|---|---|---|
+| local player | `RayHit` along the crosshair line, miss = no correction | 1 |
+| AI, remote humans | `mAimPoint`, which the engine writes as `origin + dir*200` for them | **0** |
+
+The AI path is exact, not approximate: converging on the engine's own 200-unit aim point
+reproduces the vanilla shot from the barrel with zero error. A local player (60-unit cap) or a
+remote on a client (20) can never pass the `kMinAiAimDist = 100` gate, so they never take it.
+
+### `ForceMode` is turret-only, so the first-person bail was never needed
+
+`grep -ri ForceMode --include=*.odf` over the stock data returns **47 hits, every one in
+`Sides/tur/odf/`**. No infantry class sets `ControllableClass+0x14C`, so for a soldier
+`Tracker::IsFirstPersonView` falls straight through to `byte [Tracker+0x14]` and the raw read
+this file used to do **agreed with the engine**. The hook was inert in unzoomed first person,
+not running on a stale matrix. The divergence exists only for turrets, where `ForceMode = 1`
+blocks `SetFirstPersonView` from updating `+0x14` -- and it never mattered, because a turret
+aimer has `bDirect == 0` and bails on that check anyway.
+
+The tracker read is gone entirely.
+
+### The retail bug this replaced
+
+`s_misAimingOff` was `0x15C` on Steam and GOG, believed to be `mIsAiming` because
+`TargetInfo` was thought to shift −4 on release. It does not. `mAimStart/mAimPoint/
+mIsAiming` are at `Controllable + 0x148/0x154/0x160` on **all three** builds, so
+`0x15C` was reading **`mAimPoint.z`'s low mantissa byte as a bool** — non-zero on
+roughly 255 frames in 256. Both retail builds were therefore casting a 500-unit
+`RayHit` per `WeaponCannon`/`WeaponLauncher` per turn, AI included. Deleting the
+field removes that. The reported hipfire symptom was modtools-only; retail had the
+opposite, a performance bug.
+
+`docs/RE/game_struct_reference.md` carries the same error in its release column,
+from `mCtrl` down.
 
 `mIsAiming` doubles as the "is this the local player" test: `CheckForZoom` returns
 early for AI, so the raycast below runs once or twice a frame at most, however many
@@ -411,11 +521,16 @@ Two cheaper convergence targets were considered and rejected:
   1024 units the angular correction is `barrelOffset/1024`, i.e. nothing. Reading
   those fields in the fire path also produced wildly wrong directions (shots into
   the ground) — they are not a reliable per-frame eye ray there.
-- **`TargetInfo::mAimPoint`.** The engine's own third-person convergence target,
-  written by `UpdateWeaponAndAimer` in the same frame just before this hook runs,
-  but `RayHit` caps it at 60 units from the camera. Converging there fixes close
-  range and over-corrects past it, error growing as `barrelOffset * (dist/60 - 1)`
-   — worse than doing nothing beyond ~120 units, which is exactly sniper range.
+- **`TargetInfo::mAimPoint`.** Rejected, and for a stronger reason than the 60-unit
+  cap this file used to cite. `Aimer::SetSoldierInfo` computes nothing — ten stores,
+  no math — and every branch of `UpdateWeaponAndAimer` calls it such that
+  `mAimPoint == mRootPos + mDirection*L` **identically**. So the field carries exactly
+  one scalar beyond what the hook already holds, and `L` is the literal `200.0` for AI,
+  `20.0` for a remote soldier on a net client, and only in the local third-person
+  branch a `RayHit` capped at 60 with **no miss sentinel** — a hit at 60 and a total
+  miss are indistinguishable. Converging at 60 is worse than doing nothing past 120
+  units. Reading it would also cost a build-variant offset wedged between a float and
+  a handle array, which is exactly the mistake that produced the retail bug above.
 
 #### CollisionManager::RayHit
 

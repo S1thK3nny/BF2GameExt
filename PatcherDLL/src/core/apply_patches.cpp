@@ -98,6 +98,17 @@ exe_identity identify_exe(const uintptr_t exe_base, const slim_vector<section_in
                                                   : exe_identity::foreign;
 }
 
+// Width of a patch's compare/write, in bytes.
+static size_t patch_value_size(const patch& patch)
+{
+   // Checked first on purpose: a pointer is four bytes whatever else is set, and
+   // truncating one would corrupt the site rather than fail to match.
+   if (patch.flags.values_are_va) return sizeof(uint32_t);
+   if (patch.flags.values_are_8bit) return 1;
+   if (patch.flags.values_are_16bit) return 2;
+   return sizeof(uint32_t);
+}
+
 // Verify a patch's site holds its expected original value (does not write).
 static bool verify_patch(const patch& patch, const uintptr_t exe_base,
                          const slim_vector<section_info>& sections)
@@ -108,11 +119,13 @@ static bool verify_patch(const patch& patch, const uintptr_t exe_base,
 
    if (not patch_address) return false;
 
-   const uint32_t expected_value = patch.flags.expected_is_va
+   const bool expected_is_pointer = patch.flags.expected_is_va || patch.flags.values_are_va;
+
+   const uint32_t expected_value = expected_is_pointer
                                       ? (uint32_t)(uintptr_t)resolve(exe_base, patch.expected_value)
                                       : patch.expected_value;
 
-   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(expected_value);
+   const size_t cmp_size = patch_value_size(patch);
 
    return memeq(patch_address, cmp_size, &expected_value, cmp_size);
 }
@@ -120,9 +133,15 @@ static bool verify_patch(const patch& patch, const uintptr_t exe_base,
 // The value a patch actually writes. A patch with a replacement_base is
 // late-bound: its buffer is allocated by the set's prepare(), so the base is
 // only known now, and replacement_value is an offset into it.
-static uint32_t patch_replacement(const patch& patch)
+static uint32_t patch_replacement(const patch& patch, const uintptr_t exe_base)
 {
    if (patch.replacement_base) return *patch.replacement_base + patch.replacement_value;
+
+   // An unrelocated pointer has to be rebased the same way the loader rebased
+   // everything else in the image, or the engine calls an address that is only
+   // correct when the exe loads where it asked to.
+   if (patch.flags.values_are_va)
+      return (uint32_t)(uintptr_t)resolve(exe_base, patch.replacement_value);
 
    return patch.replacement_value;
 }
@@ -135,8 +154,8 @@ static void write_patch(const patch& patch, const uintptr_t exe_base,
                             ? resolve_file_address(patch.address, sections)
                             : (char*)resolve(exe_base, patch.address);
 
-   const uint32_t replacement_value = patch_replacement(patch);
-   const size_t cmp_size = patch.flags.values_are_8bit ? 1 : sizeof(replacement_value);
+   const uint32_t replacement_value = patch_replacement(patch, exe_base);
+   const size_t cmp_size = patch_value_size(patch);
 
    memcpy(patch_address, &replacement_value, cmp_size);
 }

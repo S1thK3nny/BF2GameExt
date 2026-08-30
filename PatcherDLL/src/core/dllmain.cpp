@@ -26,6 +26,18 @@
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/fp_fire_animation_fix.hpp"
+#include "entity/command_post_null_fix.hpp"
+#include "entity/command_post_overflow_fix.hpp"
+#include "entity/branch_region_debug.hpp"
+#include "entity/branch_region_fix.hpp"
+#include "util/sound_diag.hpp"
+#include "util/voice_limit.hpp"
+#include "ai/ai_decision_rate.hpp"
+#include "ai/reservation_pool.hpp"
+#include "util/content_census.hpp"
+#include "weapon/impact_sound_water_fix.hpp"
+#include "ai/ai_update_budget.hpp"
+#include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
@@ -34,6 +46,8 @@
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
+#include "render/particle_batch_spill.hpp"
+#include "render/particle_density.hpp"
 #include "weapon/anim_textures.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
@@ -218,6 +232,25 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
+      g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
+      g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
+      g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
+      g_commandPostOverflowFix    = cfg.get_bool("Fixes", "CommandPostOverflowFix", true);
+      // Read-only instrumentation, in its own [Diagnostic] section so it is never
+      // confused with the shipped feature toggles. All default off.
+      g_branchRegionDebugEnabled  = cfg.get_bool("Diagnostic", "BranchRegionDebug", false);
+      g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
+      g_soundDiagEnabled          = cfg.get_bool("Diagnostic", "SoundDiagnostic", false);
+      g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
+      g_impactSoundWaterFix       = cfg.get_bool("Fixes", "ImpactSoundWaterFix", true);
+      g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
+      g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
+      g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
+      g_contentCensusNames        = cfg.get_bool("Diagnostic", "ContentCensusNames", false);
+      g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
+      g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
+      g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
+      g_memoryPoolHeapFix         = cfg.get_bool("Fixes", "MemoryPoolHeapFix", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -261,6 +294,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
    map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window
+   // Before gc_visual_limits_install: that one's log line reports the live
+   // cache-slot count, and the GC beam path depends on the spill being up.
+   particle_density_install(exe_base);     // byte-patches .text/.rdata
+   particle_batch_spill_install(exe_base); // byte-patches .text — needs the RW window
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    hud_weapon_icon_fix_install(exe_base);
@@ -270,18 +307,30 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
+   command_post_null_fix_install(exe_base);
+   command_post_overflow_fix_install(exe_base);
+   branch_region_fix_install(exe_base);
+   branch_region_debug_install(exe_base);
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window
    fp_fire_animation_fix_install(exe_base);  // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);
+   voice_limit_install(exe_base);  // byte-patches .text/.data - needs the RW window
+   sound_diag_install(exe_base);
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
    award_disable_install(exe_base);
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
-   ai_fairness_install(exe_base);      // byte-patches .text — needs the RW window
+   ai_fairness_install(exe_base);
+   impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
+   ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
+   reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
+   content_census_install(exe_base);   // read-only; starts its own reporting thread
+   ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
+   memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
    red_light_stale_node_fix_install(exe_base);

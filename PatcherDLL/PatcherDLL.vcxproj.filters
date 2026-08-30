@@ -145,6 +145,9 @@
     <ClInclude Include="src\entity\droideka_ball_mode.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\command_post_null_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\soldier_override_texture.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -200,6 +203,12 @@
       <Filter>render</Filter>
     </ClInclude>
     <ClInclude Include="src\render\water_texture_count_fix.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\particle_batch_spill.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\particle_density.hpp">
       <Filter>render</Filter>
     </ClInclude>
     <ClInclude Include="src\weapon\anim_textures.hpp">
@@ -321,6 +330,9 @@
     <ClCompile Include="src\entity\droideka_ball_mode.cpp">
       <Filter>entity</Filter>
     </ClCompile>
+    <ClCompile Include="src\entity\command_post_null_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
     <ClCompile Include="src\entity\soldier_override_texture.cpp">
       <Filter>entity</Filter>
     </ClCompile>
@@ -373,6 +385,12 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\water_texture_count_fix.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\particle_batch_spill.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\particle_density.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\anim_textures.cpp">

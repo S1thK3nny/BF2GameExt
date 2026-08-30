@@ -27,12 +27,16 @@
 //
 //   2. EntitySoldier::Update (modtools 0x549bf8) — the event-0x1a/0x1b order-
 //      acknowledge block that runs when a unit is given an order.  It walks
-//      target->[0x20C]->[0x0C]->pilot(+0xCC)->[0x148]->GetGameObject(); the pilot
-//      link is null for a self-piloted hover:
-//        0x549bf2  8B BF CC000000  MOV EDI,[EDI+0xCC]   ; pilot (null)
+//      target->[0x20C]->[0x0C]->mCharacter(+0xCC)->mUnit(+0x148)->GetGameObject().
+//      +0xCC is Controllable_data.mCharacter, NOT mPilot -- verified against
+//      Phantom's layout, where Controllable_data sits at +0x3C and mCharacter at
+//      data+144.  A self-piloted hover is an AI-driven vehicle with no Character
+//      record, so that link is null:
+//        0x549bf2  8B BF CC000000  MOV EDI,[EDI+0xCC]   ; mCharacter (null)
 //        0x549bf8  8B BF 48010000  MOV EDI,[EDI+0x148]  ; AV read 0x148
-//      Fix: overwrite the 6-byte load with a jump to a guard that, when the pilot
-//      is null, jumps to the block's convergence point, skipping the acknowledge.
+//      Fix: overwrite the 6-byte load with a jump to a guard that, when the
+//      character link is null, jumps to the block's convergence point, skipping
+//      the acknowledge.
 //      Fixed on modtools + Steam (registers and pending-stack state differ per
 //      build - see the two guards below).
 // =============================================================================

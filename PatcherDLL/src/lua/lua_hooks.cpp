@@ -21,6 +21,19 @@
 #include "weapon/barrel_fire_origin.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "render/particle_batch_spill.hpp"
+#include "render/particle_density.hpp"
+#include "entity/command_post_null_fix.hpp"
+#include "entity/branch_region_debug.hpp"
+#include "entity/branch_region_fix.hpp"
+#include "util/sound_diag.hpp"
+#include "util/voice_limit.hpp"
+#include "ai/ai_decision_rate.hpp"
+#include "ai/reservation_pool.hpp"
+#include "util/content_census.hpp"
+#include "weapon/impact_sound_water_fix.hpp"
+#include "ai/ai_update_budget.hpp"
+#include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "entity/land_on_arrival_fix.hpp"
@@ -324,6 +337,11 @@ void lua_hooks_uninstall()
    grapple_uninstall();
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
+   particle_batch_spill_uninstall();
+   particle_density_uninstall();
+   command_post_null_fix_uninstall();
+   branch_region_debug_uninstall();
+   branch_region_fix_uninstall();
    anim_bank_append_uninstall();
    shield_channel_fix_uninstall();
    aim_assist_uninstall();
@@ -341,6 +359,17 @@ void lua_hooks_uninstall()
    // After it, so its deactivate_all() above is still covered by the guard.
    water_texture_count_fix_uninstall();
    red_light_stale_node_fix_uninstall();
+   // Last of the Snd::EngineBase::Update hooks to come off: it went on
+   // before the saber lights did, so it is the inner detour of the two and
+   // detaching it first would unpick the chain from the middle.
+   sound_diag_uninstall();
+   voice_limit_uninstall();
+   impact_sound_water_fix_uninstall();
+   ai_decision_rate_uninstall();
+   reservation_pool_uninstall();
+   content_census_uninstall();
+   ai_update_budget_uninstall();
+   memory_pool_heap_fix_uninstall();
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

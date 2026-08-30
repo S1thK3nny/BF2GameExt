@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -127,6 +127,10 @@
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
     <ClInclude Include="src\entity\fp_fire_animation_fix.hpp" />
+    <ClInclude Include="src\entity\command_post_null_fix.hpp" />
+    <ClInclude Include="src\entity\command_post_overflow_fix.hpp" />
+    <ClInclude Include="src\entity\branch_region_debug.hpp" />
+    <ClInclude Include="src\entity\branch_region_fix.hpp" />
     <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp" />
@@ -161,6 +165,9 @@
     <ClInclude Include="src\controller\aim_assist.hpp" />
     <ClInclude Include="src\util\ini_registry.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
+    <ClInclude Include="src\util\sound_diag.hpp" />
+    <ClInclude Include="src\util\voice_limit.hpp" />
+    <ClInclude Include="src\util\memory_pool_heap_fix.hpp" />
     <ClInclude Include="src\util\enable_sound_warnings.hpp" />
     <ClInclude Include="src\util\error_dialog_fix.hpp" />
     <ClInclude Include="src\render\blur_downsize_clamp.hpp" />
@@ -170,6 +177,8 @@
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\water_texture_count_fix.hpp" />
+    <ClInclude Include="src\render\particle_batch_spill.hpp" />
+    <ClInclude Include="src\render\particle_density.hpp" />
     <ClInclude Include="src\weapon\anim_textures.hpp" />
     <ClInclude Include="src\weapon\lightsaber_illumination.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
@@ -186,6 +195,10 @@
     <ClCompile Include="src\core\lvl_read.cpp" />
     <ClCompile Include="src\core\patch_table.cpp" />
     <ClCompile Include="src\ai\ai_fairness.cpp" />
+    <ClCompile Include="src\ai\ai_decision_rate.cpp" />
+    <ClCompile Include="src\ai\reservation_pool.cpp" />
+    <ClCompile Include="src\util\content_census.cpp" />
+    <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />
     <ClCompile Include="src\entity\prone_lvl_load.cpp" />
@@ -204,10 +217,15 @@
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\fp_fire_animation_fix.cpp" />
+    <ClCompile Include="src\entity\command_post_null_fix.cpp" />
+    <ClCompile Include="src\entity\command_post_overflow_fix.cpp" />
+    <ClCompile Include="src\entity\branch_region_debug.cpp" />
+    <ClCompile Include="src\entity\branch_region_fix.cpp" />
     <ClCompile Include="src\entity\jetpack_fp_sound_fix.cpp" />
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp" />
+    <ClCompile Include="src\weapon\impact_sound_water_fix.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />
@@ -221,6 +239,9 @@
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\util\audio_stream_limit.cpp" />
+    <ClCompile Include="src\util\sound_diag.cpp" />
+    <ClCompile Include="src\util\voice_limit.cpp" />
+    <ClCompile Include="src\util\memory_pool_heap_fix.cpp" />
     <ClCompile Include="src\util\enable_sound_warnings.cpp" />
     <ClCompile Include="src\util\game_logging.cpp" />
     <ClCompile Include="src\loading_screen\config_parser.cpp" />
@@ -240,6 +261,8 @@
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\water_texture_count_fix.cpp" />
+    <ClCompile Include="src\render\particle_batch_spill.cpp" />
+    <ClCompile Include="src\render\particle_density.cpp" />
     <ClCompile Include="src\weapon\anim_textures.cpp" />
     <ClCompile Include="src\weapon\lightsaber_illumination.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />

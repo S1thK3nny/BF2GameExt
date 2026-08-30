@@ -4,7 +4,7 @@
 
 #include "util/slim_vector.hpp"
 
-#define PATCH_COUNT 20
+#define PATCH_COUNT 32
 #define EXE_COUNT 3
 
 struct patch_flags {
@@ -16,6 +16,30 @@ struct patch_flags {
 
    /// Compare and write only the low byte of expected_value/replacement_value (for imm8 patches)
    bool values_are_8bit : 1 = false;
+
+   /// Compare and write only the low WORD (for imm16 patches).  Needed where the
+   /// operand is a 16-bit immediate and a 32-bit store would run into the next
+   /// instruction -- e.g. the modtools mMaxParticles clamp, whose `CMP AX,0x80`
+   /// is immediately followed by `MOV word ptr [ESI+2],AX`.
+   bool values_are_16bit : 1 = false;
+
+   /// BOTH expected_value and replacement_value are unrelocated virtual
+   /// addresses, and both are rebased onto the loaded image at apply time.
+   ///
+   /// Required for any patch whose VALUE is a pointer into the exe -- a vtable
+   /// slot being the obvious case.  The loader applies base relocations to those,
+   /// so a raw table constant only matches when the image happens to load at its
+   /// preferred base.  Modtools does; the Steam build does not, and the EntityPath
+   /// branch region set silently skipped there with
+   ///   "site mismatch @ 79c444, expected 6dc930"
+   /// because at runtime that slot held 6dc930 + the rebase delta.  It failed
+   /// safe, but had it matched we would have written an unrelocated pointer into
+   /// a live vtable, which is very much worse than skipping.
+   ///
+   /// `expected_is_va` covers only the compare side and is what code-immediate
+   /// patches use; this covers both sides.  A VA is always four bytes, so this
+   /// overrides the 8- and 16-bit width flags rather than combining with them.
+   bool values_are_va : 1 = false;
 };
 
 struct patch {

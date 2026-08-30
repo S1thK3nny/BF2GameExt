@@ -89,6 +89,15 @@ namespace modtools {
    // is on screen"; ScopeDisplay::Hide (0x683CB0) clears it.
    constexpr uintptr_t scope_display_instance = 0x00BA36D8;
 
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (0x006DD840) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: CMP dword ptr [EAX*0x4 + 0xbd80cc],ECX at 0x006DD860
+   constexpr uintptr_t net_comm_local_player_id   = 0x00BD80CC;
+
    // float __cdecl CollisionManager::RayHit(PblVector3* start, PblVector3* dir,
    //     float maxDist, CollisionObject** outHit, PblVector3* outNormal,
    //     GameObject** exclude, int excludeCount, int flags, bool);
@@ -204,6 +213,28 @@ namespace modtools {
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x007e2c70;
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate      = 0x00802300;
+   constexpr uintptr_t red_curr_heap             = 0x00CF68DC;
+   constexpr uintptr_t mempool_heap_offset       = 0x44;
+   constexpr uintptr_t mempool_free_offset       = 0x50;
+
    constexpr uintptr_t runtime_heap_global       = 0x00b30220;
    constexpr uintptr_t s_loadheap_global         = 0x00ba111c;
 
@@ -638,6 +669,26 @@ namespace modtools {
    constexpr uintptr_t console_add_command         = 0x007ed560;
    constexpr uintptr_t engine_console_reg          = 0x00a145c0; // registers "render_soldier_colliding"
 
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam(CommandPost*, int newTeam, int oldTeam) -- __thiscall,
+   // RET 8.  Detoured to survive a NULL `this`, which a mission script passing a
+   // non-CommandPost entity can produce; see entity/command_post_null_fix.cpp.
+   constexpr uintptr_t command_post_set_team        = 0x0064FBC0;
+
+   // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
+   // FUN_0064FDF0, __cdecl(entity, CommandPostClass*).  sPostArray is a fixed 16
+   // entries and the append path has no capacity check, so the 17th registration
+   // indexes one past the end.  modtools at least logs
+   // "Exceeded %d command posts!" (CommandPost.cpp:279) -- and then uses the
+   // out-of-range index anyway.  Retail deleted even the warning.
+   constexpr uintptr_t command_post_find_or_create = 0x0064FDF0;
+   constexpr uintptr_t command_post_hint_index     = 0x00AD5494;  // one-shot forced index
+   constexpr uintptr_t command_post_array_ptr      = 0x00AD5498;  // holds the array base
+   constexpr uintptr_t command_post_count_ptr      = 0x00AD549C;  // holds the count's address
+   constexpr uintptr_t command_post_class_off      = 0x1A54;      // CommandPost -> its class
+
+
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 
    constexpr uintptr_t s_cached_particles            = 0x00B9DB78;  // sCachedParticles[300]
@@ -799,6 +850,187 @@ namespace modtools {
    // NOPing it makes the undoubled epilogue unreachable.  74 13 -> 90 90.
    constexpr uintptr_t vision_priority_player_jz  = 0x005c93a4;
 
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // The five multipliers UnitController::GetUpdateRate (0x0059E7B0, phantom
+   // 0x0078B3B0) applies to the base rate before re-queueing the controller in
+   // UpdateHighLevel.  Indexed by the LOD tier at UnitController+0x3AC: tier 0 is
+   // furthest from a human player, tier 4 nearest.  With a stock agent the base
+   // rate is 1.0, so these ARE the decision interval in seconds.
+   //
+   // These name the addresses of the FLOATS, not of the instructions holding
+   // them, because the builds encode the table differently -- modtools emits five
+   // `C7 44 24 nn <imm32>` stores into .text 8 bytes apart, retail folds tiers
+   // 0-3 into a 16-byte .rdata constant.  Naming the floats makes both identical
+   // to the patcher.
+   constexpr uintptr_t ai_lod_interval_t0        = 0x0059E7D9; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1        = 0x0059E7E1; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2        = 0x0059E7E9; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3        = 0x0059E7F1; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4        = 0x0059E7F9; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // ReserveManager::sList is a ListPool<ReserveStruct,int> of capacity 60 with a
+   // 24-byte element.  It holds every AI reservation claim (RT_REPAIR, RT_BOARD,
+   // RT_ATTACK, RT_FORMATION, RT_HeavyWeapons).  When it fills, Append drops the
+   // claim and logs `List pool is full; raise count from 60 to at least N` -- the
+   // flood users see on large-AI maps.  Overflow is fail-safe: the guard is an
+   // equality test and nothing is written out of bounds, so the cost is lost
+   // reservations and log spam, not corruption.  (The N in that message is NOT a
+   // demand figure -- mPeak counts rejected adds since level load, so it measures
+   // how long the pool has been starved.  See docs/RE/EngineLimits.md.)
+   //
+   // ReserveManager::Init is 0x005C6200, pool pointer 0x00B8F414.  modtools keeps
+   // the ListPool ctor out of line at 0x005C60F0 and derives everything there from
+   // the single pushed count:
+   //   005C60F9  LEA EAX,[ESI+ESI*2]     ; 3n
+   //   005C60FC  LEA ECX,[EAX*8+4]       ; 24n+4 bytes to allocate
+   //   005C6104  MOV [EDI+0xC],ESI       ; mPoolSize
+   //   005C611D  MOV [EAX],ESI           ; array cookie
+   // so ONE byte -- the imm8 of `6A 3C` at 0x005C620E -- is the whole patch, and
+   // there are no folded sites to keep in step.
+   //
+   // `6A ib` sign-extends, so 0x7F = 127 is the in-place ceiling.  Writing
+   // 0x80-0xFF makes the count negative: the allocation request becomes ~4 GB,
+   // new[] returns NULL, and the ctor stores mElements = NULL after mPoolSize was
+   // already written negative -- the first Reserve then writes through NULL.
+   constexpr uintptr_t reserve_pool_count_push    = 0x005C620F; // imm8 of PUSH 0x3C
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // ControllerManager::Update (0x005997A0) drains the UnitController queue but
+   // lets only N controllers run UpdateHighLevel per simulation turn; movement and
+   // firing still run for everyone.  modtools folds the choice branchlessly --
+   // `NEG AL / SBB EAX,EAX / AND EAX,0x5A / ADD EAX,0x0A`, i.e. 10 normally and
+   // 0x5A+0x0A = 100 in uber mode -- so the writable operand is the imm8 of
+   // `83 C0 0A`.  It is SIGN-EXTENDED: at 0x80 the budget reads negative and the
+   // loop's `CMP EBP,EBX / JL` never runs a single update, so the ceiling is 0x7F.
+   //   005999CE  83 C0 0A     ADD EAX,0x0A   ; imm8 at 005999D0
+   constexpr uintptr_t ai_update_budget_imm8      = 0x005999D0;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // FLEffect::s_EffectClasses, a PblHashTable laid out as
+   // `{int _iNumEntries; uint _uiTable[512];}` -- 256 KEY slots then 256 value
+   // slots -- so the COUNTER IS AT THE KEY ARRAY MINUS 4, not at the end of the
+   // table. Verified from the registrar's own increment,
+   // `FF 05 B055CF00  INC dword [0x00CF55B0]` inside FLEffect::Read.
+   //
+   // One slot per DISTINCT effect class name; duplicates are refused by the
+   // registrar's own _Find, so reuse costs nothing. In practice one slot per
+   // loaded .fx file. There is NO capacity guard, and the probe that checks for
+   // duplicates has no iteration cap -- see the header for what overflowing does.
+   constexpr uintptr_t fx_effect_classes_count    = 0x00CF55B0;
+   constexpr uintptr_t fx_effect_classes_table    = 0x00CF55B4;
+   // ---- Memory census: heaps and regions (util/content_census.cpp) ------------
+   // READ THE HEAP TABLE, DO NOT CALL THE GETTERS.  The engine's accessors are
+   // trivial wrappers over this table, and on retail 8 of the 12 getters
+   // `mem` uses were dead-stripped (DumpMemoryUsage was their only caller and it
+   // does not exist there).  Reading the table needs no calls, so there is no
+   // calling-convention risk, and it yields largest-contiguous-free even where
+   // RedGetHeapLargestFree is gone.
+   //
+   // The layout is not inferred -- the surviving accessors spell it out:
+   //   RedGetHeapSize 0x007E2DB0:
+   //     MOV ECX,[0x00CF68E0]        ; the table POINTER
+   //     LEA EAX,[EAX+EAX*8]         ; i*9, then *4 => stride 0x24
+   //     MOV EAX,[ECX+EAX*4+0x14]    ; size at +0x14
+   //   RedGetMaxHeaps 0x007E2CD0:  MOV EAX,[0x00CF68E4]   ; just the count
+   //   RedGetHeapFree 0x007E2D60 walks the free list from +0x04 summing the
+   //     node size at +0x08 -- so largest-free is the same walk with max.
+   //
+   // HeapObj, stride 0x24: +0x00 start, +0x04 free.first, +0x08 free.last,
+   //   +0x0C used.first, +0x10 used.last, +0x14 size, +0x18 char* name,
+   //   +0x1C align, +0x20 frozen, +0x21 permanent.
+   // Tag (list node), 12 bytes: +0x00 prev, +0x04 next, +0x08 size (INCLUDING
+   //   its own 12-byte header).
+   constexpr uintptr_t red_heap_table_ptr         = 0x00CF68E0;
+   constexpr uintptr_t red_heap_count             = 0x00CF68E4;
+
+   // EntityPath::BranchRegion::sList is a PblList based at 0x00AD3450; _iCount
+   // is at +0x10.  NOT 0x00AD345C -- that is _head._pObject, which on a list
+   // HEAD is structurally always null and has no read-write reference anywhere
+   // in the image.  Verified: the count is incremented by BranchRegion's ctor
+   // (0x005E4BD5) and decremented by its dtor (0x005E4630).
+   constexpr uintptr_t branch_region_count        = 0x00AD3460;
+
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Four Factory<> registries, one per authored content kind.  Each is a
+   // PblList HEAD, so for every one of them:
+   //     _pNext (where a walk starts) = head + 0x04
+   //     _iCount                      = head + 0x10
+   // Only the head is stored; deriving the other two keeps them impossible to
+   // mismatch.  That matters here -- BranchRegionDebug read _head._pObject
+   // (head+0xC) believing it was _iCount and printed zero for its entire life.
+   // Every head below was read as raw image bytes and is the self-circular
+   // five-dword block `head, head, head, 0, 0`.
+   //
+   // The registered OBJECT sits at node - 4 (the PblList node is embedded at
+   // object+4), and carries mParent +0x14, mId +0x18, mNetIndex +0x1C.  Those
+   // three are written BEFORE the node becomes reachable -- verified from the
+   // entity ctor at 0x004D0C20, where +0x14/+0x18/+0x1C are stored at
+   // 0x004D0C43..0x004D0C4F but the forward link that makes the node findable
+   // is not written until 0x004D0CBA.  The vptr is written LAST, which is why
+   // the census may never call a virtual on a walked object.
+   constexpr uintptr_t entity_class_head          = 0x00ACD2C4;
+   constexpr uintptr_t weapon_class_head          = 0x00AD43BC;
+   constexpr uintptr_t ordnance_class_head        = 0x00AD3A60;
+   constexpr uintptr_t explosion_class_head       = 0x00AD388C;
+
+   // Offset of the char[32] ODF name inside the registered object.  Each class
+   // kind put it in a different place, so there is one per registry rather than
+   // a shared constant.  EntityClass::Read (0x004D0830) proves the entity one:
+   // it hashes the TYPE-chunk buffer into mId and then strlcpy's that same
+   // buffer to obj+0x20, which makes `fnv1a_or20(name) == mId` a self-check
+   // that can only match.  NOTE: the modtools Ghidra database has mFilename at
+   // 24, which is wrong -- decompiler output naming mFilename at +0x18 is
+   // actually reading mId.
+   constexpr uintptr_t entity_class_name_off      = 0x20;
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+   constexpr uintptr_t ordnance_class_name_off    = 0x28;
+   constexpr uintptr_t explosion_class_name_off   = 0x20;
+
+   // The Factory<> BASE vftable for each registry.  An object still carrying
+   // one of these is mid-construction or mid-destruction: reachable, with valid
+   // mParent/mId, but with no name yet and only THREE vtable slots.  The census
+   // uses these to label such nodes, never to call through them.
+   constexpr uintptr_t factory_vft_entity         = 0x00A38D18;
+   constexpr uintptr_t factory_vft_weapon         = 0x00A51D24;
+   constexpr uintptr_t factory_vft_ordnance       = 0x00A50264;
+   constexpr uintptr_t factory_vft_explosion      = 0x00A50090;
+
+   // .rdata bounds, used as a sanity gate on a walked object's vptr.  A vptr
+   // outside this range means the node is not a live class object and the walk
+   // stops rather than reporting a number built from garbage.
+   constexpr uintptr_t rdata_lo                   = 0x00A2A000;
+   constexpr uintptr_t rdata_hi                   = 0x00AC3000;
+
+   // GamePathFactory::sList._iCount.  Reported as a bare COUNT and never
+   // walked: the path-chunk parser declares a factory in a STACK LOCAL and
+   // links that frame into this global list once per `path` record, so
+   // dereferencing a node here can mean reading another thread's live stack.
+   constexpr uintptr_t path_factory_count         = 0x00AC6A00;
+
+
+
+
+
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x0060526A;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x00843DB0;
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // _RenderLightSabre(PblVector3* base, PblVector3* dir, uint tex, uint glowTex,
    //                   float length, float width, uint flags) — __cdecl, ILT thunk
@@ -878,6 +1110,36 @@ namespace modtools {
    constexpr uintptr_t water_bumpmap_count_store      = 0x00864A0F;
    constexpr uintptr_t water_specularmask_count_store = 0x00864B9C;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x00AD6354;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0066D5B4;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x006681AC;
+   constexpr uintptr_t emitter_max_particles_op2    = 0x006681B8;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x005E4C90;
 } // namespace modtools
 
 // =============================================================================
@@ -931,6 +1193,15 @@ namespace steam {
    // here vs 0x520 in the debug build, but only the trailing GameSound members
    // differ; ScopeDisplay::Hide 0x633B30 reads the same offset).
    constexpr uintptr_t scope_display_instance = 0x01EAF020;
+
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (body 0x005B26F0, thunk 0x005B73C0) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: the table compare at 0x005B2707
+   constexpr uintptr_t net_comm_local_player_id   = 0x01FA3D58;
 
    // CollisionManager::RayHit — same 9 arguments as modtools, but LTCG-custom:
    //   ECX = start, EDX = dir, XMM2 = maxDist, and the remaining six on the stack
@@ -1036,6 +1307,28 @@ namespace steam {
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate      = 0x006DC370;
+   constexpr uintptr_t red_curr_heap             = 0x0093EBAC;
+   constexpr uintptr_t mempool_heap_offset       = 0x40;
+   constexpr uintptr_t mempool_free_offset       = 0x4C;
+
 
    // ---- Entity / Soldier Prone -----------------------------------------------
    constexpr uintptr_t EntitySoldier_prone       = 0x0079cfcc;
@@ -1417,6 +1710,35 @@ namespace steam {
    // ILT thunk on retail, so this is the body itself.
    constexpr uintptr_t gamesound_stolen_callback   = 0x00538730;
 
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam -- same VA in BOTH retail builds. Identified from the
+   // ctor at 0x0047A710, which lays out exactly the fields SetTeam touches:
+   //   LEA EAX,[ESI+0x120] / PUSH 8 / PUSH 0x140   -> 0x120 + 8*0x140 = 0xB20
+   //   MOV dword [ESI+0xB20],0                     -> m_pHologram = NULL
+   //   LEA ECX,[ESI+0xB24] / CALL <ctrl ctor>      -> the capture sound
+   // The capture sound is at +0xB24 here, not modtools' +0x1A24, which is why a
+   // byte-pattern search for the modtools LEA found nothing. The guard itself
+   // only tests for a NULL `this`, so that offset never enters our code.
+   //
+   // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
+   // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
+   constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
+
+   // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
+   // FUN_0047AC80, __fastcall(ECX = entity, EDX = CommandPostClass*) -- a DIFFERENT
+   // convention from modtools' __cdecl, read from this build's own prologue.
+   // sPostArray is 16 entries at 0x01E308E0 (the PUSH 0x40 memset at 0x0047AA40);
+   // slot[16] is 0x01E30920, ControllerManager's parked phase counter, which cycles
+   // 1..15 -- which is why the two observed crashes handed CommandPost `this` = 7
+   // and `this` = 13 rather than random garbage.
+   constexpr uintptr_t command_post_find_or_create = 0x0047AC80;
+   constexpr uintptr_t command_post_hint_index     = 0x007E6318;
+   constexpr uintptr_t command_post_array_ptr      = 0x007E6314;
+   constexpr uintptr_t command_post_count_ptr      = 0x007E631C;
+   constexpr uintptr_t command_post_class_off      = 0x0B3C;
+
+
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
    // Release drops 4 bytes somewhere before Properties+0x18, so every field from
    // there on sits 4 lower than on modtools.  Both derived from the same two
@@ -1596,6 +1918,117 @@ namespace steam {
    // target is a bot.  Forcing it always-taken doubles players too.
    constexpr uintptr_t vision_priority_player_jl  = 0x006710eb;
 
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // GetUpdateRate is 0x006634E0 here, same shape as modtools (agent at +0x2C0,
+   // LOD tier at +0x3AC).  Tiers 0-3 are one 16-byte .rdata constant at
+   // 0x007B28B0, loaded by the MOVAPS at 0x00663510; tier 4 is the imm32 of
+   // `MOV [EBP-8],0x3E800000` at 0x0066351B.  Rewriting the constant in place is
+   // safe -- it has exactly one xref, and its +4/+8/+0xC have none of their own,
+   // so it is not a literal pooled with unrelated code.
+   constexpr uintptr_t ai_lod_interval_t0         = 0x007B28B0; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1         = 0x007B28B4; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2         = 0x007B28B8; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3         = 0x007B28BC; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4         = 0x0066351E; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // The same 60-entry ReserveManager::sList (pool pointer 0x01EAEFF8, Init
+   // 0x0062F550), but retail INLINES and constant-folds the ListPool ctor at
+   // 0x006300E0, and Init's `PUSH ECX` at 0x0062F581 pushes an uninitialised
+   // register -- the argument is dead.  Porting the modtools one-byte patch to
+   // "the push" here is a silent no-op; all four folded copies must move together:
+   //   006300FC  B8 3C000000     MOV EAX,0x3C        ; x 0x18 = bytes to allocate
+   //   0063010B  C7 46 0C 3C...  MOV [ESI+0xC],0x3C  ; mPoolSize
+   //   00630146  6A 3C           PUSH 0x3C           ; element count, to the
+   //                                                 ; array-construct helper
+   //   0063014B  C7 00 3C000000  MOV [EAX],0x3C      ; array cookie
+   // A partial write is far worse than none -- mPoolSize larger than the
+   // allocation is a heap overrun -- so reservation_pool.cpp verifies all four
+   // before writing any.  The nearby `MOV EDX,0x18` and `PUSH 0x18` are the
+   // element SIZE, not the count; do not touch them.  The push is still imm8, so
+   // 127 remains the ceiling for the whole set.
+   constexpr uintptr_t reserve_pool_count_push    = 0x00630147; // imm8, max 0x7F
+   constexpr uintptr_t reserve_pool_count_alloc   = 0x006300FD; // imm32
+   constexpr uintptr_t reserve_pool_count_field   = 0x0063010E; // imm32
+   constexpr uintptr_t reserve_pool_count_cookie  = 0x0063014D; // imm32
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // Retail compiles the same choice with CMOVNZ and a DEDICATED imm32 for the
+   // non-uber value, so this is a plain 4-byte write with no sign-extension trap:
+   //   004863FC  E8 ..........   CALL   AIUtil::IsUberMode
+   //   00486401  84 C0           TEST   AL,AL
+   //   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- DO NOT TOUCH
+   //   00486408  BE 0A000000     MOV    ESI,0x0A   ; the dial, imm32 at 00486409
+   //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
+   //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
+   // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
+   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
+   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
+   // mapped here.
+   //
+   // DECOY, 356 bytes later in the same function: 0x0048656D is
+   // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /
+   // IMUL EAX,ESI, which is the RAY-TEST budget (Phantom's "RayTests" profiler
+   // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
+   // must be reached by fixed VA and never by a pattern scan.
+   constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // Counter verified from `FF 05 40D1EB01  INC dword [0x01EBD140]` in
+   // FLEffect::Read (0x00526DB0). Key array follows at +4.
+   constexpr uintptr_t fx_effect_classes_count    = 0x01EBD140;
+   constexpr uintptr_t fx_effect_classes_table    = 0x01EBD144;
+
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Same four Factory<> registries as modtools, same node layout, same
+   // derivation: _pNext = head + 0x04, _iCount = head + 0x10.  Every head below
+   // was read as raw image bytes and is the self-circular `head,head,head,0,0`
+   // block.  Object fields mParent +0x14, mId +0x18, mNetIndex +0x1C are
+   // build-invariant (verified from the retail ctors at 0x00491E70 and 0x00491EF0).
+   //
+   // THE NAMES ARE MOSTLY ABSENT HERE, and that is a real difference rather than
+   // an unlocated address.  Retail EntityClass is 0x60 bytes and +0x20 holds
+   // mLabel, a wchar_t* -- reading it as a char[32] yields interleaved NULs.
+   // Only WeaponClass kept its name buffer, at +0x30, and WeaponClass::Read at 0x0067A390 (PUSH 0x20 / LEA EAX,[EDI+0x30] / strlcpy) proves it.
+   // Entity, ordnance and explosion name offsets are therefore deliberately
+   // absent so the census omits the column rather than printing wide-char soup.
+   constexpr uintptr_t entity_class_head          = 0x007EC55C;
+   constexpr uintptr_t weapon_class_head          = 0x007EC5A4;
+   constexpr uintptr_t ordnance_class_head        = 0x007EC590;
+   constexpr uintptr_t explosion_class_head       = 0x007EC570;
+
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+
+   constexpr uintptr_t factory_vft_entity         = 0x00799318;
+   constexpr uintptr_t factory_vft_weapon         = 0x007B0298;
+   constexpr uintptr_t factory_vft_ordnance       = 0x007AC47C;
+   constexpr uintptr_t factory_vft_explosion      = 0x0079E8AC;
+   constexpr uintptr_t rdata_lo                   = 0x0076B000;
+   constexpr uintptr_t rdata_hi                   = 0x007DD800;
+
+
+
+
+
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x005F7B5E;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x006CEA90;
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Derived 2026-08-13 against BattlefrontII.exe (Ghidra :8193).  See the
    // modtools block for what each one is; only the porting notes are here.
@@ -1671,6 +2104,36 @@ namespace steam {
    constexpr uintptr_t water_bumpmap_count_store      = 0x0071FAB6;
    constexpr uintptr_t water_specularmask_count_store = 0x0071FBF4;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x0078AA94;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0060E554;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x0060A23F;
+   constexpr uintptr_t emitter_max_particles_op2    = 0;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x004D0F00;
 } // namespace steam
 
 // =============================================================================
@@ -1837,6 +2300,15 @@ namespace gog {
    constexpr uintptr_t weapon_render_impl             = 0x0067a3f0;       // port_gog.py from steam 0x679350, score 1.00
    constexpr uintptr_t weapon_render_thunk            = 0x0067a3f0;
    constexpr uintptr_t scope_display_instance         = 0x01eb04d4;
+
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (body 0x005B3690, thunk 0x005B8370) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: the table compare at 0x005B36A7
+   constexpr uintptr_t net_comm_local_player_id   = 0x01FA5208;
    constexpr uintptr_t collision_manager_ray_hit      = 0x0045e3a0;
    constexpr uintptr_t weapon_update                  = 0x00679250;
    constexpr uintptr_t weapon_shield_update           = 0x00692b10;
@@ -1878,6 +2350,28 @@ namespace gog {
    // ---- Memory heap management --------------------------------------------------
 
    constexpr uintptr_t red_set_current_heap           = 0x006c4ca0;
+
+   // ---- MemoryPool growth heap (util/memory_pool_heap_fix.cpp) ----------------
+   //
+   // MemoryPool::Allocate is `void __thiscall(MemoryPool*, uint)` on every build.
+   // NOTE the layout difference: the release builds drop mPeak, so every field
+   // after it shifts down four bytes. Copying the modtools offsets to retail
+   // would read mPool as the heap index and test past the end of the struct.
+   //
+   //            modtools   retail
+   //   mSize      0x30      0x30
+   //   mCount     0x34      0x34
+   //   mGrow      0x38      0x38
+   //   mUsed      0x3C      0x3C
+   //   mPeak      0x40      (absent)
+   //   mHeap      0x44      0x40
+   //   mPool      0x48      0x44
+   //   mFree      0x50      0x4C
+   constexpr uintptr_t memory_pool_allocate           = 0x006DD410;
+   constexpr uintptr_t red_curr_heap                  = 0x0094004C;
+   constexpr uintptr_t mempool_heap_offset            = 0x40;
+   constexpr uintptr_t mempool_free_offset            = 0x4C;
+
 
    // ---- Entity / Soldier Prone --------------------------------------------------
 
@@ -2122,6 +2616,21 @@ namespace gog {
    constexpr uintptr_t gamesound_controllable_stop    = 0x005393d0;
    constexpr uintptr_t gamesound_stolen_callback      = 0x005394a0;
 
+   // ---- Command Post -----------------------------------------------------------
+
+   // CommandPost::SetTeam -- same VA in BOTH retail builds. Identified from the
+   // ctor at 0x0047A710, which lays out exactly the fields SetTeam touches:
+   //   LEA EAX,[ESI+0x120] / PUSH 8 / PUSH 0x140   -> 0x120 + 8*0x140 = 0xB20
+   //   MOV dword [ESI+0xB20],0                     -> m_pHologram = NULL
+   //   LEA ECX,[ESI+0xB24] / CALL <ctrl ctor>      -> the capture sound
+   // The capture sound is at +0xB24 here, not modtools' +0x1A24, which is why a
+   // byte-pattern search for the modtools LEA found nothing. The guard itself
+   // only tests for a NULL `this`, so that offset never enters our code.
+   //
+   // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
+   // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
+   constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
+
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;
    constexpr uintptr_t load_render_real               = 0x00577c90;
@@ -2181,6 +2690,106 @@ namespace gog {
    // ShouldRaytestUnit `JZ` — same `74 0B` as modtools and Steam (verified).
    constexpr uintptr_t threat_raytest_player_jz   = 0x0066b460;
 
+   // ---- AI decision rate / LOD interval table (ai/ai_decision_rate.cpp) --------
+   // GetUpdateRate is 0x00664580 here -- byte-identical to Steam's 0x006634E0
+   // apart from the two absolute operands.  Tiers 0-3 are the .rdata constant at
+   // 0x007B3820 (MOVAPS at 0x006645B0, verified to read 4.0/3.0/2.0/1.0); tier 4
+   // is the imm32 of `MOV [EBP-8],0x3E800000` at 0x006645BB.  Same xref check as
+   // Steam: the constant has one reference and its interior floats have none.
+   constexpr uintptr_t ai_lod_interval_t0             = 0x007B3820; // 4.00 s WICKED_LOW
+   constexpr uintptr_t ai_lod_interval_t1             = 0x007B3824; // 3.00 s LOWER
+   constexpr uintptr_t ai_lod_interval_t2             = 0x007B3828; // 2.00 s LOW
+   constexpr uintptr_t ai_lod_interval_t3             = 0x007B382C; // 1.00 s NORMAL
+   constexpr uintptr_t ai_lod_interval_t4             = 0x006645BE; // 0.25 s HIGH
+   // ---- AI reservation pool capacity (ai/reservation_pool.cpp) ----------------
+   // Byte-identical to Steam apart from the absolute operands: pool pointer
+   // 0x01EB04AC, Init 0x006305F0, folded ListPool ctor 0x00631180.  Same rule --
+   // the count is folded into four places and they must move together, and the
+   // neighbouring 0x18 operands are the element size rather than the count.
+   constexpr uintptr_t reserve_pool_count_push    = 0x006311E7; // imm8, max 0x7F
+   constexpr uintptr_t reserve_pool_count_alloc   = 0x0063119D; // imm32
+   constexpr uintptr_t reserve_pool_count_field   = 0x006311AE; // imm32
+   constexpr uintptr_t reserve_pool_count_cookie  = 0x006311ED; // imm32
+   // ---- AI update budget (ai/ai_update_budget.cpp) -----------------------------
+   // Retail compiles the same choice with CMOVNZ and a DEDICATED imm32 for the
+   // non-uber value, so this is a plain 4-byte write with no sign-extension trap:
+   //   004863FC  E8 ..........   CALL   AIUtil::IsUberMode
+   //   00486401  84 C0           TEST   AL,AL
+   //   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- DO NOT TOUCH
+   //   00486408  BE 0A000000     MOV    ESI,0x0A   ; the dial, imm32 at 00486409
+   //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
+   //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
+   // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
+   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
+   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
+   // mapped here.
+   //
+   // DECOY, 356 bytes later in the same function: 0x0048656D is
+   // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /
+   // IMUL EAX,ESI, which is the RAY-TEST budget (Phantom's "RayTests" profiler
+   // zone brackets it).  Only the opcode byte separates it, `B8` vs `BE`, so this
+   // must be reached by fixed VA and never by a pattern scan.
+   constexpr uintptr_t ai_update_budget_imm32     = 0x00486409;
+   // ---- Effect class table (util/content_census.cpp) --------------------------
+   // Counter verified from `FF 05 F0E5EB01  INC dword [0x01EBE5F0]` in
+   // FLEffect::Read (same VA as Steam, different global). Key array follows at +4.
+   constexpr uintptr_t fx_effect_classes_count    = 0x01EBE5F0;
+   constexpr uintptr_t fx_effect_classes_table    = 0x01EBE5F4;
+
+   // ---- Class registries (util/content_census.cpp) ----------------------------
+   // Same four Factory<> registries as modtools, same node layout, same
+   // derivation: _pNext = head + 0x04, _iCount = head + 0x10.  Every head below
+   // was read as raw image bytes and is the self-circular `head,head,head,0,0`
+   // block.  Object fields mParent +0x14, mId +0x18, mNetIndex +0x1C are
+   // build-invariant (verified from the retail ctors at 0x00491E79, whose C7 01 B8 A2 79 00 stores the base vftable).
+   //
+   // THE NAMES ARE MOSTLY ABSENT HERE, and that is a real difference rather than
+   // an unlocated address.  Retail EntityClass is 0x60 bytes and +0x20 holds
+   // mLabel, a wchar_t* -- reading it as a char[32] yields interleaved NULs.
+   // Only WeaponClass kept its name buffer, at +0x30, and the same 13-byte sequence, occurring exactly once, at 0x0067B430 proves it.
+   // Entity, ordnance and explosion name offsets are therefore deliberately
+   // absent so the census omits the column rather than printing wide-char soup.
+   constexpr uintptr_t entity_class_head          = 0x007ED4EC;
+   constexpr uintptr_t weapon_class_head          = 0x007ED534;
+   constexpr uintptr_t ordnance_class_head        = 0x007ED520;
+   constexpr uintptr_t explosion_class_head       = 0x007ED500;
+
+   constexpr uintptr_t weapon_class_name_off      = 0x30;
+
+   constexpr uintptr_t factory_vft_entity         = 0x0079A2B8;
+   constexpr uintptr_t factory_vft_weapon         = 0x007B1210;
+   constexpr uintptr_t factory_vft_ordnance       = 0x007AD3E8;
+   // factory_vft_explosion was not read on this build -- deliberately absent.
+   // Only the `constructing` label is lost; the .rdata vptr gate still works.
+   constexpr uintptr_t rdata_lo                   = 0x0076C000;
+   constexpr uintptr_t rdata_hi                   = 0x007DF000;
+
+
+
+
+
+   // ---- Impact sound below water height (weapon/impact_sound_water_fix.cpp) ----
+   // Ordnance::Collide plays the generic impact sound only when
+   // `impact.y > waterHeight`, but it gets waterHeight from
+   // RedWater::GetWaterHeight(&pos, &out) and DISCARDS the bool return.
+   // GetWaterHeight writes *out ONLY on success (map has a water layer AND
+   // WaterExists at that cell), so on a map with no water the compare reads an
+   // uninitialised stack slot -- the incoming CollisionObject* bit-cast to float,
+   // a tiny positive denormal.  The gate degenerates to `if (impact.y > ~0) play`,
+   // which is why nothing is audible below world Y = 0.
+   //
+   // This is the ONLY one of 24 call sites that skips the `TEST AL,AL`; every other
+   // caller checks the bool, and EntitySoldier::UpdateFoleyFX even pre-stores
+   // -FLT_MAX first.  The fix retargets this one CALL rel32 at a shim that seeds
+   // *out with -FLT_MAX before tail-calling the original, so genuine underwater
+   // suppression still works on maps that DO have water.
+   //
+   // Address is of the CALL OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t ordnance_collide_water_call   = 0x005F8BFE;
+   // bool __cdecl RedWater::GetWaterHeight(PblVector3*, float*) -- convention read
+   // from Ghidra on modtools and Phantom, not inferred.  Caller cleans (ADD ESP,8).
+   constexpr uintptr_t red_water_get_water_height    = 0x006CFB30;
+
    // ---- Lightsaber illumination (lightsaber_illumination.cpp) -----------------
    // Ported from Steam with tools/port_gog.py, every one at score 1.00 on an
    // in-run shift (+0x1090 for the weapon block, +0x10a0 for RedLight, +0x10b0
@@ -2232,6 +2841,36 @@ namespace gog {
    constexpr uintptr_t water_bumpmap_count_store      = 0x00720B86;
    constexpr uintptr_t water_specularmask_count_store = 0x00720CC4;
 
+
+   // ---- Particle density / LOD -------------------------------------------------
+
+   // ParticleSystem::sLodMask, bool[4][4] indexed [currentLod][bucket] where
+   // bucket = particleIndex & 3.  sLodFadeMask is the next 16 bytes (base+0x10)
+   // and marks, for each LOD, the bucket the NEXT LOD will cull, so it can be
+   // cross-faded first.  Read by IsLodActive / GetLodAlpha.
+   constexpr uintptr_t lod_mask_table               = 0x0078BA3C;
+
+   // disp32 operand of the instruction that loads the LOD curve's numerator
+   // (4.0f) in PrepareForRender.  The constant itself is a shared literal with
+   // ~90 xrefs across the engine, so the OPERAND is repointed at a float this
+   // DLL owns rather than the value being edited.  Smaller numerator => LOD
+   // levels start further away.
+   constexpr uintptr_t lod_numerator_operand        = 0x0060F5F4;
+
+   // ParticleEmitter::mMaxParticles load-time clamp (stock 128).  modtools
+   // carries the constant twice as imm16; the retail builds load it once into
+   // EDX as imm32 and use that for both the compare and the clamp store.
+   constexpr uintptr_t emitter_max_particles_op1    = 0x0060B2CF;
+   constexpr uintptr_t emitter_max_particles_op2    = 0;
+
+   // ---- EntityPath branch regions ----------------------------------------------
+
+   // EntityPath::BranchRegionFactory::CreateRegion -- __stdcall(RedRegionDesc*,
+   // const char* name), RET 8 (`this` unused). Reached only once the vtable-slot
+   // patch in patch_table.cpp is applied: the class puts this in vtable slot 3
+   // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
+   // never call it and no branch region is ever created.
+   constexpr uintptr_t branch_region_create        = 0x004D0F00;
 } // namespace gog
 
 } // namespace game_addrs

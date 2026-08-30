@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
 #include "core/patch_table.hpp"
+#include "render/particle_batch_spill.hpp"
 
 #include <detours.h>
 #include <cstring>
@@ -82,25 +83,6 @@ static constexpr uint32_t kNewParticleAllocSize = kNewParticleCountOff + 4;
 static uint32_t g_beamLimit = kNewBeamLimit;
 
 // ---------------------------------------------------------------------------
-// RedParticleRenderer cache pool layout (identical in modtools and Steam)
-// ---------------------------------------------------------------------------
-
-static constexpr uint32_t kCacheStride          = 0x3558;
-static constexpr uint32_t kVanillaCacheSlots    = 15;
-static constexpr uint32_t kCacheParticleCap     = 200;    // entries of 0x44 bytes each
-static constexpr uint32_t kCacheParticleIdxOff  = 0x3520;
-static constexpr uint32_t kCacheTexHashOff      = 0x3524;
-static constexpr uint32_t kCacheBlendOff        = 0x3528;
-static constexpr uint32_t kCacheFlagsOff        = 0x352C;
-static constexpr uint32_t kCacheNumVertsOff     = 0x3530;
-static constexpr uint32_t kCacheNumIndicesOff   = 0x3534;
-
-// A GC beam is one strip of at most 4 submits (types 1,2,2,3) that must stay
-// in a single cache, so a spill is only allowed at a strip start (type 0/1)
-// and needs this many free entries.
-static constexpr uint32_t kSpillHeadroom = 4;
-
-// ---------------------------------------------------------------------------
 // Function pointer types
 // ---------------------------------------------------------------------------
 
@@ -114,12 +96,6 @@ typedef bool (__thiscall* fn_ParticleAdd_t)(
 
 typedef uint32_t* (__fastcall* fn_PblHash_t)(uint32_t* out, void* edx, const char* str);
 
-// RedParticleRenderer::SubmitParticle — __cdecl, 8 dword stack args.  Floats
-// and pointers are forwarded opaquely.
-typedef void (__cdecl* fn_SubmitParticle_t)(
-    uint32_t type, uint32_t a2, uint32_t a3, uint32_t a4,
-    uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8);
-
 // ---------------------------------------------------------------------------
 // Resolved pointers
 // ---------------------------------------------------------------------------
@@ -127,12 +103,6 @@ typedef void (__cdecl* fn_SubmitParticle_t)(
 static fn_BeamAdd_t        g_origBeamAdd        = nullptr;  // modtools only
 static fn_ParticleAdd_t    g_origParticleAdd    = nullptr;  // modtools only
 static fn_PblHash_t        g_pblHash            = nullptr;  // modtools only
-static fn_SubmitParticle_t g_origSubmitParticle = nullptr;  // both builds
-
-static uint8_t** g_rprCurrentCache = nullptr;
-static uint32_t* g_rprCacheIndex   = nullptr;
-static uint8_t*  g_rprCaches       = nullptr;  // LIVE array base (DLL 120-slot buffer or exe s_caches[15])
-static uint32_t  g_cacheSlots      = kVanillaCacheSlots;
 
 // ---------------------------------------------------------------------------
 // Debug stats — per-frame high-water marks + periodic logging
@@ -145,75 +115,6 @@ static uint32_t g_beamHighWater     = 0;
 static uint32_t g_particleHighWater = 0;
 static uint32_t g_frameCount        = 0;
 static bool     g_loggedOnce        = false;
-static uint32_t g_cacheSpills       = 0;
-static uint32_t g_cacheSpillFails   = 0;
-
-// ---------------------------------------------------------------------------
-// RedParticleRenderer cache spill (both builds) — the actual beam fix
-// ---------------------------------------------------------------------------
-
-static void spill_current_cache_if_full()
-{
-    uint8_t* cur = *g_rprCurrentCache;
-    if (!cur) return;
-
-    if (*(uint32_t*)(cur + kCacheParticleIdxOff) + kSpillHeadroom <= kCacheParticleCap)
-        return;
-
-    const uint32_t texHash = *(uint32_t*)(cur + kCacheTexHashOff);
-    const uint32_t blend   = *(uint32_t*)(cur + kCacheBlendOff);
-    const uint32_t flags   = *(uint32_t*)(cur + kCacheFlagsOff);
-
-    // Prefer an earlier spill cache with the same key that still has room —
-    // SetCurrentCache always finds the FIRST key match, so once that one is
-    // full it re-selects it every call and we'd otherwise burn a fresh slot
-    // per particle.
-    uint32_t used = *g_rprCacheIndex;
-    if (used > g_cacheSlots) used = g_cacheSlots;
-
-    for (uint32_t i = 0; i < used; ++i) {
-        uint8_t* c = g_rprCaches + i * kCacheStride;
-        if (c == cur) continue;
-        if (*(uint32_t*)(c + kCacheTexHashOff) == texHash &&
-            *(uint32_t*)(c + kCacheBlendOff)   == blend   &&
-            *(uint32_t*)(c + kCacheFlagsOff)   == flags   &&
-            *(uint32_t*)(c + kCacheParticleIdxOff) + kSpillHeadroom <= kCacheParticleCap) {
-            *g_rprCurrentCache = c;
-            return;
-        }
-    }
-
-    if (*g_rprCacheIndex >= g_cacheSlots) {
-        // Cache pool exhausted — fall back to the vanilla silent drop.
-        g_cacheSpillFails++;
-        return;
-    }
-
-    uint8_t* fresh = g_rprCaches + (*g_rprCacheIndex) * kCacheStride;
-    (*g_rprCacheIndex)++;
-
-    *(uint32_t*)(fresh + kCacheTexHashOff)     = texHash;
-    *(uint32_t*)(fresh + kCacheBlendOff)       = blend;
-    *(uint32_t*)(fresh + kCacheFlagsOff)       = flags;
-    *(uint32_t*)(fresh + kCacheParticleIdxOff) = 0;
-    *(uint32_t*)(fresh + kCacheNumVertsOff)    = 0;
-    *(uint32_t*)(fresh + kCacheNumIndicesOff)  = 0;
-
-    *g_rprCurrentCache = fresh;
-    g_cacheSpills++;
-}
-
-static void __cdecl hooked_submit_particle(
-    uint32_t type, uint32_t a2, uint32_t a3, uint32_t a4,
-    uint32_t a5, uint32_t a6, uint32_t a7, uint32_t a8)
-{
-    // Type 0 = standalone quad, type 1 = strip start (beam); types 2/3 are
-    // strip continuations that must stay in the cache their strip started in.
-    if (type <= 1)
-        spill_current_cache_if_full();
-
-    g_origSubmitParticle(type, a2, a3, a4, a5, a6, a7, a8);
-}
 
 // ---------------------------------------------------------------------------
 // Hooked Add functions (modtools only — Steam Adds are byte-patched instead)
@@ -294,10 +195,12 @@ static bool __fastcall hooked_particle_add(
     if (idx == 0) {
         g_frameCount++;
         if (!g_loggedOnce || (g_frameCount % 120 == 0)) {
+            uint32_t spills = 0, spillFails = 0;
+            particle_batch_spill_stats(spills, spillFails);
             log("[GC_VIS] STATS: beams=%u/%u particles=%u/%u (vanilla limits: %u/%u) dropped: b=%u p=%u spills=%u spill_fails=%u",
                 g_beamHighWater, g_beamLimit, g_particleHighWater, kNewParticleLimit,
                 kVanillaBeamLimit, kVanillaParticleLimit, g_beamDropped, g_particleDropped,
-                g_cacheSpills, g_cacheSpillFails);
+                spills, spillFails);
             g_loggedOnce = true;
         }
     }
@@ -421,64 +324,25 @@ void gc_visual_limits_install(uintptr_t exe_base)
         rp = DetourAttach(reinterpret_cast<PVOID*>(&g_origParticleAdd), hooked_particle_add);
     }
 
-    // Detour SubmitParticle for the cache spill (both builds).  The cache
-    // array base must be read from the LIVE SetCurrentCache operand: the
-    // "Particle Cache Increase" patch set (applied earlier from the patch
-    // table, INI-toggleable) redirects it from the exe's s_caches[15] to the
-    // DLL's g_sCaches_storage[120].
-    const uint32_t liveBase = *reinterpret_cast<uint32_t*>(resolve(exe_base, g_addr->rpr_setcache_base_operand));
-    const uint32_t exeBase_ = (uint32_t)(uintptr_t)resolve(exe_base, g_addr->s_caches);
-    const uint32_t dllBase  = (uint32_t)(uintptr_t)&g_sCaches_storage[0];
-
-    LONG rs = -1, rc;
-    if (liveBase == dllBase || liveBase == exeBase_) {
-        g_rprCaches = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(liveBase));
-        g_cacheSlots = (liveBase == dllBase) ? RENDERER_CACHE_SLOTS : kVanillaCacheSlots;
-
-        // With the 120-slot buffer active, also raise SetCurrentCache's
-        // allocation clamp (CMP imm8 15) — the base redirect alone leaves it
-        // at 15, which would let our spills starve other textures of slots.
-        if (g_cacheSlots > kVanillaCacheSlots) {
-            auto imm = reinterpret_cast<uint8_t*>(resolve(exe_base, g_addr->rpr_setcache_limit_imm8_op));
-            if (*imm == kVanillaCacheSlots)
-                *imm = (uint8_t)RENDERER_CACHE_SLOTS;
-            else
-                install_log("[GC_VIS] SetCurrentCache clamp imm mismatch (0x%02x) — leaving 15-slot clamp", *imm);
-        }
-
-        g_rprCurrentCache = reinterpret_cast<uint8_t**>(resolve(exe_base, g_addr->rpr_current_cache));
-        g_rprCacheIndex   = reinterpret_cast<uint32_t*>(resolve(exe_base, g_addr->rpr_cache_index));
-        g_origSubmitParticle = reinterpret_cast<fn_SubmitParticle_t>(resolve(exe_base, g_addr->rpr_submit_particle));
-        rs = DetourAttach(reinterpret_cast<PVOID*>(&g_origSubmitParticle), hooked_submit_particle);
-    } else {
-        install_log("[GC_VIS] Unrecognized s_caches base 0x%08x — cache spill hook NOT installed", liveBase);
-        g_origSubmitParticle = nullptr;
-    }
-
-    rc = DetourTransactionCommit();
+    const LONG rc = DetourTransactionCommit();
 
     install_log("[GC_VIS] %d patches applied (beam limit %u, particle limit %u, cache slots %u)",
-                n, g_beamLimit, kNewParticleLimit, g_cacheSlots);
-    install_log("[GC_VIS] Detours: beam=%ld particle=%ld submit_particle=%ld commit=%ld", rb, rp, rs, rc);
+                n, g_beamLimit, kNewParticleLimit, particle_batch_cache_slots());
+    install_log("[GC_VIS] Detours: beam=%ld particle=%ld commit=%ld", rb, rp, rc);
 }
 
 void gc_visual_limits_uninstall()
 {
     // Final stats — CRT file logger only: at DLL detach the engine (and its
     // logger) may already be torn down.
-    install_log("[GC_VIS] Final stats: beam_add=%u (dropped=%u) particle_add=%u (dropped=%u) spills=%u spill_fails=%u",
-                g_beamAddCalls, g_beamDropped, g_particleAddCalls, g_particleDropped,
-                g_cacheSpills, g_cacheSpillFails);
+    install_log("[GC_VIS] Final stats: beam_add=%u (dropped=%u) particle_add=%u (dropped=%u)",
+                g_beamAddCalls, g_beamDropped, g_particleAddCalls, g_particleDropped);
 
-    if (!g_origBeamAdd && !g_origSubmitParticle) return;
+    if (!g_origBeamAdd) return;
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
-    if (g_origBeamAdd) {
-        DetourDetach(reinterpret_cast<PVOID*>(&g_origBeamAdd),     hooked_beam_add);
-        DetourDetach(reinterpret_cast<PVOID*>(&g_origParticleAdd), hooked_particle_add);
-    }
-    if (g_origSubmitParticle)
-        DetourDetach(reinterpret_cast<PVOID*>(&g_origSubmitParticle), hooked_submit_particle);
+    DetourDetach(reinterpret_cast<PVOID*>(&g_origBeamAdd),     hooked_beam_add);
+    DetourDetach(reinterpret_cast<PVOID*>(&g_origParticleAdd), hooked_particle_add);
     DetourTransactionCommit();
 }
