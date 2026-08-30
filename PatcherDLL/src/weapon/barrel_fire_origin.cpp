@@ -37,10 +37,43 @@ static int    s_slotCount = 0;
 // Weapon::mFirePointMatrix — PblMatrix, 16 floats, at Weapon+0x20 on every build.
 static const unsigned kFirePointMatrixOff = 0x20;
 
-// Controllable::mIsAiming offset — differs by build because TargetInfo shifts -4 on
-// release (modtools TargetInfo@0x148 -> mIsAiming 0x160; Steam/GOG @0x144 -> 0x15C).
-// Set by barrel_fire_origin_install() from g_build.
-static unsigned s_misAimingOff = 0x160;
+// Controllable::mPlayerId, an int.  Build-INVARIANT at 0xD4: WeaponMelee::OverrideAimer
+// reads it off exactly this pointer on all three builds (modtools 0x6345D6/0x6345D9;
+// Steam 0x688F98 and GOG 0x68A028 are byte-identical 8B 42 6C 83 B8 D4 00 00 00 00).
+static const unsigned kPlayerIdOff = 0xD4;
+
+// Controllable, all build-INVARIANT. mEyePoint and mEyeDir are written
+// unconditionally at the top of EntitySoldier::UpdateWeaponAndAimer, before any
+// branch, so they are always this turn's true eye. mAimStart / mAimPoint are the
+// TargetInfo pair at +0x148 / +0x154 -- NOT the +0x144 the PDB implies for release
+// builds, which is the same -4 that already shipped one bug in this file.
+static const unsigned kEyePointOff = 0xDC;
+static const unsigned kEyeDirOff   = 0xE8;
+static const unsigned kAimStartOff = 0x148;
+static const unsigned kAimPointOff = 0x154;
+
+// NetComm::sLocalPlayerId — int[2].  See game_addrs.hpp for why the table is read
+// rather than the accessor called.  Null if the build has no address, in which case
+// ownerIsLocalPlayer answers false for everyone and the whole level converges at the
+// fixed distance: degraded, not broken.
+static const int* s_localPlayerIds = nullptr;
+
+// Is this Controllable a LOCAL human?  This decides who is worth a raycast, and it is
+// deliberately FAIL-SAFE: a false negative only downgrades that player to fixed-
+// distance convergence, which is still correct, just less exact at range.
+//
+// It replaces a test on Controllable::mIsAiming, which was never the right question.
+// EntitySoldier::CheckForZoom early-returns on mPlayerId < 0, so mIsAiming means
+// "not AI" -- never "local" -- and it is a zoom TOGGLE on top of that.  mTracker is
+// not a local test either: Controllable::SetupController calls Trackable::Track for
+// every human on every machine.
+static bool ownerIsLocalPlayer(const void* owner)
+{
+   if (!s_localPlayerIds) return false;
+   const int pid = *(const int*)((const char*)owner + kPlayerIdOff);
+   if (pid < 0) return false;                    // AI
+   return s_localPlayerIds[0] == pid || s_localPlayerIds[1] == pid;
+}
 
 // ---------------------------------------------------------------------------
 // Scope texture — ask the engine instead of re-deriving the condition.
@@ -58,20 +91,10 @@ static unsigned s_misAimingOff = 0x160;
 // raw Tracker+0x14 read ignores the class camera-mode override), so read the flag
 // the engine actually computed.  The instance pointer is a one-element array
 // indexed by camera; PC never uses index 0's neighbours.
-// ---------------------------------------------------------------------------
-static uintptr_t s_scopeDisplay = 0;   // address of the ScopeDisplay* global
-
-static bool scopeTextureVisible()
-{
-   if (!s_scopeDisplay) return false;
-   const char* sd = *(const char* const*)s_scopeDisplay;
-   if (!sd) return false;
-   return *(const bool*)(sd + 0x4C9);
-}
 
 // ---------------------------------------------------------------------------
 // CollisionManager::RayHit — used to find what the vanilla shot would hit, so the
-// barrel ray can be aimed at the same point (see convergeDirection below).
+// barrel ray can be aimed at the same point (see aimTargetPoint below).
 //
 //   float RayHit(PblVector3* start, PblVector3* dir, float maxDist,
 //                CollisionObject** outHit, PblVector3* outNormal,
@@ -93,7 +116,7 @@ typedef float(__cdecl* RayHit_t)(const void* start, const void* dir, float maxDi
                                  int excludeCount, int flags, int lastArg);
 
 static uintptr_t s_rayHitFn = 0;      // resolved engine address
-static RayHit_t  s_rayHit   = nullptr; // what convergeDirection() calls
+static RayHit_t  s_rayHit   = nullptr; // what aimTargetPoint() calls
 
 // Marshals the __cdecl signature above onto the release build's register layout.
 static __declspec(naked) float __cdecl rayhit_release_thunk(
@@ -126,79 +149,6 @@ static __declspec(naked) float __cdecl rayhit_release_thunk(
       pop   ebp
       ret
    }
-}
-
-// How far to look for the vanilla shot's impact point.  Beyond this the ray is
-// treated as "nothing hit" and convergence falls back to the far end of the ray,
-// where the remaining error is a fraction of the barrel offset.
-static const float kConvergeMaxDist = 500.0f;
-
-// Pushed forward along the aim direction so the ray starts outside the shooter's
-// own collision volume — cheaper and less fragile than building an exclude list,
-// which would need the GameObject* behind the Controllable.
-static const float kConvergeStartOffset = 1.0f;
-
-// Re-aims the barrel ray at whatever the vanilla ray would have hit.
-//
-// Without this, moving the origin from the engine's eye-point fire position to the
-// barrel leaves the direction untouched, so the shot is a ray parallel to the
-// vanilla one, displaced by the whole barrel-to-eyepoint vector — a fixed
-// world-space miss that scope magnification puts right in your face.
-//
-//   O = vanilla origin (aimer mRootPos — SetSoldierInfo wrote it alongside
-//       mFirePos and we never touch it, so it survives our own mFirePos write)
-//   D = vanilla direction (aimer mDirection)
-//   P = O + D * hitDistance          <- what the vanilla shot hits
-//   B = barrel hardpoint
-//   new direction = normalize(P - B)
-//
-// Returns false and leaves the direction alone whenever the result would be
-// untrustworthy, so a bad raycast degrades to the previous behaviour instead of
-// throwing shots somewhere arbitrary.
-static bool convergeDirection(float* dir, const float* origin, const float* barrel)
-{
-   if (!s_rayHit) return false;
-
-   const float D[3] = { dir[0], dir[1], dir[2] };
-
-   float start[3] = { origin[0] + D[0] * kConvergeStartOffset,
-                      origin[1] + D[1] * kConvergeStartOffset,
-                      origin[2] + D[2] * kConvergeStartOffset };
-
-   // Flags 0x9A are the engine's own aim-ray mask: EntitySoldier::UpdateWeaponAndAimer
-   // uses exactly these to resolve TargetInfo::mAimPoint, i.e. to answer "what is this
-   // player aiming at".  Same question, so same mask — we only drop its 60-unit cap.
-   // (0x80 = terrain, 0x100 = water; Ordnance::Update sweeps the world with 0x90, a
-   // subset, and RayHit's own default when flags == 0 is 0xBE, a superset whose two
-   // extra categories are unidentified.)  Anything the mask does not see — a soldier
-   // may be one — converges on the geometry behind it instead, which leaves a
-   // fraction of the barrel offset rather than all of it.
-   void* hitObj = nullptr;   // written on entry by RayHit; must be a real pointer
-   const float frac = s_rayHit(start, D, kConvergeMaxDist, &hitObj, nullptr,
-                               nullptr, 0, 0x9A, 1);
-   if (!(frac >= 0.0f) || frac > 1.0f) return false;   // also rejects NaN
-
-   // Distance from the ORIGIN, not from the pushed-forward ray start.
-   const float dist = kConvergeStartOffset + frac * kConvergeMaxDist;
-   if (dist < 2.0f) return false;   // muzzle-contact range; nothing to correct
-
-   const float P[3] = { origin[0] + D[0] * dist,
-                        origin[1] + D[1] * dist,
-                        origin[2] + D[2] * dist };
-
-   float N[3] = { P[0] - barrel[0], P[1] - barrel[1], P[2] - barrel[2] };
-   const float lenSq = N[0] * N[0] + N[1] * N[1] + N[2] * N[2];
-   if (lenSq < 0.01f) return false;
-
-   const float inv = 1.0f / sqrtf(lenSq);
-   N[0] *= inv; N[1] *= inv; N[2] *= inv;
-
-   // Sanity clamp: the correction is an arcminutes-scale nudge in every sane case.
-   // Anything past ~25 degrees means one of the inputs was garbage.
-   if (N[0] * D[0] + N[1] * D[1] + N[2] * D[2] < 0.9f) return false;
-
-   dir[0] = N[0]; dir[1] = N[1]; dir[2] = N[2];
-   return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,124 +235,256 @@ static void __fastcall hooked_weapon_Render(void* weapon, void* /*edx*/, const v
       memcpy((char*)weapon + kFirePointMatrixOff, saved, sizeof(saved));
 }
 
+// How far to look for the impact point on the crosshair line.
+static const float kConvergeMaxDist = 500.0f;
+
+// The ray starts this far ahead of the muzzle's own projection onto the aim line,
+// which clears the shooter without needing an exclude list.
+static const float kRayClear = 0.35f;
+
+// Below this the hit is muzzle contact or the shooter himself; there is nothing to
+// correct and a correction computed from it would be enormous.
+static const float kMinTargetDist = 1.5f;
+
+// An mAimPoint nearer than this is one of the engine's CAPPED aim points (60 units
+// for a local player in third person, 20 for a remote soldier on a net client)
+// rather than the genuine 200-unit one it writes for AI. Converging on a capped
+// point is worse than doing nothing past twice the cap, so the AI path refuses it.
+static const float kMinAiAimDist = 100.0f;
+
+// Below this barrel-to-origin displacement there is nothing worth moving.
+static const float kMinBarrelOffsetSq = 0.0025f;   // (5 cm)^2
+
+// Hard cap on the correction applied to an AI aimer. AIUtil::DumbDown (modtools
+// 0x591DC0) reads Aimer::mDirection back as the previous state of a discrete PD
+// controller, so a bias we inject becomes its steady-state error; push past what
+// the loop can hold and the aim slides degrees per second until it snaps. The same
+// bias erodes the AI fire gate, which needs dot(aimDir, eyeDir) > cos(pi/8).
+//
+// Estimated from the AIDifficulty ranges, NOT measured. If AI aim is ever seen
+// sliding rather than jittering, halve it.
+static const float kAiMaxCorrectionRad = 0.004f;
+
+// ---------------------------------------------------------------------------
+// Where the shot should actually land.
+//
+// The previous design converged on `mRootPos + mDirection * T` -- a point on the
+// VANILLA AIMER'S OWN LINE -- and spent its effort choosing T. That was wrong twice
+// over, and both showed up in play:
+//
+//   * In third person the vanilla aimer line is NOT the crosshair line.
+//     UpdateWeaponAndAimer converges the fire point onto the camera axis at only
+//     TrackOffset.z + 2 + 60*frac, i.e. about 5..65 units. Past that the vanilla
+//     shot itself drifts, and reproducing it faithfully reproduces the drift.
+//   * A clean RayHit MISS returns frac == 1.0 exactly, which the old code accepted,
+//     so every miss converged at 501 units. Mask 0x9A does not include water
+//     (0x100), so firing across water was a guaranteed miss.
+//
+// Both are the same error class: a convergence point further away than the thing
+// being shot at, which leaves residual error on the BARREL side. That is the
+// "distant shots land to the right" report.
+//
+// So: stop computing T. Resolve the actual impact point on the CROSSHAIR line, and
+// treat a miss as "no correction" rather than as a distance. A fallback at 500 is
+// worse than vanilla inside about 100 units.
+// ---------------------------------------------------------------------------
+static bool aimTargetPoint(const void* owner, const float* rootPos, float P[3])
+{
+   const float* E        = (const float*)((const char*)owner + kEyeDirOff);
+   const float* eyePos   = (const float*)((const char*)owner + kEyePointOff);
+   const float* aimStart = (const float*)((const char*)owner + kAimStartOff);
+   const float* aimPoint = (const float*)((const char*)owner + kAimPointOff);
+
+   if (!ownerIsLocalPlayer(owner) || !s_rayHit) {
+      // AI and server-side remotes: the engine already authored a genuine target.
+      // UpdateWeaponAndAimer writes mAimPoint = origin + dir*200 on both pid < 0
+      // sub-branches and on the tracker-less human branch, with no raycast at all.
+      // Converging there reproduces the vanilla shot from the barrel with ZERO
+      // error and costs us nothing. A local player (60-unit cap) or a remote on a
+      // client (20) can never pass the distance gate, so they never take this path.
+      const float d[3] = { aimPoint[0] - rootPos[0],
+                           aimPoint[1] - rootPos[1],
+                           aimPoint[2] - rootPos[2] };
+      if (!(d[0]*d[0] + d[1]*d[1] + d[2]*d[2] > kMinAiAimDist * kMinAiAimDist))
+         return false;
+      P[0] = aimPoint[0]; P[1] = aimPoint[1]; P[2] = aimPoint[2];
+      return true;
+   }
+
+   // Which line is the crosshair on? MEASURE it rather than guessing at camera mode.
+   //
+   // UpdateWeaponAndAimer writes mEyePoint unconditionally at the top, then:
+   //   third person      mAimStart = camera point, pushed along E until
+   //                     dot(mAimStart - mEyePoint, E) == 0 IDENTICALLY
+   //   first person, hip mAimStart = mEyePoint + E*t.z + right*t.x + cross(E,right)*t.y
+   //                     and right, cross(E,right) are both perpendicular to E, so
+   //                     dot(mAimStart - mEyePoint, E) == t.z EXACTLY
+   //                     (0.25 stand, 0.25 crouch, 0.15 prone)
+   // So that one scalar says which branch the engine took, build-invariantly, with
+   // no Tracker read, no ScopeDisplay read and no camera predicate.
+   const float v[3] = { aimStart[0] - eyePos[0],
+                        aimStart[1] - eyePos[1],
+                        aimStart[2] - eyePos[2] };
+   const float along = v[0]*E[0] + v[1]*E[1] + v[2]*E[2];
+   const float* A = (along > 0.05f && along < 0.40f) ? eyePos : aimStart;
+
+   // Start the ray at the muzzle's own projection onto the aim line, pushed a
+   // little further forward. That clears the shooter in every stance without an
+   // exclude list, which would need the GameObject* behind the Controllable.
+   const float w[3] = { rootPos[0] - A[0], rootPos[1] - A[1], rootPos[2] - A[2] };
+   const float d0 = (w[0]*E[0] + w[1]*E[1] + w[2]*E[2]) + kRayClear;
+   const float start[3] = { A[0] + E[0]*d0, A[1] + E[1]*d0, A[2] + E[2]*d0 };
+
+   void* hitObj = nullptr;   // RayHit zeroes this on entry; it must never be null
+   const float frac = s_rayHit(start, E, kConvergeMaxDist, &hitObj, nullptr,
+                               nullptr, 0, 0x9A, 1);
+
+   // No usable hit -- open sky, across water (0x100 is not in the mask), or a hit
+   // so close it can only be contact or the shooter himself. Converge on the FAR
+   // END of the crosshair ray rather than giving up.
+   //
+   // That would have been wrong under the previous design and is right under this
+   // one, and the difference is which line the ray follows. The old ray ran along
+   // the AIMER's line, which diverges from the crosshair past about 65 units, so it
+   // could miss a target the player was plainly aiming at -- and converging at 501
+   // then left residual error on the barrel side, which is exactly the "distant
+   // shots land right" report. This ray follows the CROSSHAIR line, and soldiers,
+   // vehicles, terrain and statics are all in the 0x9A mask, so a miss means the
+   // line really is empty and there is nothing within 500 units to be inaccurate
+   // against. Bailing there would only cost the barrel origin for no accuracy gain.
+   //
+   // `hitObj` is the engine's own sentinel: RayHit zeroes it on entry and writes it
+   // only on an accepted hit, so a clean miss returns frac == 1.0 with hitObj null
+   // and cannot be told from a hit at maximum range by frac alone.
+   float t = kConvergeMaxDist;
+   if (hitObj && frac > 0.0f && frac <= 1.0f) {   // the frac tests also reject NaN
+      const float hit = frac * kConvergeMaxDist;
+      if (hit > kMinTargetDist) t = hit;
+   }
+
+   P[0] = start[0] + E[0]*t; P[1] = start[1] + E[1]*t; P[2] = start[2] + E[2]*t;
+   return true;
+}
+
+// Aim from `from` at `P`, rejecting anything that cannot be trusted. The coarse
+// 60-degree net catches garbage inputs; the correction itself is geometry and at
+// contact range is legitimately large, so a tight angular clamp would reject
+// exactly the corrections that matter most.
+static bool aimAt(const float* from, const float* P, const float* refDir, float out[3])
+{
+   float n[3] = { P[0] - from[0], P[1] - from[1], P[2] - from[2] };
+   const float lenSq = n[0]*n[0] + n[1]*n[1] + n[2]*n[2];
+   if (!(lenSq > 1.0f)) return false;   // also rejects NaN
+   const float inv = 1.0f / sqrtf(lenSq);
+   n[0] *= inv; n[1] *= inv; n[2] *= inv;
+   if (!(n[0]*refDir[0] + n[1]*refDir[1] + n[2]*refDir[2] > 0.5f)) return false;
+   out[0] = n[0]; out[1] = n[1]; out[2] = n[2];
+   return true;
+}
+
+// Is this weapon's baked barrel position usable this turn?
+static const float* trustedBarrelPoint(void* weapon, const void* owner,
+                                       const float* rootPos, const float* P)
+{
+   const float* m = (const float*)((char*)weapon + kFirePointMatrixOff);
+
+   // trans.w is the LAST write of Weapon::Render's bake (modtools 0x0061E0AB,
+   // Steam 0x0067948C, GOG 0x0067A52C -- C7 47 xx 00 00 80 3F), so a matrix that
+   // has never been baked does not carry it. Weapon::Weapon never initialises the
+   // field, so on retail it is otherwise arbitrary heap contents.
+   if (m[15] != 1.0f) return nullptr;
+   if (matrixIsMirrored(m)) return nullptr;   // reflection-region backstop
+
+   const float* trans = m + 12;
+   const float d[3] = { trans[0] - rootPos[0], trans[1] - rootPos[1], trans[2] - rootPos[2] };
+   for (int i = 0; i < 3; ++i)
+      if (d[i] < -5.0f || d[i] > 5.0f) return nullptr;   // grossly out of body
+
+   const float lenSq = d[0]*d[0] + d[1]*d[1] + d[2]*d[2];
+   if (!(lenSq > kMinBarrelOffsetSq)) return nullptr;    // nothing worth moving
+
+   // NOTE: no AI test here, deliberately. An earlier revision refused the origin
+   // move for AI whose barrel sat further than kAiMaxCorrectionRad * range from
+   // the chest -- 0.8 units at their 200-unit aim point, which is less than most
+   // weapons and ALL long ones, so AI silently stopped firing from the barrel at
+   // all. That was wrong on its own terms: AIUtil::DumbDown reads back
+   // mDirection, not mFirePos, so relocating the muzzle costs the AI aim loop
+   // nothing. Only the DIRECTION correction is a bias it has to absorb, and that
+   // is capped at the call site instead.
+   return trans;
+}
+
+// ---------------------------------------------------------------------------
 // Replacement for WeaponCannon::OverrideAimer (vtable slot 0x70).
-// Relocates the fire ORIGIN (Aimer::mFirePos, 0x88) to the barrel hardpoint
-// (Weapon::mFirePointMatrix trans).  Falls back to the vanilla aimer position when
-// the matrix is stale (first-person zoom); reflection regions are handled at the
-// source by hooked_weapon_Render, not here.
 //
-// WeaponCannon::Fire (Phantom 0x7B5680) builds the OrdnanceDesc from mFirePos
-// (origin) and mDirection (0x48) INDEPENDENTLY, so moving the origin on its own
-// shifts the whole shot sideways.  While zoomed we therefore also re-aim the
-// direction — see convergeDirection().
+// WeaponCannon::Fire builds the OrdnanceDesc from Aimer::mFirePos and
+// mDirection INDEPENDENTLY, so moving the origin on its own shifts the whole shot
+// sideways. Origin and direction are therefore committed TOGETHER or not at all --
+// there is no path here that relocates the muzzle without re-aiming from it.
 //
-// Two convergence targets were considered and rejected before the raycast:
-//   - The reticle is NOT a raycast.  ReticuleDisplay::Update (modtools 0x683270)
-//     draws the crosshair at the projection of P = mAimStart + aimDir*1024
-//     (mAimStart = Controllable+0x148 TargetInfo base; aimDir = Controllable+0xE8).
-//     At 1024 units the angular correction is ~barrelOffset/1024, i.e. nothing.
-//     Reading those fields in the FIRE path also produced wildly wrong directions
-//     (shots into the ground) — they are not a reliable per-frame eye ray there.
-//   - TargetInfo::mAimPoint (TargetInfo+0xC) is the engine's own third-person
-//     convergence target, written by UpdateWeaponAndAimer just before this hook
-//     runs, but CollisionManager::RayHit caps it at 60 units from the camera.
-//     Converging there fixes close range and over-corrects past it, the error
-//     growing as barrelOffset * (dist/60 - 1) — worse than doing nothing beyond
-//     ~120 units, which is exactly sniper range.
-// Only the true hit distance is range-correct, so we cast the ray ourselves.
+// Two stages, in order of how much they need:
+//   (1) DIRECTION. Needs no barrel data at all, so it works in first person too,
+//       where it removes vanilla's own hipfire offset (the stance weapon-offset
+//       table puts the shot on a ray PARALLEL to the crosshair, displaced about
+//       0.12 right and 0.10 down -- 31 mrad at 5 units). It is an algebraic no-op
+//       while aiming down sights, where the vanilla origin already sits on the aim
+//       line, and a no-op for AI, whose target point is exactly rootPos + dir*200.
+//   (2) ORIGIN. Only when the baked barrel matrix is trustworthy.
+//
+// Anything untrustworthy returns false and hands the frame back to the vanilla
+// aimer, rather than correcting from a number we do not believe.
+// ---------------------------------------------------------------------------
 static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 {
    if (!g_useBarrelFireOrigin) return false;
 
-   // ---- Zoom state -----------------------------------------------------------
-   // mIsAiming = TargetInfo::mIsAiming (TargetInfo+0x18; Controllable+0x148
-   // modtools / +0x144 release -> 0x160 / 0x15C).  EntitySoldier::CheckForZoom
-   // (modtools 0x528E00) drives it from Weapon::CycleZoom, so it is the zoom
-   // TOGGLE, not a per-frame aim state, and it stays 0 for AI (CheckForZoom
-   // returns early when mPlayerId < 0) and for weapons with ZoomMax <= 1.
-   //
-   // Why relocating the origin costs accuracy at all:
-   // EntitySoldier::UpdateWeaponAndAimer (modtools 0x52C980, Phantom 0x58AD80)
-   // computes the fire position from sEyePointOffset[stance] and then, in the
-   // third-person path, derives the aim DIRECTION by converging that position
-   // onto TargetInfo::mAimPoint (the camera ray's hit point):
-   //     dir = normalize(mAimPoint - firePos)
-   // We move only the ORIGIN to the barrel, so unless the direction is re-aimed
-   // the shot is a ray parallel to the vanilla one, displaced by the whole
-   // barrel-to-eyepoint vector.  That displacement is fixed in world units, so
-   // what decides whether it is visible is magnification: unzoomed nobody can see
-   // it, zoomed it is the difference between hitting and missing.
-   //
-   // So: zoomed, pay for a raycast and correct the direction properly.  mIsAiming
-   // is only ever set for the local player (CheckForZoom returns early when
-   // mPlayerId < 0), which bounds this to one or two rays per frame no matter how
-   // many WeaponCannons the level holds.
-   void* owner = *(void**)((char*)weapon + 0x6C);
-   bool converge = false;
-   if (owner && *(bool*)((char*)owner + s_misAimingOff)) {
-      // First-person zoom: mFirePointMatrix stops tracking (the third-person model
-      // is not being posed), so the barrel position itself goes stale and there is
-      // nothing worth converging on.
-      void* tracker = *(void**)((char*)owner + 0x34);
-      if (tracker && *(bool*)((char*)tracker + 0x14))
-         return false;
-
-      converge = true;
-   }
-
    __try {
-      // Scope texture up: hand the frame back untouched.  Converging the direction
-      // makes the shot land correctly but cannot fix how it LOOKS — the bolt still
-      // leaves from wherever the idle animation is holding the muzzle, so instead
-      // of a straight line from the gun you get a visible diagonal to the target.
-      // Under a scope there is nothing to gain from the barrel origin anyway.
-      if (scopeTextureVisible()) return false;
-
+      void* owner = *(void**)((char*)weapon + 0x6C);   // Weapon::mOwner
       void* aimer = *(void**)((char*)weapon + 0x70);   // Weapon::mAimer
-      if (!aimer) return false;
+      if (!owner || !aimer) return false;
 
-      // Weapon::mFirePointMatrix at weapon+0x20 (PblMatrix, 0x40 bytes).
-      // PblMatrix::trans row is at offset 0x30 — the world-space fire position.
-      const float* matrix = (const float*)((char*)weapon + kFirePointMatrixOff);
-      const float* trans  = matrix + 12;
+      // Aimer::bDirect. Aimer::SetSoldierInfo is its only writer and sets it
+      // unconditionally, so it means "UpdateWeaponAndAimer authored mRootPos and
+      // mDirection as a matched pair this turn". A turret or vehicle aimer never
+      // carries it, which is what keeps those out of scope.
+      if (!*(const unsigned char*)((const char*)aimer + 0x29)) return false;
 
-      // Validate: check for uninitialized (0xCDCDCDCD) or zero
-      const uint32_t raw = *(const uint32_t*)&trans[0];
-      if (raw == 0xCDCDCDCD ||
-          (trans[0] == 0.0f && trans[1] == 0.0f && trans[2] == 0.0f))
-         return false;
+      float*       dir     = (float*)((char*)aimer + 0x48);        // mDirection
+      float*       firePos = (float*)((char*)aimer + 0x88);        // mFirePos
+      const float* rootPos = (const float*)((char*)aimer + 0x70);  // mRootPos
 
-      // Reflection backstop.  hooked_weapon_Render keeps the mirrored duplicate
-      // draw from ever reaching this field, so a mirrored matrix here means that
-      // hook did not install (unknown build, vtable already patched by another
-      // mod) — fall back to the vanilla aimer rather than firing from the mirror
-      // image.  Cheap, and it fails safe instead of silently wrong.
-      if (matrixIsMirrored(matrix)) return false;
+      float P[3];
+      if (!aimTargetPoint(owner, rootPos, P)) return false;
 
-      float* aimerFirePos = (float*)((char*)aimer + 0x88);  // Aimer::mFirePos
-      const float* rootPos = (const float*)((char*)aimer + 0x70);  // Aimer::mRootPos
+      float newDir[3];
+      if (!aimAt(rootPos, P, dir, newDir)) return false;
 
-      // Position sanity: reject a grossly out-of-body fire point (corrupt matrix).
-      // All three axes, since the barrel is always within arm's reach of the eye
-      // point no matter the stance or animation.
-      const float dx = trans[0] - rootPos[0];
-      const float dy = trans[1] - rootPos[1];
-      const float dz = trans[2] - rootPos[2];
-      if (dx < -5.0f || dx > 5.0f || dy < -5.0f || dy > 5.0f ||
-          dz < -5.0f || dz > 5.0f)
-         return false;
+      const float* B = trustedBarrelPoint(weapon, owner, rootPos, P);
+      if (B) {
+         float d2[3];
+         if (aimAt(B, P, dir, d2)) {
+            // The origin move is unconditional once B is trusted -- it is purely
+            // visual and nothing downstream reads mFirePos as aim state.
+            firePos[0] = B[0]; firePos[1] = B[1]; firePos[2] = B[2];
 
-      aimerFirePos[0] = trans[0];
-      aimerFirePos[1] = trans[1];
-      aimerFirePos[2] = trans[2];
+            // The DIRECTION is what AIUtil::DumbDown reads back as the previous
+            // state of its PD loop, so a bias larger than the loop can hold has
+            // no fixed point and the aim slides. For AI, take the correction only
+            // while it stays inside that budget; otherwise keep the vanilla
+            // direction and accept the barrel offset, which is exactly what
+            // shipped before convergence existed.
+            bool takeDir = true;
+            if (*(const int*)((const char*)owner + kPlayerIdOff) < 0) {
+               const float dot = d2[0]*dir[0] + d2[1]*dir[1] + d2[2]*dir[2];
+               // cos(x) ~ 1 - x^2/2, so compare against the small-angle bound
+               // rather than paying an acosf here.
+               takeDir = (dot > 1.0f - 0.5f * kAiMaxCorrectionRad * kAiMaxCorrectionRad);
+            }
+            if (takeDir) { newDir[0] = d2[0]; newDir[1] = d2[1]; newDir[2] = d2[2]; }
+         }
+      }
 
-      // Re-aim from the new origin so the shot still hits what the vanilla shot
-      // would have hit.  mRootPos is the engine's own fire position: SetSoldierInfo
-      // writes mFirePos and mRootPos from the same value and we only overwrite
-      // mFirePos, so mRootPos still holds the untouched vanilla origin.
-      if (converge)
-         convergeDirection((float*)((char*)aimer + 0x48), rootPos, aimerFirePos);
-
+      dir[0] = newDir[0]; dir[1] = newDir[1]; dir[2] = newDir[2];
       return true;
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -445,12 +527,13 @@ static void* patch_vtable_slot(uintptr_t exe_base, uintptr_t slotVA,
 //                          mirrored matrix behind in mFirePointMatrix
 //
 // each only after validating that the slot still points at the vanilla entry.
-// Struct offsets used by the hooks are build-invariant except mIsAiming (see
-// s_misAimingOff).
+// EVERY struct offset used by the hooks is now build-invariant, verified on all
+// three targets' own bytes.  The one per-build address is NetComm::sLocalPlayerId,
+// and a build without it degrades cleanly rather than reading the wrong field.
 // ---------------------------------------------------------------------------
 void barrel_fire_origin_install(uintptr_t exe_base)
 {
-   uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, scopeVA;
+   uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, localIdsVA;
    uintptr_t cannonRenderVA, launcherRenderVA, renderImplVA, renderThunkVA;
    bool rayHitIsRelease;
    switch (g_build) {
@@ -465,8 +548,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       renderThunkVA    = game_addrs::modtools::weapon_render_thunk;
       rayHitVA   = game_addrs::modtools::collision_manager_ray_hit;
       rayHitIsRelease = false;   // plain __cdecl, result in ST(0)
-      scopeVA = game_addrs::modtools::scope_display_instance;
-      s_misAimingOff = 0x160;
+      localIdsVA = game_addrs::modtools::net_comm_local_player_id;
       break;
 
    case GameBuild::Steam:
@@ -480,8 +562,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       renderThunkVA    = game_addrs::steam::weapon_render_thunk;
       rayHitVA   = game_addrs::steam::collision_manager_ray_hit;
       rayHitIsRelease = true;    // ECX/EDX/XMM2 + six stack args, result in XMM0
-      scopeVA = game_addrs::steam::scope_display_instance;
-      s_misAimingOff = 0x15C;
+      localIdsVA = game_addrs::steam::net_comm_local_player_id;
       break;
 
    case GameBuild::GOG:
@@ -495,19 +576,19 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       renderThunkVA    = game_addrs::gog::weapon_render_thunk;
       rayHitVA   = game_addrs::gog::collision_manager_ray_hit;
       rayHitIsRelease = true;    // same LTCG RayHit convention as Steam
-      scopeVA = game_addrs::gog::scope_display_instance;
-      s_misAimingOff = 0x15C;    // shared release layout
+      localIdsVA = game_addrs::gog::net_comm_local_player_id;
       break;
    default:
       return; // unknown build
    }
 
-   // Direction convergence is optional: if RayHit is missing the hook still
-   // relocates the origin, it just stops correcting for the offset while zoomed.
+   // The raycast is optional: without it the local player simply converges at the
+   // same fixed distance everyone else does, which is still far better than
+   // leaving the direction alone.
    s_rayHitFn = (uintptr_t)resolve(exe_base, rayHitVA);
    s_rayHit   = rayHitIsRelease ? &rayhit_release_thunk : (RayHit_t)s_rayHitFn;
 
-   s_scopeDisplay = (uintptr_t)resolve(exe_base, scopeVA);
+   s_localPlayerIds = localIdsVA ? (const int*)resolve(exe_base, localIdsVA) : nullptr;
 
    void* aimer_impl  = resolve(exe_base, implVA);
    void* aimer_thunk = resolve(exe_base, thunkVA);

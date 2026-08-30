@@ -1,5 +1,16 @@
 # BF2 (2005) Game Struct Reference
 
+> **CORRECTION 2026-08-22 — the release column is wrong from `mCtrl` down.** The PDB's
+> `-4` shift was extrapolated onto Steam and GOG and never measured against their bytes.
+> `Controllable::mAimStart / mAimPoint / mIsAiming` are at `+0x148 / +0x154 / +0x160` on
+> **all three** builds, and `Controllable = derived - 0x240` everywhere
+> (`8D 81 C0 FD FF FF` at Steam/GOG `0x4778D0`, modtools `0x52B520`).
+> This error shipped: `barrel_fire_origin.cpp` read `+0x15C` as `mIsAiming` on retail,
+> which is `mAimPoint.z`'s low mantissa byte, so a zoom gate was true on roughly 255
+> frames in 256 and both retail builds cast a raycast per weapon per turn. Verify a
+> release offset against that build's own instructions before using it.
+
+
 Cross-build struct layouts, access paths, and verified offsets for modtools, Steam, and GOG executables.
 
 ---

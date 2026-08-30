@@ -26,6 +26,7 @@
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/command_post_null_fix.hpp"
+#include "entity/command_post_overflow_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
@@ -231,6 +232,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
       g_commandPostNullFixEnabled = cfg.get_bool("Fixes", "CommandPostNullFix", true);
+      g_commandPostOverflowFix    = cfg.get_bool("Fixes", "CommandPostOverflowFix", true);
       // Read-only instrumentation, in its own [Diagnostic] section so it is never
       // confused with the shipped feature toggles. All default off.
       g_branchRegionDebugEnabled  = cfg.get_bool("Diagnostic", "BranchRegionDebug", false);
@@ -300,6 +302,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
+   command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window

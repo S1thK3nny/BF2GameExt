@@ -127,6 +127,7 @@
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
     <ClInclude Include="src\entity\command_post_null_fix.hpp" />
+    <ClInclude Include="src\entity\command_post_overflow_fix.hpp" />
     <ClInclude Include="src\entity\branch_region_debug.hpp" />
     <ClInclude Include="src\entity\branch_region_fix.hpp" />
     <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp" />
@@ -213,6 +214,7 @@
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\command_post_null_fix.cpp" />
+    <ClCompile Include="src\entity\command_post_overflow_fix.cpp" />
     <ClCompile Include="src\entity\branch_region_debug.cpp" />
     <ClCompile Include="src\entity\branch_region_fix.cpp" />
     <ClCompile Include="src\entity\jetpack_fp_sound_fix.cpp" />

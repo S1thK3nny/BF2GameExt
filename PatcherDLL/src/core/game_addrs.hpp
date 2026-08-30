@@ -82,6 +82,15 @@ namespace modtools {
    // is on screen"; ScopeDisplay::Hide (0x683CB0) clears it.
    constexpr uintptr_t scope_display_instance = 0x00BA36D8;
 
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (0x006DD840) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: CMP dword ptr [EAX*0x4 + 0xbd80cc],ECX at 0x006DD860
+   constexpr uintptr_t net_comm_local_player_id   = 0x00BD80CC;
+
    // float __cdecl CollisionManager::RayHit(PblVector3* start, PblVector3* dir,
    //     float maxDist, CollisionObject** outHit, PblVector3* outNormal,
    //     GameObject** exclude, int excludeCount, int flags, bool);
@@ -626,6 +635,19 @@ namespace modtools {
    // non-CommandPost entity can produce; see entity/command_post_null_fix.cpp.
    constexpr uintptr_t command_post_set_team        = 0x0064FBC0;
 
+   // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
+   // FUN_0064FDF0, __cdecl(entity, CommandPostClass*).  sPostArray is a fixed 16
+   // entries and the append path has no capacity check, so the 17th registration
+   // indexes one past the end.  modtools at least logs
+   // "Exceeded %d command posts!" (CommandPost.cpp:279) -- and then uses the
+   // out-of-range index anyway.  Retail deleted even the warning.
+   constexpr uintptr_t command_post_find_or_create = 0x0064FDF0;
+   constexpr uintptr_t command_post_hint_index     = 0x00AD5494;  // one-shot forced index
+   constexpr uintptr_t command_post_array_ptr      = 0x00AD5498;  // holds the array base
+   constexpr uintptr_t command_post_count_ptr      = 0x00AD549C;  // holds the count's address
+   constexpr uintptr_t command_post_class_off      = 0x1A54;      // CommandPost -> its class
+
+
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
 
    constexpr uintptr_t s_cached_particles            = 0x00B9DB78;  // sCachedParticles[300]
@@ -1107,6 +1129,15 @@ namespace steam {
    // here vs 0x520 in the debug build, but only the trailing GameSound members
    // differ; ScopeDisplay::Hide 0x633B30 reads the same offset).
    constexpr uintptr_t scope_display_instance = 0x01EAF020;
+
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (body 0x005B26F0, thunk 0x005B73C0) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: the table compare at 0x005B2707
+   constexpr uintptr_t net_comm_local_player_id   = 0x01FA3D58;
 
    // CollisionManager::RayHit — same 9 arguments as modtools, but LTCG-custom:
    //   ECX = start, EDX = dir, XMM2 = maxDist, and the remaining six on the stack
@@ -1629,6 +1660,20 @@ namespace steam {
    // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
+
+   // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
+   // FUN_0047AC80, __fastcall(ECX = entity, EDX = CommandPostClass*) -- a DIFFERENT
+   // convention from modtools' __cdecl, read from this build's own prologue.
+   // sPostArray is 16 entries at 0x01E308E0 (the PUSH 0x40 memset at 0x0047AA40);
+   // slot[16] is 0x01E30920, ControllerManager's parked phase counter, which cycles
+   // 1..15 -- which is why the two observed crashes handed CommandPost `this` = 7
+   // and `this` = 13 rather than random garbage.
+   constexpr uintptr_t command_post_find_or_create = 0x0047AC80;
+   constexpr uintptr_t command_post_hint_index     = 0x007E6318;
+   constexpr uintptr_t command_post_array_ptr      = 0x007E6314;
+   constexpr uintptr_t command_post_count_ptr      = 0x007E631C;
+   constexpr uintptr_t command_post_class_off      = 0x0B3C;
+
 
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
    // Release drops 4 bytes somewhere before Properties+0x18, so every field from
@@ -2158,6 +2203,15 @@ namespace gog {
    constexpr uintptr_t weapon_render_impl             = 0x0067a3f0;       // port_gog.py from steam 0x679350, score 1.00
    constexpr uintptr_t weapon_render_thunk            = 0x0067a3f0;
    constexpr uintptr_t scope_display_instance         = 0x01eb04d4;
+
+   // NetComm::sLocalPlayerId - int[2], the engine's own local-player table.
+   // NetComm::GetJoystickIndex is literally
+   //     for (i = 0; i < 2; ++i) if (sLocalPlayerId[i] == pid) return i;  return -1;
+   // so the table is read directly rather than called, which sidesteps a
+   // convention split: modtools' GetJoystickIndex is __cdecl (body 0x005B3690, thunk 0x005B8370) while both
+   // retail builds are __fastcall behind a __cdecl thunk.
+   // Verified from the compare itself: the table compare at 0x005B36A7
+   constexpr uintptr_t net_comm_local_player_id   = 0x01FA5208;
    constexpr uintptr_t collision_manager_ray_hit      = 0x0045e3a0;
    constexpr uintptr_t weapon_update                  = 0x00679250;
    constexpr uintptr_t weapon_shield_update           = 0x00692b10;
