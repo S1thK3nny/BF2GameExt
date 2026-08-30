@@ -25,6 +25,7 @@
 #include "entity/hover_pilot_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/hero_team_switch_fix.hpp"
+#include "entity/fp_fire_animation_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
@@ -270,6 +271,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window
+   fp_fire_animation_fix_install(exe_base);  // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);

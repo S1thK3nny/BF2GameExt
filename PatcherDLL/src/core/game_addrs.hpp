@@ -391,6 +391,10 @@ namespace modtools {
    // ---- Animation ---------------------------------------------------------------
 
    constexpr uintptr_t fp_update_soldier            = 0x004A9BE0;
+   // FirstPersonRenderable::UpdateSoldier + 0x352 — `MOV EBP,[ESI+0x1620]`, the
+   // transition-anim override that replaces the soldier state computed earlier in
+   // the same call (state = mTransitionAnim).  See fp_fire_animation_fix.cpp.
+   constexpr uintptr_t fp_transition_anim_override  = 0x004A9F32;
    constexpr uintptr_t anim_add_bank               = 0x004A8FC0;
    constexpr uintptr_t anim_find_animation         = 0x004A7900;
    constexpr uintptr_t fp_anim_array               = 0x00B70E30;  // ZephyrAnim*[48]
@@ -1560,6 +1564,9 @@ namespace steam {
    // reads +0x1608 (cached state) / +0x1600 (mCurrentWeapon), identical to the
    // modtools body (FP renderable layout is build-invariant).
    constexpr uintptr_t fp_update_soldier   = 0x0051FB70;
+   // The transition-anim override inside it: `MOV EBX,[EDI+0x1620]` (state reg is
+   // EBX and `this` is EDI on release; EBP/ESI on modtools).  Byte-verified.
+   constexpr uintptr_t fp_transition_anim_override = 0x0051FEFC;
 
    // ---- Fog (see modtools namespace for docs) ----------------------------------
    constexpr uintptr_t red_renderer_set_fog_range  = 0x006B3640;
@@ -2147,6 +2154,7 @@ namespace gog {
    constexpr uintptr_t fp_anim_array                  = 0x01e572e0;
    constexpr uintptr_t anim_name_table                = 0x0078a710;
    constexpr uintptr_t fp_update_soldier              = 0x0051fb70;
+   constexpr uintptr_t fp_transition_anim_override    = 0x0051fefc;  // port_gog.py from steam 0x51fefc, score 1.00
 
    // ---- Fog (see modtools namespace for docs) -----------------------------------
 

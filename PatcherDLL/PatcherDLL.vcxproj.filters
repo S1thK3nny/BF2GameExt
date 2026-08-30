@@ -61,6 +61,9 @@
     <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\fp_fire_animation_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\prone_lvl_load.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -232,6 +235,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\soldier_prone.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\fp_fire_animation_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\prone_lvl_load.cpp">
