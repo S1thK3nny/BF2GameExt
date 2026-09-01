@@ -84,6 +84,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    // [Features] — optional gameplay features (may require additional assets)
    INI_ENTRY("Features", "Prone", "1", "Enable prone stance. Requires data\\_lvl_pc\\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing"),
    INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds"),
+   INI_ENTRY("Features", "SpawnVehicleList", "1", "On the spawn screen, list the vehicles that spawn at the highlighted command post, the way SWBF1 did. Stock BF2 leaves that line blank. Set 0 for stock"),
    INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only)"),
    INI_ENTRY("Features", "DisableAwardBuffs", "0", "Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive"),
    INI_ENTRY("Features", "DisableAwardWeapons", "0", "Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards"),

@@ -804,6 +804,37 @@ namespace modtools {
    // Listed for reference only — the modtools editor works and is NOT patched.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00690E70;
 
+   // ---- Spawn-screen vehicle list (render/spawn_vehicle_list.cpp) --------------
+   // Restores BF1's "vehicles at this command post" line.  Everything except the
+   // string producer survives in BF2; see docs/RE/CommandPostVehicleList.md.
+   //
+   // SpawnDisplay::Update, vtable slot 1 (vtable 0x00A5BB7C -> thunk 0x0040F498).
+   // bool __thiscall(this, float dt); epilogue is RET 4, read off the disasm and
+   // not the decompiler.  We poll it rather than hooking the SetCommandPost edge
+   // (0x0068A8C0), because entering the unit screen from side select does not
+   // necessarily re-select the post, so an edge hook goes blank after a side change.
+   constexpr uintptr_t spawndisplay_update           = 0x0068CCD0;
+   // SpawnDisplay::mMode, 0 = side select.  SelectPost 0x0068A950 gates its own
+   // spawn-point-change sound on exactly `mMode != 0`, so we reuse that gate.
+   constexpr uintptr_t spawndisplay_mode_off         = 0x18;
+   // SpawnDisplay::mCommandPost.  Sole writer is SetCommandPost 0x0068A8C0,
+   // `mov [ecx+0x2094],eax`.
+   constexpr uintptr_t spawndisplay_command_post_off = 0x2094;
+   // HUD::Event::Send, __thiscall(Event*), forwards to EventClass::Send 0x006AD870.
+   constexpr uintptr_t hud_event_send                = 0x006ADA90;
+   // EventClass* array for player%d.spawnDisplay.vehicle, registered type_String(8)
+   // by HUD::GameEvents::Open 0x006AEF00.  Index [playerIdx * 0xCA]; the sibling
+   // .enable at 0x00BA3CE8 is what SpawnDisplay::Show fires through the same array.
+   constexpr uintptr_t hud_event_spawn_vehicle       = 0x00BA3CF4;
+   // sVehicleSpawnList, PblList<VehicleSpawn>: _head at +0, _iCount at +0x10.
+   // From the ctor's list link (0x00664C50) and the dtor's count decrement.
+   constexpr uintptr_t vehicle_spawn_list            = 0x00AD6004;
+   // EntityClass shape.  The debug build keeps the 32-byte filename, so the label
+   // sits past it.  Both read out of SpawnDisplay::SetSlotInfo.
+   constexpr uintptr_t entityclass_label_off         = 0x40;  // wchar_t*, localized
+   constexpr uintptr_t entityclass_filename_off      = 0x20;  // char[32] fallback
+   constexpr uintptr_t entityclass_hash_off          = 0;     // debug has the filename
+
    // ---- Combat awards (award_disable.cpp) --------------------------------------
    // bool __thiscall MedalsMgr::IsAwardAvailable(MedalsMgr*, int index) — the one
    // gate every award effect reads.  Body is
@@ -1853,6 +1884,31 @@ namespace steam {
    // the modtools one; single vtable xref, so it is not a COMDAT-folded shared thunk.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00546E20;
 
+   // ---- Spawn-screen vehicle list (see modtools for docs) ----------------------
+   // SpawnDisplay::Update, vtable 0x0079663C slot 1.  Epilogue at 0x0042AC89 is
+   // `pop edi / mov al,1 / pop esi / mov esp,ebp / pop ebp / RET 4`.
+   constexpr uintptr_t spawndisplay_update           = 0x0042A6B0;
+   // SelectPost 0x0042B960 gates its sound on `cmp [esi+0x18],0`, same as modtools.
+   constexpr uintptr_t spawndisplay_mode_off         = 0x18;
+   // SetCommandPost 0x0042B9D0: `mov [esi+0x2058],edx`.  mTeamNumber is +0x2054.
+   constexpr uintptr_t spawndisplay_command_post_off = 0x2058;
+   // HUD::Event::Send, forwards to EventClass::Send 0x0055DE10.  Identified from
+   // SpawnDisplay::Show 0x00429DD0, which builds an Event then calls this.
+   constexpr uintptr_t hud_event_send                = 0x0055E100;
+   // Same Open-order derivation as modtools: .enable 0x01E56DC0, .disable ..C4,
+   // .message ..C8, .vehicle ..CC, .spawninfo ..D0.  Stride is 0xCA here too.
+   constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E56DCC;
+   // sVehicleSpawnList, from the dtor's `dec [0x007EBECC]` (_iCount) minus 0x10.
+   // VehicleSpawn itself is byte-identical to modtools; verified field by field
+   // against the ctor 0x0066E820 (mClass +0x70, mCommandPost +0x74, matrix +0x30,
+   // trackers +0xD8, mVehicleTeam +0xF4).
+   constexpr uintptr_t vehicle_spawn_list            = 0x007EBEBC;
+   // Release EntityClass drops the debug filename, so the label moves down to
+   // +0x20 and the fallback becomes the name hash printed as "0x%08X".
+   constexpr uintptr_t entityclass_label_off         = 0x20;  // wchar_t*, localized
+   constexpr uintptr_t entityclass_filename_off      = 0;     // stripped on release
+   constexpr uintptr_t entityclass_hash_off          = 0x18;  // uint fallback
+
    // ---- Lua core / character system (ported 2026-07-20) ------------------------
    // Character slot layout is build-INVARIANT (verified via Lua_Callbacks::
    // GetCharacterUnit 0x58fcd0 / GetCharacterTeam 0x58f820: stride 0x1B0,
@@ -2243,6 +2299,29 @@ namespace gog {
    // Same route as Steam: ctor 0x005459E0 writes vtable 0x007A13D4, slot 2 =
    // 0x007A13DC.  First 24 bytes identical to Steam, so the guard is shared.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00547B70;
+
+   // ---- Spawn-screen vehicle list (see modtools for docs) ----------------------
+   // Derived in the GOG program (BattlefrontII_MemExt.exe), NOT shifted from Steam:
+   // three of these are globals, which the piecewise .text shift does not cover.
+   // SpawnDisplay ctor 0x00429520 -> vtable 0x007975DC -> slot 1 = Update.  Its
+   // first 10 bytes match Steam's, so the prologue guard is shared.
+   constexpr uintptr_t spawndisplay_update           = 0x0042A670;
+   // SelectPost 0x0042B920: `cmp [esi+0x18],0` before the change sound.
+   constexpr uintptr_t spawndisplay_mode_off         = 0x18;
+   // SetCommandPost 0x0042B990: `mov [esi+0x2058],edx`.
+   constexpr uintptr_t spawndisplay_command_post_off = 0x2058;
+   // HUD::Event::Send, from Show 0x00429D90, which builds an Event (ctor
+   // 0x0055ED60) then calls this.
+   constexpr uintptr_t hud_event_send                = 0x0055EE80;
+   // .vehicle event array.  Confirmed twice: Show reads .enable at 0x01E58270 with
+   // stride 0xCA, and Open 0x0055F120 stores this Create's result at 0x0055F94E.
+   constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E5827C;
+   // sVehicleSpawnList: ~VehicleSpawn 0x0066FAC0 does `dec [0x007ECE9C]` (_iCount).
+   constexpr uintptr_t vehicle_spawn_list            = 0x007ECE8C;
+   // Release EntityClass, same as Steam (SpawnDisplay::SetSlotInfo).
+   constexpr uintptr_t entityclass_label_off         = 0x20;
+   constexpr uintptr_t entityclass_filename_off      = 0;
+   constexpr uintptr_t entityclass_hash_off          = 0x18;
 
    // =========================================================================
    // Ported from the Steam namespace with tools/port_gog.py (2026-07-26).

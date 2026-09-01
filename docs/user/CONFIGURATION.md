@@ -80,6 +80,7 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 |-----|---------|-------------|
 | `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
 | `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
+| `SpawnVehicleList` | `1` | On the spawn screen, list the vehicles that spawn at the highlighted command post, the way SWBF1 did. Stock BF2 leaves that line blank. Set 0 for stock |
 | `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
 | `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |

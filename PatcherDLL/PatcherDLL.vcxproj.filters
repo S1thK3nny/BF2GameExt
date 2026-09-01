@@ -193,6 +193,9 @@
     <ClInclude Include="src\render\hud_widescreen.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\spawn_vehicle_list.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -373,6 +376,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_widescreen.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\spawn_vehicle_list.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">
