@@ -108,7 +108,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 ## Vehicle Additions and Fixes
 
-- **Command Post Vehicle List** - On the spawn screen, highlighting a command post now lists the vehicles that spawn there, the way SWBF1 did. Stock BF2 leaves that line of the spawn screen blank on every map. The list follows whoever owns the post and updates as you move between posts. Works in vanilla and any mod. INI: `[Features] SpawnVehicleList=1`
+- **Command Post Vehicle List** - On the spawn screen, highlighting a command post now lists the vehicles that spawn there, the way SWBF1 did. Stock BF2 leaves that line of the spawn screen blank on every map. The list follows whoever owns the post and updates as you move between posts. Works in vanilla and any mod. For modders wanting to change it up: The HUD item for it is `player1spawnvehicle` INI: `[Features] SpawnVehicleList=1`
 - **Carrier Class** - EntityCarrier was an unused class. Now, it's a completely usable class with proper landing oscillation, cargo attachment, level of detail rendering, turret activation and animation, making it usable as a VehiclePad.
 - **Droideka Death Animation Fix** - Droidekas never played their death animation even though every stock droideka bank defines one. A bug cut the animation off after a single frame, so the droideka just exploded instantly, while walkers like the ATST, ATTE and ATAT played theirs correctly. The fix lets the death animation run to completion, and drops the personal shield as soon as the droideka starts dying instead of leaving it up through the collapse. Rolling droidekas still explode instantly by design, and banks with no death animation are unaffected. INI: `[Fixes] DroidekaDeathAnimation=1`
 
