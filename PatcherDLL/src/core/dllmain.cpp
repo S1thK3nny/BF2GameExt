@@ -32,6 +32,7 @@
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
 #include "util/voice_limit.hpp"
+#include "util/mp_spawn_delay.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
@@ -241,6 +242,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_branchRegionFixEnabled    = cfg.get_bool("Fixes", "BranchRegionFix", true);
       g_soundDiagEnabled          = cfg.get_bool("Diagnostic", "SoundDiagnostic", false);
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
+      g_mpSpawnDelay              = cfg.get_float("Features", "MPSpawnDelay", 15.0f);
       g_impactSoundWaterFix       = cfg.get_bool("Fixes", "ImpactSoundWaterFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
@@ -317,6 +319,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);
    voice_limit_install(exe_base);  // byte-patches .text/.data - needs the RW window
+   mp_spawn_delay_install(exe_base);  // byte-patches .text - needs the RW window
    sound_diag_install(exe_base);
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window

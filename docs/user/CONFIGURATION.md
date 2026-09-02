@@ -84,6 +84,7 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
 | `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
+| `MPSpawnDelay` | `15` | Seconds a player waits to respawn in multiplayer. The game hardcodes 15 there and throws away whatever the mission script asked for, so no map and no host could change it. Anything from 0.1 to 300, decimals allowed. Only the host sets this, everyone else follows. |
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
 

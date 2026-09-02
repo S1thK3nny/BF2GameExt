@@ -167,6 +167,7 @@
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
     <ClInclude Include="src\util\sound_diag.hpp" />
     <ClInclude Include="src\util\voice_limit.hpp" />
+    <ClInclude Include="src\util\mp_spawn_delay.hpp" />
     <ClInclude Include="src\util\memory_pool_heap_fix.hpp" />
     <ClInclude Include="src\util\enable_sound_warnings.hpp" />
     <ClInclude Include="src\util\error_dialog_fix.hpp" />
@@ -242,6 +243,7 @@
     <ClCompile Include="src\util\audio_stream_limit.cpp" />
     <ClCompile Include="src\util\sound_diag.cpp" />
     <ClCompile Include="src\util\voice_limit.cpp" />
+    <ClCompile Include="src\util\mp_spawn_delay.cpp" />
     <ClCompile Include="src\util\memory_pool_heap_fix.cpp" />
     <ClCompile Include="src\util\enable_sound_warnings.cpp" />
     <ClCompile Include="src\util\game_logging.cpp" />
