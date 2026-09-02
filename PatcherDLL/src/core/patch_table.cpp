@@ -916,6 +916,62 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "Reverb Restore On Map Exit",
+               .patches =
+                  {
+                     // EAX reverb stops working for the rest of the session once you
+                     // leave a map through the pause menu.  Snd::Listener::mFlags bit
+                     // 3 is the "reverb updates enabled" gate, and it is the ONLY
+                     // thing in the chain that survives a map change:
+                     //
+                     //   Snd::Listener::Update
+                     //     if ((mFlags & 6) == 6 && preset != Engine::smReverb
+                     //         && (mFlags & 8))          <== bit 3
+                     //         Engine::SetGlobalReverb(preset);
+                     //
+                     // and SetGlobalReverb is the sole writer of the EAX property set
+                     // (DSBuffer::SetProperty on EAXPROPERTYID_EAX40_FXSlot0), so with
+                     // the bit clear nothing ever reaches EAX again.
+                     //
+                     // PauseMenu::_SetPauseAudio(true) clears bit 3 on every listener
+                     // and applies a dry pause reverb.  _SetPauseAudio(false) sets it
+                     // back -- but both halves sit behind `!GameLoop::IsGameOver()`,
+                     // and the two ways out of a map do not agree:
+                     //
+                     //   ScriptCB_RestartMission  calls PauseMenu::SetPaused(v,false)
+                     //                            first, so the restore runs.
+                     //   ScriptCB_QuitToShell     goes straight to NetSetup::RequestQuit
+                     //                            and never unpauses.
+                     //
+                     // That is exactly the reported behaviour: restarting a map keeps
+                     // EAX, quitting to the main menu kills it until the game is
+                     // restarted.  Snd::EngineBase::smListeners is a static array of
+                     // four built once by a CRT initializer, so the cleared bit lives
+                     // as long as the process.
+                     //
+                     // GameSoundEngine::Destroy is the single choke point for "this
+                     // map is going away" (GameLoop::PostStateCleanup and
+                     // GameSoundEngine::Term are its only callers).  It already
+                     // rewrites the same flags word to release each listener:
+                     //
+                     //   0074F0C5  8B 0E        MOV ECX,[ESI]
+                     //   0074F0C7  83 E1 FE     AND ECX,0xFFFFFFFE    ; drop "in use"
+                     //   0074F0CA  83 C9 06     OR  ECX,0x6           ; space + preset
+                     //   0074F0CD  89 0E        MOV [ESI],ECX
+                     //
+                     // Folding bit 3 into that OR re-arms the reverb on every teardown,
+                     // whichever way the player left.  Nothing reads bit 3 outside
+                     // Listener::Update, and a listener being released has no space to
+                     // apply a preset from, so the bit only takes effect once the next
+                     // map assigns one.  Pausing still mutes the reverb normally.
+                     //
+                     // Guarded as the full 4-byte run `83 C9 06 89` so the imm8 cannot
+                     // match some unrelated OR.
+                     patch{0x0074F0CA, 0x8906C983, 0x890EC983}, // OR ECX,0x6 -> OR ECX,0xE
+                  },
+            },
+
          },
    },
 
@@ -1567,6 +1623,27 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            patch_set{
+               .name = "Reverb Restore On Map Exit",
+               .patches =
+                  {
+                     // See the modtools list for why bit 3 has to be re-armed here.
+                     // Retail folds the same block differently -- EAX instead of ECX,
+                     // and a PUSH 0 hoisted between the OR and the store -- so the
+                     // guarded run is `83 C8 06 6A` rather than modtools' `83 C9 06 89`:
+                     //
+                     //   005398C5  8B 06        MOV EAX,[ESI]
+                     //   005398C9  83 E0 FE     AND EAX,0xFFFFFFFE
+                     //   005398CC  83 C8 06     OR  EAX,0x6
+                     //   005398CF  6A 00        PUSH 0x0
+                     //   005398D1  89 06        MOV [ESI],EAX
+                     //
+                     // GOG.  Ported from Steam with tools/port_gog.py (score 1.00,
+                     // shift +0xD70) and the bytes read back from both images.
+                     patch{0x005398CC, 0x6A06C883, 0x6A0EC883}, // OR EAX,0x6 -> OR EAX,0xE
+                  },
+            },
+
          },
    },
 
@@ -2215,6 +2292,23 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x004E96E2, 0x39, 0x90, {.values_are_8bit = true}},
                      patch{0x004E96E3, 0x00, 0x90, {.values_are_8bit = true}},
                      patch{0x004E96E4, 0x00, 0x90, {.values_are_8bit = true}},
+                  },
+            },
+
+            patch_set{
+               .name = "Reverb Restore On Map Exit",
+               .patches =
+                  {
+                     // See the modtools list for why bit 3 has to be re-armed here.
+                     // Steam.  Byte-identical to GOG at the site; only the address
+                     // differs.
+                     //
+                     //   00538B55  8B 06        MOV EAX,[ESI]
+                     //   00538B59  83 E0 FE     AND EAX,0xFFFFFFFE
+                     //   00538B5C  83 C8 06     OR  EAX,0x6
+                     //   00538B5F  6A 00        PUSH 0x0
+                     //   00538B61  89 06        MOV [ESI],EAX
+                     patch{0x00538B5C, 0x6A06C883, 0x6A0EC883}, // OR EAX,0x6 -> OR EAX,0xE
                   },
             },
 

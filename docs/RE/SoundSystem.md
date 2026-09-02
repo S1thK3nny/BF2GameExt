@@ -494,6 +494,163 @@ where not to look inside BF2, not a fix.
 
 ---
 
+## The environmental reverb (EAX) path, and the pause-menu latch
+
+Everything a map's reverb has to pass through before it reaches EAX, and the one
+gate in the chain that outlives the map.
+
+### Who writes the EAX property set
+
+`Snd::Engine::SetGlobalReverb(I3DL2Reverb*)` is the only writer, and it has two
+completely different bodies depending on `smMixConfig` (`0x02339F84`):
+
+```c
+if (smMixConfig == mixConfig_DirectSoundHardware) {          // 2 == the EAX path
+    if (smDummySecBuffer.mProperties && smEAXFXSlot)
+        DSBuffer::SetProperty(&smDummySecBuffer, &EAXPROPERTYID_EAX40_FXSlot0,
+                              1, &clampedParams, 0x70);
+} else if (smMixConfig == mixConfig_Software) {
+    SoftOutput::SetReverb(smSoftOutput, reverb);
+}
+smReverb = reverb;                                           // cached, see below
+```
+
+`smDummySecBuffer` and `smEAXFXSlot` are set up once, in `Snd::Engine::Open`: a
+1-sample dummy secondary buffer is created purely to obtain an `IKsPropertySet`,
+`EAXPROPERTYID_EAX40_FXSlot0` is loaded as the effect, and an EAX4 context is
+written naming that slot as the primary. If any of the three property calls fails
+the buffer is destroyed and `smHardwareEffectsAvailable` goes false. None of that
+is redone per map.
+
+| Symbol | modtools | Steam | GOG |
+|--------|----------|-------|-----|
+| `Snd::Engine::SetGlobalReverb` | `0x00885510` | `0x00732C60` | `0x00733D50` |
+| `Snd::Listener::Update` | `0x0089F130` | `0x007488B0` | `0x007499A0` |
+| `GameSoundEngine::StopAll` | `0x0074E9E0` | `0x00538C60` | `0x005399D0` |
+| `GameSoundEngine::Destroy` | `0x0074EFC0` | `0x00538A60` | `0x005397D0` |
+| `PauseMenu::_SetPauseAudio` | `0x006806B0` | `0x006165C0` | `0x00617660` |
+| `Snd::EngineBase::smListeners` | `0x02331090` | `0x01E296A8` | `0x01E2AB48` |
+| `Snd::ListenerBase::smActiveListeners` | `0x0233EA24` | `0x009CF4A0` | `0x009D0940` |
+| `Snd::Engine::smReverb` | `0x02339FA8` | `0x009D7E28` | `0x009D92C8` |
+| `Snd::Space::smDefaultSpace.mReverbPreset` | `0x0233EA14` | `0x009D8400` | `0x009D98A0` |
+
+> **`Space::mReverbPreset` is at `+0x3c` on modtools and `+0x38` on retail.** The
+> release build dropped a member ahead of it. Everything else in the chain shares
+> its offsets across builds.
+
+### Who calls it
+
+`Snd::Listener::Update` is the only caller that carries a map's own reverb:
+
+```c
+ListenerBase::Update(this);
+if ((mFlags & 6) == 6) {
+    preset = (smActiveListeners < 2) ? mSpace->mReverbPreset       // +0x30 -> +0x3c
+                                     : Space::smDefaultSpace.mReverbPreset;
+    if (preset != Engine::smReverb && (mFlags & 8))
+        Engine::SetGlobalReverb(preset);
+}
+```
+
+Four independent conditions, and `Snd::ListenerBase::ListenerBase` /
+`ListenerBase::SetSpace` between them name three of the flag bits:
+
+| Bit | Set by | Meaning |
+|-----|--------|---------|
+| `0x1` | `GetFreeListener` caller | listener is in use |
+| `0x2` | `SetSpace(non-null)` | a Space has been assigned |
+| `0x4` | `SetSpace`, when that Space had a preset | a reverb preset has been assigned |
+| `0x8` | ctor (`mFlags = 8`), then only `PauseMenu::_SetPauseAudio` | reverb updates enabled |
+
+The other callers all push a *fixed* reverb: `Engine::Open` a default one,
+`GameSoundEngine::StopAll` a `RoomGain = 0` silence, and `_SetPauseAudio` the
+pause menu's own. All three build it on the **stack**, so `smReverb` routinely
+holds a dangling pointer afterwards. That is harmless only because the compare is
+for inequality.
+
+### The latch
+
+`Snd::EngineBase::smListeners` is a static array of four `Snd::Listener`, stride
+`0x38`, built by a CRT dynamic initializer and torn down by its atexit partner.
+It is never reconstructed, so `mFlags` bit 3 persists for the life of the process.
+
+`PauseMenu::_SetPauseAudio` is the only code that touches that bit:
+
+```c
+void _SetPauseAudio(PauseMenu* this, bool pause) {
+    if (pause && GameLoop::IsGameOver()) GameSoundEngine::StopAll();
+    if ((!netEnabled || GetNumLocalPlayers() < 2) && !GameLoop::IsGameOver()) {
+        if (pause) {
+            for each camera listener: mFlags &= ~8;              // reverb off
+            mInGameReverb = Snd::Engine::smReverb;
+            Snd::Engine::SetGlobalReverb(&mPauseReverb);
+        } else {
+            for each camera listener: mFlags |= 8;               // reverb back on
+                                      SetSpace(mSpace) forced re-apply
+            if (mInGameReverb) Snd::Engine::SetGlobalReverb(mInGameReverb);
+        }
+    }
+}
+```
+
+Both halves sit behind `!IsGameOver()`, and the two ways out of a map disagree
+about whether they unpause first:
+
+- `Lua_Callbacks::ScriptCB_RestartMission` calls `PauseMenu::SetPaused(v, false)`
+  for every camera **before** `GameState::SetState`, so the restore runs and bit 3
+  comes back.
+- `Lua_Callbacks::ScriptCB_QuitToShell` goes straight to `NetSetup::RequestQuit(0)`.
+  Nothing unpauses, bit 3 stays clear, and `Listener::Update` never calls
+  `SetGlobalReverb` again for the rest of the process.
+
+`GameSoundEngine::Destroy` does rewrite the same flags word on teardown, but only
+to release the listener - `mFlags = (mFlags & ~1) | 6` - so it preserves bit 3
+rather than re-arming it.
+
+That is the whole bug: restart a mission and EAX survives; quit to the main menu
+and every map loaded afterwards is dry, which in practice means Galactic Conquest
+never has it, because a GC battle is always entered from a shell.
+
+A mission that ends on its own is unaffected. `EndDisplay::Show` reaches
+`_SetPauseAudio(true)` with `IsGameOver()` already true, which takes the
+`StopAll()` branch and skips the flag block entirely.
+
+### The fix
+
+Patch set **Reverb Restore On Map Exit** (`core/patch_table.cpp`, all three
+builds, always on) folds bit 3 into the OR that `GameSoundEngine::Destroy` already
+performs:
+
+```asm
+0074F0C5  8B 0E        MOV ECX,[ESI]
+0074F0C7  83 E1 FE     AND ECX,0xFFFFFFFE
+0074F0CA  83 C9 06     OR  ECX,0x6     ->  83 C9 0E   OR ECX,0xE
+0074F0CD  89 0E        MOV [ESI],ECX
+```
+
+One `imm8`, guarded as the full four-byte run so it cannot match an unrelated OR.
+Retail folds the block around `EAX` with a `PUSH 0` hoisted between the OR and the
+store, so its guard is `83 C8 06 6A` (Steam `0x00538B5C`, GOG `0x005398CC`, ported
+with `tools/port_gog.py` and read back from both images).
+
+`GameSoundEngine::Destroy` is the right site because it is the single choke point
+for "this map is going away" - `GameLoop::PostStateCleanup` and
+`GameSoundEngine::Term` are its only callers - and a listener being released has
+no Space to draw a preset from, so the bit only takes effect once the next map
+assigns one. Pausing still mutes the reverb exactly as before.
+
+`Engine::smReverb` was deliberately left alone. It is only ever compared for
+inequality, and after `StopAll` it holds a dead stack address that cannot collide
+with a real preset, so clearing it would buy nothing.
+
+### Checking it by hand
+
+There is no shipped diagnostic for this. To confirm the latch in a debugger or with
+`memwatch`, read `mFlags` at the base of `Snd::EngineBase::smListeners` (modtools
+`0x02331090`): bit `0x8` clear in a live map means no reverb will ever be applied.
+
+---
+
 ## Applied in BF2GameExt
 
 `loading_screen/lifecycle.cpp` owns every sound it starts, one-shots included, in
