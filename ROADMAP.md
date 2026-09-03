@@ -179,6 +179,11 @@ blaster fire passes through. The deflect call site is already known from the sab
 work, so this is a matter of finding what identifies the incoming attack at that point and
 adding a per-weapon gate, not new plumbing.
 
+**Jetpack Particle Effect Origin** - The engine hardcodes the jetpack effect to be attached to `bone_ribcage`, 
+which may work fine for a regular jetpack, but not if you want to do something a bit more fancy,
+like Cad Banes jetpack boots, which would require the effect to be attached to bone_l_foot and bone_r_foot. 
+The fix is to add a new ODF property to the jetpack class that allows you to specify the bone name for the effect origin.
+
 **Real riot shields** - A shield that actually stops shots by geometry rather than by a
 deflect rule. Needs per-unit collision on the shield part, which the soldier collision model
 does not currently provide: soldiers use a single capsule, and the only existing example of
