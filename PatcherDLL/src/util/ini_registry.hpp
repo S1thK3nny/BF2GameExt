@@ -45,7 +45,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "DLCMissionLimit",     "1", "Raise DLC / addon mission limit",                     "DLC Mission Limit Extension"),
    INI_PATCH("LimitIncreases", "SoundLimit",          "1", "Raise global sound limit",                            "Sound Limit Extension"),
    INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
-   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "1", "Raise combo animation limit",                         "Combo Anims Increase"),
+   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "0", "Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0", "Combo Anims Increase"),
    INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
    INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
@@ -55,6 +55,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "LODLimitExtension",  "1", "Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail",                                                       "LOD Limit Extension"),
    INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
+   INI_ENTRY("LimitIncreases", "TentacleLimit",      "0", "Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5"),
 
    // [Particles] — one switch for engine correctness, one dial for density.
    // The three fix patch sets deliberately share a single key; ini_lookup_patch_set

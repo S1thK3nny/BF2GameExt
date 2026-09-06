@@ -16,6 +16,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "ai/ai_fairness.hpp"
 #include "entity/cloth_collision_fix.hpp"
+#include "entity/tentacle_limit.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/award_disable.hpp"
 #include "entity/flyer_sound_fix.hpp"
@@ -24,6 +25,7 @@
 #include "entity/terrain_texture_fix.hpp"
 #include "entity/hover_pilot_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
+#include "entity/combo_damage_anim_guard.hpp"
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/fp_fire_animation_fix.hpp"
 #include "entity/command_post_null_fix.hpp"
@@ -251,6 +253,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
+      g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", false);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -308,6 +311,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
+   combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);
@@ -327,6 +331,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
+   tentacle_limit_install(exe_base);   // byte-patches .text/.rdata — needs the RW window
    ai_fairness_install(exe_base);
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window

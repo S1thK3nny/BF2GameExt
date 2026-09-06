@@ -30,7 +30,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `DLCMissionLimit` | `1` | Raise DLC / addon mission limit |
 | `SoundLimit` | `1` | Raise global sound limit |
 | `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
-| `ComboAnimIncrease` | `1` | Raise combo animation limit |
+| `ComboAnimIncrease` | `0` | Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0 |
 | `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
 | `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
@@ -40,6 +40,7 @@ Engine limit patches. All are on by default and all are safe to leave on; they o
 | `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
 | `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
 | `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
+| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5 |
 
 ## Particles
 

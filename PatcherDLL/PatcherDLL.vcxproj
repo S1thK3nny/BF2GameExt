@@ -124,6 +124,7 @@
     <ClInclude Include="src\entity\soldier_fp_animation_override.hpp" />
     <ClInclude Include="src\entity\flyer_boost_animation.hpp" />
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
+    <ClInclude Include="src\entity\tentacle_limit.hpp" />
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
     <ClInclude Include="src\entity\fp_fire_animation_fix.hpp" />
@@ -160,6 +161,7 @@
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\entity\ai_squad_order_null_fix.hpp" />
+    <ClInclude Include="src\entity\combo_damage_anim_guard.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
     <ClInclude Include="src\controller\aim_assist.hpp" />
@@ -207,6 +209,7 @@
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp" />
     <ClCompile Include="src\entity\flyer_boost_animation.cpp" />
     <ClCompile Include="src\entity\cloth_collision_fix.cpp" />
+    <ClCompile Include="src\entity\tentacle_limit.cpp" />
     <ClCompile Include="src\entity\vehicle_view_toggle.cpp" />
     <ClCompile Include="src\entity\anim_bank_append.cpp" />
     <ClCompile Include="src\entity\land_on_arrival_fix.cpp" />
@@ -217,6 +220,7 @@
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
+    <ClCompile Include="src\entity\combo_damage_anim_guard.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\fp_fire_animation_fix.cpp" />
     <ClCompile Include="src\entity\command_post_null_fix.cpp" />

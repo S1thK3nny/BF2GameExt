@@ -6,83 +6,55 @@ is shipped. For what the DLL actually does today, see
 
 ## Bugs
 
-**Upper-body animation lookup has NO upper bound and only a NULL guard on the result** -
-found 2026-08-21 from a user crash while rolling. Access violation at
-`SoldierAnimator::UpdateUpperBodyAnimation` +0xD (modtools `0x0057897D`, `MOV EAX,[EBX]`)
-with `param_2` = `0xF4F2D887`, i.e. a garbage non-NULL pointer.
+**Combo animations past index 163 have nowhere to be stored** - the crash side is fixed,
+the storage side is not. `SoldierAnimatorClass::AnimationMap` is 1208 bytes holding exactly
+164 animation slots, and `[LimitIncreases] ComboAnimIncrease` moves the "no animation"
+sentinel from 164 to 254 at 25 sites without widening that block, so the engine hands out
+indices 164-253 that address the NEXT map's slots. Confirmed live 2026-09-06 on modtools
+and GOG: map 27, index 179, returning `0x00000041` and `0x15AC5475`.
 
-The producer is `SoldierAnimatorClass::GetUpperBodyAnimation` (modtools `0x0057DD40`), which is
-a raw table read with no rejection path at all:
+`combo_damage_anim_guard.cpp` now clamps inside
+`SoldierAnimatorClass::Get{Upper,Lower}BodyAnimation` (modtools `0x0057DD40` / `0x0057DD80`,
+Steam `0x006439E0` / `0x00643A10`, GOG `0x00644A80` / `0x00644AB0`), which is the choke point
+every consumer goes through, so an out-of-range index and a never-populated slot (`0xFFFFFFFF`,
+the `rep stosd` reset fill) both come back as the engine's own "no animation" answer. That
+closes the 2026-08-21 `UpdateUpperBodyAnimation` crash as well - it was the `0xFFFFFFFF` case,
+which is why the pointer looked like garbage rather than NULL. **An animation authored at
+index 164+ still cannot play.**
 
-    EDX = map * 0x12E
-    EAX = idx * 2                       ; idx is a uchar, so 0..255
-    EDX += EAX
-    if (EAX < 0x10C) return [ECX + EDX*4 + 0x24];   ; idx <  134
-    else             return [ECX + EDX*4 - 0x6C];   ; idx >= 134
+Making those animations work means widening the per-map block. The derivation, the site
+tables and the record of the in-place attempt that failed are in
+[docs/RE/ComboAnimationLimit.md](docs/RE/ComboAnimationLimit.md). Two things learned since:
 
-Both branches return something. Nothing compares `idx` against a populated count, so an index
-that was never filled in yields whatever dword happens to sit at that offset.
+- **The population path is pointer-based.** `SoldierAnimatorClass::SetupBodyMasks` computes
+  the map base once (`imul edi,edi,0x4B8` `0x00582074`, `lea edx,[edi+ecx+0x24]` `0x00582084`)
+  and passes a *pointer* to `0x0057F520`, which either returns a cached map or resets the
+  passed buffer. No writer indexes a map by animation index, so relocating the storage fixes
+  every write for free - only the base computations and the three getters need patching.
+- **AnimationMaps also live outside `mMap[30]`.** `0x0057F520` caches them, and there is a
+  24-element array of `{8-byte header, AnimationMap}` at stride `0x4C0` (`0x0057F34E`,
+  `0x0057E17A`). `docs/RE/ComboAnimationLimit.md` currently calls that array "not
+  AnimationMaps" on the strength of `0x4C0 != 0x4B8`; the `lea edx,[ecx+8]` before its
+  `rep stosd` of `0x12E` dwords says otherwise. Every one of those allocations has to grow
+  too, and that has to be enumerated before any stride is touched.
 
-The consumer, `SoldierAnimator::UpdateActionAnimation` (`0x0057AFD0`), guards only against NULL:
+Content-side workaround in the meantime: the 30-slot cap is on distinct combo animation
+*names* GLOBALLY, across every bank and weapon, so a mod with a dozen saber heroes unions
+past it even though no single hero is close. `/dumpanimmaps` counts them.
 
-    0057B127  MOV EAX,[ESI+0x2014]      ; anim kind
-    0057B12D  CMP EAX,0x7
-    0057B130  JNZ 0057B154
-    0057B134  MOV AL,[ESI+0x2018]       ; anim index byte
-    0057B13A  CMP AL,0xA4               ; the "no animation" sentinel
-    0057B13C  JZ  0057B1DF              ; ...skip
-    0057B14D  CALL GetUpperBodyAnimation
-    0057B16F  MOV EDI,EAX
-    0057B171  TEST EDI,EDI
-    0057B173  JZ  0057B1DF              ; NULL-ONLY guard
-    0057B18E  PUSH EDI
-    0057B19B  CALL UpdateUpperBodyAnimation   ; derefs immediately
 
-So a non-NULL garbage slot reaches the deref unchecked. **Our `Combo Anims Increase` patch set
-moves that sentinel from `0xA4` (164) to `0xFE` (254) at three sites inside this very function**
-(file offsets `0x17b02c+1`, `0x17b13a+1`, `0x17b1ca+6`), so index 164 stops being rejected here
-and becomes a live table index. That is the leading suspect and the A/B test is one INI line:
-`[LimitIncreases] ComboAnimIncrease=0`.
+**Tentacle fields are unclamped in stock code** - Both tentacle properties on
+`EntitySoldierClass` are bitfields that accept more than the arrays can hold, and neither is
+clamped on any build. `NumTentacles` is 3 bits (0-7) against arrays dimensioned for 4;
+`BonesPerTentacle` is 4 bits (0-15) against a fixed 4x5 array on the STACK, where an overrun
+reaches the saved return address. modtools warns but does not clamp - the `JBE` only skips
+the warning - and retail compiled both checks out entirely, strings included, so a mod hits
+it with no diagnostic at all. Full site list in
+[docs/RE/TentacleSystem.md](docs/RE/TentacleSystem.md).
 
-Second, weaker suspect on the same path: `soldier_prone.cpp`'s `hooked_SetAction` forces
-`mAction` to `CROUCH_TO_PRONE`/`PRONE_TO_STAND`/`PRONE_TO_CROUCH` (27/28/29), values vanilla
-`SetAction` never writes. A class with no prone animations authored could resolve those to an
-unpopulated index. Gated on `g_proneEnabled`, so it is separately testable.
-
-NOT the cause: a zero roll energy cost. It removes the roll lockout entirely (see
-`docs/RE/EnergyBar.md`) so the path runs far more often, but it is an exposure multiplier, not
-a memory-safety mechanism.
-
-**PARKED 2026-08-22, not closed.** The crash has happened exactly once and has not recurred
-before or since, and the user attributes the surrounding behaviour to ODF parameters allowing
-looping rolls - which is correct for the ROLLING, since a zero cost makes `SpendEnergy` skip its
-entire body. It does not explain the access violation. The unbounded table read and the
-NULL-only guard are still there regardless of whether anything triggers them again. Do not
-re-open this as an active hunt without a second occurrence; if one arrives, the one-line test is
-`[LimitIncreases] ComboAnimIncrease=0`.
-
-**Tentacle fields are unclamped and overrun fixed arrays** - found 2026-08-21 while scoping the
-9-tentacle feature; independent of it and worth fixing on its own. Both tentacle properties on
-`EntitySoldierClass` are bitfields at `+0x8BC` that accept more than the arrays can hold, and
-NEITHER is clamped on any build:
-
-- `NumTentacles`, 3 bits (mask `0x380`, extracted `SHR 7 / AND 7`) accepts **0-7**, but `tPos`
-  and `oldPos` are dimensioned for **4**. Values 5-7 pass straight through and `DoTentacles`
-  writes past the arrays.
-- `BonesPerTentacle`, 4 bits (mask `0x3C00`) accepts **0-15**, but the per-frame bone array is
-  a fixed 4x5 on the STACK. Values >= 6 overrun it; on Steam `0x006558F0` it first destroys the
-  spill locals holding the live row pointer and loop counters, so the corruption compounds, then
-  reaches saved `EBP` and the return address. On modtools `0x0056F4E0` the array is at
-  `[ESP+0x20..0x70)` and `[ESP+0x6C]` is the saved return address.
-
-modtools at least WARNS (`"Too many tentacles!"` `0x00A40FE8` via `0x00541CD3 CMP EAX,4 / JBE`,
-`"Too many bones per tentacle!"` `0x00A412E4` via `0x0053FBF5 CMP EAX,5`) - but the `JBE` only
-skips the warning, it never clamps. **Retail compiled both checks out entirely**, strings and
-all, so a mod hits this with zero diagnostic.
-
-No stock ODF exceeds either limit, so it is latent - but it is a stack smash reachable from a
-plain ODF typo. A clamp at the store site is cheap and length-neutral (edit the `AND` mask) and
-should be done regardless of whether the 9-tentacle feature ever happens.
+Latent, since no stock ODF exceeds either, but reachable from an ODF typo. `TentacleLimit=1`
+already clamps both in its replacement constructor, so this only bites with the feature off.
+The standalone fix is a length-neutral edit to the `AND` mask at the extraction sites.
 
 **Unbounded hash probe - the best candidate for the GUI freeze** - `PblHashTableCode::_Find` is
 an open-addressing probe that walks backwards with wraparound and has NO iteration cap. Its only

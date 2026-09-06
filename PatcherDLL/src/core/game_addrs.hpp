@@ -1171,6 +1171,30 @@ namespace modtools {
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
    constexpr uintptr_t branch_region_create        = 0x005E4C90;
+   // ---- TentacleSimulator ------------------------------------------------------
+   //
+   // The acklay/rancor tentacle solver.  entity/tentacle_limit.cpp replaces the
+   // constructor and DoTentacles and calls the three simulation steps directly, so
+   // it needs all five plus the static bone-name hash table.
+   //
+   // Verified conventions (identical on all three builds unless noted):
+   //   ctor              __thiscall(numTentacles, bonesPerTentacle, collType), RET 0xC
+   //   DoTentacles       __thiscall(pose, parentMatrix, velocity, targetMats, float dt), RET 0x14
+   //   UpdatePose        __thiscall(pose, parentMatrix, bonePtrs[][5], targetMats), RET 0x10
+   //   EnforceCollisions __thiscall(pose, parentMatrix), RET 0x8
+   //   UpdatePositions   modtools: __thiscall(dt, velocity, pose, parentMatrix, bonePtrs), RET 0x14
+   //                     Steam/GOG LTCG: dt arrives in XMM1 and the stack loses it,
+   //                     RET 0x10 -- see the naked shim in tentacle_limit.cpp.
+   //
+   // tentacle_bone_hashes is 20 CRC-32/BZIP2 hashes of "bone_string_1".."bone_string_20"
+   // (4 tentacles x 5 bones), indexed [bonesPerTentacle * tentacle + bone].
+   constexpr uintptr_t tentacle_ctor               = 0x0056D090;
+   constexpr uintptr_t tentacle_do_tentacles       = 0x0056F4E0;
+   constexpr uintptr_t tentacle_update_positions   = 0x0056E420;
+   constexpr uintptr_t tentacle_enforce_collisions = 0x0056F020;
+   constexpr uintptr_t tentacle_update_pose        = 0x0056DC80;
+   constexpr uintptr_t tentacle_bone_hashes        = 0x00A442F0;
+
 } // namespace modtools
 
 // =============================================================================
@@ -2190,6 +2214,30 @@ namespace steam {
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
    constexpr uintptr_t branch_region_create        = 0x004D0F00;
+   // ---- TentacleSimulator ------------------------------------------------------
+   //
+   // The acklay/rancor tentacle solver.  entity/tentacle_limit.cpp replaces the
+   // constructor and DoTentacles and calls the three simulation steps directly, so
+   // it needs all five plus the static bone-name hash table.
+   //
+   // Verified conventions (identical on all three builds unless noted):
+   //   ctor              __thiscall(numTentacles, bonesPerTentacle, collType), RET 0xC
+   //   DoTentacles       __thiscall(pose, parentMatrix, velocity, targetMats, float dt), RET 0x14
+   //   UpdatePose        __thiscall(pose, parentMatrix, bonePtrs[][5], targetMats), RET 0x10
+   //   EnforceCollisions __thiscall(pose, parentMatrix), RET 0x8
+   //   UpdatePositions   modtools: __thiscall(dt, velocity, pose, parentMatrix, bonePtrs), RET 0x14
+   //                     Steam/GOG LTCG: dt arrives in XMM1 and the stack loses it,
+   //                     RET 0x10 -- see the naked shim in tentacle_limit.cpp.
+   //
+   // tentacle_bone_hashes is 20 CRC-32/BZIP2 hashes of "bone_string_1".."bone_string_20"
+   // (4 tentacles x 5 bones), indexed [bonesPerTentacle * tentacle + bone].
+   constexpr uintptr_t tentacle_ctor               = 0x00655770;
+   constexpr uintptr_t tentacle_do_tentacles       = 0x006558F0;
+   constexpr uintptr_t tentacle_update_positions   = 0x00656270;
+   constexpr uintptr_t tentacle_enforce_collisions = 0x006569C0;
+   constexpr uintptr_t tentacle_update_pose        = 0x00655B60;
+   constexpr uintptr_t tentacle_bone_hashes        = 0x0078B630;
+
 } // namespace steam
 
 // =============================================================================
@@ -2950,6 +2998,30 @@ namespace gog {
    // while LoadUtil::ProcessRegionInfo dispatches through slot 1, so stock builds
    // never call it and no branch region is ever created.
    constexpr uintptr_t branch_region_create        = 0x004D0F00;
+   // ---- TentacleSimulator ------------------------------------------------------
+   //
+   // The acklay/rancor tentacle solver.  entity/tentacle_limit.cpp replaces the
+   // constructor and DoTentacles and calls the three simulation steps directly, so
+   // it needs all five plus the static bone-name hash table.
+   //
+   // Verified conventions (identical on all three builds unless noted):
+   //   ctor              __thiscall(numTentacles, bonesPerTentacle, collType), RET 0xC
+   //   DoTentacles       __thiscall(pose, parentMatrix, velocity, targetMats, float dt), RET 0x14
+   //   UpdatePose        __thiscall(pose, parentMatrix, bonePtrs[][5], targetMats), RET 0x10
+   //   EnforceCollisions __thiscall(pose, parentMatrix), RET 0x8
+   //   UpdatePositions   modtools: __thiscall(dt, velocity, pose, parentMatrix, bonePtrs), RET 0x14
+   //                     Steam/GOG LTCG: dt arrives in XMM1 and the stack loses it,
+   //                     RET 0x10 -- see the naked shim in tentacle_limit.cpp.
+   //
+   // tentacle_bone_hashes is 20 CRC-32/BZIP2 hashes of "bone_string_1".."bone_string_20"
+   // (4 tentacles x 5 bones), indexed [bonesPerTentacle * tentacle + bone].
+   constexpr uintptr_t tentacle_ctor               = 0x00656810;
+   constexpr uintptr_t tentacle_do_tentacles       = 0x00656990;
+   constexpr uintptr_t tentacle_update_positions   = 0x00657310;
+   constexpr uintptr_t tentacle_enforce_collisions = 0x00657A60;
+   constexpr uintptr_t tentacle_update_pose        = 0x00656C00;
+   constexpr uintptr_t tentacle_bone_hashes        = 0x0078C5D0;
+
 } // namespace gog
 
 } // namespace game_addrs
