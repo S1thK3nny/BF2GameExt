@@ -239,6 +239,11 @@ only been verified in play on Modtools.
 - Aim assist is off by default. It needs `[AimAssist] Enabled=1` of its own,
   separately from `[Controller] Enabled=1`, and it is singleplayer only and
   controller only.
+- **Stick drifting, twitchy, too slow, or moving you when you are not touching
+  it?** That is sensitivity and deadzone, and BF2GameExt does not set either.
+  Change them in the game's own **Options -> Controls** screen. Nothing in
+  `BF2GameExt.ini` affects stick feel; the `[Controller.*]` sections only decide
+  which button does what.
 
 Full reference: [CONTROLLER.md](CONTROLLER.md).
 

@@ -1195,6 +1195,18 @@ namespace modtools {
    constexpr uintptr_t tentacle_update_pose        = 0x0056DC80;
    constexpr uintptr_t tentacle_bone_hashes        = 0x00A442F0;
 
+
+   // ---- EntitySoldier bone-attached effect matrix copy -----------------------
+
+   // EntitySoldier::Render, the five-slot bone-attached effect loop. This is the
+   // `REP MOVSD` that copies a bone's 4x4 world matrix out of the hash lookup
+   // that found it, with no test for the lookup having failed. Address of the
+   // `MOV ESI,EAX` that takes the result, 0x15 bytes before the copy itself.
+   // See soldier_bone_effect_null_fix.cpp. 0 = not derived on this build.
+   constexpr uintptr_t soldier_render_bone_matrix_copy = 0x53738C;
+   constexpr uintptr_t soldier_render_bone_copy_continue = 0;  // length-neutral patch, no trampoline
+   constexpr uintptr_t soldier_render_bone_copy_skip     = 0;
+
 } // namespace modtools
 
 // =============================================================================
@@ -2238,6 +2250,18 @@ namespace steam {
    constexpr uintptr_t tentacle_update_pose        = 0x00655B60;
    constexpr uintptr_t tentacle_bone_hashes        = 0x0078B630;
 
+
+   // ---- EntitySoldier bone-attached effect matrix copy -----------------------
+
+   // EntitySoldier::Render, the five-slot bone-attached effect loop. This is the
+   // `REP MOVSD` that copies a bone's 4x4 world matrix out of the hash lookup
+   // that found it, with no test for the lookup having failed. Address of the
+   // `MOV ESI,EAX` that takes the result, 0x15 bytes before the copy itself.
+   // See soldier_bone_effect_null_fix.cpp. 0 = not derived on this build.
+   constexpr uintptr_t soldier_render_bone_matrix_copy   = 0x4E3B5B;  // PUSH EAX (the lookup result)
+   constexpr uintptr_t soldier_render_bone_copy_continue = 0x4E3B63;  // CALL <copy 4x4 matrix>
+   constexpr uintptr_t soldier_render_bone_copy_skip     = 0x4E3B7E;  // loop tail; reloads the counter
+
 } // namespace steam
 
 // =============================================================================
@@ -3021,6 +3045,18 @@ namespace gog {
    constexpr uintptr_t tentacle_enforce_collisions = 0x00657A60;
    constexpr uintptr_t tentacle_update_pose        = 0x00656C00;
    constexpr uintptr_t tentacle_bone_hashes        = 0x0078C5D0;
+
+
+   // ---- EntitySoldier bone-attached effect matrix copy -----------------------
+
+   // EntitySoldier::Render, the five-slot bone-attached effect loop. This is the
+   // `REP MOVSD` that copies a bone's 4x4 world matrix out of the hash lookup
+   // that found it, with no test for the lookup having failed. Address of the
+   // `MOV ESI,EAX` that takes the result, 0x15 bytes before the copy itself.
+   // See soldier_bone_effect_null_fix.cpp. 0 = not derived on this build.
+   constexpr uintptr_t soldier_render_bone_matrix_copy   = 0x4E3B5B;  // PUSH EAX (the lookup result)
+   constexpr uintptr_t soldier_render_bone_copy_continue = 0x4E3B63;  // CALL <copy 4x4 matrix>
+   constexpr uintptr_t soldier_render_bone_copy_skip     = 0x4E3B7E;  // loop tail; reloads the counter
 
 } // namespace gog
 

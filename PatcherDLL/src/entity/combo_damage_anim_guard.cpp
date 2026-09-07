@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <detours.h>
+#include <intrin.h>
 
 // =============================================================================
 // Out-of-range soldier animation index crash fixes.
@@ -218,6 +219,10 @@ constexpr int kMaxAnimMap = 64;
 // checking the result afterwards, because the result is meaningless.
 constexpr int kMaxAnimIndex = 164;
 
+// A byte-sized animation index field that was never assigned holds 0xFF. It is
+// not an authored index and not a mod error - see clamp_body_animation.
+constexpr int kUnassignedAnimIndex = 0xFF;
+
 // Cheapest possible sanity test on a pointer the engine handed back, so a bad
 // slot from any path we have not characterised degrades to a log line rather
 // than an access violation inside this guard.
@@ -301,10 +306,46 @@ bool getter_already_reported(int map, int idx)
 // Callers push the index as a dword whose low byte is the index; the engine
 // reads it with MOVZX, so only the low byte is meaningful and the test has to
 // mask before comparing.
+//
+// -----------------------------------------------------------------------------
+// Not every out-of-range index means a mod authored one
+//
+// 0xFF is the "no animation assigned" value of a byte-sized animation index
+// field, and it reaches this getter on a completely stock map with
+// ComboAnimIncrease off. The engine's own filters are not range checks - the two
+// sites in `FUN_0057afd0` (modtools `0x0057B02C` and `0x0057B13A`) read the byte
+// at `soldier+0x2018` and test it with
+//
+//     CMP AL,0xA4
+//     JZ  skip
+//
+// which skips the sentinel 164 and *only* 164. An unassigned 0xFF is not equal
+// to 0xA4, so it falls straight through into the getter. `Combo::ResolveForWeapon`
+// (`0x00600AF0`) and `PostLoad` (`0x0058788A`) do it properly with `< 0xA4` /
+// `JNC`, which is why those paths never produce this report.
+//
+// So the message has to separate the two cases. An index at or above the
+// sentinel but below 0xFF is a real authored-past-the-end animation and is worth
+// pointing at ComboAnimIncrease. 0xFF is an empty field, is expected, and naming
+// ComboAnimIncrease there sends people to a setting that is not involved - it
+// reads as a bug in the mod when nothing is wrong.
+//
+// Both still return NULL. That is the correct answer either way, and it is what
+// the engine would have produced had it range-checked.
 void* clamp_body_animation(fn_GetUpperBodyAnim_t original, void* ecx, void* edx,
-                           int map, int idx, const char* which)
+                           int map, int idx, const char* which, void* caller)
 {
    const int animIdx = idx & 0xFF;
+
+   // Unrelocated form, so a report can be looked up directly in Ghidra.
+   const uintptr_t site = (uintptr_t)caller - exe_base() + kUnrelocatedBase;
+
+   // Silent on purpose. This fires on completely stock content - it is an empty
+   // field, not an authored animation, and there is nothing for anyone to fix -
+   // so a line here is a false alarm on maps that are working correctly. The
+   // clamp itself is unchanged: NULL is still returned, which is the whole point
+   // of the guard. Only the report goes away.
+   if (animIdx == kUnassignedAnimIndex) return nullptr;
 
    if (animIdx >= kMaxAnimIndex) {
       if (!getter_already_reported(map, animIdx))
@@ -313,8 +354,8 @@ void* clamp_body_animation(fn_GetUpperBodyAnim_t original, void* ecx, void* edx,
             "but a map only stores indices 0-%d. The animation authored at that index "
             "cannot play. Reduce the number of distinct combo animation names, or turn "
             "off [LimitIncreases] ComboAnimIncrease - it raises the index limit without "
-            "raising the storage behind it.\n",
-            which, animIdx, map, kMaxAnimIndex - 1);
+            "raising the storage behind it. Called from %08X\n",
+            which, animIdx, map, kMaxAnimIndex - 1, (unsigned)site);
       return nullptr;
    }
 
@@ -334,12 +375,14 @@ void* clamp_body_animation(fn_GetUpperBodyAnim_t original, void* ecx, void* edx,
 
 void* __fastcall hooked_GetUpperBodyAnimation(void* ecx, void* edx, int map, int idx)
 {
-   return clamp_body_animation(original_GetUpperBodyAnim, ecx, edx, map, idx, "upper body");
+   return clamp_body_animation(original_GetUpperBodyAnim, ecx, edx, map, idx, "upper body",
+                               _ReturnAddress());
 }
 
 void* __fastcall hooked_GetLowerBodyAnimation(void* ecx, void* edx, int map, int idx)
 {
-   return clamp_body_animation(original_GetLowerBodyAnim, ecx, edx, map, idx, "lower body");
+   return clamp_body_animation(original_GetLowerBodyAnim, ecx, edx, map, idx, "lower body",
+                               _ReturnAddress());
 }
 
 char __fastcall hooked_ResolveDamageData(void* ecx, void* edx, void* combo, void* attack,

@@ -221,6 +221,15 @@ static const NamedValue s_rawInputNames[] = {
    // User-friendly trigger aliases (DI Z axis: LT=Z+, RT=Z-)
    { "RT",        eCONTROLLERINPUT_Z_NEG },
    { "LT",        eCONTROLLERINPUT_Z_POS },
+   // Positional aliases for the four face buttons. A/B/X/Y are the Xbox
+   // labels; DualShock and Nintendo pads print the same four differently, and
+   // Nintendo swaps the pairs outright, so "B" is ambiguous documentation for
+   // two of the three pad families. These name the position as printed on the
+   // pad in the player's hands instead.
+   { "FaceDown",  eCONTROLLERINPUT_BUTTON0 },   // A on an Xbox pad
+   { "FaceRight", eCONTROLLERINPUT_BUTTON1 },   // B
+   { "FaceLeft",  eCONTROLLERINPUT_BUTTON2 },   // X
+   { "FaceUp",    eCONTROLLERINPUT_BUTTON3 },   // Y
    { nullptr, 0 },
 };
 
@@ -394,15 +403,50 @@ void controller_setup_bindings(uintptr_t exe_base)
       // The default tables use "RT"/"LT" for triggers, so those names will
       // match and provide defaults. "ZNeg"/"ZPos" have empty defaults and
       // won't generate bindings unless the user explicitly sets them in INI.
+      // Resolve one action string per PHYSICAL input, not per name.
+      //
+      // Several names address the same input - FaceDown and A, RT and ZNeg -
+      // and this loop visits every one of them, so a line written against one
+      // spelling has to suppress the other spelling's built-in default.
+      // Binding per name would make `FaceDown=Reload` leave A's default Jump in
+      // place and drive the button with both.
+      //
+      // Precedence per input: an explicit INI line wins, whichever spelling it
+      // used; otherwise the built-in default. Writing two spellings of one
+      // input keeps the first in the table and ignores the second rather than
+      // stacking them.
+      char resolved[eCONTROLLERINPUT_MAX][256] = {};
+      bool haveResolved[eCONTROLLERINPUT_MAX] = {};
+      bool wasExplicit[eCONTROLLERINPUT_MAX]  = {};
+
+      // A value no INI line can produce, so "came back unchanged" means the key
+      // is absent rather than present and empty - present-and-empty is a
+      // deliberate unbind and has to beat the default.
+      static const char kAbsent[] = { (char)0x01, (char)0 };
+
       for (const NamedValue* inp = s_rawInputNames; inp->name; ++inp) {
-         const char* defaultVal = get_mode_default(mode, inp->name);
+         if (inp->value < 0 || inp->value >= eCONTROLLERINPUT_MAX) continue;
 
          char actionBuf[256];
-         cfg.get_string(section, inp->name, defaultVal, actionBuf, sizeof(actionBuf));
+         cfg.get_string(section, inp->name, kAbsent, actionBuf, sizeof(actionBuf));
 
-         if (actionBuf[0] == '\0') continue;  // no binding for this input
+         if (strcmp(actionBuf, kAbsent) != 0) {
+            if (wasExplicit[inp->value]) continue;   // another spelling already won
+            strncpy_s(resolved[inp->value], actionBuf, _TRUNCATE);
+            wasExplicit[inp->value]  = true;
+            haveResolved[inp->value] = true;
+         } else if (!wasExplicit[inp->value] && !haveResolved[inp->value]) {
+            const char* defaultVal = get_mode_default(mode, inp->name);
+            if (defaultVal[0] != 0) {
+               strncpy_s(resolved[inp->value], defaultVal, _TRUNCATE);
+               haveResolved[inp->value] = true;
+            }
+         }
+      }
 
-         count += parse_action_list(actionBuf, inp->value,
+      for (int rawInput = 0; rawInput < eCONTROLLERINPUT_MAX; ++rawInput) {
+         if (!haveResolved[rawInput] || resolved[rawInput][0] == 0) continue;
+         count += parse_action_list(resolved[rawInput], rawInput,
                                     &modeBindings[mode][count],
                                     MAX_BINDINGS - count);
       }

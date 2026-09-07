@@ -37,51 +37,6 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("General", "Enabled",  "1",              "Master enable/disable switch for BF2GameExt"),
    INI_ENTRY("General", "DLLPath",  "BF2GameExt.dll", "Path to the main extension DLL (relative to proxy)"),
 
-   // [LimitIncreases] — engine limit patches (all default to enabled)
-   INI_PATCH("LimitIncreases", "SoldierHeightCeiling", "0", "Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable", "Soldier Height Ceiling Removal"),
-   INI_ENTRY("LimitIncreases", "ReservationPoolSize", "127", "How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with \"List pool is full\". 127 is the ceiling and costs 1.6 KB. Set 60 for stock"),
-   INI_PATCH("LimitIncreases", "HeapExtension",       "1", "Extend RedMemory heap size",                          "RedMemory Heap Extensions"),
-   INI_PATCH("LimitIncreases", "SoundLayerLimit",     "1", "Raise SoundParameterized layer limit",                "SoundParameterized Layer Limit Extension"),
-   INI_PATCH("LimitIncreases", "DLCMissionLimit",     "1", "Raise DLC / addon mission limit",                     "DLC Mission Limit Extension"),
-   INI_PATCH("LimitIncreases", "SoundLimit",          "1", "Raise global sound limit",                            "Sound Limit Extension"),
-   INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
-   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "0", "Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0", "Combo Anims Increase"),
-   INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
-   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
-   INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
-   INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
-   INI_ENTRY("LimitIncreases", "VoiceLimit", "0", "How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice"),
-   INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise how many sounds can stream at the same time from 6 to 12. Uses more memory",                    "Audio Stream Limit Increase"),
-   INI_PATCH("LimitIncreases", "LODLimitExtension",  "1", "Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail",                                                       "LOD Limit Extension"),
-   INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
-   INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
-   INI_ENTRY("LimitIncreases", "TentacleLimit",      "0", "Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5"),
-
-   // [Particles] — one switch for engine correctness, one dial for density.
-   // The three fix patch sets deliberately share a single key; ini_lookup_patch_set
-   // resolves each set name to the first registry row naming it, so they toggle together.
-   INI_PATCH("Particles", "ParticleFixes", "1", "Effects stop dropping out when many are on screen at once, and particles stop switching off for the rest of the session after one bad frame. Turn off only to compare against stock", "Particle Cache Increase"),
-   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Effect Skip Fix"),
-   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Cache Reset Fix"),
-   INI_ENTRY("Particles", "ParticleDensity", "0", "How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time"),
-
-   // [Fixes] — bug-fix patches
-   INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
-   INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
-   INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
-   INI_PATCH("Fixes", "SaberBlockFix", "1", "Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock", "Lightsaber Block Direction Fix"),
-   INI_PATCH("Fixes", "BranchRegionFix", "1", "Make EntityPath branch regions work; in stock BF2 they never trigger at all. Name the region \"entitypathbranch <id>\" and write BranchRegion(\"<id>\") in the path node. Set 0 for stock", "EntityPath Branch Region Fix"),
-   INI_ENTRY("Fixes", "ImpactSoundWaterFix", "1", "Impact sounds play below world height 0. On a map with no water, anything happening under Y=0 was silent. Maps that do have water still go quiet under the surface. Set 0 for stock"),
-   INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
-   INI_ENTRY("Fixes", "BarrelFireOriginFix", "1", "Shots leave the barrel instead of the soldier's head, and land on the crosshair at every range. Stock BF2 drifts its own shots off the crosshair past about 65 units, wider the further you shoot. Set 0 for stock"),
-   INI_ENTRY("Fixes", "BlurDownsizeClamp", "1", "Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix)"),
-   INI_ENTRY("Fixes", "ScreenshotFix", "1", "Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix)"),
-   INI_ENTRY("Fixes", "ErrorDialogFix", "1", "Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix)"),
-   INI_ENTRY("Fixes", "DLCMissionInitFix", "0", "EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off)"),
-   INI_ENTRY("Fixes", "DroidekaDeathAnimation", "1", "Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected"),
-   INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
-   INI_ENTRY("Fixes", "WeaponIconFix", "1", "Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present"),
-
    // [Features] — optional gameplay features (may require additional assets)
    INI_ENTRY("Features", "Prone", "1", "Enable prone stance. Requires data\\_lvl_pc\\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing"),
    INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds"),
@@ -92,6 +47,14 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Features", "MPSpawnDelay", "15", "Seconds a player waits to respawn in multiplayer. The game hardcodes 15 there and throws away whatever the mission script asked for, so no map and no host could change it. Anything from 0.1 to 300, decimals allowed. Only the host sets this, everyone else follows."),
    INI_ENTRY("Features", "DisableDeadBodyShooting", "1", "Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions)"),
    INI_ENTRY("Features", "DeadBodyShootingAllFactions", "0", "Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1)"),
+
+   // [Particles] — one switch for engine correctness, one dial for density.
+   // The three fix patch sets deliberately share a single key; ini_lookup_patch_set
+   // resolves each set name to the first registry row naming it, so they toggle together.
+   INI_PATCH("Particles", "ParticleFixes", "1", "Effects stop dropping out when many are on screen at once, and particles stop switching off for the rest of the session after one bad frame. Turn off only to compare against stock", "Particle Cache Increase"),
+   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Effect Skip Fix"),
+   INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Cache Reset Fix"),
+   INI_ENTRY("Particles", "ParticleDensity", "0", "How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time"),
 
    // [Lightsaber] — lightsaber blade lighting
    INI_ENTRY("Lightsaber", "LightsaberIllumination", "1", "Ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. Set 0 for stock"),
@@ -132,6 +95,51 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Diagnostic", "ContentCensusNames", "0", "List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers \"what did I actually put in this map\". Needs ContentCensus to be on, and names are only stored on the modtools build"),
    INI_ENTRY("Diagnostic", "AIUpdateDiag",      "0", "Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising"),
    INI_ENTRY("Diagnostic", "PoolGrowthDiag",    "0", "Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs"),
+
+   // [Fixes] — bug-fix patches
+   INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
+   INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
+   INI_PATCH("Fixes", "SkyObjectLimit", "1", "Raise the SkyObjectClass instance limit (PrismaticFlower's fix)", "SkyObjectClass Limit Extension"),
+   INI_PATCH("Fixes", "SaberBlockFix", "1", "Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock", "Lightsaber Block Direction Fix"),
+   INI_PATCH("Fixes", "BranchRegionFix", "1", "Make EntityPath branch regions work; in stock BF2 they never trigger at all. Name the region \"entitypathbranch <id>\" and write BranchRegion(\"<id>\") in the path node. Set 0 for stock", "EntityPath Branch Region Fix"),
+   INI_ENTRY("Fixes", "ImpactSoundWaterFix", "1", "Impact sounds play below world height 0. On a map with no water, anything happening under Y=0 was silent. Maps that do have water still go quiet under the surface. Set 0 for stock"),
+   INI_ENTRY("Fixes", "TerrainTextureFix", "1", "Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "BarrelFireOriginFix", "1", "Shots leave the barrel instead of the soldier's head, and land on the crosshair at every range. Stock BF2 drifts its own shots off the crosshair past about 65 units, wider the further you shoot. Set 0 for stock"),
+   INI_ENTRY("Fixes", "BlurDownsizeClamp", "1", "Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "ScreenshotFix", "1", "Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "ErrorDialogFix", "1", "Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix)"),
+   INI_ENTRY("Fixes", "DLCMissionInitFix", "0", "EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off)"),
+   INI_ENTRY("Fixes", "DroidekaDeathAnimation", "1", "Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected"),
+   INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
+   INI_ENTRY("Fixes", "WeaponIconFix", "1", "Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present"),
+
+   // [LimitIncreases] - engine limit patches.
+   //
+   // Order matters: it is the order they appear in the generated INI.  The
+   // safe, on-by-default ceilings come first; anything off by default or with
+   // a real cost goes in the second group at the bottom, behind the warning
+   // registered in generate_ini.py.  Keep new entries in the right group.
+   INI_PATCH("LimitIncreases", "HeapExtension",       "1", "Extend RedMemory heap size",                          "RedMemory Heap Extensions"),
+   INI_PATCH("LimitIncreases", "SoundLayerLimit",     "1", "Raise SoundParameterized layer limit",                "SoundParameterized Layer Limit Extension"),
+   INI_PATCH("LimitIncreases", "DLCMissionLimit",     "1", "Raise DLC / addon mission limit",                     "DLC Mission Limit Extension"),
+   INI_PATCH("LimitIncreases", "SoundLimit",          "1", "Raise global sound limit",                            "Sound Limit Extension"),
+   INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
+   INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
+   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
+   INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
+   INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
+   INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise how many sounds can stream at the same time from 6 to 12. Uses more memory",                    "Audio Stream Limit Increase"),
+   INI_PATCH("LimitIncreases", "LODLimitExtension",  "1", "Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail",                                                       "LOD Limit Extension"),
+   INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
+   INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
+   INI_ENTRY("LimitIncreases", "ReservationPoolSize", "127", "How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with \"List pool is full\". 127 is the ceiling and costs 1.6 KB. Set 60 for stock"),
+
+   // --- Off by default. Read the comment before turning any of these on. ---
+   INI_PATCH("LimitIncreases", "SoldierHeightCeiling", "0", "Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable", "Soldier Height Ceiling Removal"),
+   INI_ENTRY("LimitIncreases", "VoiceLimit", "0", "How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice"),
+   INI_ENTRY("LimitIncreases", "TentacleLimit",      "0", "Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5"),
+   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "0", "Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0", "Combo Anims Increase"),
+
 };
 // END_REGISTRY
 

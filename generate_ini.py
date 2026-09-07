@@ -45,13 +45,18 @@ DOC_HEADER = (
 # exist in the C++ source. Adding a feature means adding its line here too;
 # the checks in verify_prose() will tell you if you forgot.
 
+# The registry section the [Controller.*] binding blocks are emitted after, so
+# the pad's settings and its bindings stay together.
+BINDINGS_AFTER_SECTION = "AimAssist"
+
 SECTION_BLURBS = OrderedDict([
     ("General",
      "Read by `dinput8.dll` before the extension is loaded, so these two cannot "
      "be changed at runtime."),
     ("LimitIncreases",
-     "Engine limit patches. All are on by default and all are safe to leave on; "
-     "they only raise a ceiling, they do not change behaviour below it."),
+     "Engine limit patches. Most only raise a ceiling and do not change "
+     "behaviour below it, and those are on by default. The last few are off by "
+     "default and each says why in its own description."),
     ("Particles",
      "Particle effects. `ParticleFixes` repairs how the engine batches and draws "
      "them and should stay on; `ParticleDensity` decides how many it is allowed "
@@ -94,6 +99,8 @@ SECTION_BLURBS = OrderedDict([
      "off - some of them log every frame."),
 ])
 
+
+
 MODE_DESCRIPTIONS = OrderedDict([
     ("Controller.Unit", "On foot, the default for infantry"),
     ("Controller.Vehicle", "Ground vehicles and walkers"),
@@ -103,10 +110,14 @@ MODE_DESCRIPTIONS = OrderedDict([
 ])
 
 INPUT_DESCRIPTIONS = {
-    "A": "Face button, bottom",
-    "B": "Face button, right",
-    "X": "Face button, left",
-    "Y": "Face button, top",
+    "A": "Face button, bottom. Same button as `FaceDown`",
+    "B": "Face button, right. Same button as `FaceRight`",
+    "X": "Face button, left. Same button as `FaceLeft`",
+    "Y": "Face button, top. Same button as `FaceUp`",
+    "FaceDown": "Face button, bottom. Same button as `A`",
+    "FaceRight": "Face button, right. Same button as `B`",
+    "FaceLeft": "Face button, left. Same button as `X`",
+    "FaceUp": "Face button, top. Same button as `Y`",
     "LB": "Left shoulder bumper",
     "RB": "Right shoulder bumper",
     "Back": "Back / Select",
@@ -339,7 +350,30 @@ def write_ini(entries, modes, version, path: Path):
     lines.append("; To regenerate, run python generate_ini.py")
     lines.append("")
 
-    # Write simple sections from registry
+    def emit_bindings():
+        # The per-mode binding sections belong immediately after the pad's own
+        # settings; splitting them with unrelated sections reads as a mistake.
+        lines.append("; Controller button/axis bindings per mode.")
+        lines.append("; Keys are raw input names, values are comma-separated action names.")
+        lines.append("; Omit a key or set it to empty to unbind.  Defaults are shown below.")
+        lines.append("; Full list of input and action names: docs/user/CONTROLLER.md")
+        lines.append(";")
+        lines.append("; These only decide WHICH button does what. If the stick drifts, is")
+        lines.append("; twitchy, or moves you when you are not touching it, that is sensitivity")
+        lines.append("; and deadzone - neither is set here. Use the game's own")
+        lines.append("; Options -> Controls screen for those.")
+        lines.append("")
+
+        for sec_name, bindings in modes.items():
+            lines.append(f"[{sec_name}]")
+            for input_name, actions in bindings:
+                if actions:
+                    lines.append(f";{input_name}={actions}")
+                # Skip empty defaults (unbound by default)
+            lines.append("")
+
+    # Registry sections, with the binding blocks dropped in right after the last
+    # controller-related one so the pad's settings and its bindings stay together.
     for section, keys in group_sections(entries).items():
         lines.append(f"[{section}]")
         for key, default, comment in keys:
@@ -347,21 +381,9 @@ def write_ini(entries, modes, version, path: Path):
                 lines.append(f"; {comment}")
             lines.append(f"{key}={default}")
         lines.append("")
+        if section == BINDINGS_AFTER_SECTION:
+            emit_bindings()
 
-    # Write controller binding sections
-    lines.append("; Controller button/axis bindings per mode.")
-    lines.append("; Keys are raw input names, values are comma-separated action names.")
-    lines.append("; Omit a key or set it to empty to unbind.  Defaults are shown below.")
-    lines.append("; Full list of input and action names: docs/user/CONTROLLER.md")
-    lines.append("")
-
-    for sec_name, bindings in modes.items():
-        lines.append(f"[{sec_name}]")
-        for input_name, actions in bindings:
-            if actions:
-                lines.append(f";{input_name}={actions}")
-            # Skip empty defaults (unbound by default)
-        lines.append("")
 
     write_generated(path, "\n".join(lines) + "\n")
 
@@ -426,6 +448,14 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
         f"aim assist tuning values."
     )
     L.append("")
+    L.append(
+        "> **Stick feel is not set here.** These sections decide *which* button "
+        "does *what*, nothing more. If the stick drifts, feels twitchy or too "
+        "slow, or moves you when you are not touching it, that is sensitivity "
+        "and deadzone - set those in the game's own **Options -> Controls** "
+        "screen. Rebinding will not fix it, and no INI key here changes it."
+    )
+    L.append("")
 
     L.append("## How a binding works")
     L.append("")
@@ -471,6 +501,22 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     L.append("## Raw input names")
     L.append("")
     L.append("Valid on the left of the `=`.")
+    L.append("")
+    L.append(
+        "The four face buttons have two spellings for the same button. "
+        "`A`/`B`/`X`/`Y` are the Xbox labels. `FaceDown`/`FaceRight`/`FaceLeft`/"
+        "`FaceUp` name the button by **where it sits on the pad in your hands**, "
+        "which is the unambiguous form: a DualShock prints different symbols in "
+        "those positions, and a Nintendo pad swaps A with B and X with Y, so `B` "
+        "means a different physical button depending on the pad. Either spelling "
+        "works and both always drive the same button."
+    )
+    L.append("")
+    L.append(
+        "Write only one spelling per button. A section that sets both keeps the "
+        "one listed first in this table and ignores the other, rather than "
+        "binding the button to both."
+    )
     L.append("")
     L.append("| Name | Control |")
     L.append("|------|---------|")

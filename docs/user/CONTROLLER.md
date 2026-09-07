@@ -6,6 +6,8 @@
 
 Gamepad binding reference for BF2GameExt v1.0.0. Enable the pad itself with `[Controller] Enabled=1`. Aim assist is separate and is **off by default** - turn it on with `[AimAssist] Enabled=1`. See [CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the aim assist tuning values.
 
+> **Stick feel is not set here.** These sections decide *which* button does *what*, nothing more. If the stick drifts, feels twitchy or too slow, or moves you when you are not touching it, that is sensitivity and deadzone - set those in the game's own **Options -> Controls** screen. Rebinding will not fix it, and no INI key here changes it.
+
 ## How a binding works
 
 Each binding is one line in a `[Controller.<Mode>]` section. The **key** is a raw input (a physical button or axis) and the **value** is a comma-separated list of **actions** to fire:
@@ -37,12 +39,16 @@ Full axes (`MoveAxis`, `TurnAxis`, `StrafeAxis`, `PitchAxis`) expect a stick axi
 
 Valid on the left of the `=`.
 
+The four face buttons have two spellings for the same button. `A`/`B`/`X`/`Y` are the Xbox labels. `FaceDown`/`FaceRight`/`FaceLeft`/`FaceUp` name the button by **where it sits on the pad in your hands**, which is the unambiguous form: a DualShock prints different symbols in those positions, and a Nintendo pad swaps A with B and X with Y, so `B` means a different physical button depending on the pad. Either spelling works and both always drive the same button.
+
+Write only one spelling per button. A section that sets both keeps the one listed first in this table and ignores the other, rather than binding the button to both.
+
 | Name | Control |
 |------|---------|
-| `A` | Face button, bottom |
-| `B` | Face button, right |
-| `X` | Face button, left |
-| `Y` | Face button, top |
+| `A` | Face button, bottom. Same button as `FaceDown` |
+| `B` | Face button, right. Same button as `FaceRight` |
+| `X` | Face button, left. Same button as `FaceLeft` |
+| `Y` | Face button, top. Same button as `FaceUp` |
 | `LB` | Left shoulder bumper |
 | `RB` | Right shoulder bumper |
 | `Back` | Back / Select |
@@ -67,6 +73,10 @@ Valid on the left of the `=`.
 | `RZNeg` | DirectInput RZ axis, negative. Varies by controller |
 | `RT` | Right trigger. Alias for `ZNeg` |
 | `LT` | Left trigger. Alias for `ZPos` |
+| `FaceDown` | Face button, bottom. Same button as `A` |
+| `FaceRight` | Face button, right. Same button as `B` |
+| `FaceLeft` | Face button, left. Same button as `X` |
+| `FaceUp` | Face button, top. Same button as `Y` |
 
 > **Triggers.** Both triggers sit on the single DirectInput Z axis on most pads, with the left trigger reading positive and the right negative. `LT` and `RT` are aliases for `ZPos` and `ZNeg`, so binding both a trigger alias and its Z axis name to different actions will not do what you want. Which physical control lands on `RZPos`/`RZNeg` varies between controllers and drivers, so those two are worth testing rather than assuming.
 

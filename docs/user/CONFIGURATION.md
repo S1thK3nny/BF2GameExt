@@ -17,62 +17,6 @@ Read by `dinput8.dll` before the extension is loaded, so these two cannot be cha
 | `Enabled` | `1` | Master enable/disable switch for BF2GameExt |
 | `DLLPath` | `BF2GameExt.dll` | Path to the main extension DLL (relative to proxy) |
 
-## LimitIncreases
-
-Engine limit patches. All are on by default and all are safe to leave on; they only raise a ceiling, they do not change behaviour below it.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `SoldierHeightCeiling` | `0` | Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable |
-| `ReservationPoolSize` | `127` | How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with "List pool is full". 127 is the ceiling and costs 1.6 KB. Set 60 for stock |
-| `HeapExtension` | `1` | Extend RedMemory heap size |
-| `SoundLayerLimit` | `1` | Raise SoundParameterized layer limit |
-| `DLCMissionLimit` | `1` | Raise DLC / addon mission limit |
-| `SoundLimit` | `1` | Raise global sound limit |
-| `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
-| `ComboAnimIncrease` | `0` | Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0 |
-| `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
-| `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
-| `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
-| `StringPoolIncrease` | `1` | Increase string pool size |
-| `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice |
-| `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |
-| `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
-| `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
-| `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
-| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5 |
-
-## Particles
-
-Particle effects. `ParticleFixes` repairs how the engine batches and draws them and should stay on; `ParticleDensity` decides how many it is allowed to show, and is the only setting here with a frame-time cost.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ParticleFixes` | `1` | Effects stop dropping out when many are on screen at once, and particles stop switching off for the rest of the session after one bad frame. Turn off only to compare against stock |
-| `ParticleDensity` | `0` | How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time |
-
-## Fixes
-
-Bug fixes for engine defects. On by default. Each one is guarded by a byte check against the stock instruction bytes, so a patch that does not recognise your executable declines to apply rather than corrupting it.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ChunkPushFix` | `1` | Let explosions push bodies that break into chunks, instead of dropping them where they stood |
-| `PropGeneratorLoopFix` | `1` | Fix foliage-update crash at very high FOVs (PrismaticFlower's fix) |
-| `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
-| `SaberBlockFix` | `1` | Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock |
-| `BranchRegionFix` | `1` | Make EntityPath branch regions work; in stock BF2 they never trigger at all. Name the region "entitypathbranch <id>" and write BranchRegion("<id>") in the path node. Set 0 for stock |
-| `ImpactSoundWaterFix` | `1` | Impact sounds play below world height 0. On a map with no water, anything happening under Y=0 was silent. Maps that do have water still go quiet under the surface. Set 0 for stock |
-| `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |
-| `BarrelFireOriginFix` | `1` | Shots leave the barrel instead of the soldier's head, and land on the crosshair at every range. Stock BF2 drifts its own shots off the crosshair past about 65 units, wider the further you shoot. Set 0 for stock |
-| `BlurDownsizeClamp` | `1` | Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix) |
-| `ScreenshotFix` | `1` | Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix) |
-| `ErrorDialogFix` | `1` | Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix) |
-| `DLCMissionInitFix` | `0` | EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off) |
-| `DroidekaDeathAnimation` | `1` | Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected |
-| `ReticleCorrection` | `-1` | HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1) |
-| `WeaponIconFix` | `1` | Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present |
-
 ## Features
 
 Optional behaviour that changes the game rather than fixing it. Some need assets that ship alongside the DLL.
@@ -88,6 +32,15 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `MPSpawnDelay` | `15` | Seconds a player waits to respawn in multiplayer. The game hardcodes 15 there and throws away whatever the mission script asked for, so no map and no host could change it. Anything from 0.1 to 300, decimals allowed. Only the host sets this, everyone else follows. |
 | `DisableDeadBodyShooting` | `1` | Stop AI from shooting dead bodies entirely (overrides DeadBodyShootingAllFactions) |
 | `DeadBodyShootingAllFactions` | `0` | Let all factions shoot dead bodies, not just Alliance (ignored if DisableDeadBodyShooting=1) |
+
+## Particles
+
+Particle effects. `ParticleFixes` repairs how the engine batches and draws them and should stay on; `ParticleDensity` decides how many it is allowed to show, and is the only setting here with a frame-time cost.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ParticleFixes` | `1` | Effects stop dropping out when many are on screen at once, and particles stop switching off for the rest of the session after one bad frame. Turn off only to compare against stock |
+| `ParticleDensity` | `0` | How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time |
 
 ## Lightsaber
 
@@ -151,6 +104,53 @@ Read-only instrumentation, all off by default. These only write to `BF2GameExt.l
 | `ContentCensusNames` | `0` | List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers "what did I actually put in this map". Needs ContentCensus to be on, and names are only stored on the modtools build |
 | `AIUpdateDiag` | `0` | Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising |
 | `PoolGrowthDiag` | `0` | Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs |
+
+## Fixes
+
+Bug fixes for engine defects. On by default. Each one is guarded by a byte check against the stock instruction bytes, so a patch that does not recognise your executable declines to apply rather than corrupting it.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ChunkPushFix` | `1` | Let explosions push bodies that break into chunks, instead of dropping them where they stood |
+| `PropGeneratorLoopFix` | `1` | Fix foliage-update crash at very high FOVs (PrismaticFlower's fix) |
+| `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
+| `SaberBlockFix` | `1` | Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock |
+| `BranchRegionFix` | `1` | Make EntityPath branch regions work; in stock BF2 they never trigger at all. Name the region "entitypathbranch <id>" and write BranchRegion("<id>") in the path node. Set 0 for stock |
+| `ImpactSoundWaterFix` | `1` | Impact sounds play below world height 0. On a map with no water, anything happening under Y=0 was silent. Maps that do have water still go quiet under the surface. Set 0 for stock |
+| `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |
+| `BarrelFireOriginFix` | `1` | Shots leave the barrel instead of the soldier's head, and land on the crosshair at every range. Stock BF2 drifts its own shots off the crosshair past about 65 units, wider the further you shoot. Set 0 for stock |
+| `BlurDownsizeClamp` | `1` | Clamp blur effect downsize resolution to 512px at high resolutions (PrismaticFlower's fix) |
+| `ScreenshotFix` | `1` | Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix) |
+| `ErrorDialogFix` | `1` | Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix) |
+| `DLCMissionInitFix` | `0` | EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off) |
+| `DroidekaDeathAnimation` | `1` | Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected |
+| `ReticleCorrection` | `-1` | HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1) |
+| `WeaponIconFix` | `1` | Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present |
+
+## LimitIncreases
+
+Engine limit patches. Most only raise a ceiling and do not change behaviour below it, and those are on by default. The last few are off by default and each says why in its own description.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `HeapExtension` | `1` | Extend RedMemory heap size |
+| `SoundLayerLimit` | `1` | Raise SoundParameterized layer limit |
+| `DLCMissionLimit` | `1` | Raise DLC / addon mission limit |
+| `SoundLimit` | `1` | Raise global sound limit |
+| `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
+| `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
+| `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
+| `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
+| `StringPoolIncrease` | `1` | Increase string pool size |
+| `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |
+| `LODLimitExtension` | `1` | Troops and props snap to their blurry low-detail models as soon as a fight gets crowded. Keeps roughly twenty times as many of them at full detail |
+| `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
+| `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
+| `ReservationPoolSize` | `127` | How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with "List pool is full". 127 is the ceiling and costs 1.6 KB. Set 60 for stock |
+| `SoldierHeightCeiling` | `0` | Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable |
+| `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice |
+| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5 |
+| `ComboAnimIncrease` | `0` | Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0 |
 
 ## Controller bindings
 

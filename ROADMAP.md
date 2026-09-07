@@ -230,6 +230,17 @@ in property on the ordnance class: `OrdnanceGrapplingHookClass::SetProperty` alr
 the lookup is solved. What it must not be is the ordnance ClassLabel, which
 would sweep up rockets, mines and anything else on the same label.
 
+**`ScopeTextureFull` - a whole texture as the scope, not a mirrored quarter** - The zoomed
+scope overlay is one texture quadrant mirrored into four screen quadrants, so art must be
+symmetric about both axes and an off-centre reticle is not authorable. Each quad is also
+stretched per axis independently, which is where BF2's oval-at-16:9 scope comes from.
+`ScopeTextureFull` (hash `0xB7D234B3`, on `WeaponClass`) makes element 0 full-screen centred
+and disables elements 1-3. Opt-in by data, no INI toggle. Addresses, the spec and a companion
+`ScopeModel` are in [docs/RE/ScopeDisplaySystem.md](docs/RE/ScopeDisplaySystem.md); two things
+worth fixing while in there are that `ScopeTexture` silently falls back to `weapon_scope` on a
+typo with no warning, and that bitmap sizes are read once in the constructor so stock scopes
+are wrong after a resolution change.
+
 ## Rendering
 
 **Restore the decal system** - BF2 ships a complete decal pipeline with only the
@@ -257,6 +268,9 @@ per-bone decal skinning and no Ghoul2 equivalent. Ordered plan:
 A and B are confidently estimable. C and D are where the schedule can move. Once the
 pipeline exists, blaster impacts and explosion scorch marks are nearly free and will be far
 more visible in normal play than saber marks.
+
+**Unlock framerate above 80 FPS** - The game caps out around 80 and anything above this will
+cause issues with vehicles, especially hovers, due to being tied to the framerate. The fix is to detach the physics and animation updates from the framerate, and instead run them on a fixed timestep. This will allow the game to run at higher framerates without affecting gameplay mechanics.
 
 ## Sound
 
@@ -644,7 +658,24 @@ would force every hero class to be edited individually and would not let a scrip
 for one mode and leave it on for another. Needs the code that applies the drain traced first,
 then a toggle hung off that path.
 
-## Documentation
+**Restore `FlatInfo()`** - a `.sky` block BF1 rendered and BF2 does not parse at all. A
+scrolling flat texture layer: a horizontal plane, separate from the dome, for a cloud or haze
+sheet at a fixed world height. The schema survives in a stock BF2 asset,
+`assets/worlds/END/world1/end1.sky`, where a porter left the block in and nothing has read it
+since - `Height(0,0)`, `Texture`, `Color`, `Modulate`, `TextureSpeed` (the UV scroll that makes
+it drift), `TileSize`. Endor's copy is inert, so the file proves the schema, not the visual.
+
+**This is a rebuild, not a revival.** Sky blocks dispatch by PblHash, and
+`PblHash("FlatInfo") = 0x4B936222` occurs nowhere in the modtools exe, as neither constant nor
+string - while every supported block occurs exactly once (`SkyInfo` `0x06C0D3E6`, `DomeInfo`
+`0x185AB6C2`, `DomeModel` `0x82681057`, `SunInfo` `0x3780C8F9`, `LowResTerrain` `0xDDF0C29E`).
+Parser case and renderer were both compiled out, so it needs a new sky config case plus a
+renderable drawing one textured, scrolling, world-height quad.
+
+BF1's reader is `SkyDome::Read(PblConfig&)` at `0x001D10A0`, with `SkyDome::Render` the draw
+side. **Neither read yet** - still open are the two `Height` values, how `Modulate` selects the
+blend, and whether the plane draws before or after the dome. (Ghidra has not applied BF1's
+symbols; resolve names through their Mach-O nlist entries, not by name lookup.)
 
 **AI systems documentation** - Write up the goal layer (`AIGoalManager::AssignUnit`) and the
 combat response layer (`SelectCombatResponse`), how a unit gets from a team level goal to an
