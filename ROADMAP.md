@@ -638,12 +638,31 @@ does nothing in the front end: the main menu, the spawn screen, the map and unit
 and the pause menu all still need mouse and keyboard. That makes the controller support a
 half answer for anyone actually playing from the couch.
 
-Goal is a shell input mode that drives the existing UI navigation rather than faking mouse
-movement: directional input to move the selection, a confirm and a back action, and shoulder
-buttons for tab or page changes where the screen has them. Needs the shell's own input and
-focus handling traced first, including whether the spawn screen and the pause menu go
-through the same path as the main menu or each roll their own, since that decides whether
-this is one mode or several.
+**Traced 2026-09-07, and most of it already exists.** The shell is a controller UI with a
+mouse bolted on, not the reverse: all 120 `ifs_*` screens implement `Input_Accept`,
+`Input_Back`, `Input_GeneralUp/Down/Left/Right`, `Input_Start`, `Input_L/RTrigger`,
+`Input_Misc`/`Misc2`, and the handlers already take a joystick index
+(`metagame_ai.lua:46`, `ifs_meta_main:Input_Accept(iJoystick,1)`). Only 2 files use
+`fnTestHotSpot` for mouse hit-testing, against 57 with explicit directional handlers and the
+rest inheriting `gShellScreen_fnDefaultInputUp/Down`. So the per-screen navigation logic is
+written and shipping - it is what the arrow keys drive today - and none of this needs shell
+Lua changes, which matters because GameExt ships no shell.
+
+Dispatch is generic and source-agnostic. `GuiManager::HandleEvents` (Steam `0x00528FB0`)
+drains an event queue and builds the Lua method name at runtime,
+`_snprintf(buf, 0x7F, "%s%s", "Input_", name_table[id*2])` then `CallLuaFunctionOfScope`. The
+bare name table (Steam `0x007E66C4`) carries the full console set - `Accept`, `Back`,
+`GeneralUp/Down/Left/Right`, `Start`, `LTrigger`, `RTrigger`, `Misc`, `Misc2`, `KeyDown`,
+`Char` - so nothing is a reduced PC subset. The console controller-management API is intact
+and used by the scripts too (`ScriptCB_ReadAllControllers` and friends, plus
+`ScriptCB_GetVKeyboardCharacter`, an on-screen keyboard that only exists for pad text entry).
+
+So the work is one thing: raise those events from the pad. **The open question is the enqueue
+side** - `HandleEvents` is the consumer; who produces into that queue, and whether there is a
+callable post/push entry point, has not been found yet. Find that before scoping anything.
+Remaining risk after that is blast radius rather than difficulty: menu code runs before
+everything, so a bug locks people out of the game entirely, and verifying it means walking a
+lot of screens rather than one repro.
 
 ## Lua API
 
