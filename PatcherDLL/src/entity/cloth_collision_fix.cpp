@@ -71,6 +71,19 @@
 //
 //   6. Solver iterations.  Every shipped call site passes 1, which barely
 //      converges.  Raised via the InternalUpdate hook.
+//
+//   7. Fixed points on a frame with no substep.  Consequence of 5, and a
+//      regression this file introduced: RestoreFixedPoints only runs inside
+//      SatisfyConstraints, inside InternalUpdate, so a frame that accumulates
+//      less than one step used to leave the fixed row pinned to the PREVIOUS
+//      step's bone positions while m_worldMat and the character mesh were
+//      already drawn at the current pose.  Vanilla steps once per rendered
+//      frame and so re-pins every frame; above 60 FPS the accumulator skips
+//      (1 - 60/fps) of them - 40% at 100 FPS, 58% at 144 - and the cape's
+//      attach row visibly detaches and jitters while the attach bones move,
+//      which is why it showed when moving and not when idle.  Those frames now
+//      call SatisfyConstraints with iterations = 0, which runs
+//      RestoreFixedPoints and skips the constraint/collision loop entirely.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -127,6 +140,14 @@ typedef char (__fastcall* fn_InternalUpdate_t)(void* ecx, void* edx,
                                                 void* mat, void* pose,
                                                 uint32_t iterations, float dt);
 static fn_InternalUpdate_t original_InternalUpdate = nullptr;
+
+// EntityCloth::SatisfyConstraints - thiscall(PblMatrix*, RedPose*, uint), RET 0xC.
+// Called directly, never detoured: it is the only entry point to
+// RestoreFixedPoints, and iterations = 0 makes it do nothing else.
+typedef void (__fastcall* fn_SatisfyConstraints_t)(void* ecx, void* edx,
+                                                    void* mat, void* pose,
+                                                    uint32_t iterations);
+static fn_SatisfyConstraints_t game_SatisfyConstraints = nullptr;
 
 // EntityCloth::EnforceCollisions - thiscall(PblMatrix*, RedPose*), RET 8
 typedef void (__fastcall* fn_EnforceCollisions_t)(void* ecx, void* edx,
@@ -444,7 +465,16 @@ static char __fastcall hooked_InternalUpdate(void* ecx, void* /*edx*/,
 
    if (accum < kSimStep) {
       e->accum = accum;
-      return 1; // not enough accumulated time for a step yet
+      // Not enough accumulated time for a step - but the fixed points still
+      // have to follow the pose this frame, or the attach row lags the body by
+      // a frame of bone motion (see 7 in the header).  iterations = 0 runs
+      // RestoreFixedPoints and skips the constraint and collision loop.
+      // Safe with a null pose: RestoreFixedPoints only dereferences it when
+      // m_pFixedPointsBones is set, and EntityCloth::Render returns before
+      // reaching us when that pairing occurs.
+      if (game_SatisfyConstraints && *(void**)((uintptr_t)ecx + kPosBuffer_offset))
+         game_SatisfyConstraints(ecx, nullptr, mat, pose, 0);
+      return 1;
    }
 
    // The vanilla body is gated on m_lastFrameUpdated < GetFrameNumber() and
@@ -482,12 +512,13 @@ static PVOID g_cylinderHook = nullptr; // build-specific entry attached to the d
 
 void cloth_collision_fix_install(uintptr_t exe_base)
 {
-   uintptr_t internal_update = 0, enforce = 0, cylinder = 0;
+   uintptr_t internal_update = 0, enforce = 0, cylinder = 0, satisfy = 0;
 
    switch (g_build) {
    case GameBuild::Modtools: {
       using namespace game_addrs::modtools;
       internal_update = cloth_internal_update;
+      satisfy         = cloth_satisfy_constraints;
       enforce         = cloth_enforce_collisions;
       cylinder        = cloth_enforce_cylinder_coll;
       g_cylinderHook  = (PVOID)hooked_EnforceCylinderCollision;
@@ -495,6 +526,7 @@ void cloth_collision_fix_install(uintptr_t exe_base)
    case GameBuild::Steam: {
       using namespace game_addrs::steam;
       internal_update = cloth_internal_update;
+      satisfy         = cloth_satisfy_constraints;
       enforce         = cloth_enforce_collisions;
       cylinder        = cloth_enforce_cylinder_coll;
       g_cylinderHook  = (PVOID)hooked_EnforceCylinderCollision_steam;
@@ -502,6 +534,7 @@ void cloth_collision_fix_install(uintptr_t exe_base)
    case GameBuild::GOG: {
       using namespace game_addrs::gog;
       internal_update = cloth_internal_update;
+      satisfy         = cloth_satisfy_constraints;
       enforce         = cloth_enforce_collisions;
       cylinder        = cloth_enforce_cylinder_coll;
       // Same release/LTCG codegen as Steam, so the same naked thunk applies.
@@ -514,6 +547,7 @@ void cloth_collision_fix_install(uintptr_t exe_base)
    accum_reset();
 
    original_InternalUpdate = (fn_InternalUpdate_t)resolve(exe_base, internal_update);
+   game_SatisfyConstraints = (fn_SatisfyConstraints_t)resolve(exe_base, satisfy);
    original_EnforceCollisions = (fn_EnforceCollisions_t)resolve(exe_base, enforce);
    original_EnforceCylinderCollision = (fn_EnforceCylinderCollision_t)resolve(exe_base, cylinder);
 
