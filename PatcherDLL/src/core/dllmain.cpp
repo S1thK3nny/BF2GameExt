@@ -27,6 +27,7 @@
 #include "entity/soldier_bone_effect_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/combo_damage_anim_guard.hpp"
+#include "entity/odf_gameext_props.hpp"
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/fp_fire_animation_fix.hpp"
 #include "entity/command_post_null_fix.hpp"
@@ -314,6 +315,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    soldier_bone_effect_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
+   odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);

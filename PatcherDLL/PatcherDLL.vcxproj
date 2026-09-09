@@ -163,6 +163,7 @@
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
     <ClInclude Include="src\entity\ai_squad_order_null_fix.hpp" />
     <ClInclude Include="src\entity\combo_damage_anim_guard.hpp" />
+    <ClInclude Include="src\entity\odf_gameext_props.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
     <ClInclude Include="src\controller\aim_assist.hpp" />
@@ -223,6 +224,7 @@
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
     <ClCompile Include="src\entity\combo_damage_anim_guard.cpp" />
+    <ClCompile Include="src\entity\odf_gameext_props.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\fp_fire_animation_fix.cpp" />
     <ClCompile Include="src\entity\command_post_null_fix.cpp" />

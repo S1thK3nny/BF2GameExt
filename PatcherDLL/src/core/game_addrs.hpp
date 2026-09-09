@@ -201,6 +201,23 @@ namespace modtools {
    constexpr uintptr_t hover_updateindirect_pilot_call = 0x00515e39;
    constexpr uintptr_t controllable_get_active_pilot   = 0x004d49f0;
 
+   // ---- Munged-ODF readers ---------------------------------------------------
+
+   // The PROP branch of each of the four *Class::Read functions, at the point
+   // where the property hash (a register) and the value string (EAX) are both
+   // live and the next instruction sequence is the SetProperty virtual call.
+   // Nine bytes each: MOV EDX,[this] / PUSH EAX / PUSH hash / MOV ECX,this /
+   // CALL [EDX+slot]. Registers and the vtable slot differ per reader; the byte
+   // signatures are in odf_gameext_props.cpp.
+   //   EntityClass::Read    0x004D0830   this=EBX hash=EDI slot 0x18
+   //   ExplosionClass::Read 0x00601F30   this=EDI hash=ESI slot 0x0C
+   //   OrdnanceClass::Read  0x006059D0   this=ESI hash=EDI slot 0x18
+   //   WeaponClass::Read    0x0061E3F0   this=EBX hash=EDI slot 0x18
+   constexpr uintptr_t entity_class_read_prop_site    = 0x004d08ae;
+   constexpr uintptr_t explosion_class_read_prop_site = 0x00601fab;
+   constexpr uintptr_t ordnance_class_read_prop_site  = 0x00605a4b;
+   constexpr uintptr_t weapon_class_read_prop_site    = 0x0061e46c;
+
    // Second self-piloted-hover crash: issuing a unit order crashes in
    // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
    // derefs the same null pilot link (+0xCC) on a self-piloted hover.
@@ -1820,6 +1837,21 @@ namespace steam {
    constexpr uintptr_t snd_soundstream_init     = 0x00736b40;
    constexpr uintptr_t snd_stream_slot_count_imm8 = 0x0073409c;
    constexpr uintptr_t snd_engine_get_free_stream = 0x00734080;
+
+   // ---- Munged-ODF readers ---------------------------------------------------
+   // PROP-branch SetProperty dispatch site in each of the four *Class::Read
+   // functions; nine bytes each. Release codegen, so MOV ECX precedes the
+   // pushes: `MOV EDX,[this] / MOV ECX,this / PUSH EAX / PUSH hash /
+   // CALL [EDX+slot]`. Signatures and the per-reader register/slot table are in
+   // odf_gameext_props.cpp.
+   //   EntityClass::Read    0x00491CC0 (Ghidra-named)  this=EDI hash=ESI slot 0x18
+   //   ExplosionClass::Read 0x0051CEC0                 this=EDI hash=ESI slot 0x0C
+   //   OrdnanceClass::Read  0x005F83C0                 this=EDI hash=ESI slot 0x18
+   //   WeaponClass::Read    0x0067A240 (Ghidra-named)  this=EBX hash=ESI slot 0x18
+   constexpr uintptr_t entity_class_read_prop_site    = 0x00491d2d;
+   constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
+   constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f842d;
+   constexpr uintptr_t weapon_class_read_prop_site    = 0x0067a2b9;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -2695,6 +2727,15 @@ namespace gog {
    constexpr uintptr_t snd_soundstream_init           = 0x00737c30;
    constexpr uintptr_t snd_stream_slot_count_imm8     = 0x0073518c;
    constexpr uintptr_t snd_engine_get_free_stream     = 0x00735170;
+
+   // ---- Munged-ODF readers ---------------------------------------------------
+   // Same shape as Steam throughout; see the steam namespace and
+   // odf_gameext_props.cpp. Entity and Explosion land at the same addresses as
+   // Steam, Ordnance and Weapon do not.
+   constexpr uintptr_t entity_class_read_prop_site    = 0x00491d2d;
+   constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
+   constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f94cd;
+   constexpr uintptr_t weapon_class_read_prop_site    = 0x0067b359;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;

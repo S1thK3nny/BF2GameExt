@@ -4,6 +4,36 @@ Properties added by BF2GameExt, on top of the stock ones. The game ignores prope
 
 For which builds each one works on, see the [compatibility table](../../README.md#compatibility).
 
+## GameExt-Only Values
+
+*New in 1.1.0.*
+
+One ODF, two sets of values: the normal line is what a stock game sees, and a second line ending in `@GameExt` is what the extension uses instead. Nothing else changes, and the ODF still loads and plays normally without the extension installed.
+
+```
+WeaponName         = "all_weap_inf_rifle"
+WeaponName@GameExt = "all_weap_inf_bowcaster"
+```
+
+A stock game gives the unit the rifle. With BF2GameExt installed it gets the bowcaster. This works for any property, stock or added by the extension, so a mod no longer needs a duplicate unit, a second side, or a Lua `SetClassProperty` call just to change one value.
+
+**Put the `@GameExt` line directly under the line it replaces.** It has to be in the same ODF, within about a dozen properties of the plain version, and the plain version has to actually be there. Inheriting the plain value from a `ClassParent` is not enough: write it out in the child as well.
+
+Anything the property references is packed into the level automatically, exactly as if you had written the plain line, so there is nothing extra to add to a `.req`.
+
+Sections work the way you would expect, since the override lands wherever you wrote it:
+
+```
+WEAPONSECTION      = 1
+WeaponName         = "all_weap_inf_rifle"
+WeaponName@GameExt = "all_weap_inf_bowcaster"
+WeaponAmmo         = 6
+```
+
+Only slot 1 changes. The other slots are untouched, and no extra weapon is added.
+
+**What it cannot do.** `ClassLabel` is decided before any property is read, so `ClassLabel@GameExt` does nothing: a GameExt-only class still needs its own ODF. `[InstanceProperties]` and world layer overrides are also not covered.
+
 ## Soldier Classes
 
 Set on the concrete soldier class.
