@@ -51,6 +51,9 @@ In rough order of likelihood:
 - **`[General] Enabled=0`** in your INI.
 - **You are on the Aspyr Classic Collection.** It is a different executable and
   is not supported. Only the Modtools, Steam and GOG builds work.
+- **You are on GOG and the game closes with a "Failed to apply patches" box.**
+  That is the older 2006 executable. See
+  [GOG, and it says it cannot identify the executable](#gog-and-it-says-it-cannot-identify-the-executable).
 - **Your executable has already been patched by something else.** See below.
 - **An overlay or launcher is loading its own `dinput8.dll`** ahead of ours.
 - **`dinput8.dll` is not in the folder any more.** Rare, but a scanner can
@@ -89,6 +92,41 @@ To fix it, put the original executable back:
 
 Then install BF2GameExt again. Nothing it ships modifies the executable on
 disk, so once the original is back you can leave it alone permanently.
+
+## I have the GOG version and it says it cannot identify the executable
+
+You start the game, get
+
+```
+Failed to apply patches! Check "BF2GameExt.log" for more info.
+```
+
+and the log ends with
+
+```
+Couldn't identify executable. Unable to patch.
+```
+
+**Your GOG copy is running the original 2006 executable, not the 2017 one.**
+BF2GameExt supports the 2017 version, and some GOG installs still have the older
+exe in place. It is a different program, not a modified copy, so nothing in the
+extension fits it and there is no way to make it work short of updating the game.
+
+Check the size of `BattlefrontII.exe` in `GameData`:
+
+| Size | What it is | Works |
+|------|-----------|-------|
+| 4.16mb | GOG, 2017 | yes |
+| 4.39mb | the original 2006 release, v1.1 | no |
+
+If you have the original, offline 2006 release, update the game to the current version by
+reinstalling the game through **GOG Galaxy** instead of downloading the offline installer. 
+Check the size again afterwards. 
+It is worth checking even if the game is freshly installed, since which executable
+you end up with depends on where the install came from rather than on how old it is.
+
+Nothing else needs redoing. Once the size matches the supported one, the files
+you already dropped into `GameData` start working on the next launch.
 
 ## ReShade or another dinput8 proxy
 
