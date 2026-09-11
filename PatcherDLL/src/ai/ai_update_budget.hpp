@@ -41,9 +41,9 @@
 // sits below, the budget is not the constraint and raising it would only burn
 // frame time.  Measure before choosing a number.
 //
-// THE DIAL RUNS ON ALL THREE BUILDS; the diagnostic is modtools-only, because it
-// hooks ControllerManager::Update and UpdateHighLevel and those addresses are not
-// mapped for retail.  Retail compiles the same quota with CMOVcc instead of the
+// THE DIAL AND THE DIAGNOSTIC BOTH RUN ON ALL THREE BUILDS (kDiagModtools /
+// kDiagSteam / kDiagGOG carry the ControllerManager::Update and UpdateHighLevel
+// addresses).  Retail compiles the same quota with CMOVcc instead of the
 // NEG/SBB idiom above, and gives the non-uber value its own imm32:
 //
 //   00486403  B9 64000000     MOV    ECX,0x64   ; uber = 100 -- NOT the dial

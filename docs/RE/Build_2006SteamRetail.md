@@ -109,6 +109,29 @@ dgVoodoo; GameSpy is long dead so multiplayer is direct-IP/LAN only; and **BF2Ga
 on this build** - every address in the project is derived from the other builds and this is a
 different compile.
 
+## Other copies of this lineage
+
+Two more `PC Final LTCG` executables circulate, both DRM-free and both 4,608,000 bytes:
+
+| copy | md5 | PE timestamp |
+| --- | --- | --- |
+| GOG (one of its installers; which one is unverified) | `14530022f2997f5c398e7d5b4d9231c8` | 2006-06-19 10:04:38 |
+| SWBFSpy | `47168d1e58b19a524cbfe349b259e00c` | 2006-06-19 03:53:26 |
+
+Each is a separate link of the same compile. Against each other, every function sits at the same
+address: all but 10 of the differing `.text` bytes are `.rdata`/`.data`/BSS pointer operands shifted
+by 8 to 32 bytes. The real code differences are `0x417743` (`EB 56` in the GOG copy, `75 56` in
+SWBFSpy) and a table SWBFSpy repoints to `0x867D68` at `0x6960FD`. SWBFSpy additionally rewrites
+the GameSpy hostnames to `swbfspy.com`. `.text` size and unpacked entry point match the 2006 Steam
+copy above.
+
+**Detection.** Because each copy is its own link, the fixed-offset id bytes the patch lists use are
+different in every one. What they share is the CodeView record,
+`e:\Battlefront2\main\Battlefront2\Build\PC Final LTCG\Battlefront2.pdb`. No supported build links
+from that config (modtools `PC Release` / `PC Modtools Release`, 2017 `PC GOG Release` /
+`PC GOG XPLAY Release`), so `is_retail_2006()` in `core/apply_patches.cpp` keys off that path
+and the DLL exits with a message naming the executable instead of the generic failure.
+
 ## Shipped data
 
 Of 191 `_LVL_PC` files, 183 match the 2017 Steam data in size. 41 of those differ only in

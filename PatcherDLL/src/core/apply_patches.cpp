@@ -55,28 +55,87 @@ static bool matches_list(const exe_patch_list& exe_list, const uintptr_t exe_bas
                 &exe_list.expected_id, sizeof(exe_list.expected_id));
 }
 
+// One data directory of a mapped 32-bit module, or null if it is absent.
+static const IMAGE_DATA_DIRECTORY* module_data_directory(const uintptr_t module_base, int index)
+{
+   const char* const base = (const char*)module_base;
+
+   const IMAGE_DOS_HEADER& dos_header = *(const IMAGE_DOS_HEADER*)base;
+   if (dos_header.e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
+
+   const IMAGE_NT_HEADERS32& nt_headers = *(const IMAGE_NT_HEADERS32*)(base + dos_header.e_lfanew);
+   if (nt_headers.Signature != IMAGE_NT_SIGNATURE) return nullptr;
+   if (nt_headers.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) return nullptr;
+   if (nt_headers.OptionalHeader.NumberOfRvaAndSizes <= (DWORD)index) return nullptr;
+
+   const IMAGE_DATA_DIRECTORY& dir = nt_headers.OptionalHeader.DataDirectory[index];
+   if (not dir.VirtualAddress or not dir.Size) return nullptr;
+
+   return &dir;
+}
+
 // Walk a module's import directory looking for one DLL by name.
 static bool module_imports(const uintptr_t module_base, const char* dll_name)
 {
    const char* const base = (const char*)module_base;
 
-   const IMAGE_DOS_HEADER& dos_header = *(const IMAGE_DOS_HEADER*)base;
-   if (dos_header.e_magic != IMAGE_DOS_SIGNATURE) return false;
-
-   const IMAGE_NT_HEADERS32& nt_headers = *(const IMAGE_NT_HEADERS32*)(base + dos_header.e_lfanew);
-   if (nt_headers.Signature != IMAGE_NT_SIGNATURE) return false;
-   if (nt_headers.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) return false;
-   if (nt_headers.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_IMPORT) return false;
-
-   const IMAGE_DATA_DIRECTORY& import_dir =
-      nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-
-   if (not import_dir.VirtualAddress or not import_dir.Size) return false;
+   const IMAGE_DATA_DIRECTORY* import_dir =
+      module_data_directory(module_base, IMAGE_DIRECTORY_ENTRY_IMPORT);
+   if (not import_dir) return false;
 
    for (const IMAGE_IMPORT_DESCRIPTOR* import =
-           (const IMAGE_IMPORT_DESCRIPTOR*)(base + import_dir.VirtualAddress);
+           (const IMAGE_IMPORT_DESCRIPTOR*)(base + import_dir->VirtualAddress);
         import->Name; ++import) {
       if (_stricmp(base + import->Name, dll_name) == 0) return true;
+   }
+
+   return false;
+}
+
+// Is this the original 2006 v1.1 retail executable? It still circulates: some
+// GOG installs ship it, and so does the SWBFSpy multiplayer exe. It is not the
+// 2017 recompile our Steam and GOG tables describe but a separate compile, so
+// nothing in the project applies to it and the user needs telling that plainly
+// rather than getting the generic "couldn't identify" failure.
+//
+// Every copy seen (the 2006 Steam depot, a GOG install, SWBFSpy) is its own
+// link of one compile, so the fixed-offset id bytes the patch lists use differ
+// between them. What they share is the CodeView record naming the build config,
+// `...\Build\PC Final LTCG\Battlefront2.pdb`. No supported build was linked from
+// that config: modtools is `PC Release` / `PC Modtools Release`, the 2017
+// exes `PC GOG Release` / `PC GOG XPLAY Release`. The record sits in .rdata, so
+// it is mapped and readable in place.
+static bool is_retail_2006(const uintptr_t module_base)
+{
+   const char* const base = (const char*)module_base;
+
+   const IMAGE_DATA_DIRECTORY* debug_dir =
+      module_data_directory(module_base, IMAGE_DIRECTORY_ENTRY_DEBUG);
+   if (not debug_dir) return false;
+
+   const IMAGE_DEBUG_DIRECTORY* entries =
+      (const IMAGE_DEBUG_DIRECTORY*)(base + debug_dir->VirtualAddress);
+   const size_t count = debug_dir->Size / sizeof(IMAGE_DEBUG_DIRECTORY);
+
+   // RSDS record: 'RSDS', GUID, age, then the NUL-terminated PDB path.
+   constexpr size_t rsds_path_offset = 4 + 16 + 4;
+
+   for (size_t i = 0; i < count; ++i) {
+      const IMAGE_DEBUG_DIRECTORY& entry = entries[i];
+
+      if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW) continue;
+      if (not entry.AddressOfRawData or entry.SizeOfData <= rsds_path_offset) continue;
+
+      const char* const record = base + entry.AddressOfRawData;
+      if (memcmp(record, "RSDS", 4) != 0) continue;
+
+      const char* const pdb_path = record + rsds_path_offset;
+      const size_t path_room = entry.SizeOfData - rsds_path_offset;
+
+      // Unterminated within the record means it isn't one we can trust.
+      if (strnlen(pdb_path, path_room) == path_room) continue;
+
+      if (strstr(pdb_path, "\\PC Final LTCG\\")) return true;
    }
 
    return false;
@@ -87,6 +146,8 @@ exe_identity identify_exe(const uintptr_t exe_base, const slim_vector<section_in
    for (const exe_patch_list& exe_list : patch_lists) {
       if (matches_list(exe_list, exe_base, sections)) return exe_identity::supported;
    }
+
+   if (is_retail_2006(exe_base)) return exe_identity::retail_2006;
 
    // No fingerprint matched, so decide how loudly to fail. An unrecognized BF2
    // build is a real problem the user needs told about (a pre-patched exe, say);
@@ -250,6 +311,11 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
       }
 
       return true;
+   }
+
+   if (is_retail_2006(exe_base)) {
+      log.printf("This is the original 2006 v1.1 executable (PC Final LTCG), a different compile "
+                 "from the 2017 Steam/GOG builds. It is not supported.\n");
    }
 
    log.printf("Couldn't identify executable. Unable to patch.\n");

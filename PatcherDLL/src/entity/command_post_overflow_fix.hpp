@@ -76,7 +76,7 @@
 // Per-build:
 //   modtools  FUN_0064FDF0  __cdecl      hint 0x00AD5494  array 0x00AD5498  count 0x00AD549C  class +0x1A54
 //   Steam     FUN_0047AC80  __fastcall   hint 0x007E6318  array 0x007E6314  count 0x007E631C  class +0x0B3C
-//   GOG       not derived -- the fix omits itself rather than guessing.
+//   GOG       FUN_0047AC80  __fastcall   hint 0x007E7318  array 0x007E7314  count 0x007E731C  class +0x0B3C
 //
 // The calling convention DIFFERS between builds; it is read from each build's own
 // prologue, not ported.

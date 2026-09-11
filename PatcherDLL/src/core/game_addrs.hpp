@@ -316,7 +316,13 @@ namespace modtools {
 
    // ---- Debug / Logging ------------------------------------------------------
 
-   // GameLog(fmt, ...) — printf-style debug logger, __cdecl
+   // GameLog(fmt, ...) — printf-style debug logger, __cdecl.  This IS
+   // RedWarning::LogMessage, which writes each message with a full
+   // fopen("a")/fprintf/fclose cycle.  This exe links the SINGLE-THREADED static
+   // CRT (no _lock_str in _fprintf 0x008D56A0 or _fclose 0x008D55B6), so two
+   // threads logging at once corrupt the shared FILE and crash inside __flsbuf
+   // at 0x008D9D6C.  util/game_log_lock.cpp serialises it; retail imports its
+   // stdio from MSVCR120.dll and locks each stream already.
    constexpr uintptr_t game_log                    = 0x007E3D50;
    // RedWarning::SetLogData(severity, file, line, date, time) — __cdecl.  Sets the
    // context the bf2log formatter prints as "Message Severity: N ... file(line)".
@@ -476,6 +482,13 @@ namespace modtools {
    // function: MOV AL,[EDI+0x165] / TEST AL,AL / JNZ <return false>.
    // Patch site is the load; `this` is in EDI.
    constexpr uintptr_t character_change_team_hero_test = 0x00643485;
+
+   // ---- AI / CombatHelper::DeadBodyCheck (0x5B4EC0) ---------------------------
+   // The two branches the [Features] DeadBody* toggles NOP (see dllmain.cpp).
+   //   ..._guard_jge : `7D 07` JGE past the `*(mUnit+0x3AC) >= 4` early-out.
+   //   ..._side_jnz  : `75 16` JNZ on `Team::mSide == 1` (Alliance only).
+   constexpr uintptr_t deadbody_check_guard_jge      = 0x005B4ED3;
+   constexpr uintptr_t deadbody_check_side_jnz       = 0x005B4F06;
 
    // ---- Animation (weapon/soldier) ---------------------------------------------
 
@@ -1388,6 +1401,13 @@ namespace steam {
    // where modtools is 6.
    constexpr uintptr_t character_change_team_hero_test = 0x00452338;
 
+   // ---- AI / CombatHelper::DeadBodyCheck (0x46CD50) ---------------------------
+   // Sole caller CombatHelper::UpdateState (call @0x46D4C3).  The first guard is
+   // the same `7D 07` JGE as modtools; the side gate is a near JNZ here,
+   // `0F 85 C1 01 00 00`, so the NOP is 6 bytes instead of 2.
+   constexpr uintptr_t deadbody_check_guard_jge      = 0x0046CD69;
+   constexpr uintptr_t deadbody_check_side_jnz       = 0x0046CD96;
+
    // ---- Memory heap management -----------------------------------------------
 
    constexpr uintptr_t red_set_current_heap      = 0x006C3C10;  // RedSetCurrentHeap
@@ -2084,9 +2104,9 @@ namespace steam {
    //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
    //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
    // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
-   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
-   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
-   // mapped here.
+   // differs.  The diagnostic half runs here too -- see kDiagSteam / kDiagGOG in
+   // ai/ai_update_budget.cpp for its ControllerManager::Update and
+   // UpdateHighLevel addresses.
    //
    // DECOY, 356 bytes later in the same function: 0x0048656D is
    // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /
@@ -2530,6 +2550,11 @@ namespace gog {
    // byte-identical at the site; see the steam namespace for the full note.
    constexpr uintptr_t character_change_team_hero_test = 0x00452318;
 
+   // ---- AI / CombatHelper::DeadBodyCheck (0x46CD50) ---------------------------
+   // Same VA and byte-identical to Steam at both sites; see the steam namespace.
+   constexpr uintptr_t deadbody_check_guard_jge      = 0x0046CD69;
+   constexpr uintptr_t deadbody_check_side_jnz       = 0x0046CD96;
+
    // ---- Memory heap management --------------------------------------------------
 
    constexpr uintptr_t red_set_current_heap           = 0x006c4ca0;
@@ -2823,6 +2848,19 @@ namespace gog {
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
 
+   // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
+   // Same VA as Steam and byte-identical: tools/port_gog.py `deep` compares the
+   // registration function 23/23 instructions with 0 differences, so the
+   // __fastcall(ECX = entity, EDX = CommandPostClass*) shape carries over, as does
+   // the class offset -- `CMP [EAX+0xB3C],EBX` sits at 0x0047AD1B on both builds.
+   // The three globals are the Steam ones + 0x1000, each ported through several
+   // referencing instructions (3, 14 and 5 concurring sites, all score 1.00).
+   constexpr uintptr_t command_post_find_or_create = 0x0047AC80;
+   constexpr uintptr_t command_post_hint_index     = 0x007E7318;
+   constexpr uintptr_t command_post_array_ptr      = 0x007E7314;
+   constexpr uintptr_t command_post_count_ptr      = 0x007E731C;
+   constexpr uintptr_t command_post_class_off      = 0x0B3C;
+
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;
    constexpr uintptr_t load_render_real               = 0x00577c90;
@@ -2912,9 +2950,9 @@ namespace gog {
    //   0048640D  0F 45 F1        CMOVNZ ESI,ECX
    //   0048642A  85 F6 / JLE     ; <= 0 skips the loop entirely -- fail-safe
    // Steam and GOG share this VA and these bytes; only the CALL rel32 after them
-   // differs.  The diagnostic half of the feature stays modtools-only -- it hooks
-   // ControllerManager::Update and UpdateHighLevel, whose addresses are not
-   // mapped here.
+   // differs.  The diagnostic half runs here too -- see kDiagSteam / kDiagGOG in
+   // ai/ai_update_budget.cpp for its ControllerManager::Update and
+   // UpdateHighLevel addresses.
    //
    // DECOY, 356 bytes later in the same function: 0x0048656D is
    // `B8 0A000000 / 0F 45 C1 / 0F AF C6` -- MOV EAX,0x0A / CMOVNZ EAX,ECX(=0x32) /

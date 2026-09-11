@@ -31,8 +31,8 @@
 // all, and the logger was one of the two unknowns (the other being whether the
 // detours attached, which is why the install line reports its return codes).
 //
-// modtools only -- the addresses are not derived for retail, and the installer
-// no-ops elsewhere.
+// All three builds (kDbgModtools / kDbgSteam / kDbgGOG); the installer no-ops on
+// an unrecognised one.
 // =============================================================================
 
 bool g_branchRegionDebugEnabled = false;

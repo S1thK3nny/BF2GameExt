@@ -2073,11 +2073,12 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 // These hooks fix out-of-bounds writes in vanilla and need nothing but the
 // three function addresses plus two struct offsets.
 //
-// The custom flight system, cargo team save/restore and animation override are
-// installed here too when their addresses are mapped (Steam).  Still NOT ported:
-// turret fire patch + PILOT_SELF turret AI, the ActivatePhysics vtable patch,
-// the CreateController null check (modtools-only by nature — it is a debugger
-// timing bug), and the RayHit terrain-swirl NOPs.
+// Everything else is installed here too where the addresses are mapped: the
+// custom flight system, cargo team save/restore, animation override, the turret
+// fire patch, PILOT_SELF turret AI, the ActivatePhysics vtable patch and the
+// RayHit terrain-swirl suppression.  The one deliberate omission is the
+// CreateController null check (modtools-only by nature — it is a debugger
+// timing bug, and a 23-byte inline cave whose release codegen would differ).
 // ---------------------------------------------------------------------------
 static void carrier_bounds_guards_install(uintptr_t exe_base)
 {

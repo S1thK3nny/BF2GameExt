@@ -22,6 +22,7 @@ struct section_info {
 enum class exe_identity {
    supported,   // matched one of the patch lists
    unsupported, // looks like a BF2 build we have no table for (pre-patched exe, odd variant)
+   retail_2006, // the original 2006 v1.1 exe: a different compile, see is_retail_2006
    foreign,     // not the game at all
 };
 

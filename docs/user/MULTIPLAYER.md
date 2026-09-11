@@ -193,11 +193,10 @@ There is no way to enforce this: the protocol has no attestation and no content 
 
 ### Fix in the DLL before the next release
 1. **AimAssist local-player gate** — `aim_assist.cpp:416` and `checkAutoLock`. Highest priority; it is a live defect that degrades other people's play.
-2. **String Pool Increase is non-functional on Steam and GOG** — `patch_table.cpp:2040` / `:1384` aim at `InitPool` (glyph cache), not `StringDB::Init` (Steam `0x00651ED0`, GOG `0x00652F70`). Mark the toggle non-functional until re-aimed; it currently gives false confidence about an unchecked heap write.
-3. **Matrix/Item Pool arithmetic** — three sites write a byte size into an element-index compare (`0x006B028A`, `0x00407597`; correct `0xBF600` / `0xBF5FF`).
-4. **SkyObjectClass** — the alloc-failure increment at Steam `0x00638DC9` is still live with the patch on.
-5. **Documentation tiering** — Soldier Height Ceiling Removal and Chunk Push Fix are simulation changes filed under "fixes" in `docs/user/FEATURES.md`; they belong in a tier with an explicit "everyone should match" note. SoundParameterized's stated crash symptom is unsupported.
-6. **Network Timer Increase's comment and description** are wrong in three places — see below.
+2. **Matrix/Item Pool arithmetic** — three sites write a byte size into an element-index compare (`0x006B028A`, `0x00407597`; correct `0xBF600` / `0xBF5FF`).
+3. **SkyObjectClass** — the alloc-failure increment at Steam `0x00638DC9` is still live with the patch on.
+4. **Documentation tiering** — Soldier Height Ceiling Removal and Chunk Push Fix are simulation changes filed under "fixes" in `docs/user/FEATURES.md`; they belong in a tier with an explicit "everyone should match" note. SoundParameterized's stated crash symptom is unsupported.
+5. **Network Timer Increase's comment and description** are wrong in three places — see below.
 
 ---
 

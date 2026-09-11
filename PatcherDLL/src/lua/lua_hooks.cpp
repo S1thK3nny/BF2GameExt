@@ -31,6 +31,7 @@
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
+#include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
@@ -385,4 +386,8 @@ void lua_hooks_uninstall()
          VirtualProtect(g_enter_state_path_op_ptr, sizeof(uint32_t), oldProt, &oldProt);
       }
    }
+
+   // Last: every teardown above may log, and until this comes off those lines
+   // are still serialised against the engine's own threads.
+   game_log_lock_uninstall();
 }

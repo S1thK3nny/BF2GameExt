@@ -10,7 +10,7 @@
 // under the id WITHOUT the engine's stray leading space as well, so both
 // BranchRegion("id") and BranchRegion(" id") resolve.
 //
-// Shares the [Fixes] BranchRegionFix key with the patch set. modtools only.
+// Shares the [Fixes] BranchRegionFix key with the patch set. All three builds.
 
 extern bool g_branchRegionFixEnabled;
 

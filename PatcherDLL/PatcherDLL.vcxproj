@@ -170,6 +170,7 @@
     <ClInclude Include="src\util\ini_registry.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
     <ClInclude Include="src\util\sound_diag.hpp" />
+    <ClInclude Include="src\util\game_log_lock.hpp" />
     <ClInclude Include="src\util\voice_limit.hpp" />
     <ClInclude Include="src\util\mp_spawn_delay.hpp" />
     <ClInclude Include="src\util\memory_pool_heap_fix.hpp" />
@@ -204,6 +205,7 @@
     <ClCompile Include="src\ai\ai_decision_rate.cpp" />
     <ClCompile Include="src\ai\reservation_pool.cpp" />
     <ClCompile Include="src\util\content_census.cpp" />
+    <ClCompile Include="src\util\game_log_lock.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />

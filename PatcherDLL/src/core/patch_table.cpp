@@ -1433,11 +1433,15 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            // GOG StringDB::Init is 0x00652F70 — the Steam body (0x00651ED0)
+            // ported by tools/port_gog.py at score 1.00, same three immediates.
             patch_set{
                .name = "String Pool Increase",
                .patches =
                   {
-                     patch{0x13b293 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
+                     patch{0x252380 + 0x1, 0x8000, 0x20000, {.file_offset = true}}, // operator new size
+                     patch{0x25238f + 0x6, 0x8000, 0x20000, {.file_offset = true}}, // stored pool size
+                     patch{0x25239e + 0x1, 0x8000, 0x20000, {.file_offset = true}}, // memset size
                   },
             },
 
@@ -2110,11 +2114,21 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
+            // StringDB::Init is INLINED on the retail builds: the 32KB pool size
+            // is constant-folded into three immediates inside 0x00651ED0 (called
+            // from GameState::PreStateInit @0x0053AFCE), rather than passed as the
+            // `size` argument the modtools build takes.  The old entry here raised
+            // the `PUSH 0x1770` at 0x0053B143, which feeds a different allocator
+            // (0x006DB770) entirely, so the string pool itself stayed at 32KB on
+            // Steam and GOG.  Same body as modtools 0x0048D880: clear the 0x1000
+            // hash table, store the size, allocate it, memset it.
             patch_set{
                .name = "String Pool Increase",
                .patches =
                   {
-                     patch{0x13a543 + 0x1, 0x1770, 0x20000, {.file_offset = true}}, // 6000 -> 128KB
+                     patch{0x2512e0 + 0x1, 0x8000, 0x20000, {.file_offset = true}}, // operator new size
+                     patch{0x2512ef + 0x6, 0x8000, 0x20000, {.file_offset = true}}, // stored pool size
+                     patch{0x2512fe + 0x1, 0x8000, 0x20000, {.file_offset = true}}, // memset size
                   },
             },
 

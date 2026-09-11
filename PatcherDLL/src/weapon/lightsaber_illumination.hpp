@@ -14,8 +14,7 @@
 // attaches a RedOmniLight to each ignited blade, coloured from that blade's own
 // LightSaberTrailColor, so no ODF edits are needed for stock content.
 //
-// Modtools only for now; the retail address sets are unfilled, so the installer
-// no-ops there.
+// All three builds; the installer no-ops where an address it needs is unmapped.
 // =============================================================================
 
 void lightsaber_illumination_install(uintptr_t exe_base);

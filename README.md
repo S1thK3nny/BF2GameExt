@@ -49,6 +49,8 @@ Three builds are supported:
 - **[Steam](https://store.steampowered.com/app/6060)**
 - **[GOG](https://www.gog.com/en/game/star_wars_battlefront_ii)**
 
+Steam and GOG here mean the 2017 update. The original 2006 executable (v1.1), which some GOG installs and the SWBFSpy exe still use, is not supported; see [Troubleshooting](docs/user/TROUBLESHOOTING.md#the-game-closes-saying-the-exe-is-the-original-2006-version).
+
 A runtime build-dispatch layer resolves per-build addresses, so features light up per executable as their addresses are derived. Binary patches apply everywhere; hook-based features are ported build by build.
 
 | Area | Modtools | Steam | GOG |

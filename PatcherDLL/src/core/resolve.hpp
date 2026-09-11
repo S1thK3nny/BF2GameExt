@@ -7,6 +7,7 @@
 
 #include "game_addrs.hpp"
 #include "game_build.hpp"
+#include "util/game_log_lock.hpp"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -98,6 +99,10 @@ constexpr const char* trim_src_path(const char* p)
 // Call-site context captured by the get_gamelog() macro just below, so the shim
 // can stamp the caller's own file and line rather than inheriting whatever the
 // last engine warning left in the RedWarning globals. Single-threaded game.
+// NOTE these are shared globals, so the SetLogData + LogMessage pair below is
+// only atomic because both shims hold the engine-log lock across it. Without
+// that, a second thread logging in between would stamp its own file and line on
+// our message. See util/game_log_lock.hpp.
 inline const char* g_logFile = "PatcherDLL";
 inline int         g_logLine = 0;
 } // namespace detail
@@ -126,11 +131,13 @@ inline void __cdecl scheme_gamelog(const char* fmt, ...)
    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
    va_end(ap);
 
+   game_log_lock_enter();
    if (SetLogData_t set_log_data = get_set_log_data()) {
       set_log_data(RED_SEVERITY_INFO, detail::g_logFile, detail::g_logLine,
                    __DATE__, __TIME__);
    }
    fn_log("%s", msg);
+   game_log_lock_leave();
 }
 
 inline GameLog_t get_gamelog_at(const char* file, int line)
@@ -172,7 +179,9 @@ inline void warn_gamelog(int severity, const char* srcFile, int srcLine,
    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
    va_end(ap);
 
+   game_log_lock_enter();
    if (SetLogData_t set_log_data = get_set_log_data())
       set_log_data(severity, srcFile, srcLine, __DATE__, __TIME__);
    fn_log("%s", msg);
+   game_log_lock_leave();
 }

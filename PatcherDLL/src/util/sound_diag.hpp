@@ -41,8 +41,8 @@
 // logging happens on the engine tick.  Off by default:
 // [Diagnostic] SoundDiagnostic.
 //
-// modtools only -- the addresses are not derived for retail, and the installer
-// no-ops elsewhere.
+// All three builds (kSndModtools / kSndSteam / kSndGOG); the installer no-ops on
+// an unrecognised one.
 // =============================================================================
 
 extern bool g_soundDiagEnabled;

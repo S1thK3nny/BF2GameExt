@@ -173,8 +173,7 @@ decides how many there are.
 ## VoiceLimit did nothing
 
 `[LimitIncreases] VoiceLimit` is 0 by default, which keeps the stock 32; a
-count from 33 to 119 raises it. The key is Modtools only, and on Steam and GOG
-the installer no-ops and the key is ignored.
+count from 33 to 119 raises it. The key works on Modtools, Steam and GOG.
 
 Both mixing paths are raised, so on Modtools the count should climb either way.
 The two paths get there differently, and only one of them needs anything from

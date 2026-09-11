@@ -35,6 +35,7 @@
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
+#include "util/game_log_lock.hpp"
 #include "util/voice_limit.hpp"
 #include "util/mp_spawn_delay.hpp"
 #include "ai/ai_decision_rate.hpp"
@@ -72,35 +73,52 @@ static bool g_initialized = false;
 static void install_patches_impl(uintptr_t exe_base, const char* ini_path);
 
 // ---------------------------------------------------------------------------
-// CombatHelper::DeadBodyCheck (0x5b4ec0) toggles.
+// CombatHelper::DeadBodyCheck toggles (modtools 0x5B4EC0, Steam/GOG 0x46CD50).
 //
 // Vanilla behaviour: Alliance units (Team::mSide == 1) walk to and shoot
-// nearby soldier corpses. Two optional byte patches control this. They are
-// modtools VAs and are guarded by their expected original bytes, so they
-// silently no-op on the GOG/Steam builds (different addresses).
+// nearby soldier corpses. Two optional byte patches control this, each
+// guarded by its expected original bytes.
 //
 //   disableAll  — NOP the first guard's JGE so DeadBodyCheck always returns
 //                 false: NOBODY shoots corpses (this overrides allFactions,
 //                 since the function bails before reaching the side gate).
-//                   0x5b4ed3: 7D 07  JGE 0x5b4edc -> 90 90
-//                   (falls through to the 0x5b4ed5 XOR AL,AL / RET epilogue)
+//                 `7D 07` on every build; the fall-through is the compiler's
+//                 own XOR AL,AL / RET early-out.
 //
 //   allFactions — NOP the mSide==1 JNZ so the side gate always passes: ALL
 //                 factions shoot corpses (the team != 0 null-check above is
-//                 left intact).
-//                   0x5b4f06: 75 16  JNZ 0x5b4f1e -> 90 90
+//                 left intact).  Modtools `75 16` (short), retail
+//                 `0F 85 C1 01 00 00` (near).
 //
 // Must run while the executable sections are still RW (before re-protect).
 // ---------------------------------------------------------------------------
+static bool nop_if_matches(uintptr_t exe_base, uintptr_t va, const uint8_t* orig, size_t len)
+{
+   if (va == 0) return false;
+   uint8_t* p = (uint8_t*)resolve(exe_base, va);
+   if (memcmp(p, orig, len) != 0) return false;
+   memset(p, 0x90, len);
+   return true;
+}
+
 static void apply_deadbody_check_patches(uintptr_t exe_base, bool disableAll, bool allFactions)
 {
+   static const uint8_t kGuardJge[]        = {0x7D, 0x07};
+   static const uint8_t kSideJnzModtools[] = {0x75, 0x16};
+   static const uint8_t kSideJnzRetail[]   = {0x0F, 0x85, 0xC1, 0x01, 0x00, 0x00};
+
+   const bool retail = (g_build == GameBuild::Steam || g_build == GameBuild::GOG);
+   if (!retail && g_build != GameBuild::Modtools) return;
+
    if (disableAll) {
-      uint8_t* p = (uint8_t*)resolve(exe_base, 0x5b4ed3);
-      if (p[0] == 0x7D && p[1] == 0x07) { p[0] = 0x90; p[1] = 0x90; }
+      if (!nop_if_matches(exe_base, g_addr->deadbody_check_guard_jge, kGuardJge, sizeof(kGuardJge)))
+         get_gamelog()("[DeadBodyCheck] unexpected bytes at guard JGE, DisableDeadBodyShooting not applied\n");
    }
-   if (allFactions) {
-      uint8_t* p = (uint8_t*)resolve(exe_base, 0x5b4f06);
-      if (p[0] == 0x75 && p[1] == 0x16) { p[0] = 0x90; p[1] = 0x90; }
+   else if (allFactions) {
+      const uint8_t* orig = retail ? kSideJnzRetail : kSideJnzModtools;
+      const size_t   len  = retail ? sizeof(kSideJnzRetail) : sizeof(kSideJnzModtools);
+      if (!nop_if_matches(exe_base, g_addr->deadbody_check_side_jnz, orig, len))
+         get_gamelog()("[DeadBodyCheck] unexpected bytes at side JNZ, DeadBodyShootingAllFactions not applied\n");
    }
 }
 
@@ -196,7 +214,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // process before anything with a side effect: patching someone else's image
    // is meaningless, FatalAppExit'ing it kills their program, and opening the
    // log "w" from a launcher wipes the log from the last real game session.
-   if (identify_exe(exe_base, sections) == exe_identity::foreign) return;
+   const exe_identity identity = identify_exe(exe_base, sections);
+   if (identity == exe_identity::foreign) return;
 
    // Before any patching: capture first-chance fatal exceptions to
    // BF2GameExt_crash.log (the game's own SEH handler can otherwise swallow the
@@ -215,6 +234,15 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    }
 
    if (not apply_patches(exe_base, sections, ini_path)) {
+      // The 2006 exe gets its own message: the generic one sends people
+      // hunting through the log for a problem that is simply the wrong exe.
+      if (identity == exe_identity::retail_2006) {
+         FatalAppExitA(0, "This BattlefrontII.exe is the original 2006 version (v1.1), which "
+                          "BF2GameExt does not support. It needs the updated 2017 executable "
+                          "from Steam or GOG.\n\nTo play without BF2GameExt, set Enabled=0 under "
+                          "[General] in BF2GameExt.ini.");
+      }
+
       FatalAppExitA(0, "Failed to apply patches! Check \"BF2GameExt.log\" for more info.");
    }
 
@@ -280,6 +308,11 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 
    // Sections are still RW here (re-protected below) — safe to apply byte patches.
    apply_deadbody_check_patches(exe_base, disableDeadBody, deadBodyAllFactions);
+
+   // Before anything that could log from a thread of its own, and well before
+   // the engine starts its Snd workers: the dev exe's logger is not thread-safe
+   // (see util/game_log_lock.cpp).
+   game_log_lock_install(exe_base);
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);

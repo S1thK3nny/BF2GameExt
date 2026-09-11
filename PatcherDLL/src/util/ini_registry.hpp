@@ -95,7 +95,6 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Diagnostic", "ContentCensusNames", "0", "List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers \"what did I actually put in this map\". Needs ContentCensus to be on, and names are only stored on the modtools build"),
    INI_ENTRY("Diagnostic", "AIUpdateDiag",      "0", "Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising"),
    INI_ENTRY("Diagnostic", "PoolGrowthDiag",    "0", "Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs"),
-
    // [Fixes] — bug-fix patches
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
    INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),
