@@ -2,6 +2,13 @@
 
 #include "patch_table.hpp"
 #include "game_addrs.hpp"
+#include "entity/combo_anim_limit.hpp"
+
+// _RenderLightSabre: match Classic Collection's backward visual extension.
+// Redirect only this renderer's operand; the exe's 0.04f constant is shared.
+// The blade tip, combat edge, glow pass and texture blending stay native.
+static const float lightsaber_base_extension = 0.08f;
+static const uint32_t lightsaber_base_extension_address = (uint32_t)&lightsaber_base_extension;
 
 // Matrix/Item Pool Limit Extension: redirect matrixPool to larger static buffer
 // Original pool: 0x2FD80 bytes (0xBF6 entries × 64-byte matrices)
@@ -47,10 +54,10 @@ static const uint32_t gog_sCachedParticles_va = game_addrs::gog::s_cached_partic
 
 // Combo animation increase: 30 -> 90 entries
 // ComboAnimation struct is 0x24 bytes each
-static char s_aComboAnimation_storage[0x24 * 90] = {};
+static char s_aComboAnimation_storage[0x24 * kComboAnimationCount] = {};
 static const uint32_t s_aComboAnimation_addr = (uint32_t)&s_aComboAnimation_storage[0];
-// ComboAnimationPool: 0x4 * 256 per pool, 3 pools
-static char s_aeComboAnimationPool_storage[0x4 * 256 * 3] = {};
+// One shared pool of combo animation references, raised from 256 to 768 entries.
+static char s_aeComboAnimationPool_storage[0x4 * kComboReferenceCount] = {};
 static const uint32_t s_aeComboAnimationPool_addr = (uint32_t)&s_aeComboAnimationPool_storage[0];
 
 // Renderer cache increase: 15 -> RENDERER_CACHE_SLOTS entries
@@ -512,6 +519,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "Combo Anims Increase",
+               .install = combo_anim_limit_install,
                .patches =
                   {
                      // Combo animation array redirect: 30 -> 90 entries (0x24 bytes each)
@@ -519,56 +527,56 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x1709b1 + 0x1, 0xb8c640, s_aComboAnimation_addr + 0x20, {.file_offset = true, .expected_is_va = true}}, // FindComboAnimation
 
                      // Combo limit: 0x1E (30) -> 0x5A (90)
-                     patch{0x170a65 + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
-                     patch{0x188a40 + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
+                     patch{0x170a65 + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
+                     patch{0x188a40 + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
 
                      // ComboAnimationPool redirect + pool size (0x100 -> 0x300)
                      patch{0x170a2b + 0x3, 0xb8cc80, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // AddComboAnimation
                      patch{0x170b31 + 0x3, 0xb8cc80, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // GetComboAnimationIndex
-                     patch{0x170a22 + 0x1, 0x100, 0x300, {.file_offset = true}}, // AddComboAnimation pool size
-                     patch{0x170b27 + 0x2, 0x100, 0x300, {.file_offset = true}}, // GetComboAnimationIndex pool size
+                     patch{0x170a22 + 0x1, 0x100, kComboReferenceCount, {.file_offset = true}}, // AddComboAnimation pool size
+                     patch{0x170b27 + 0x2, 0x100, kComboReferenceCount, {.file_offset = true}}, // GetComboAnimationIndex pool size
 
                      // Animation name table upper limit
-                     patch{0x1722e8 + 0x1, 0x148, 0x1fc, {.file_offset = true}}, // s_pAnimationNameTable upper limit
+                     patch{0x1722e8 + 0x1, 0x148, 2 * kComboAnimationEnd, {.file_offset = true}}, // s_pAnimationNameTable upper limit
 
-                     // SoldierAnimationData struct size: 0xf60 -> 0x17d0
-                     patch{0x1737be + 0x1, 0xf60, 0x17d0, {.file_offset = true}}, // InitAnimationData
-                     patch{0x1739a6 + 0x2, 0xf60, 0x17d0, {.file_offset = true}}, // InitAnimationData
+                     // SoldierAnimationData struct size: 0xf60 -> 0x1500
+                     patch{0x1737be + 0x1, 0xf60, 24 * kComboAnimationEnd, {.file_offset = true}}, // InitAnimationData
+                     patch{0x1739a6 + 0x2, 0xf60, 24 * kComboAnimationEnd, {.file_offset = true}}, // InitAnimationData
 
-                     // Anim index limit: 0xA4 (164) -> 0xFE (254)
-                     patch{0x188b06 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
-                     patch{0x178175 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor
-                     patch{0x17ad35 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner
-                     patch{0x17b02c + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x17b13a + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x17b1ca + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x17b9d1 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x17baaf + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x17bc81 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x17bc89 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x17ccc3 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
-                     patch{0x187951 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x187a36 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x18788a + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x176a3f + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap
-                     patch{0x176c60 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x176c62 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x176c84 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x176c97 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     // Anim index limit: 0xA4 (164) -> 0xE0 (224)
+                     patch{0x188b06 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
+                     patch{0x178175 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor
+                     patch{0x17ad35 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner
+                     patch{0x17b02c + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x17b13a + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x17b1ca + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x17b9d1 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x17baaf + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x17bc81 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x17bc89 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x17ccc3 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
+                     patch{0x187951 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x187a36 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x18788a + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x176a3f + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap
+                     patch{0x176c60 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x176c62 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x176c84 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x176c97 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
                      // EntitySoldier::Render (4-byte, NOT 8-bit)
-                     patch{0x136d47 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0x136d4c + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0x136c99 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0x136c54 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
+                     patch{0x136d47 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0x136d4c + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0x136c99 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0x136c54 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
                      // FUN_005f* and FUN_006009* animation functions
-                     patch{0x1f5cf7 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f5bb0
-                     patch{0x1f6c63 + 0x3, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f6b20
-                     patch{0x1f7754 + 0x3, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f7600
-                     patch{0x200af3 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // FUN_00600990
-                     patch{0x1f6094 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f6090
+                     patch{0x1f5cf7 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f5bb0
+                     patch{0x1f6c63 + 0x3, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f6b20
+                     patch{0x1f7754 + 0x3, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f7600
+                     patch{0x200af3 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // FUN_00600990
+                     patch{0x1f6094 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // FUN_005f6090
                      // g_fnAnim_Data
-                     patch{0x1778b3 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // g_fnAnim_Data (8-bit)
-                     patch{0x177d4a + 0x1, 0xa4, 0xfe, {.file_offset = true}},                          // g_fnAnim_Data (4-byte)
+                     patch{0x1778b3 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // g_fnAnim_Data (8-bit)
+                     patch{0x177d4a + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}},                          // g_fnAnim_Data (4-byte)
                   },
             },
 
@@ -753,6 +761,17 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x48AE01, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
                      patch{0x48AE48, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
                      patch{0x48AF44, 0x233A720, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_pos_address}, // smPlayingPos[0]
+                  },
+            },
+
+            patch_set{
+               .name = "Lightsaber Base Extension",
+               .patches =
+                  {
+                     // Modtools: FMUL [0x00A541D8]. Verify the opcode as well
+                     // as the rebased pointer before redirecting the operand.
+                     patch{0x00633751, 0x0DD8, 0x0DD8, {.values_are_16bit = true}},
+                     patch{0x00633753, 0x00A541D8, lightsaber_base_extension_address, {.expected_is_va = true}},
                   },
             },
 
@@ -1291,6 +1310,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "Combo Anims Increase",
+               .install = combo_anim_limit_install,
                .patches =
                   {
                      // GOG combo animation array redirect: 30 -> 90 entries
@@ -1300,53 +1320,53 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x23D0AD + 0x1, 0x1eb0630, s_aComboAnimation_addr + 0x20, {.file_offset = true, .expected_is_va = true}}, // FindComboAnimation
 
                      // Combo limit: 0x1E (30) -> 0x5A (90)
-                     patch{0x23D170 + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
-                     patch{0x24A90D + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
+                     patch{0x23D170 + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
+                     patch{0x24A90D + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
 
                      // ComboAnimationPool redirect + pool size (0x100 -> 0x300)
                      patch{0x23D13F + 0x3, 0x1eb0bb8, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // AddComboAnimation
                      patch{0x23D20B + 0x3, 0x1eb0bb8, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // GetComboAnimationIndex
-                     patch{0x23D120 + 0x2, 0x100, 0x300, {.file_offset = true}}, // AddComboAnimation pool size
-                     patch{0x23D1F2 + 0x2, 0x100, 0x300, {.file_offset = true}}, // GetComboAnimationIndex pool size
+                     patch{0x23D120 + 0x2, 0x100, kComboReferenceCount, {.file_offset = true}}, // AddComboAnimation pool size
+                     patch{0x23D1F2 + 0x2, 0x100, kComboReferenceCount, {.file_offset = true}}, // GetComboAnimationIndex pool size
 
                      // Animation name table upper limit
-                     patch{0x23E897 + 0x1, 0x148, 0x1fc, {.file_offset = true}}, // s_pAnimationNameTable upper limit
+                     patch{0x23E897 + 0x1, 0x148, 2 * kComboAnimationEnd, {.file_offset = true}}, // s_pAnimationNameTable upper limit
 
                      // SoldierAnimationData struct size
-                     patch{0x23E21B + 0x1, 0xf60, 0x17d0, {.file_offset = true}}, // InitAnimationData
-                     patch{0x23E38C + 0x2, 0xa4, 0xfe, {.file_offset = true}},    // InitAnimationData (4-byte 0xA4->0xFE)
+                     patch{0x23E21B + 0x1, 0xf60, 24 * kComboAnimationEnd, {.file_offset = true}}, // InitAnimationData
+                     patch{0x23E38C + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true}},    // InitAnimationData (4-byte 0xA4->0xE0)
 
-                     // Anim index limit: 0xA4 (164) -> 0xFE (254)
-                     patch{0x24A9A5 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
-                     patch{0x23ECD4 + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 1)
-                     patch{0x23ECD4 + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 2)
-                     patch{0x23EF3F + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 1)
-                     patch{0x23EF3F + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 2)
-                     patch{0x240D87 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x240EA2 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x240F2B + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x241642 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x241715 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x241905 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x24190C + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x240372 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
-                     patch{0x248D23 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x248DF6 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x248C60 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x23FC77 + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 1)
-                     patch{0x23FC77 + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 2)
-                     patch{0x23FE76 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23FE7D + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23FE9E + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23FEAF + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     // Anim index limit: 0xA4 (164) -> 0xE0 (224)
+                     patch{0x24A9A5 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
+                     patch{0x23ECD4 + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 1)
+                     patch{0x23ECD4 + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 2)
+                     patch{0x23EF3F + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 1)
+                     patch{0x23EF3F + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 2)
+                     patch{0x240D87 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x240EA2 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x240F2B + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x241642 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x241715 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x241905 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x24190C + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x240372 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
+                     patch{0x248D23 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x248DF6 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x248C60 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x23FC77 + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 1)
+                     patch{0x23FC77 + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 2)
+                     patch{0x23FE76 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23FE7D + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23FE9E + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23FEAF + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
                      // EntitySoldier::Render (4-byte, NOT 8-bit) — same file offsets as Steam (offset 0 in this region)
-                     patch{0xe2838 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe283d + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe2778 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe274a + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
+                     patch{0xe2838 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe283d + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe2778 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe274a + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
                      // Combo::ResolveForWeapon + DeflectAnimation — same file offsets as Steam (offset 0)
-                     patch{0x74B82 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // ResolveForWeapon (CMP AL, 0xA4)
-                     patch{0x72BD9 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // DeflectAnimation (CMP CL, 0xA4)
+                     patch{0x74B82 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // ResolveForWeapon (CMP AL, 0xA4)
+                     patch{0x72BD9 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // DeflectAnimation (CMP CL, 0xA4)
                   },
             },
 
@@ -1551,6 +1571,16 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x33755F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x3375AE, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x337D5F, 0x1E2B1E0, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                  },
+            },
+
+            patch_set{
+               .name = "Lightsaber Base Extension",
+               .patches =
+                  {
+                     // GOG: MULSS XMM0,[0x007B2E98].
+                     patch{0x00690432, 0x05590FF3, 0x05590FF3},
+                     patch{0x00690436, 0x007B2E98, lightsaber_base_extension_address, {.expected_is_va = true}},
                   },
             },
 
@@ -1967,6 +1997,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "Combo Anims Increase",
+               .install = combo_anim_limit_install,
                .patches =
                   {
                      // Steam combo animation array redirect: 30 -> 90 entries
@@ -1975,67 +2006,67 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x23c00d + 0x1, 0x1eaf0c0, s_aComboAnimation_addr + 0x20, {.file_offset = true, .expected_is_va = true}}, // FindComboAnimation
 
                      // Combo limit: 0x1E (30) -> 0x5A (90)
-                     patch{0x23c0d0 + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
-                     patch{0x24986d + 0x2, 0x1e, 0x5a, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
+                     patch{0x23c0d0 + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // AddComboAnimation
+                     patch{0x24986d + 0x2, 0x1e, kComboAnimationCount, {.file_offset = true, .values_are_8bit = true}}, // IsWeaponMeleeAnimIndex
 
                      // ComboAnimationPool redirect + pool size (0x100 -> 0x300)
                      patch{0x23c09f + 0x3, 0x1eaf710, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // AddComboAnimation
                      patch{0x23c16b + 0x3, 0x1eaf710, s_aeComboAnimationPool_addr, {.file_offset = true, .expected_is_va = true}}, // GetComboAnimationIndex
-                     patch{0x23c080 + 0x2, 0x100, 0x300, {.file_offset = true}}, // AddComboAnimation pool size
-                     patch{0x23c152 + 0x2, 0x100, 0x300, {.file_offset = true}}, // GetComboAnimationIndex pool size
+                     patch{0x23c080 + 0x2, 0x100, kComboReferenceCount, {.file_offset = true}}, // AddComboAnimation pool size
+                     patch{0x23c152 + 0x2, 0x100, kComboReferenceCount, {.file_offset = true}}, // GetComboAnimationIndex pool size
 
                      // Animation name table upper limit
-                     patch{0x23d7f7 + 0x1, 0x148, 0x1fc, {.file_offset = true}}, // s_pAnimationNameTable upper limit
+                     patch{0x23d7f7 + 0x1, 0x148, 2 * kComboAnimationEnd, {.file_offset = true}}, // s_pAnimationNameTable upper limit
 
                      // SoldierAnimationData struct size
-                     patch{0x23d17b + 0x1, 0xf60, 0x17d0, {.file_offset = true}}, // InitAnimationData
-                     patch{0x23d2ec + 0x2, 0xa4, 0xfe, {.file_offset = true}},    // InitAnimationData (4-byte 0xA4->0xFE)
+                     patch{0x23d17b + 0x1, 0xf60, 24 * kComboAnimationEnd, {.file_offset = true}}, // InitAnimationData
+                     patch{0x23d2ec + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true}},    // InitAnimationData (4-byte 0xA4->0xE0)
 
-                     // Anim index limit: 0xA4 (164) -> 0xFE (254)
-                     patch{0x249905 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
-                     patch{0x23dc34 + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 1)
-                     patch{0x23dc34 + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 2)
-                     patch{0x23de9f + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 1)
-                     patch{0x23de9f + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 2)
-                     patch{0x23fce7 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x23fe02 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x23fe8b + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
-                     patch{0x2405a2 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x240675 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x240865 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x24086c + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
-                     patch{0x23f2d2 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
-                     patch{0x247c83 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x247d56 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x247bc0 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
-                     patch{0x23ebd7 + 0x7, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 1)
-                     patch{0x23ebd7 + 0x8, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 2)
-                     patch{0x23edd6 + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23eddd + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23edfe + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
-                     patch{0x23ee0f + 0x6, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     // Anim index limit: 0xA4 (164) -> 0xE0 (224)
+                     patch{0x249905 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // GetAnimFromAnimIndex
+                     patch{0x23dc34 + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 1)
+                     patch{0x23dc34 + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SoldierAnimator ctor (byte 2)
+                     patch{0x23de9f + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 1)
+                     patch{0x23de9f + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetNewOwner (byte 2)
+                     patch{0x23fce7 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x23fe02 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x23fe8b + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateActionAnimation
+                     patch{0x2405a2 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x240675 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x240865 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x24086c + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // UpdateMovementAnimation
+                     patch{0x23f2d2 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetupPose
+                     patch{0x247c83 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x247d56 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x247bc0 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // LowResClass::PostLoad
+                     patch{0x23ebd7 + 0x7, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 1)
+                     patch{0x23ebd7 + 0x8, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponAnimationMap (byte 2)
+                     patch{0x23edd6 + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23eddd + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23edfe + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
+                     patch{0x23ee0f + 0x6, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // SetWeaponComboState
                      // EntitySoldier::Render (4-byte, NOT 8-bit)
-                     patch{0xe2838 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe283d + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe2778 + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
-                     patch{0xe274a + 0x1, 0xa4, 0xfe, {.file_offset = true}}, // Render
+                     patch{0xe2838 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe283d + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe2778 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
+                     patch{0xe274a + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true}}, // Render
                      // Combo::ResolveForWeapon — gates GetUpperBodyAnimation on anim index < 0xA4
-                     patch{0x74B82 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // ResolveForWeapon (CMP AL, 0xA4)
+                     patch{0x74B82 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // ResolveForWeapon (CMP AL, 0xA4)
                      // Combo::State::Deflect::DeflectAnimation — rejects anim indices >= 0xA4
-                     patch{0x72BD9 + 0x2, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // DeflectAnimation (CMP CL, 0xA4)
+                     patch{0x72BD9 + 0x2, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // DeflectAnimation (CMP CL, 0xA4)
                      // WeaponMelee current-combo-anim helper (VA 0x688b80) — returns hardcoded
                      // 0xA4 as its "no animation" sentinel (MOV AL,0xA4; POP ESI; RET).  Both of
-                     // its callers are the EntitySoldier::Render compare sites patched to 0xFE
+                     // its callers are the EntitySoldier::Render compare sites patched to 0xE0
                      // above, so an unpatched return here makes "no melee anim" read as REAL anim
                      // index 0xA4 -> garbage combo/anim data -> crash whenever a melee unit is
                      // in play.  Modtools inlines this helper into Render, where the four Render
                      // patches already cover its sentinel — Steam keeps it out-of-line, so the
                      // sentinel needs its own patch.
-                     patch{0x287FA5, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // melee-anim helper sentinel return (MOV AL, 0xA4)
+                     patch{0x287FA5, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // melee-anim helper sentinel return (MOV AL, 0xA4)
                      // EntitySoldier::Update — inlined weapon-loop bound check on the melee anim
                      // index (CALL helper@0x688b70; CMP AL,0xA4; JAE skip), gated on
                      // weapon->IsMelee().  Same 0xA4 total-index bound as the Render sites.
-                     patch{0xE94F9 + 0x1, 0xa4, 0xfe, {.file_offset = true, .values_are_8bit = true}}, // EntitySoldier::Update (CMP AL, 0xA4)
+                     patch{0xE94F9 + 0x1, 0xa4, kComboAnimationEnd, {.file_offset = true, .values_are_8bit = true}}, // EntitySoldier::Update (CMP AL, 0xA4)
                   },
             },
 
@@ -2237,6 +2268,16 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      patch{0x33646F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x3364BE, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
                      patch{0x336C6F, 0x1E29D40, 0, {.file_offset = true, .expected_is_va = true}, &snd_playing_vel_address}, // smPlayingVel[0]
+                  },
+            },
+
+            patch_set{
+               .name = "Lightsaber Base Extension",
+               .patches =
+                  {
+                     // Steam: MULSS XMM0,[0x007B1F20].
+                     patch{0x0068F3A2, 0x05590FF3, 0x05590FF3},
+                     patch{0x0068F3A6, 0x007B1F20, lightsaber_base_extension_address, {.expected_is_va = true}},
                   },
             },
 

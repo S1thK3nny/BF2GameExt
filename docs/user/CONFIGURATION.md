@@ -44,10 +44,11 @@ Particle effects. `ParticleFixes` repairs how the engine batches and draws them 
 
 ## Lightsaber
 
-Lighting for lightsaber blades. On by default. Radius and intensity are independent: radius changes how far the light reaches, intensity changes how bright it is, and changing one does not affect the other.
+Rendering and lighting for lightsaber blades. On by default. Radius and intensity are independent: radius changes how far the light reaches, intensity changes how bright it is, and changing one does not affect the other.
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `ExtendedBladeBase` | `1` | Extend the visible blade 8% behind its base instead of 4%, matching Classic Collection. Combat reach is unchanged. Set 0 for stock |
 | `LightsaberIllumination` | `1` | Ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. Set 0 for stock |
 | `LightsaberLightRadius` | `4.0` | How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights |
 | `LightsaberLightIntensity` | `1.0` | Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored |
@@ -123,6 +124,7 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 | `ScreenshotFix` | `1` | Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix) |
 | `ErrorDialogFix` | `1` | Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix) |
 | `DLCMissionInitFix` | `0` | EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off) |
+| `HeldOrdnanceEffect` | `1` | Cannon weapons can hold their projectile's TrailEffect at an animated soldier bone before firing. Set HeldOrdnanceEffectBone in the weapon ODF |
 | `DroidekaDeathAnimation` | `1` | Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected |
 | `ReticleCorrection` | `-1` | HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1) |
 | `WeaponIconFix` | `1` | Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present |
@@ -149,8 +151,8 @@ Engine limit patches. Most only raise a ceiling and do not change behaviour belo
 | `ReservationPoolSize` | `127` | How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with "List pool is full". 127 is the ceiling and costs 1.6 KB. Set 60 for stock |
 | `SoldierHeightCeiling` | `0` | Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable |
 | `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice |
-| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5 |
-| `ComboAnimIncrease` | `0` | Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0 |
+| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn |
+| `ComboAnimIncrease` | `0` | Raise combo animation names from 30 to 90, distinct animation banks from 16 to 64, bank/weapon maps from 30 to 90 and references from 256 to 768. Includes the storage needed to play the extra animations. Off by default; enable for content that needs these limits |
 
 ## Controller bindings
 

@@ -125,6 +125,8 @@
     <ClInclude Include="src\entity\flyer_boost_animation.hpp" />
     <ClInclude Include="src\entity\cloth_collision_fix.hpp" />
     <ClInclude Include="src\entity\tentacle_limit.hpp" />
+    <ClInclude Include="src\entity\tentacle_timing.hpp" />
+    <ClInclude Include="src\entity\tentacle_timing_sites.hpp" />
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp" />
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
     <ClInclude Include="src\entity\fp_fire_animation_fix.hpp" />
@@ -135,6 +137,8 @@
     <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp" />
+    <ClInclude Include="src\weapon\held_ordnance_effect.hpp" />
+    <ClInclude Include="src\weapon\held_ordnance_effect_sites.hpp" />
     <ClInclude Include="src\weapon\grappling_hook.hpp" />
     <ClInclude Include="src\weapon\shield_channel_fix.hpp" />
     <ClInclude Include="src\lua\lua_hooks.hpp" />
@@ -163,6 +167,8 @@
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
     <ClInclude Include="src\entity\ai_squad_order_null_fix.hpp" />
     <ClInclude Include="src\entity\combo_damage_anim_guard.hpp" />
+    <ClInclude Include="src\entity\combo_anim_limit.hpp" />
+    <ClInclude Include="src\entity\combo_anim_layout.hpp" />
     <ClInclude Include="src\entity\odf_gameext_props.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
@@ -226,6 +232,7 @@
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />
     <ClCompile Include="src\entity\ai_squad_order_null_fix.cpp" />
     <ClCompile Include="src\entity\combo_damage_anim_guard.cpp" />
+    <ClCompile Include="src\entity\combo_anim_limit.cpp" />
     <ClCompile Include="src\entity\odf_gameext_props.cpp" />
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\fp_fire_animation_fix.cpp" />
@@ -237,6 +244,7 @@
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp" />
+    <ClCompile Include="src\weapon\held_ordnance_effect.cpp" />
     <ClCompile Include="src\weapon\impact_sound_water_fix.cpp" />
     <ClCompile Include="src\weapon\grappling_hook.cpp" />
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />

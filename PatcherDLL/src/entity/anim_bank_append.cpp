@@ -70,15 +70,12 @@
 //     - the inline search loop FUN_0057de40 (hooked_FindInBanks).
 //   The count int stays inline — it's used only as an index value.
 //
-//   NOTE — a SEPARATE, harder limit exists that this does NOT (and must not) try
-//   to raise: the number of distinct bank NAMES is capped at 16, and weapon
-//   types at 20, fused into fixed-size STACK-LOCAL arrays inside SetupBodyMasks
-//   (aiStack_81c0[16*20], stride 0x14 baked in at 6 sites; coupled to the global
-//   AddBank cap of 16 and the per-class AnimationMap[30]).  Raising the AddBank
-//   cap overflows those stack arrays -> stack smash, so do NOT do it.  Modded
-//   soldier classes must keep to <=16 distinct bank names and <=20 weapon types;
-//   within that, this PART B raise lets them load far more than 18 .zaabin
-//   sub-banks (up to kBigBankMax).
+//   Distinct bank NAMES are a separate registry, stock cap 16. ComboAnimIncrease
+//   raises it to 64 and relocates the bank-order and bank/weapon scratch arrays
+//   in SoldierAnimatorClass initialization. That storage belongs to the combo
+//   module; increasing only AddBank's comparison would overflow it. Weapon
+//   types remain capped at 20. This module expands loaded .zaabin pointers,
+//   including numbered sub-banks, without consuming extra bank-name IDs.
 // =============================================================================
 
 // ---------------------------------------------------------------------------

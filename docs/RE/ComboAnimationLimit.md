@@ -1,5 +1,112 @@
 # Raising the combo animation limit
 
+## Applied in BF2GameExt
+
+`[LimitIncreases] ComboAnimIncrease` now grows the storage as well as the name
+list, on modtools, Steam and GOG. Off by default.
+
+The old patch handed out indices past 163 without making room for them. An index
+could land in the next map, or in the custom fields at the end of this one. The
+getter guard stopped the crash by returning NULL, but the animation still could
+not play. `entity/combo_anim_limit.cpp` gives those indices their own storage.
+
+| Quantity | Stock | With ComboAnimIncrease |
+|---|---:|---:|
+| Combo animation names | 30 | 90 |
+| Distinct animation-bank names | 16 | 64 |
+| Bank/weapon maps | 30 | 90 |
+| Combo animation references | 256 | 768 |
+| Logical melee indices | 134–163 | 134–223 |
+| No-animation sentinel | 164 (`0xA4`) | 224 (`0xE0`) |
+| AnimationMap size | `0x4B8` | `0x698` |
+| Custom fields, relative to map | `+0x490` | `+0x670` |
+| SoldierAnimationData size | `0xF60` | `0x1500` |
+| Animation name table bound | 328 | 448 |
+
+The weapon/melee union is unchanged: logical weapon indices 116–133 alias the
+first eighteen melee pairs. The unassigned byte `0xFF` is still unassigned, not
+another animation. Weapon types stay at 20, low-resolution bank names at 12,
+and the temporary map cache at 24. Loaded numbered sub-banks use the separate
+array extended by `anim_bank_append.cpp`.
+
+### What moves, and what does not
+
+The class stays `0xF7C0` bytes. Moving its tail was what broke the earlier attempt
+below: interior pointers into the collision tables were missed. Instead the DLL
+holds 90 maps, 90 collision records and 24 temporary map payloads. The old inline
+arrays remain in the object, so unrelated members keep their offsets.
+
+MapCache keeps its original bank/weapon keys at stride `0x4C0`, where the parent
+stack still walks them. Only the returned map pointer moves. The supplied-pointer
+GetMap translates `this+0x24+map*0x4B8` to a DLL map and preserves parent aliases.
+Newly claimed maps get the same `0xFF` fill as stock. The initializer resets DLL
+storage first, lets the engine reset its own keys, then drops the cache's stack
+pointer on return. Initialization and class rebuilds remain non-reentrant.
+
+The bank registry moves with both of its initializer tables: 64 records of
+`0x2C` bytes, a 65-entry bank-order list (including the final -1), and 64×20
+bank/weapon cells. Raising AddBank's comparison alone would overrun those stack
+tables. Original hashing, name copies, parent links and low-resolution links
+stay in use. The installer copies the built-in entries; mission reset still
+reduces the bank count to one and the map count to five. Registered map IDs are
+checked before they can reach the unchecked skeleton lookup.
+
+LowResClass::PostLoad also had a 256-entry stack list with no bound check. It
+deduplicates by `(map, logical animation)`, so `90*224` eight-byte records cover
+every possible pair. Its eighteen accesses per build now use DLL storage. The
+per-class count reset, final heap allocation and stack frame are unchanged.
+
+### Readers that cannot use the old inline maps
+
+Upper/lower movement, action, weapon and generic getters, plus the custom getter,
+all read the new maps. The modtools physical-pair preview getter is replaced too;
+retail compiled that path out. Custom writers use `+0x670`, and the final cleanup
+walk advances by `0x698`. Collision records keep their 900-byte stride; both
+readers and initializer writes are redirected, including the retail write that
+computes its address independently of the other anchors.
+
+The jetpack sampler is a separate trap. Modtools `0x0058414D` reads
+`[ESI+0xEC]`, which is map 0's upper action 25 (`0x24+25*8`). It bypasses every
+getter. Steam `0x00647456` and GOG `0x006484F6` push the same cell instead. These
+instructions now read the DLL cell, keeping the original MOV/PUSH behaviour.
+
+Retail callers keep ECX and sometimes EDX live across the original leaf getters.
+A C++ calling-convention annotation does not preserve that contract. The naked
+shims preserve registers other than the EAX result, flags and XMM0–7, and keep
+each original RET argument count. Function and instruction tables are in
+`combo_anim_limit.cpp`; capacities and layout assertions are in
+`combo_anim_layout.hpp`.
+
+### Installation and guards
+
+The patch core checks every numeric site before calling `patch_set::install`.
+That callback checks all storage instructions and hook entries, installs the
+hooks in one Detours transaction, and restores storage bytes if commit fails.
+Only a successful install permits the numeric limits to change. Retail absolute
+operands are rebased for both verification and rollback. These are startup,
+process-lifetime patches, like the other array relocations.
+
+The damage guard uses the same expanded lookup and leaves its detours alone.
+With the option off, it keeps the stock 164-index/30-map bound. Both paths skip
+missing clips; the lower-body fallback is unchanged. See
+[ComboDamageResolver.md](ComboDamageResolver.md).
+
+The initialization log gives the live counts and cache peak/failures. The crash
+logger also recognizes the modtools lower-movement fault at `0x0057906D`, caller
+`0x0057BBE3`, and prints the map, stance and raw slots without faulting on an
+unreadable pointer. Startup logs append after one initial truncation, so messages
+from separate installer handles do not overwrite one another.
+
+Played on modtools and Steam with 52 names, 253 references, 31 maps and 17 banks;
+both logs show a 14/24 cache peak and no cache failures. GOG's original-byte and
+native checks pass; live GOG play has not been checked here.
+
+## Historical in-place attempt (reverted)
+
+The remainder is the failed 2026-09-06 approach. Its 120-name target and tail
+offsets are not the applied layout above. The custom offset is `0x490` relative
+to a map; `0x4B4` includes the class's `+0x24` map-array base.
+
 > **The in-place growth described below was BUILT, TESTED AND REVERTED on 2026-09-06.**
 > It crashes instantly. Read "Why this failed" at the bottom before acting on any of the
 > site tables here. The derivation and the index-space analysis are still correct and are

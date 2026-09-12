@@ -84,10 +84,12 @@ reached once the primary animation is good. Left unguarded by
 
 ## Per-map block geometry
 
-The animator's per-map stride is `0x12E` dwords = `0x4B8` = 1208 bytes, and three
-sub-arrays share it (`+0x24`, `-0x6C`, `+0x4B4`). Because the third starts at 1204, the
-second holds indices 0..163 and `0xA4` (164) is the stock sentinel **because it is one past
-the end**. See ROADMAP.md for what `ComboAnimIncrease` does to that bound.
+The stock animator's per-map stride is `0x12E` dwords = `0x4B8` = 1208 bytes.
+Its 146 physical animation pairs expose logical indices 0..163 because the
+weapon and melee ranges alias; ten custom dwords begin at map offset `0x490`.
+The inline map array begins at class offset `0x24`, so its first custom field
+is at class offset `0x4B4`. `0xA4` (164) is the stock logical sentinel.
+See [ComboAnimationLimit.md](ComboAnimationLimit.md) for the expanded layout.
 
 ## Related
 
@@ -130,3 +132,13 @@ untouched.
 A signature miss no longer disables the whole file: the clamp and the resolver guard install
 independently, and a miss logs the bytes actually found so an injected `E9` from another DLL
 is distinguishable from a wrong address.
+
+## Expanded-map integration
+
+When `ComboAnimIncrease` installs, it owns the upper/lower body entry points and
+preserves the retail callers' extra register requirements. The damage guard
+does not detour them again or read the old inline map. It uses the extension's
+shared lookup with the live map count and logical indices 0..223. With the
+extension inactive, the existing getter clamps retain 30 maps and indices
+0..163. The unassigned byte `0xFF` is silent on both paths; missing clips still
+contribute no damage samples. The lower-body fallback described above is unchanged.
