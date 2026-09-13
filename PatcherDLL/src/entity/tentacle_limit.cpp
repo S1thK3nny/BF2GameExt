@@ -125,7 +125,7 @@
 // functions are replaced here.
 // =============================================================================
 
-bool g_tentacleLimitEnabled = false;
+bool g_tentacleLimitEnabled = true;
 
 namespace {
 

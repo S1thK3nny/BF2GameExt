@@ -3,7 +3,7 @@
 ## Applied in BF2GameExt
 
 `[LimitIncreases] ComboAnimIncrease` now grows the storage as well as the name
-list, on modtools, Steam and GOG. Off by default.
+list, on modtools, Steam and GOG. On by default.
 
 The old patch handed out indices past 163 without making room for them. An index
 could land in the next map, or in the custom fields at the end of this one. The

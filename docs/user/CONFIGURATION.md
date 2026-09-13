@@ -149,10 +149,10 @@ Engine limit patches. Most only raise a ceiling and do not change behaviour belo
 | `ExplosionVisibleRadius` | `1` | Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map |
 | `GCVisualLimits` | `1` | Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets) |
 | `ReservationPoolSize` | `127` | How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with "List pool is full". 127 is the ceiling and costs 1.6 KB. Set 60 for stock |
+| `TentacleLimit` | `1` | Raise how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn |
+| `ComboAnimIncrease` | `1` | Raise combo animation names from 30 to 90, distinct animation banks from 16 to 64, bank/weapon maps from 30 to 90 and references from 256 to 768. Includes the storage needed to play the extra animations |
 | `SoldierHeightCeiling` | `0` | Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable |
 | `VoiceLimit` | `0` | How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice |
-| `TentacleLimit` | `0` | Raise how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn |
-| `ComboAnimIncrease` | `0` | Raise combo animation names from 30 to 90, distinct animation banks from 16 to 64, bank/weapon maps from 30 to 90 and references from 256 to 768. Includes the storage needed to play the extra animations. Off by default; enable for content that needs these limits |
 
 ## Controller bindings
 

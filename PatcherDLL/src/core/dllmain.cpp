@@ -285,7 +285,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
-      g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", false);
+      g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
