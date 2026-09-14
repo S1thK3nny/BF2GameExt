@@ -63,11 +63,20 @@ struct patch {
 /// allocation degrades to "feature off" instead of taking the process down.
 using patch_prepare_fn = bool (*)();
 
+/// Installs runtime support after every operand in the set has been verified,
+/// but before any is written. Returning false leaves the numeric patch set off;
+/// the callback must also leave its own hooks and storage inactive on failure.
+/// Called inside the startup RW window, before any engine code can use the set.
+using patch_install_fn = bool (*)(uintptr_t exe_base);
+
 struct patch_set {
    const char* name = "";
 
    /// Optional; see patch_prepare_fn. Sets without late-bound buffers leave it null.
    patch_prepare_fn prepare = nullptr;
+
+   /// Optional runtime support that must succeed before numeric limits change.
+   patch_install_fn install = nullptr;
 
    slim_vector<patch> patches;
 };

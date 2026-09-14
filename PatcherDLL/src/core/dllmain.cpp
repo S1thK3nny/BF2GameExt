@@ -10,6 +10,7 @@
 #include "entity/anim_bank_append.hpp"
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/barrel_fire_origin.hpp"
+#include "weapon/held_ordnance_effect.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
 #include "entity/soldier_override_texture.hpp"
@@ -265,6 +266,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiPlayerAwarenessFairness = cfg.get_bool("AI", "PlayerAwarenessFairness", true);
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
       g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
+      g_heldOrdnanceEffectEnabled = cfg.get_bool("Fixes", "HeldOrdnanceEffect", true);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
       g_particleDensity           = cfg.get_int("Particles", "ParticleDensity", 0);
@@ -283,7 +285,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
-      g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", false);
+      g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
       g_disableAwardWeapons = cfg.get_bool("Features", "DisableAwardWeapons", false);
@@ -320,6 +322,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Installers that select their address set from g_addr; each no-ops where its
    // addresses are unknown.  Called here while sections are still RW.
    barrel_fire_origin_install(exe_base);
+   // Held-effect preflight verifies the original soldier render receiver chain;
+   // install before tentacle/texture wrappers replace its native render entries.
+   held_ordnance_effect_install(exe_base);
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
    prone_lvl_load_install(exe_base); // must follow prone_system_install — owns g_proneEnabled
@@ -365,10 +370,12 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    droideka_ball_mode_install(exe_base);
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
    award_disable_install(exe_base);
+   // Own the complete render frames before texture overrides wrap the same
+   // soldier/selection entries; the tentacle preflight verifies original bytes.
+   tentacle_limit_install(exe_base);
    soldier_override_texture_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
-   tentacle_limit_install(exe_base);   // byte-patches .text/.rdata — needs the RW window
    ai_fairness_install(exe_base);
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window

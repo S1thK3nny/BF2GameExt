@@ -226,7 +226,13 @@ static void write_patch(const patch& patch, const uintptr_t exe_base,
 bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& sections,
                    const char* ini_path)
 {
-   cfile log{"BF2GameExt.log", "w"};
+   // Start a fresh log, then append so runtime installers can append through
+   // their own handles without the next patch-set message overwriting them.
+   {
+      cfile fresh_log{"BF2GameExt.log", "w"};
+      if (not fresh_log) return false;
+   }
+   cfile log{"BF2GameExt.log", "a"};
 
    if (not log) return false;
 
@@ -283,6 +289,15 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
          if (bad) {
             log.printf("Skipping patch set (site mismatch @ %x, expected %x): %s\n",
                        bad->address, bad->expected_value, set.name);
+            continue;
+         }
+
+         // Coupled runtime storage must be installed before raising any limit.
+         // Every numeric site is already verified, so a failed callback leaves
+         // the whole set at its stock values. The callback owns rollback of any
+         // hooks or redirects it attempted before returning false.
+         if (set.install && !set.install(exe_base)) {
+            log.printf("Skipping patch set (runtime support not installed): %s\n", set.name);
             continue;
          }
 

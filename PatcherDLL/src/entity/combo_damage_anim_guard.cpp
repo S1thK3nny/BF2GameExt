@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "combo_damage_anim_guard.hpp"
+#include "combo_anim_limit.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 
@@ -10,109 +11,45 @@
 #include <intrin.h>
 
 // =============================================================================
-// Out-of-range soldier animation index crash fixes.
+// Soldier animation lookup and melee damage guards.
 //
-// -----------------------------------------------------------------------------
-// The shared cause
+// A stock AnimationMap is 0x4B8 bytes: 38 action pairs, 78 movement pairs,
+// a union of 18 weapon / 30 melee pairs, and ten custom-animation dwords.
+// The union means 146 physical pairs expose logical indices 0..163. Indices
+// beyond that range read custom data or a neighbouring map, and reset-fill
+// 0xFFFFFFFF also survives the engine's ordinary NULL checks.
 //
-// SoldierAnimatorClass::AnimationMap stores exactly 164 animation slots per map
-// and NOTHING in the engine range-checks an animation index against that.
+// With ComboAnimIncrease active, combo_anim_limit owns the body getters and
+// supplies enlarged maps for logical indices 0..223. This module leaves those
+// entry points alone and probes that same storage when resolving damage. With
+// the feature off, the two stock getter clamps reject invalid maps, indices
+// and reset-fill. Other direct map readers are handled by the limit extension.
 //
-// A map is 0x4B8 = 1208 bytes (`IMUL ,0x12E`, 302 dwords) laid out as
+// Combo::Attack::_ResolveDamageData (modtools 0x005FCD30, Steam/GOG 0x004727A0)
+// still needs its own guard. It gets the upper-body animation and dereferences
+// it without a NULL test, unlike its sibling Combo::ResolveForWeapon:
 //
-//     mActionAnimation      [38]      pairs   offset    0
-//     mMovementAnimation    [6][13]   = 78    offset  304
-//     mWeaponAnimation      [3][6]    = 18  } aliased   928
-//     mWeaponMeleeAnimation [30]      = 30  } union     928
-//     mCustomAnimation      uint[10]          offset 1168
-//
-// 38 + 78 + 18 + 30 = 164, and the melee sub-array ends exactly where
-// mCustomAnimation starts, which is why 0xA4 (164) is the engine's "no
-// animation" sentinel: it is one past the end of the array, not a magic number.
-// See docs/RE/ComboAnimationLimit.md for the derivation.
-//
-// [LimitIncreases] ComboAnimIncrease moves that sentinel to 0xFE (254) at 25
-// sites so a mod can carry more than 30 distinct combo animation names. It does
-// not widen the per-map block, so indices 164..253 address the NEXT map's slots.
-//
-// -----------------------------------------------------------------------------
-// Bug 1 - the getters return garbage, and every consumer only tests for NULL
-//
-// SoldierAnimatorClass::Get{Upper,Lower}BodyAnimation (modtools 0x0057DD40 /
-// 0x0057DD80, Steam 0x006439E0 / 0x00643A10, GOG 0x00644A80 / 0x00644AB0) are
-// bare table reads with no rejection path at all:
-//
-//     IMUL EDX,map,0x12E
-//     MOV  EAX,[ECX + EDX*4 + 0x24]      ; idx <  134
-//     MOV  EAX,[ECX + EDX*4 - 0x6C]      ; idx >= 134
-//
-// Both branches return something for every index a uchar can hold. Two values
-// therefore reach callers that only compare against NULL:
-//
-//   * an index past 163 -> whatever dword sits in the neighbouring map.
-//     Confirmed live 2026-09-06 on both modtools and GOG: map 27, index 179,
-//     returning 0x00000041 and 0x15AC5475.
-//   * an in-range but unpopulated slot -> 0xFFFFFFFF, because a map is reset
-//     with `OR EAX,-1 / REP STOSD` across all 302 dwords (modtools 0x0057E190).
-//     This is the value behind the parked UpdateUpperBodyAnimation crash.
-//
-// Fixed by clamping inside the two getters, which is the choke point the whole
-// family goes through - UpdateActionAnimation, UpdateMovementAnimation,
-// SetupPose, EntitySoldier::Render and the damage resolver all come through
-// here. Out of range and never-populated both become NULL, which is the answer
-// every one of those callers already handles.
-//
-// -----------------------------------------------------------------------------
-// Bug 2 - _ResolveDamageData does not test the lookup at all
-//
-// _ResolveDamageData (modtools 0x005FCD30, Steam/GOG 0x004727A0) is the melee
-// damage-ray resolver. For each Attack in a combo state it walks the attack's
-// animation and records the keyframed blade positions and directions the swing
-// sweeps (docs/RE/ComboDamageResolver.md). It fetches that animation once:
-//
-//     modtools 0x005FCEB3  MOV CL,[EAX+0x28]        ; Attack::mAnimIndex
-//              0x005FCEB6  MOV EAX,[EDI+8]          ; Combo::mMap
+//     modtools 0x005FCEB3  MOV CL,[EAX+0x28]   ; Attack::mAnimIndex
+//              0x005FCEB6  MOV EAX,[EDI+8]     ; Combo::mMap
 //              0x005FCEC9  CALL GetUpperBodyAnimation
-//              0x005FCECE  MOV [ESP+0x24],EAX       ; stored, never tested
+//              0x005FCECE  MOV [ESP+0x24],EAX ; later dereferenced raw
 //
-//     Steam    0x0047293E  MOV EAX,[EDI+8]          ; Combo::mMap
+//     Steam    0x0047293E  MOV EAX,[EDI+8]
 //              0x00472946  CALL 0x006439E0
-//              0x0047294B  MOV EDI,EAX              ; stored, never tested
+//              0x0047294B  MOV EDI,EAX
 //
-// and then dereferences it raw at modtools 0x005FD17F (`MOV EAX,[ESI]`). Its
-// immediate sibling Combo::ResolveForWeapon does the identical lookup and DOES
-// null-check it; this one does not, and has four unguarded uses.
+// Repeat the lookup before entering the resolver and reject a missing clip.
+// Returning false matches the function's existing invalid-bone failure paths;
+// its caller discards the result, so the attack simply contributes no samples.
+// Nothing has been constructed before this check, which also avoids touching
+// the retail resolver's SEH frame. See docs/RE/ComboDamageResolver.md.
 //
-// So the clamp is not enough for this caller, and it keeps its own guard:
-// repeat the lookup, skip the call when the animation is unusable. Skipping is
-// the engine's own answer to an attack it cannot resolve - the two RedWarning
-// paths inside the function ("uses damage edge attached to invalid bone",
-// "...to lower body bone ... without AnimatedMove!") both return false the same
-// way, and the single caller on every build discards the return value. The
-// attack contributes no damage samples instead of crashing. Nothing is
-// constructed before the check, so there is nothing to unwind, which also keeps
-// us clear of the SEH frame the retail builds set up.
+// The class contains 30 animation maps, followed by unrelated ordnance and
+// bank data. Dividing the whole class allocation by a map stride does not give
+// a legal map bound. Negative maps can result from failed weapon-map lookup.
 //
-// A negative map is bailed on too. That is the poisoned-ODF state described in
-// setcharacterweapon_melee_animmap (WeaponMeleeClass::Build caches the first
-// instance's animation MAP into the shared class and writes -1 when the lookup
-// failed); feeding -1 to the getter reads far below the animator object.
-//
-// -----------------------------------------------------------------------------
-// What this does NOT do
-//
-// It does not make an animation authored at index 164+ play. The storage is not
-// there, and putting it there means widening the per-map block, which is a
-// separate piece of work tracked in ROADMAP.md and
-// docs/RE/ComboAnimationLimit.md. Until then an over-budget combo animation is
-// silently absent rather than fatal, and the log names the map and index so the
-// content side can be brought back under the limit.
-//
-// Reading a crash log for the resolver bug: [Features] Prone hooks the
-// animation accessor at modtools 0x005701F0 with its own null guard
-// (soldier_prone.cpp), so with Prone on a NULL survives four more instructions
-// and the AV lands on the raw deref at 0x005FD17F rather than inside the
-// accessor. Same bug either way.
+// 0xFF is an unassigned byte-sized animation index, including on stock content.
+// It is separate from the stock/expanded logical sentinel and is silent here.
 // =============================================================================
 
 namespace {
@@ -200,24 +137,12 @@ const uint8_t kLowerRetail[]   = {0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x0C, 0x0F, 0xB6
 // in build_addrs above.
 constexpr size_t kComboMapOff = 0x08;
 
-// Upper bound on a legal animation map.  SoldierAnimatorClass is one
-// `operator new(0xF7C0)` block (modtools 0x005817A9) holding per-map blocks of
-// 0x4B8 bytes after a 0x24 header, so 52 maps fit.  64 is comfortably above any
-// legal value and comfortably below anything that would read off the object.
-constexpr int kMaxAnimMap = 64;
+constexpr int kStockAnimIndexEnd = 164;
 
-// Upper bound on a legal animation index, and the reason the stock sentinel is
-// 0xA4.  Inside a map's 0x4B8-byte block this index addresses a sub-array at
-// `idx*8 - 0x6C`, and the next sub-array starts at +0x4B4, so the last index
-// that fits is 163 and 164 is one past the end.  ComboAnimIncrease raises the
-// sentinel to 0xFE at 25 sites without widening the block, so 164..253 read
-// into the NEXT map's slots and hand back whatever happens to sit there.
-//
-// That is not a hypothetical: observed 2026-09-06 on both modtools and GOG with
-// map 27, index 179, returning 0x00000041 and 0x15AC5475 - non-NULL values that
-// are not pointers. The read has to be refused before it happens; there is no
-// checking the result afterwards, because the result is meaningless.
-constexpr int kMaxAnimIndex = 164;
+int animation_index_end()
+{
+   return combo_anim_limit_active() ? kComboAnimationEnd : kStockAnimIndexEnd;
+}
 
 // A byte-sized animation index field that was never assigned holds 0xFF. It is
 // not an authored index and not a mod error - see clamp_body_animation.
@@ -272,66 +197,13 @@ bool getter_already_reported(int map, int idx)
    return false;
 }
 
-// -----------------------------------------------------------------------------
-// The getter clamp.
+// The stock getter clamp. Callers pass the animation index as a dword but
+// the original leaf reads only its low byte, so preserve that convention.
+// The extension owns these entry points when active; its shared lookup already
+// validates ownership, the live map count and the expanded index range.
 //
-// SoldierAnimatorClass::Get{Upper,Lower}BodyAnimation are bare table reads with
-// no rejection path:
-//
-//     IMUL EDX,map,0x12E                 ; 302 dwords = 0x4B8 = 1208 bytes/map
-//     MOV  EAX,[ECX + EDX*4 + 0x24]      ; idx <  134
-//     MOV  EAX,[ECX + EDX*4 - 0x6C]      ; idx >= 134
-//
-// Both branches return something for any index a uchar can hold.  A map's block
-// holds 164 slots (the melee sub-array is last and ends exactly where
-// mCustomAnimation starts), so 164..255 address the NEXT map's block.
-//
-// Two values therefore reach callers that only test for NULL:
-//
-//   * an out-of-range index -> whatever dword sits in the neighbouring map
-//     (observed: map 27, index 179 -> 0x00000041 and 0x15AC5475), and
-//   * an in-range but unpopulated slot -> 0xFFFFFFFF, because a map is reset by
-//     `OR EAX,-1 / REP STOSD` over all 302 dwords.
-//
-// Returning NULL for both is the answer every consumer already handles: they
-// all compare the result against the "no animation" case and skip.  Nothing can
-// be relying on -1 as a live value, because a consumer that received one would
-// dereference it.
-//
-// This is the choke point for the whole family - UpdateActionAnimation,
-// UpdateMovementAnimation, SetupPose, EntitySoldier::Render and the damage
-// resolver all come through here - which is why it is a clamp on the getters
-// rather than a guard bolted onto each caller.
-//
-// Callers push the index as a dword whose low byte is the index; the engine
-// reads it with MOVZX, so only the low byte is meaningful and the test has to
-// mask before comparing.
-//
-// -----------------------------------------------------------------------------
-// Not every out-of-range index means a mod authored one
-//
-// 0xFF is the "no animation assigned" value of a byte-sized animation index
-// field, and it reaches this getter on a completely stock map with
-// ComboAnimIncrease off. The engine's own filters are not range checks - the two
-// sites in `FUN_0057afd0` (modtools `0x0057B02C` and `0x0057B13A`) read the byte
-// at `soldier+0x2018` and test it with
-//
-//     CMP AL,0xA4
-//     JZ  skip
-//
-// which skips the sentinel 164 and *only* 164. An unassigned 0xFF is not equal
-// to 0xA4, so it falls straight through into the getter. `Combo::ResolveForWeapon`
-// (`0x00600AF0`) and `PostLoad` (`0x0058788A`) do it properly with `< 0xA4` /
-// `JNC`, which is why those paths never produce this report.
-//
-// So the message has to separate the two cases. An index at or above the
-// sentinel but below 0xFF is a real authored-past-the-end animation and is worth
-// pointing at ComboAnimIncrease. 0xFF is an empty field, is expected, and naming
-// ComboAnimIncrease there sends people to a setting that is not involved - it
-// reads as a bug in the mod when nothing is wrong.
-//
-// Both still return NULL. That is the correct answer either way, and it is what
-// the engine would have produced had it range-checked.
+// Keep the unassigned 0xFF field silent. Stock equality checks against 0xA4
+// can let it reach the getter even though no animation was ever requested.
 void* clamp_body_animation(fn_GetUpperBodyAnim_t original, void* ecx, void* edx,
                            int map, int idx, const char* which, void* caller)
 {
@@ -340,22 +212,24 @@ void* clamp_body_animation(fn_GetUpperBodyAnim_t original, void* ecx, void* edx,
    // Unrelocated form, so a report can be looked up directly in Ghidra.
    const uintptr_t site = (uintptr_t)caller - exe_base() + kUnrelocatedBase;
 
-   // Silent on purpose. This fires on completely stock content - it is an empty
-   // field, not an authored animation, and there is nothing for anyone to fix -
-   // so a line here is a false alarm on maps that are working correctly. The
-   // clamp itself is unchanged: NULL is still returned, which is the whole point
-   // of the guard. Only the report goes away.
    if (animIdx == kUnassignedAnimIndex) return nullptr;
 
-   if (animIdx >= kMaxAnimIndex) {
+   if (map < 0 || map >= kComboStockMapCount) {
+      if (!getter_already_reported(map, animIdx))
+         get_gamelog()("[ComboAnimGuard] no %s animation: invalid animation map %d "
+                       "(index %d, valid maps 0-%d). Called from %08X\n",
+                       which, map, animIdx, kComboStockMapCount - 1, (unsigned)site);
+      return nullptr;
+   }
+
+   if (animIdx >= kStockAnimIndexEnd) {
       if (!getter_already_reported(map, animIdx))
          warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
             "[ComboAnimGuard] no %s animation: index %d requested on animation map %d, "
-            "but a map only stores indices 0-%d. The animation authored at that index "
-            "cannot play. Reduce the number of distinct combo animation names, or turn "
-            "off [LimitIncreases] ComboAnimIncrease - it raises the index limit without "
-            "raising the storage behind it. Called from %08X\n",
-            which, animIdx, map, kMaxAnimIndex - 1, (unsigned)site);
+            "but the stock map supports indices 0-%d. ComboAnimIncrease is inactive; "
+            "check its startup status before loading content that needs extra combo "
+            "animations. Called from %08X\n",
+            which, animIdx, map, kStockAnimIndexEnd - 1, (unsigned)site);
       return nullptr;
    }
 
@@ -385,6 +259,14 @@ void* __fastcall hooked_GetLowerBodyAnimation(void* ecx, void* edx, int map, int
                                _ReturnAddress());
 }
 
+// This wrapper is called only by our C++ guard, not by the retail engine's
+// register-sensitive getter call sites. Never probe a stock-map trampoline
+// when the extension owns the map storage.
+void* __fastcall expanded_GetUpperBodyAnimation(void* owner, void* /*edx*/, int map, int idx)
+{
+   return combo_anim_limit_get_body(owner, map, idx, false);
+}
+
 char __fastcall hooked_ResolveDamageData(void* ecx, void* edx, void* combo, void* attack,
                                          uint32_t a3, uint32_t a4, void* a5)
 {
@@ -392,7 +274,11 @@ char __fastcall hooked_ResolveDamageData(void* ecx, void* edx, void* combo, void
       const int map = *(int*)((uint8_t*)combo + kComboMapOff);
       const int idx = *((uint8_t*)attack + g_attackAnimIdxOff);
 
-      if (map < 0 || map >= kMaxAnimMap) {
+      if (idx == kUnassignedAnimIndex) return 0;
+
+      const int mapCount = combo_anim_limit_map_count();
+      const int indexEnd = animation_index_end();
+      if (map < 0 || map >= mapCount) {
          if (!already_reported(map, idx))
             get_gamelog()("[ComboDamageGuard] skipped attack: combo[%08X] has animation map "
                           "%d, which is not a valid map (animation index %d)\n",
@@ -402,15 +288,14 @@ char __fastcall hooked_ResolveDamageData(void* ecx, void* edx, void* combo, void
 
       // Out of range for the table, so the lookup itself would read out of
       // bounds. Refuse before the read, not after.
-      if (idx >= kMaxAnimIndex) {
+      if (idx >= indexEnd) {
          if (!already_reported(map, idx))
             warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
                "[ComboDamageGuard] skipped attack: combo[%08X] uses animation index %d on "
-               "animation map %d, but a map only holds indices 0-%d. Raise the combo's "
-               "animation index limit or reduce the number of combo animations; with "
-               "[LimitIncreases] ComboAnimIncrease=1 the engine hands out indices it cannot "
-               "store.\n",
-               *(uint32_t*)combo, idx, map, kMaxAnimIndex - 1);
+               "animation map %d, outside the active range 0-%d "
+               "(ComboAnimIncrease %s).\n",
+               *(uint32_t*)combo, idx, map, indexEnd - 1,
+               combo_anim_limit_active() ? "active" : "inactive");
          return 0;
       }
 
@@ -488,36 +373,41 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
       return false;
    };
 
-   // -------------------------------------------------------------------------
-   // The getter clamp. This is the part that matters most: it is the single
-   // choke point every animation-index consumer goes through, so it is
-   // installed on its own and a failure anywhere else does not take it out.
+   // ComboAnimIncrease owns both getters when active. Do not compare their
+   // patched entries with stock signatures or place another detour over them.
+   const bool expanded = combo_anim_limit_active();
    uint8_t* upper = (uint8_t*)resolve(exe_base, a->get_upper_body_anim);
-   uint8_t* lower = (uint8_t*)resolve(exe_base, a->get_lower_body_anim);
+   bool upperOk = false;
 
-   const bool upperOk = signature_ok(upper, a->get_upper_body_anim, upperSig, upperLen,
-                                     "GetUpperBodyAnimation");
-   const bool lowerOk = signature_ok(lower, a->get_lower_body_anim, lowerSig, lowerLen,
-                                     "GetLowerBodyAnimation");
+   if (expanded) {
+      install_log("[ComboAnimGuard] using ComboAnimIncrease body getters "
+                  "(indices 0-%d)\n", kComboAnimationEnd - 1);
+   } else {
+      uint8_t* lower = (uint8_t*)resolve(exe_base, a->get_lower_body_anim);
+      upperOk = signature_ok(upper, a->get_upper_body_anim, upperSig, upperLen,
+                              "GetUpperBodyAnimation");
+      const bool lowerOk = signature_ok(lower, a->get_lower_body_anim, lowerSig, lowerLen,
+                                        "GetLowerBodyAnimation");
 
-   if (upperOk && lowerOk) {
-      original_GetUpperBodyAnim = (fn_GetUpperBodyAnim_t)upper;
-      original_GetLowerBodyAnim = (fn_GetUpperBodyAnim_t)lower;
+      if (upperOk && lowerOk) {
+         original_GetUpperBodyAnim = (fn_GetUpperBodyAnim_t)upper;
+         original_GetLowerBodyAnim = (fn_GetUpperBodyAnim_t)lower;
 
-      DetourTransactionBegin();
-      DetourUpdateThread(GetCurrentThread());
-      DetourAttach(&(PVOID&)original_GetUpperBodyAnim, hooked_GetUpperBodyAnimation);
-      DetourAttach(&(PVOID&)original_GetLowerBodyAnim, hooked_GetLowerBodyAnimation);
-      if (DetourTransactionCommit() != NO_ERROR) {
-         original_GetUpperBodyAnim = nullptr;
-         original_GetLowerBodyAnim = nullptr;
-         install_log("[ComboAnimGuard] animation index clamp NOT installed: "
-                     "Detours commit failed\n");
-      } else {
-         install_log("[ComboAnimGuard] animation index clamp installed "
-                     "(getters 0x%08X / 0x%08X, indices 0-%d)\n",
-                     (unsigned)a->get_upper_body_anim, (unsigned)a->get_lower_body_anim,
-                     kMaxAnimIndex - 1);
+         DetourTransactionBegin();
+         DetourUpdateThread(GetCurrentThread());
+         DetourAttach(&(PVOID&)original_GetUpperBodyAnim, hooked_GetUpperBodyAnimation);
+         DetourAttach(&(PVOID&)original_GetLowerBodyAnim, hooked_GetLowerBodyAnimation);
+         if (DetourTransactionCommit() != NO_ERROR) {
+            original_GetUpperBodyAnim = nullptr;
+            original_GetLowerBodyAnim = nullptr;
+            install_log("[ComboAnimGuard] animation index clamp NOT installed: "
+                        "Detours commit failed\n");
+         } else {
+            install_log("[ComboAnimGuard] animation index clamp installed "
+                        "(getters 0x%08X / 0x%08X, indices 0-%d, maps 0-%d)\n",
+                        (unsigned)a->get_upper_body_anim, (unsigned)a->get_lower_body_anim,
+                        kStockAnimIndexEnd - 1, kComboStockMapCount - 1);
+         }
       }
    }
 
@@ -544,11 +434,14 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
       return;
    }
 
-   // Probe through the trampoline when the clamp is in, so the guard's own
-   // lookup does not re-enter the detour; fall back to the raw leaf otherwise.
-   fn_getUpperBodyAnim        = original_GetUpperBodyAnim
-                                   ? original_GetUpperBodyAnim
-                                   : (upperOk ? (fn_GetUpperBodyAnim_t)upper : nullptr);
+   // Expanded maps must use the same lookup as the installed feature getters.
+   // Only the stock path may probe through the old getter trampoline.
+   if (expanded)
+      fn_getUpperBodyAnim = expanded_GetUpperBodyAnimation;
+   else if (original_GetUpperBodyAnim)
+      fn_getUpperBodyAnim = original_GetUpperBodyAnim;
+   else
+      fn_getUpperBodyAnim = upperOk ? (fn_GetUpperBodyAnim_t)upper : nullptr;
    g_animatorInstance         = (void**)resolve(exe_base, a->animator_instance);
    g_attackAnimIdxOff         = a->attack_anim_idx_off;
    original_ResolveDamageData = (fn_ResolveDamageData_t)fn;

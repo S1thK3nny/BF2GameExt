@@ -79,6 +79,12 @@
     <ClInclude Include="src\entity\tentacle_limit.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\tentacle_timing.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\tentacle_timing_sites.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\vehicle_view_toggle.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -89,6 +95,12 @@
       <Filter>weapon</Filter>
     </ClInclude>
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
+    <ClInclude Include="src\weapon\held_ordnance_effect.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
+    <ClInclude Include="src\weapon\held_ordnance_effect_sites.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
     <ClInclude Include="src\weapon\shield_channel_fix.hpp">
@@ -170,6 +182,12 @@
       <Filter>entity</Filter>
     </ClInclude>
     <ClInclude Include="src\entity\combo_damage_anim_guard.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\combo_anim_limit.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\combo_anim_layout.hpp">
       <Filter>entity</Filter>
     </ClInclude>
     <ClInclude Include="src\controller\controller_support.hpp">
@@ -288,6 +306,9 @@
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
+    <ClCompile Include="src\weapon\held_ordnance_effect.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
     <ClCompile Include="src\weapon\shield_channel_fix.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
@@ -367,6 +388,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\combo_damage_anim_guard.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\combo_anim_limit.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">

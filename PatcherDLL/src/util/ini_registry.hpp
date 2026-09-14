@@ -56,7 +56,8 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("Particles", "ParticleFixes", "1", nullptr, "Particle Cache Reset Fix"),
    INI_ENTRY("Particles", "ParticleDensity", "0", "How many particles effects are allowed to show. 0 = stock, 1 = balanced (full density near and mid-range, stock thinning far away, and effects that ask for more than 128 particles get them), 2 = maximum (no thinning with distance at all). Higher costs frame time"),
 
-   // [Lightsaber] — lightsaber blade lighting
+   // [Lightsaber] — lightsaber blade rendering and lighting
+   INI_PATCH("Lightsaber", "ExtendedBladeBase", "1", "Extend the visible blade 8% behind its base instead of 4%, matching Classic Collection. Combat reach is unchanged. Set 0 for stock", "Lightsaber Base Extension"),
    INI_ENTRY("Lightsaber", "LightsaberIllumination", "1", "Ignited lightsaber blades give off real light in their own blade colour. Objects can only take 4 dynamic lights at once, so a nearby saber can replace one of a room's own lights. Set 0 for stock"),
    INI_ENTRY("Lightsaber", "LightsaberLightRadius", "4.0", "How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights"),
    INI_ENTRY("Lightsaber", "LightsaberLightIntensity", "1.0", "Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored"),
@@ -108,6 +109,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Fixes", "ScreenshotFix", "1", "Replace the broken Print Screen handler on retail builds (PrismaticFlower's fix)"),
    INI_ENTRY("Fixes", "ErrorDialogFix", "1", "Restore fatal-error dialogs on retail builds via a template in BF2GameExt.dll (PrismaticFlower's fix)"),
    INI_ENTRY("Fixes", "DLCMissionInitFix", "0", "EXPERIMENTAL: initialize the DLC mission list when launching a mission from the commandline (PrismaticFlower's fix; not yet working on retail, keep off)"),
+   INI_ENTRY("Fixes", "HeldOrdnanceEffect", "1", "Cannon weapons can hold their projectile's TrailEffect at an animated soldier bone before firing. Set HeldOrdnanceEffectBone in the weapon ODF"),
    INI_ENTRY("Fixes", "DroidekaDeathAnimation", "1", "Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected"),
    INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
    INI_ENTRY("Fixes", "WeaponIconFix", "1", "Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present"),
@@ -132,12 +134,12 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "ExplosionVisibleRadius","1","Explosions more than a short way off were not drawn at all, so distant fighting looked empty. Makes them visible across the map",                                                                        "Explosion VisibleRadius Increase"),
    INI_ENTRY("LimitIncreases", "GCVisualLimits",     "1", "Raise Galactic Conquest galaxy-map pathway/particle draw limits (fixes missing pathways and icons with >13 planets)"),
    INI_ENTRY("LimitIncreases", "ReservationPoolSize", "127", "How many jobs AI squads may hold at once. Vehicle seats, repair points, attack slots and formation positions all come from one pool, and once it fills units stop being given work and the log fills with \"List pool is full\". 127 is the ceiling and costs 1.6 KB. Set 60 for stock"),
+   INI_ENTRY("LimitIncreases", "TentacleLimit",      "1", "Raise how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn"),
+   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "1", "Raise combo animation names from 30 to 90, distinct animation banks from 16 to 64, bank/weapon maps from 30 to 90 and references from 256 to 768. Includes the storage needed to play the extra animations", "Combo Anims Increase"),
 
    // --- Off by default. Read the comment before turning any of these on. ---
    INI_PATCH("LimitIncreases", "SoldierHeightCeiling", "0", "Soldiers stop dying the moment they go higher than 1000 units, so a map can be built taller. Flyers were never affected. The floor, the fall-speed kill and the horizontal walls are left alone. Costs: a soldier who genuinely escapes upward is never cleaned up. Set 1 to enable", "Soldier Height Ceiling Removal"),
    INI_ENTRY("LimitIncreases", "VoiceLimit", "0", "How many sounds may be audible at once. 0 keeps the stock limit of 32, otherwise a count from 33 to 119. Under EAX (5.1/7.1, or any audio mode using hardware) the extra voices come from your sound device and it must have some spare; software mixing needs nothing extra but costs more CPU. Costs 1.4 KB per voice"),
-   INI_ENTRY("LimitIncreases", "TentacleLimit",      "0", "Raise how many tentacles a unit can have from 4 to 9. Units asking for 4 or fewer, which is every stock unit, are unchanged. Bones per tentacle stays capped at 5"),
-   INI_PATCH("LimitIncreases", "ComboAnimIncrease",   "0", "Unfinished and unsafe. The extra combo animations never play and the game can crash. Leave at 0", "Combo Anims Increase"),
 
 };
 // END_REGISTRY

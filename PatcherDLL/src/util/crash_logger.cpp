@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "crash_logger.hpp"
+#include "entity/combo_anim_limit.hpp"
 
 #pragma warning(disable: 4996) // _snprintf/_vsnprintf deprecation (matches anim_bank_append.cpp)
 
@@ -225,6 +226,10 @@ static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS xp)
             "    ESI=%08X EDI=%08X EBP=%08X ESP=%08X\r\n",
             (unsigned)c->Eax, (unsigned)c->Ebx, (unsigned)c->Ecx, (unsigned)c->Edx,
             (unsigned)c->Esi, (unsigned)c->Edi, (unsigned)c->Ebp, (unsigned)c->Esp);
+
+    if (code == EXCEPTION_ACCESS_VIOLATION)
+        len += combo_anim_limit_crash_details(c->Eip, c->Ebp, c->Ecx, c->Edi,
+                                              buf + len, sizeof(buf) - len);
 
     // Frame walk via the EBP chain. This is the call stack proper — the raw
     // scan below is only a fallback, because it cannot tell a live return
