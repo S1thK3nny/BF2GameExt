@@ -131,6 +131,33 @@ namespace modtools {
    // Factory::mNetIndex (+0x1C), which goes over the wire in 8 bits.
    constexpr uintptr_t weapon_class_factory_counter = 0x00B91BE8;
 
+   // RedModel* __cdecl FindModel(uint pblHash) (thunk 0x41050A). What WeaponClass::SetProperty
+   // uses for GeometryName: a lookup in the loaded-model table 0xD4D964, marks it used.
+   constexpr uintptr_t red_model_find = 0x00448670;
+
+   // uint __thiscall RedModel::GetParentBoneAndOffset(uint crc, PblVector3* out), RET 8.
+   // Hardpoint name CRC (PblTEMPHash) -> offset; returns the parent bone hash or 0 on a miss.
+   // FirePointName stores `out` in WeaponClass::mFirePointOffset (+0x24).
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x007F9E50;
+
+   // bool __thiscall WeaponCannon::Fire(), plain RET. Non-virtual; sole caller
+   // WeaponCannon::UpdateFire (0x006276F5, via thunk 0x4109C9, a call site
+   // held_ordnance_effect rewrites). Builds the OrdnanceDesc from Aimer::mFirePos (+0x88)
+   // and mDirection (+0x48) on every call, one call per ShotsPerShot pellet.
+   constexpr uintptr_t weapon_cannon_fire = 0x00626490;
+
+   // void __thiscall WeaponClass::RenderFlash(PblVector3* pos, PblVector3* dir, float t),
+   // RET 0xC (thunk 0x408D7D). Weapon::Render calls it on mRenderClass with
+   // pos = mFirePointMatrix.trans, dir = Aimer::mDirection,
+   // t = (mMuzzleFlashStartTime - now) / mClass->mFlashLength, while t > 0.
+   constexpr uintptr_t weapon_class_render_flash = 0x0061CA80;
+
+   // float __cdecl GameLoop::GetMissionTime(), result in ST(0) (thunk 0x40DCD3).
+   constexpr uintptr_t game_loop_get_mission_time = 0x00732E60;
+
+   // Weapon::Render looks the weapon hardpoint up in a RedPose with
+   // pbl_hash_table_find(pose + 4, 0x100, crc); that entry lives under Hashing below.
+
    // ---- Loading Screen (LoadDisplay) -----------------------------------------
 
    constexpr uintptr_t load_data_file_real       = 0x0067e2b0;
