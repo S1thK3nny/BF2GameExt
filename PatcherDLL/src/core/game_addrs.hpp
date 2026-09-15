@@ -155,6 +155,13 @@ namespace modtools {
    // float __cdecl GameLoop::GetMissionTime(), result in ST(0) (thunk 0x40DCD3).
    constexpr uintptr_t game_loop_get_mission_time = 0x00732E60;
 
+   // void __cdecl FirstPerson::Init(), plain RET, runs on every ingame.lvl load. The ONLY
+   // writer of FirstPerson::mAnim[48] (fp_anim_array). A slot whose FirstPersonAnimName
+   // entry is null is skipped by the lookup and only refilled with humanfp_tool_idle while
+   // it is still null, so from the second level on it keeps the previous level's freed
+   // pointer. See weapon/dual_cannon.cpp.
+   constexpr uintptr_t first_person_init = 0x004AB590;
+
    // Weapon::Render looks the weapon hardpoint up in a RedPose with
    // pbl_hash_table_find(pose + 4, 0x100, crc); that entry lives under Hashing below.
 

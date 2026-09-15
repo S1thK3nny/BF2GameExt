@@ -61,6 +61,15 @@
 // The muzzle flash belongs to the gun that fired last: Weapon::Render draws it at the
 // main fire point, so for gun 2 the flash timer is held back around that call and the
 // flash drawn at the offhand fire point instead.
+//
+// FIRE2 makes a latent engine bug reachable. First person picks its animation from
+// FirstPerson::mAnim[weaponClass * 11 + state], and FirstPerson::Init fills it on every
+// ingame.lvl load: slots with a name are looked up, and any slot still null afterwards
+// gets humanfp_tool_idle. The shoot2 slot (state 3) has no name for the rifle, bazooka
+// and tool classes, so Init never clears it: it keeps the previous level's pointer, which
+// is freed memory by then. Stock never reaches those slots, because only a grenade
+// enters FIRE2. We clear the table before Init runs so every unnamed slot is refilled
+// from the level being loaded.
 // =============================================================================
 
 namespace {
@@ -186,8 +195,14 @@ using fn_render_flash_t        = void(__thiscall*)(void* cls, const float* pos, 
                                                    float t);
 using fn_mission_time_t        = float(__cdecl*)();
 
+using fn_first_person_init_t   = void(__cdecl*)();
+
+constexpr unsigned kFirstPersonAnimSlots = 48;
+
 fn_create_base_classes_t original_create_base_classes = nullptr;
 fn_fire_t                original_fire                = nullptr;
+fn_first_person_init_t   original_first_person_init   = nullptr;
+void**                   s_firstPersonAnims           = nullptr;
 fn_operator_new_t        s_operatorNew     = nullptr;
 fn_class_ctor_t          s_classCtor       = nullptr;
 fn_find_model_t          s_findModel       = nullptr;
@@ -522,6 +537,14 @@ bool __fastcall hooked_fire(void* weapon, void* edx)
    return fired;
 }
 
+void __cdecl hooked_first_person_init()
+{
+   // See the header comment. Every slot Init leaves alone afterwards is refilled with
+   // this level's humanfp_tool_idle, or stays null, which ZephyrAnimInst::SetAnim skips.
+   std::memset(s_firstPersonAnims, 0, kFirstPersonAnimSlots * sizeof(void*));
+   original_first_person_init();
+}
+
 void build_vtables()
 {
    std::memcpy(s_classVtable, s_cannonClassVtable, sizeof(s_classVtable));
@@ -585,7 +608,8 @@ void dual_cannon_install(uintptr_t exe_base)
        !g_addr->weapon_cannon_vftable || !g_addr->weapon_class_factory_counter ||
        !g_addr->red_model_find || !g_addr->red_model_get_parent_bone_and_offset ||
        !g_addr->pbl_hash_table_find || !g_addr->weapon_cannon_fire ||
-       !g_addr->weapon_class_render_flash || !g_addr->game_loop_get_mission_time) {
+       !g_addr->weapon_class_render_flash || !g_addr->game_loop_get_mission_time ||
+       !g_addr->first_person_init || !g_addr->fp_anim_array) {
       install_log("[DualCannon] NOT installed: addresses unknown for this build");
       return;
    }
@@ -598,8 +622,18 @@ void dual_cannon_install(uintptr_t exe_base)
    static constexpr uint8_t kFirePrologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
                                                0x81, 0xEC, 0xC4, 0x00, 0x00, 0x00};
 
+   // FirstPerson::Init: CALL rel32 (to thunk 0x411095) / TEST AL,AL / JE near.
+   static constexpr uint8_t kFirstPersonInitPrologue[] = {0xE8, 0x00, 0x5B, 0xF6, 0xFF,
+                                                          0x84, 0xC0, 0x0F, 0x84};
+
    void* createTarget = resolve(exe_base, g_addr->game_state_create_base_weapon_classes);
    void* fireTarget   = resolve(exe_base, g_addr->weapon_cannon_fire);
+   void* fpInitTarget = resolve(exe_base, g_addr->first_person_init);
+   if (std::memcmp(fpInitTarget, kFirstPersonInitPrologue, sizeof(kFirstPersonInitPrologue)) != 0) {
+      install_log("[DualCannon] NOT installed: unexpected bytes at FirstPerson::Init %08X",
+                  (unsigned)g_addr->first_person_init);
+      return;
+   }
    if (std::memcmp(createTarget, kCreatePrologue, sizeof(kCreatePrologue)) != 0) {
       install_log("[DualCannon] NOT installed: unexpected bytes at CreateBaseWeaponClasses %08X",
                   (unsigned)g_addr->game_state_create_base_weapon_classes);
@@ -626,14 +660,18 @@ void dual_cannon_install(uintptr_t exe_base)
 
    original_create_base_classes = reinterpret_cast<fn_create_base_classes_t>(createTarget);
    original_fire                = reinterpret_cast<fn_fire_t>(fireTarget);
+   original_first_person_init   = reinterpret_cast<fn_first_person_init_t>(fpInitTarget);
+   s_firstPersonAnims = static_cast<void**>(resolve(exe_base, g_addr->fp_anim_array));
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
    DetourAttach(&(PVOID&)original_fire, hooked_fire);
+   DetourAttach(&(PVOID&)original_first_person_init, hooked_first_person_init);
    if (DetourTransactionCommit() != NO_ERROR) {
       original_create_base_classes = nullptr;
       original_fire                = nullptr;
+      original_first_person_init   = nullptr;
       install_log("[DualCannon] NOT installed: detours failed");
       return;
    }
@@ -649,7 +687,9 @@ void dual_cannon_uninstall()
    DetourUpdateThread(GetCurrentThread());
    DetourDetach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
    DetourDetach(&(PVOID&)original_fire, hooked_fire);
+   DetourDetach(&(PVOID&)original_first_person_init, hooked_first_person_init);
    DetourTransactionCommit();
    original_create_base_classes = nullptr;
    original_fire                = nullptr;
+   original_first_person_init   = nullptr;
 }
