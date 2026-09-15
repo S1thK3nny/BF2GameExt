@@ -98,9 +98,13 @@ indexed `[bonesPerTentacle * tentacle + bone]`. The static table holds exactly
 `bone_string_1` hashes to `0x24CB9E5E`, which `DoTentacles` also uses as its
 presence guard: no work happens unless that key resolves in the pose.
 
-`UpdatePose` reads its `_Remove`/`_Store` keys straight out of that table, which
-is why driving the stock sub-functions in groups of four requires swapping the
-current group's names in for the duration of each call.
+`UpdatePose` reads its `_Remove`/`_Store` keys straight out of that table. The
+original limit hook swapped the current group's names into this global table.
+The current hook gives each batch a private empty RedPose instead. Native
+UpdatePose writes its stock keys there; the hook copies the resulting matrix
+pointers into the original pose's existing value slots under their true names.
+All input bone pointers are collected before publishing any output. The global
+name table, original pose keys, entry count and unrelated values never change.
 
 ## Pose hash table
 
@@ -172,3 +176,44 @@ overruns a stack array and reaches the saved return address. No stock ODF
 exceeds either, so it is latent. `tentacle_limit.cpp` clamps both in its own
 constructor, which covers the case while the feature is on; with the feature off
 the stock behaviour, and the stock bug, are unchanged.
+
+## Timing and output storage in the limit patch
+
+Xbox's title update and Classic Collection have a nine-chain simulator of size
+`0x538`. PC keeps its `0x268` prefix and extends the allocation to `0x778`,
+batching 4+4+1 through the original solver. Each batch sees the same oldVelocity;
+otherwise the first batch consumes the velocity change and the rest lose it.
+
+`tentacle_timing.hpp` keeps the original offline and multiplayer paths. Offline
+time comes from mInternalTimer, capped at 0.039 seconds. Online, a supplied zero
+means pose-only work; negative or unordered input takes the extrapolation path.
+Both GetTurnRatio calls retain their x87 rounding. Timing selection precedes the
+null-pose check, and the engine's UpdateTimer is untouched.
+
+UpdatePose returns pointers into its caller's matrix buffer. A shared scratch
+array is therefore too short-lived: another render call can overwrite it before
+the first draw finishes. Each complete render wrapper owns 45 aligned matrices
+and keeps them alive until it returns. Nested calls get another frame; up to four
+chains still use the original caller's buffer.
+
+| Render caller | modtools | Steam | GOG | stack arguments |
+|---|---|---|---|---|
+| Soldier | `0x00535D90` | `0x004E23D0` | `0x004E23D0` | 3 |
+| Selection | `0x00674890` | `0x0048DC90` | `0x0048DC90` | 2 |
+| Addon | `0x0056FE80` | `0x00443CA0` | `0x00443C80` | 6 |
+
+These entries, their DoTentacles calls, the constructor, timing dependencies and
+mask/pool sites are checked before any write. All five hooks share one Detours
+transaction; failure restores the dependent bytes. Texture overrides install
+after these wrappers and uninstall first. An uninstall failure keeps the active
+patch in place.
+
+No `bone_string_1` means no work, as in stock. Once that presence check passes,
+a missing requested bone or missing independent output frame is an error, not a
+reason to fall back to four chains. First-update seeding uses the supplied pose.
+The BF2_modtools_NoDVD.exe has correct oldPos/firstUpdate offsets; the fullscreen
+defect above must not be assumed for every executable labelled modtools.
+
+The Fisto mesh distortion was separate: ModelMunge emitted an eighteen-bone
+segment against a fifteen-bone renderer palette. Fixing simulator capacity does
+not fix that asset. See [EngineLimits.md](EngineLimits.md#unchecked-upload-including-malformed-munger-output).

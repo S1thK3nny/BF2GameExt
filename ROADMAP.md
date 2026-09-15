@@ -17,43 +17,6 @@ back; it also moved the convergence ray to the crosshair line, which was a separ
 you can see the animation rotating the droidekas geometry to face the player. 
 No idea why this happens.
 
-**Combo animations past index 163 have nowhere to be stored** - the crash side is fixed,
-the storage side is not. `SoldierAnimatorClass::AnimationMap` is 1208 bytes holding exactly
-164 animation slots, and `[LimitIncreases] ComboAnimIncrease` moves the "no animation"
-sentinel from 164 to 254 at 25 sites without widening that block, so the engine hands out
-indices 164-253 that address the NEXT map's slots. Confirmed live 2026-09-06 on modtools
-and GOG: map 27, index 179, returning `0x00000041` and `0x15AC5475`.
-
-`combo_damage_anim_guard.cpp` now clamps inside
-`SoldierAnimatorClass::Get{Upper,Lower}BodyAnimation` (modtools `0x0057DD40` / `0x0057DD80`,
-Steam `0x006439E0` / `0x00643A10`, GOG `0x00644A80` / `0x00644AB0`), which is the choke point
-every consumer goes through, so an out-of-range index and a never-populated slot (`0xFFFFFFFF`,
-the `rep stosd` reset fill) both come back as the engine's own "no animation" answer. That
-closes the 2026-08-21 `UpdateUpperBodyAnimation` crash as well - it was the `0xFFFFFFFF` case,
-which is why the pointer looked like garbage rather than NULL. **An animation authored at
-index 164+ still cannot play.**
-
-Making those animations work means widening the per-map block. The derivation, the site
-tables and the record of the in-place attempt that failed are in
-[docs/RE/ComboAnimationLimit.md](docs/RE/ComboAnimationLimit.md). Two things learned since:
-
-- **The population path is pointer-based.** `SoldierAnimatorClass::SetupBodyMasks` computes
-  the map base once (`imul edi,edi,0x4B8` `0x00582074`, `lea edx,[edi+ecx+0x24]` `0x00582084`)
-  and passes a *pointer* to `0x0057F520`, which either returns a cached map or resets the
-  passed buffer. No writer indexes a map by animation index, so relocating the storage fixes
-  every write for free - only the base computations and the three getters need patching.
-- **AnimationMaps also live outside `mMap[30]`.** `0x0057F520` caches them, and there is a
-  24-element array of `{8-byte header, AnimationMap}` at stride `0x4C0` (`0x0057F34E`,
-  `0x0057E17A`). `docs/RE/ComboAnimationLimit.md` currently calls that array "not
-  AnimationMaps" on the strength of `0x4C0 != 0x4B8`; the `lea edx,[ecx+8]` before its
-  `rep stosd` of `0x12E` dwords says otherwise. Every one of those allocations has to grow
-  too, and that has to be enumerated before any stride is touched.
-
-Content-side workaround in the meantime: the 30-slot cap is on distinct combo animation
-*names* GLOBALLY, across every bank and weapon, so a mod with a dozen saber heroes unions
-past it even though no single hero is close. `/dumpanimmaps` counts them.
-
-
 **Tentacle fields are unclamped in stock code** - Both tentacle properties on
 `EntitySoldierClass` are bitfields that accept more than the arrays can hold, and neither is
 clamped on any build. `NumTentacles` is 3 bits (0-7) against arrays dimensioned for 4;

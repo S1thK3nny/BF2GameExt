@@ -52,6 +52,7 @@ Set on the concrete soldier class.
 | Property | Class | Value | Description |
 |----------|-------|-------|-------------|
 | `DisguiseModel` | `WeaponDisguise` | model name | Swaps the soldier to a specific model while disguised, instead of cloning the first enemy soldier the game finds. The model has to be loaded in memory. Set it to a single space (`" "`) to keep the soldier's own model and suppress the swap entirely. Leave it out for stock behaviour. |
+| `HeldOrdnanceEffectBone` | `WeaponCannon` | bone name | Holds the projectile's `TrailEffect` at an animated soldier bone until release, then transfers it to the projectile. Inherits through `ClassParent`; set to `""` on a child to disable it. On by default, controlled by `[Fixes] HeldOrdnanceEffect`. |
 | `AnimTexture1` | `WeaponMelee` | texture name | Second frame of an animated lightsaber blade. Set under the blade's `WeaponMelee` section. |
 | `AnimTexture2` | `WeaponMelee` | texture name | Third frame. |
 | `AnimTexture3` | `WeaponMelee` | texture name | Fourth frame. |
@@ -64,6 +65,15 @@ AnimTexture1 = "blade_red_2"
 AnimTexture2 = "blade_red_3"
 AnimTexture3 = "blade_red_4"
 ```
+
+**Held effects.** Set `HeldOrdnanceEffectBone` in the cannon weapon's `[Properties]` section. The weapon's `OrdnanceName` must point to a projectile with a `TrailEffect`, and the soldier's animation must contain the named bone. Spelling and case must match.
+
+```
+[Properties]
+HeldOrdnanceEffectBone = "hp_bubble"
+```
+
+Any animated bone works. Leave the property out, or use a bone or projectile with no matching effect, and the weapon fires normally without a held effect. Cancelling fire or putting the weapon away removes it. If one shot creates several projectiles, the first takes the held effect and the rest create their normal trails. Launcher and grappling-hook classes do not use this property.
 
 ## Ordnance Classes
 

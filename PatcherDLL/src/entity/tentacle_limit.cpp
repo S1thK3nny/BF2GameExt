@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "tentacle_limit.hpp"
+#include "tentacle_timing.hpp"
+#include "tentacle_timing_sites.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
@@ -82,7 +84,7 @@
 //   2. Clamping.  Widening the field to four bits lets an ODF ask for up to 15
 //      tentacles, which overruns both the 9-slot heap arrays and the 45-entry
 //      bone pointer array on the stack.  The hooked constructor clamps.
-//   3. Null pose.  The stock DoTentacles opens with a null check on the pose;
+//   3. Null pose. The stock DoTentacles checks the pose after selecting timing;
 //      the replacement dereferenced it unconditionally.
 //   4. All-or-nothing patching.  Every site is verified before any byte is
 //      written, and a failed Detours commit rolls the bytes back.  The previous
@@ -101,13 +103,16 @@
 //      tolerated it silently, which is exactly why it slipped through.)
 //
 // -----------------------------------------------------------------------------
-// Known behaviour differences from stock
+// Timing and output ownership
 //
-// The stock DoTentacles has three timing paths.  Offline, or with netFrameLock
-// set, it ignores the caller's dt and uses min(mInternalTimer, 0.039); in a
-// netgame without frame lock it extrapolates through mTimeSinceLastUpdate and
-// mTimerOffset.  This replacement always takes the offline path, which is
-// identical to stock for single-player and skips the extrapolation in MP.
+// Keep all three native timing paths, including supplied dt == 0 for a pose-only
+// render and network extrapolation. The original UpdateTimer remains in use.
+// Each of the three render callers owns an expanded matrix buffer in a wrapper
+// frame. It stays alive until that caller finishes drawing, including nested
+// reflection/addon calls; no output matrices are shared between those frames.
+// UpdatePose writes its stock names into a private batch pose, and we publish
+// the returned matrix pointers under the actual names in the original pose.
+// The engine's bone-name table remains read-only throughout.
 //
 // One modtools-only engine defect this incidentally papers over: in
 // BattlefrontII.Debug.FullScreen.1080.exe the stock constructor's zeroing loop
@@ -120,16 +125,16 @@
 // functions are replaced here.
 // =============================================================================
 
-bool g_tentacleLimitEnabled = false;
+bool g_tentacleLimitEnabled = true;
 
 namespace {
 
 // install_log() is the ONLY logger that may run during install: dllmain holds the
 // exe sections at PAGE_READWRITE (non-executable) until every installer has run,
 // so calling the engine's own logger there executes non-executable .text and is
-// an immediate EXEC access violation on the DEP-enabled retail builds. Runtime
-// code (anything reached from a hook) uses get_gamelog() instead. Same split as
-// gc_visual_limits.cpp and hud_weapon_icon_fix.cpp.
+// an immediate EXEC access violation on the DEP-enabled retail builds. The fatal
+// runtime context guard also uses this logger so it does not depend on a working
+// engine log callback.
 void install_log(const char* fmt, ...)
 {
    FILE* f = nullptr;
@@ -149,9 +154,7 @@ constexpr int kBonePtrStride   = 5;    // bonePtrs entries per tentacle
 constexpr int kBatch           = 4;    // the stock arrays hold exactly this many
 constexpr int kBoneTableSlots  = 20;   // the engine's static bone_string_ table (4 * 5)
 constexpr int kPoseTableSize   = 0x100;
-constexpr float kMaxDt         = 0.039f;
-
-constexpr int kTotalBoneHashes = kMaxTentacles * kTentStride; // 54
+constexpr int kTotalBoneHashes = kMaxTentacles * kMaxBones; // 45 animated bones
 
 constexpr uint32_t kStockPoolSize    = 0x268;
 constexpr uint32_t kExtendedPoolSize = 0x778;
@@ -196,6 +199,38 @@ static_assert(offsetof(tentacle_sim, mFirstUpdate)        == 0x264, "mFirstUpdat
 static_assert(offsetof(tentacle_sim, tPos)                == 0x268, "extended tPos");
 static_assert(offsetof(tentacle_sim, oldPos)              == 0x4F0, "extended oldPos");
 static_assert(sizeof(tentacle_sim) == kExtendedPoolSize, "extended block size");
+
+// RedPose publishes matrix pointers; the storage must outlive DoTentacles and
+// remain independent until its render caller has consumed the pose. A wrapper
+// around each complete caller gives it exactly that lifetime. Nested callers
+// link another frame without changing the outer frame's output.
+struct pose_frame;
+thread_local pose_frame* g_poseFrame = nullptr;
+
+struct alignas(16) pose_frame {
+   PblMat4 matrices[kMaxTentacles * kMaxBones];
+   pose_frame* previous;
+   bool claimed = false;
+
+   pose_frame() : previous(g_poseFrame) { g_poseFrame = this; }
+   ~pose_frame() { g_poseFrame = previous; }
+   pose_frame(const pose_frame&) = delete;
+   pose_frame& operator=(const pose_frame&) = delete;
+};
+
+struct batch_pose {
+   uint32_t count = 0;
+   uint32_t table[kPoseTableSize] = {};
+};
+static_assert(sizeof(batch_pose) == 0x404, "RedPose count and hash storage");
+
+tentacle_timing::network_state g_timingNetwork{};
+
+void fail_pose_context(const char* reason)
+{
+   install_log("[Tentacle] invalid pose context: %s", reason);
+   FatalAppExitA(0, "BF2GameExt: invalid tentacle pose context. See BF2GameExt.log.");
+}
 
 // ---------------------------------------------------------------------------
 // Bone name hashing -- CRC-32/BZIP2, the same one PblTEMPHash uses
@@ -274,6 +309,19 @@ void* ht_find(const uint32_t* table, int tableSize, uint32_t hash)
    return nullptr;
 }
 
+uint32_t* ht_value_slot(uint32_t* table, uint32_t hash)
+{
+   if (hash == 0) return nullptr;
+   constexpr int half = kPoseTableSize / 2;
+   int idx = (int)(hash & (half - 1));
+   for (int i = 0; i < half; ++i) {
+      if (table[idx] == hash) return &table[half + idx];
+      if (table[idx] == 0) return nullptr;
+      idx = (idx - 1) & (half - 1);
+   }
+   return nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // Stock sub-functions, resolved at install time
 // ---------------------------------------------------------------------------
@@ -289,6 +337,32 @@ fn_doTentacles_t     g_origDoTentacles  = nullptr;
 fn_updatePositions_t g_updatePositions  = nullptr;
 fn_enforceColl_t     g_enforceColl      = nullptr;
 fn_updatePose_t      g_updatePose       = nullptr;
+
+using fn_soldierRender_t = void(__thiscall*)(void*, unsigned char, float, uint32_t);
+using fn_selectionRender_t = void(__thiscall*)(void*, void*, void*);
+using fn_addonRender_t = void(__thiscall*)(void*, void*, void*, void*, void*, void*, uint32_t);
+fn_soldierRender_t g_origSoldierRender = nullptr;
+fn_selectionRender_t g_origSelectionRender = nullptr;
+fn_addonRender_t g_origAddonRender = nullptr;
+
+void __fastcall hooked_soldier_render(void* self, void*, unsigned char pass, float fade, uint32_t flags)
+{
+   pose_frame frame;
+   g_origSoldierRender(self, pass, fade, flags);
+}
+
+void __fastcall hooked_selection_render(void* self, void*, void* matrix, void* color)
+{
+   pose_frame frame;
+   g_origSelectionRender(self, matrix, color);
+}
+
+void __fastcall hooked_addon_render(void* self, void*, void* simulator, void* velocity,
+                                    void* pose, void* matrix, void* color, uint32_t flags)
+{
+   pose_frame frame;
+   g_origAddonRender(self, simulator, velocity, pose, matrix, color, flags);
+}
 
 // Steam/GOG LTCG: UpdatePositions takes dt in XMM1 and drops it from the stack,
 // so it is __thiscall(velocity, pose, parentMat, bonePtrs) + XMM1, RET 0x10 --
@@ -313,72 +387,6 @@ __declspec(naked) void shim_update_positions_retail()
       ret   0x14                   // clean our own five
    }
 }
-
-// ---------------------------------------------------------------------------
-// The engine's static bone-name table
-//
-// UpdatePose reads its _Remove/_Store keys straight out of this array, indexed
-// [bonesPerTentacle * tentacle + bone].  Batching resets the tentacle index to
-// zero on every group, so the table has to hold the current group's real names
-// for the duration of the call.  It lives in .rdata, hence the one-time
-// unprotect; the original protection is kept so uninstall can put it back.
-// ---------------------------------------------------------------------------
-
-// The unprotect has to happen lazily, on the first hooked call, NOT at install
-// time: dllmain restores every section's original protection once all the
-// installers have run, which would put the page straight back to read-only.
-uint32_t* g_boneTable        = nullptr;
-DWORD     g_boneTableProt    = 0;
-bool      g_boneTableRW      = false;
-bool      g_boneTableRefused = false;
-
-bool make_bone_table_writable()
-{
-   if (g_boneTableRW) return true;
-   if (g_boneTableRefused || !g_boneTable) return false;
-
-   if (!VirtualProtect(g_boneTable, kBoneTableSlots * sizeof(uint32_t),
-                       PAGE_READWRITE, &g_boneTableProt)) {
-      g_boneTableRefused = true;
-      if (auto fn_log = get_gamelog())
-         fn_log("[Tentacle] could not unprotect the bone name table; "
-                "holding at %d tentacles\n", kBatch);
-      return false;
-   }
-
-   g_boneTableRW = true;
-   return true;
-}
-
-void restore_bone_table_protection()
-{
-   if (!g_boneTableRW) return;
-   DWORD ignored;
-   VirtualProtect(g_boneTable, kBoneTableSlots * sizeof(uint32_t), g_boneTableProt, &ignored);
-   g_boneTableRW = false;
-}
-
-// Swaps the current batch's bone names into the engine's table for the lifetime
-// of the scope, and puts the originals back on the way out -- including down
-// any early-return path inside UpdatePose, which is why this is a guard object
-// rather than a pair of memcpys around the call.
-struct bone_table_guard {
-   uint32_t saved[kBoneTableSlots];
-   int      count;
-
-   bone_table_guard(int bonesPerTentacle, int firstTentacle, int tentacleCount)
-   {
-      count = bonesPerTentacle * tentacleCount;
-      if (count > kBoneTableSlots) count = kBoneTableSlots;
-      std::memcpy(saved, g_boneTable, count * sizeof(uint32_t));
-      std::memcpy(g_boneTable, &g_boneHashes[bonesPerTentacle * firstTentacle],
-                  count * sizeof(uint32_t));
-   }
-   ~bone_table_guard() { std::memcpy(g_boneTable, saved, count * sizeof(uint32_t)); }
-
-   bone_table_guard(const bone_table_guard&) = delete;
-   bone_table_guard& operator=(const bone_table_guard&) = delete;
-};
 
 // ---------------------------------------------------------------------------
 // Batching
@@ -433,9 +441,12 @@ void* __fastcall hooked_ctor(tentacle_sim* self, void* /*edx*/,
 
 void __fastcall hooked_do_tentacles(tentacle_sim* self, void* /*edx*/,
                                     void* pose, void* parentMatrix, void* velocity,
-                                    void* targetMatrices, float /*dtIn*/)
+                                    void* targetMatrices, float dtIn)
 {
-   if (!pose) return; // stock DoTentacles opens with this check
+   const float dt = tentacle_timing::select_elapsed_time(
+      self->mInternalTimer, self->mTimeSinceLastUpdate, self->mTimerOffset,
+      dtIn, pose != nullptr, g_timingNetwork);
+   if (!pose) return;
 
    int numT = self->mNumTentacles;
    int bpt  = self->mBonesPerTentacle;
@@ -443,30 +454,38 @@ void __fastcall hooked_do_tentacles(tentacle_sim* self, void* /*edx*/,
    if (bpt  > kMaxBones)     bpt  = kMaxBones;
    if (numT <= 0 || bpt <= 0) return;
 
-   // Anything past the first group needs the engine's bone name table swapped
-   // per batch.  If the page will not go writable, fall back to exactly what
-   // stock does rather than posing the extra tentacles with the wrong names.
-   if (numT > kBatch && !make_bone_table_writable()) numT = kBatch;
-
-   // RedPose: [0] is the entry count, the hash table starts one dword in.
-   const uint32_t* poseTable = (const uint32_t*)((uintptr_t)pose + 4);
-
-   // ---- timing (the offline path; see the header comment) -------------------
-   float dt = self->mInternalTimer;
-   if (dt > kMaxDt) dt = kMaxDt;
-   self->mInternalTimer = 0.0f;
+   // RedPose: [0] is the entry count, followed by keys and matching values.
+   uint32_t* poseTable = (uint32_t*)((uintptr_t)pose + 4);
 
    // ---- nothing to do unless this pose actually has tentacle bones ----------
    if (!ht_find(poseTable, kPoseTableSize, g_boneHashes[0])) return;
 
    // ---- bone lookup for every tentacle -------------------------------------
    void* bonePtrs[kMaxTentacles * kBonePtrStride] = {};
-   for (int t = 0; t < numT; ++t)
-      for (int b = 0; b < bpt; ++b)
-         bonePtrs[t * kBonePtrStride + b] =
-            ht_find(poseTable, kPoseTableSize, g_boneHashes[bpt * t + b]);
+   uint32_t* poseSlots[kMaxTentacles * kMaxBones] = {};
+   for (int t = 0; t < numT; ++t) {
+      for (int b = 0; b < bpt; ++b) {
+         uint32_t* slot = ht_value_slot(poseTable, g_boneHashes[bpt * t + b]);
+         if (!slot || !*slot) {
+            fail_pose_context("missing bone in the requested tentacle rig");
+            return;
+         }
+         poseSlots[bpt * t + b] = slot;
+         bonePtrs[t * kBonePtrStride + b] = (void*)(uintptr_t)*slot;
+      }
+   }
 
-   // ---- first frame: seed both position buffers from the bind pose ----------
+   PblMat4* output = (PblMat4*)targetMatrices;
+   if (output && numT > kBatch) {
+      if (!g_poseFrame || g_poseFrame->claimed) {
+         fail_pose_context("extended output has no independent render frame");
+         return;
+      }
+      g_poseFrame->claimed = true;
+      output = g_poseFrame->matrices;
+   }
+
+   // ---- first frame: seed both position buffers from the supplied pose ------
    if (self->mFirstUpdate) {
       for (int t = 0; t < numT; ++t) {
          for (int b = 0; b < bpt; ++b) {
@@ -517,34 +536,29 @@ void __fastcall hooked_do_tentacles(tentacle_sim* self, void* /*edx*/,
       }
    }
 
-   // ---- write the result back into the pose (runs even at dt == 0) ----------
-   //
-   // targetMatrices is scratch: UpdatePose fills it and the caller never reads
-   // it back, so batches past the first can spill into our own buffer rather
-   // than off the end of the caller's frame, which is sized for four tentacles.
-   // Widening the caller's SUB ESP is not an option -- those frames are
-   // ESP-relative after an AND ESP alignment, so every local would shift.
-   static PblMat4 s_targetSpill[kMaxTentacles * kMaxBones];
-
-   for (int first = 0; first < numT; first += kBatch) {
-      const int count = (numT - first < kBatch) ? (numT - first) : kBatch;
-
-      batch_copy_in(self, first, count);
-      self->mNumTentacles = count;
-
-      void* target = (first == 0) ? targetMatrices : (void*)&s_targetSpill[first * bpt];
-
-      if (first == 0) {
-         // The first group's names are already what the table holds, so it is
-         // left alone -- which is also what keeps a stock 4-tentacle unit from
-         // ever needing the page writable.
-         g_updatePose(self, pose, parentMatrix, &bonePtrs[first * kBonePtrStride], target);
-      } else {
-         bone_table_guard names(bpt, first, count);
-         g_updatePose(self, pose, parentMatrix, &bonePtrs[first * kBonePtrStride], target);
+   // The native math only uses the pose for its final Remove/Store operations.
+   // Let it publish stock names into a private table, then replace the existing
+   // original pose values under the real names. Source pointers were collected
+   // before any replacement, preserving each chain's native matrix inputs.
+   if (output) {
+      for (int first = 0; first < numT; first += kBatch) {
+         const int count = (numT - first < kBatch) ? (numT - first) : kBatch;
+         batch_pose result;
+         batch_copy_in(self, first, count);
+         self->mNumTentacles = count;
+         PblMat4* target = output + first * bpt;
+         g_updatePose(self, &result, parentMatrix, &bonePtrs[first * kBonePtrStride], target);
+         for (int i = 0; i < count * bpt; ++i) {
+            void* matrix = ht_find(result.table, kPoseTableSize, g_boneHashes[i]);
+            if (matrix != target + i) {
+               self->mNumTentacles = savedNumT;
+               fail_pose_context("native UpdatePose did not publish its output matrix");
+               return;
+            }
+            *poseSlots[first * bpt + i] = (uint32_t)(uintptr_t)matrix;
+         }
+         batch_copy_out(self, first, count);
       }
-
-      batch_copy_out(self, first, count);
    }
 
    self->mNumTentacles = savedNumT;
@@ -688,6 +702,74 @@ struct build_functions {
    uintptr_t ctor, doTentacles, updatePositions, enforceCollisions, updatePose, boneTable;
 };
 
+struct render_sites {
+   uintptr_t soldier, selection, addon;
+   uintptr_t calls[3];
+   uintptr_t doTarget;
+};
+
+const render_sites* renders_for_build()
+{
+   // All three are thiscall, with 3, 2 and 6 stack arguments respectively.
+   static constexpr render_sites modtools = {
+      0x00535D90, 0x00674890, 0x0056FE80,
+      { 0x00536F50, 0x00674E32, 0x0056FFD4 }, 0x0040F2A9
+   };
+   static constexpr render_sites steam = {
+      0x004E23D0, 0x0048DC90, 0x00443CA0,
+      { 0x004E3644, 0x0048E2A6, 0x00443E07 }, 0x006558F0
+   };
+   static constexpr render_sites gog = {
+      0x004E23D0, 0x0048DC90, 0x00443C80,
+      { 0x004E3644, 0x0048E2A6, 0x00443DE7 }, 0x00656990
+   };
+   switch (g_build) {
+   case GameBuild::Modtools: return &modtools;
+   case GameBuild::Steam: return &steam;
+   case GameBuild::GOG: return &gog;
+   default: return nullptr;
+   }
+}
+
+bool verify_render_sites(uintptr_t exe_base, const render_sites& sites, const build_functions& fn)
+{
+   constexpr uint8_t debugCtor[] = { 0x83, 0xEC, 0x14, 0x8B, 0xC1 };
+   constexpr uint8_t retailCtor[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C };
+   const bool debug = g_build == GameBuild::Modtools;
+   if (std::memcmp(resolve(exe_base, fn.ctor), debug ? debugCtor : retailCtor,
+                   debug ? sizeof(debugCtor) : sizeof(retailCtor)) != 0) {
+      install_log("[Tentacle] NOT installed: constructor entry mismatch");
+      return false;
+   }
+   constexpr uint8_t frame[] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0 };
+   const uintptr_t entries[] = { sites.soldier, sites.selection, sites.addon };
+   for (uintptr_t va : entries) {
+      if (std::memcmp(resolve(exe_base, va), frame, sizeof(frame)) != 0) {
+         install_log("[Tentacle] NOT installed: render entry mismatch at %08X", (unsigned)va);
+         return false;
+      }
+   }
+   for (uintptr_t va : sites.calls) {
+      const uint8_t* call = (const uint8_t*)resolve(exe_base, va);
+      int32_t displacement;
+      std::memcpy(&displacement, call + 1, sizeof(displacement));
+      if (*call != 0xE8 || call + 5 + displacement != resolve(exe_base, sites.doTarget)) {
+         install_log("[Tentacle] NOT installed: render call mismatch at %08X", (unsigned)va);
+         return false;
+      }
+   }
+   if (g_build == GameBuild::Modtools) {
+      const uint8_t* thunk = (const uint8_t*)resolve(exe_base, sites.doTarget);
+      int32_t displacement;
+      std::memcpy(&displacement, thunk + 1, sizeof(displacement));
+      if (*thunk != 0xE9 || thunk + 5 + displacement != resolve(exe_base, fn.doTentacles)) {
+         install_log("[Tentacle] NOT installed: DoTentacles thunk mismatch");
+         return false;
+      }
+   }
+   return true;
+}
+
 bool functions_for_build(build_functions& out)
 {
    switch (g_build) {
@@ -726,15 +808,18 @@ void tentacle_limit_install(uintptr_t exe_base)
    if (g_installed) return;
 
    const build_patches* p = patches_for_build();
+   const render_sites* renders = renders_for_build();
    build_functions fn{};
-   if (!p || !functions_for_build(fn)) return;
-
-   // ---- the engine's bone table, and proof our hash matches its hash --------
-   g_boneTable = (uint32_t*)resolve(exe_base, fn.boneTable);
-   if (!init_bone_hashes(g_boneTable)) {
-      g_boneTable = nullptr;
+   if (!p || !renders || !functions_for_build(fn)) return;
+   if (!verify_render_sites(exe_base, *renders, fn)) return;
+   if (!tentacle_timing::resolve_network_state(exe_base, g_build, g_timingNetwork)) {
+      install_log("[Tentacle] NOT installed: native timing signature mismatch");
       return;
    }
+
+   // ---- the engine's bone table, and proof our hash matches its hash --------
+   const auto* boneTable = (const uint32_t*)resolve(exe_base, fn.boneTable);
+   if (!init_bone_hashes(boneTable)) return;
 
    // ---- verify every site before writing any of them ------------------------
    for (int i = 0; i < kBitfieldSites; ++i) {
@@ -743,7 +828,6 @@ void tentacle_limit_install(uintptr_t exe_base)
       if (read_site(at, bp.width) != bp.stock) {
          install_log("[Tentacle] NOT installed: bitfield site %d at 0x%08X reads %08X, "
                      "expected %08X", i, (unsigned)bp.va, read_site(at, bp.width), bp.stock);
-         g_boneTable = nullptr;
          return;
       }
    }
@@ -753,7 +837,6 @@ void tentacle_limit_install(uintptr_t exe_base)
          install_log("[Tentacle] NOT installed: pool size site %d at 0x%08X reads 0x%X, "
                      "expected 0x%X", i, (unsigned)p->poolSize[i], *(const uint32_t*)at,
                      kStockPoolSize);
-         g_boneTable = nullptr;
          return;
       }
    }
@@ -762,26 +845,18 @@ void tentacle_limit_install(uintptr_t exe_base)
       if (*(const uint8_t*)at != kBatch) {
          install_log("[Tentacle] NOT installed: warn threshold at 0x%08X reads %02X, "
                      "expected %02X", (unsigned)p->warnThreshold, *(const uint8_t*)at, kBatch);
-         g_boneTable = nullptr;
          return;
       }
    }
-
-   // ---- every check has passed; commit --------------------------------------
-   for (int i = 0; i < kBitfieldSites; ++i) {
-      const byte_patch& bp = p->bitfield[i];
-      record_and_write(resolve(exe_base, bp.va), bp.width, bp.stock, bp.patched);
-   }
-   for (int i = 0; i < 3; ++i)
-      record_and_write(resolve(exe_base, p->poolSize[i]), 4, kStockPoolSize, kExtendedPoolSize);
-   if (p->warnThreshold)
-      record_and_write(resolve(exe_base, p->warnThreshold), 1, kBatch, kMaxTentacles);
 
    // ---- hooks ---------------------------------------------------------------
    g_origCtor        = (fn_ctor_t)resolve(exe_base, fn.ctor);
    g_origDoTentacles = (fn_doTentacles_t)resolve(exe_base, fn.doTentacles);
    g_enforceColl     = (fn_enforceColl_t)resolve(exe_base, fn.enforceCollisions);
    g_updatePose      = (fn_updatePose_t)resolve(exe_base, fn.updatePose);
+   g_origSoldierRender = (fn_soldierRender_t)resolve(exe_base, renders->soldier);
+   g_origSelectionRender = (fn_selectionRender_t)resolve(exe_base, renders->selection);
+   g_origAddonRender = (fn_addonRender_t)resolve(exe_base, renders->addon);
 
    if (p->dtInXmm1) {
       g_rawUpdatePositions = resolve(exe_base, fn.updatePositions);
@@ -790,40 +865,71 @@ void tentacle_limit_install(uintptr_t exe_base)
       g_updatePositions    = (fn_updatePositions_t)resolve(exe_base, fn.updatePositions);
    }
 
-   DetourTransactionBegin();
-   DetourUpdateThread(GetCurrentThread());
-   DetourAttach(&(PVOID&)g_origCtor, hooked_ctor);
-   DetourAttach(&(PVOID&)g_origDoTentacles, hooked_do_tentacles);
-   const LONG rc = DetourTransactionCommit();
+   LONG rc = DetourTransactionBegin();
+   if (rc != NO_ERROR) {
+      install_log("[Tentacle] NOT installed: Detours begin failed (%ld)", rc);
+      return;
+   }
+   rc = DetourUpdateThread(GetCurrentThread());
+   if (rc == NO_ERROR) rc = DetourAttach(&(PVOID&)g_origCtor, hooked_ctor);
+   if (rc == NO_ERROR) rc = DetourAttach(&(PVOID&)g_origDoTentacles, hooked_do_tentacles);
+   if (rc == NO_ERROR) rc = DetourAttach(&(PVOID&)g_origSoldierRender, hooked_soldier_render);
+   if (rc == NO_ERROR) rc = DetourAttach(&(PVOID&)g_origSelectionRender, hooked_selection_render);
+   if (rc == NO_ERROR) rc = DetourAttach(&(PVOID&)g_origAddonRender, hooked_addon_render);
+   if (rc != NO_ERROR) {
+      DetourTransactionAbort();
+      install_log("[Tentacle] NOT installed: Detours attach failed (%ld)", rc);
+      return;
+   }
+
+   // Every signature and hook has passed before the dependent sizes change.
+   for (int i = 0; i < kBitfieldSites; ++i) {
+      const byte_patch& bp = p->bitfield[i];
+      record_and_write(resolve(exe_base, bp.va), bp.width, bp.stock, bp.patched);
+   }
+   for (int i = 0; i < 3; ++i)
+      record_and_write(resolve(exe_base, p->poolSize[i]), 4, kStockPoolSize, kExtendedPoolSize);
+   if (p->warnThreshold)
+      record_and_write(resolve(exe_base, p->warnThreshold), 1, kBatch, kMaxTentacles);
+   rc = DetourTransactionCommit();
 
    if (rc != NO_ERROR) {
       // The widened masks are only safe while our replacements are in place.
       install_log("[Tentacle] NOT installed: Detours commit failed (%ld); bytes reverted", rc);
       revert_all();
-      restore_bone_table_protection();
-      g_boneTable = nullptr;
       return;
    }
 
    g_installed = true;
-   install_log("[Tentacle] installed (limit raised to %d tentacles)", kMaxTentacles);
+   install_log("[Tentacle] installed (limit=%d, native timing, caller-owned poses, read-only bone names)", kMaxTentacles);
 }
 
 void tentacle_limit_uninstall()
 {
    if (!g_installed) return;
 
-   DetourTransactionBegin();
-   DetourUpdateThread(GetCurrentThread());
-   DetourDetach(&(PVOID&)g_origCtor, hooked_ctor);
-   DetourDetach(&(PVOID&)g_origDoTentacles, hooked_do_tentacles);
-   DetourTransactionCommit();
+   LONG rc = DetourTransactionBegin();
+   if (rc != NO_ERROR) return;
+   rc = DetourUpdateThread(GetCurrentThread());
+   if (rc == NO_ERROR) rc = DetourDetach(&(PVOID&)g_origCtor, hooked_ctor);
+   if (rc == NO_ERROR) rc = DetourDetach(&(PVOID&)g_origDoTentacles, hooked_do_tentacles);
+   if (rc == NO_ERROR) rc = DetourDetach(&(PVOID&)g_origSoldierRender, hooked_soldier_render);
+   if (rc == NO_ERROR) rc = DetourDetach(&(PVOID&)g_origSelectionRender, hooked_selection_render);
+   if (rc == NO_ERROR) rc = DetourDetach(&(PVOID&)g_origAddonRender, hooked_addon_render);
+   if (rc != NO_ERROR) {
+      DetourTransactionAbort();
+      install_log("[Tentacle] uninstall failed; active patch retained (%ld)", rc);
+      return;
+   }
+   rc = DetourTransactionCommit();
+   if (rc != NO_ERROR) {
+      install_log("[Tentacle] uninstall commit failed; active patch retained (%ld)", rc);
+      return;
+   }
 
    // Must follow the detach: the stock DoTentacles against widened masks would
    // take up to 15 tentacles into arrays that hold 4.
    revert_all();
-   restore_bone_table_protection();
 
-   g_boneTable = nullptr;
    g_installed = false;
 }
