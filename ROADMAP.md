@@ -135,6 +135,10 @@ which may work fine for a regular jetpack, but not if you want to do something a
 like Cad Banes jetpack boots, which would require the effect to be attached to bone_l_foot and bone_r_foot. 
 The fix is to add a new ODF property to the jetpack class that allows you to specify the bone name for the effect origin.
 
+**Jetpack Directional Animations** - The jetpack only has one animation: jetpack_hover. 
+The goal is to add directional animations based on the player's movement direction, similarly to how the flying
+or land animations for units have it.
+
 **Real riot shields** - A shield that actually stops shots by geometry rather than by a
 deflect rule. Needs per-unit collision on the shield part, which the soldier collision model
 does not currently provide: soldiers use a single capsule, and the only existing example of
