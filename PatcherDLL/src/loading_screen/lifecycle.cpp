@@ -307,7 +307,26 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
     else
         _snprintf_s(lvlName, sizeof(lvlName), _TRUNCATE, "%s.lvl", stem);
 
-    if (!lvl_read_data_file(lvlName)) {
+    // RunTimeHeap, not the heap the caller left current. LoadDisplay::LoadData
+    // (modtools 0x0067e360) switches to the temp load heap around this very call,
+    // and GameMemory::ReleaseTempHeap fills that heap with 0xDE and frees it the
+    // moment loading ends. Everything a sound lvl registers is linked into
+    // process-global lists - Snd properties, banks, GameSoundEngine's own lists
+    // walked every tick from GameSoundEngine::Update - so reading it on the temp
+    // heap leaves those lists pointing into poison. The first sound update after
+    // loading then walks a node whose next pointer is 0xDEDEDEDE and faults
+    // (modtools EIP 0x007538BC). Same trap as the load-screen model vertex
+    // formats; data_guard.cpp does the same for those.
+    bool readOk;
+    if (g_set_current_heap && g_runtime_heap_idx) {
+        const int prevHeap = g_set_current_heap(*g_runtime_heap_idx);
+        readOk = lvl_read_data_file(lvlName);
+        g_set_current_heap(prevHeap);
+    } else {
+        readOk = lvl_read_data_file(lvlName);
+    }
+
+    if (!readOk) {
         warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
                "[BF1Ext] LoadSoundLVL \"%s\": LoadUtil::ReadDataFile could not "
                "open \"%s\" (resolved as \"%s\"), so no BF1 sound is "
@@ -316,23 +335,33 @@ void __fastcall hooked_load_data_file(void* ecx, void* edx, const char* lvlPath)
     }
 
     // Reading the lvl and registering its properties are separate things, and
-    // only the second is what the sound calls need. Probe one hash the config
-    // actually named so a future regression says so here, at the cause, rather
-    // than as "sound hash not found" from somewhere else entirely.
-    const uint32_t probe = g_loadScreenCfg.barSoundHash    ? g_loadScreenCfg.barSoundHash
-                         : g_loadScreenCfg.xTrackSoundHash ? g_loadScreenCfg.xTrackSoundHash
-                         : g_loadScreenCfg.transitionSoundHash;
-    if (probe && g_find_by_hash && !g_find_by_hash(probe)) {
+    // only the second is what the sound calls need. Check every sound the config
+    // named, each by its key, so a missing one says so here, at the cause, rather
+    // than as "sound hash not found" from somewhere else entirely. Checking just
+    // one is not enough: the stock BF1 names are always registered, so a config
+    // mixing them with a custom sound would pass on the stock one.
+    if (!g_find_by_hash) return;
+
+    const struct { const char* key; uint32_t hash; } named[] = {
+        {"XTrackingSound",  g_loadScreenCfg.xTrackSoundHash},
+        {"YTrackingSound",  g_loadScreenCfg.yTrackSoundHash},
+        {"ZoomSound",       g_loadScreenCfg.zoomSoundHash},
+        {"TransitionSound", g_loadScreenCfg.transitionSoundHash},
+        {"BarSound",        g_loadScreenCfg.barSoundHash},
+    };
+
+    for (const auto& n : named) {
+        if (!n.hash || g_find_by_hash(n.hash)) continue;
         warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
-               "[BF1Ext] LoadSoundLVL \"%s\" was read as \"%s\", but sound hash "
-               "%08x from the same LoadConfig is still not registered - the lvl "
-               "loaded without its sound properties.%s\n",
-               want, lvlName, probe,
-               group ? "" : " No sound group was given: a BF2 sound lvl is loaded"
-                            " as \"<lvl>;<group>\", the way script-side"
-                            " ReadDataFile(\"sound\\\\bes.lvl;bes1cw\") does, and"
-                            " without the group the file opens but nothing is"
-                            " registered. Try LoadSoundLVL = \"<path>;<group>\".");
+               "[BF1Ext] LoadSoundLVL \"%s\" was read as \"%s\", but the %s sound "
+               "(hash %08x) is still not registered, so it will not play.%s\n",
+               want, lvlName, n.key, n.hash,
+               group ? " Check that the sound is in that lvl and in that sound group."
+                     : " No sound group was given: a BF2 sound lvl is loaded"
+                       " as \"<lvl>;<group>\", the way script-side"
+                       " ReadDataFile(\"sound\\\\bes.lvl;bes1cw\") does, and"
+                       " without the group the file opens but nothing is"
+                       " registered. Try LoadSoundLVL(\"<path>;<group>\").");
     }
 }
 
