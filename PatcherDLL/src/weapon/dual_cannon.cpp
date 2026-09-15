@@ -70,6 +70,11 @@
 // is freed memory by then. Stock never reaches those slots, because only a grenade
 // enters FIRE2. We clear the table before Init runs so every unnamed slot is refilled
 // from the level being loaded.
+//
+// The spawn screen preview soldier has no Weapon instance: SoldierElement draws its
+// selected weapon with the non-virtual WeaponClass::Render, which none of the vtable
+// overrides reach. A detour on it (keyed on the side table, so stock classes pass
+// straight through) draws the offhand model there too.
 // =============================================================================
 
 namespace {
@@ -196,12 +201,16 @@ using fn_render_flash_t        = void(__thiscall*)(void* cls, const float* pos, 
 using fn_mission_time_t        = float(__cdecl*)();
 
 using fn_first_person_init_t   = void(__cdecl*)();
+using fn_class_render_t        = void(__fastcall*)(void* cls, void* edx, const float* world,
+                                                   void* pose, const uint8_t* color,
+                                                   uint32_t flags, uint32_t highRes);
 
 constexpr unsigned kFirstPersonAnimSlots = 48;
 
 fn_create_base_classes_t original_create_base_classes = nullptr;
 fn_fire_t                original_fire                = nullptr;
 fn_first_person_init_t   original_first_person_init   = nullptr;
+fn_class_render_t        original_class_render        = nullptr;
 void**                   s_firstPersonAnims           = nullptr;
 fn_operator_new_t        s_operatorNew     = nullptr;
 fn_class_ctor_t          s_classCtor       = nullptr;
@@ -390,6 +399,49 @@ bool matrix_is_mirrored(const float* m)
    return det < 0.0f;
 }
 
+// Draw the offhand model the way the engine draws the main one: hardpoint matrix * world,
+// then the model's own Render. `outWorld` receives the offhand world matrix.
+bool draw_offhand(void* model, uint32_t hardPoint, const float* world, void* pose,
+                  const uint8_t* color, uint32_t flags, float* outWorld)
+{
+   if (!model || !hardPoint || !world || !pose || !color) return false;
+
+   const auto* node = static_cast<const float*>(
+      s_hashTableFind(static_cast<uint8_t*>(pose) + kPoseTable, kPoseTableSize, hardPoint));
+   if (!node) return false;
+
+   matrix_multiply(outWorld, node, world);
+
+   const auto render =
+      reinterpret_cast<fn_model_render_t>((*static_cast<void***>(model))[kSlotModelRender]);
+   render(model, outWorld, 0, color, flags, 0);
+   return true;
+}
+
+// The spawn screen preview: WeaponClass::Render has drawn the main model (or bailed on
+// an invisible colour or a missing hp_weapons), so add the offhand under the same rules.
+void __fastcall hooked_class_render(void* cls, void* edx, const float* world, void* pose,
+                                    const uint8_t* color, uint32_t flags, uint32_t highRes)
+{
+   original_class_render(cls, edx, world, pose, color, flags, highRes);
+
+   // WeaponClass::Render's own gates: a transparent draw or no pose draws nothing.
+   if (!cls || !color || color[3] == 0 || !pose) return;
+
+   void*    model     = nullptr;
+   uint32_t hardPoint = 0;
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      auto it = s_classes.find(cls);
+      if (it == s_classes.end()) return;
+      model     = it->second.model;
+      hardPoint = it->second.hardPoint;
+   }
+
+   float offhandWorld[16];
+   draw_offhand(model, hardPoint, world, pose, color, flags, offhandWorld);
+}
+
 // Weapon::Render draws the main gun at hp_weapons, the muzzle flash, and writes
 // mFirePointMatrix. After it, draw the offhand model at the class's OffhandHardPoint
 // the same way (hardpoint matrix * world, then the model's own Render), remember where
@@ -426,18 +478,10 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    s_baseRender(weapon, world, pose, color, flags, highRes);
    if (offhandFlash) flashStart = savedFlashStart;
 
-   if (hidden || !pose || !world || !color || !model || !hardPoint) return;
-
-   const auto* node = static_cast<const float*>(
-      s_hashTableFind(static_cast<uint8_t*>(pose) + kPoseTable, kPoseTableSize, hardPoint));
-   if (!node) return;
+   if (hidden) return;
 
    float offhandWorld[16];
-   matrix_multiply(offhandWorld, node, world);
-
-   const auto render =
-      reinterpret_cast<fn_model_render_t>((*static_cast<void***>(model))[kSlotModelRender]);
-   render(model, offhandWorld, 0, color, flags, 0);
+   if (!draw_offhand(model, hardPoint, world, pose, color, flags, offhandWorld)) return;
 
    // Same bake conditions as Weapon::Render: invisible draws leave the fire point alone,
    // and a reflection region's mirrored duplicate must not overwrite the real one.
@@ -609,7 +653,7 @@ void dual_cannon_install(uintptr_t exe_base)
        !g_addr->red_model_find || !g_addr->red_model_get_parent_bone_and_offset ||
        !g_addr->pbl_hash_table_find || !g_addr->weapon_cannon_fire ||
        !g_addr->weapon_class_render_flash || !g_addr->game_loop_get_mission_time ||
-       !g_addr->first_person_init || !g_addr->fp_anim_array) {
+       !g_addr->first_person_init || !g_addr->fp_anim_array || !g_addr->weapon_class_render) {
       install_log("[DualCannon] NOT installed: addresses unknown for this build");
       return;
    }
@@ -628,6 +672,16 @@ void dual_cannon_install(uintptr_t exe_base)
 
    void* createTarget = resolve(exe_base, g_addr->game_state_create_base_weapon_classes);
    void* fireTarget   = resolve(exe_base, g_addr->weapon_cannon_fire);
+   // WeaponClass::Render: PUSH EBP / MOV EBP,ESP / AND ESP,-16 / SUB ESP,0x84.
+   static constexpr uint8_t kClassRenderPrologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                      0x81, 0xEC, 0x84, 0x00, 0x00, 0x00};
+
+   void* classRenderTarget = resolve(exe_base, g_addr->weapon_class_render);
+   if (std::memcmp(classRenderTarget, kClassRenderPrologue, sizeof(kClassRenderPrologue)) != 0) {
+      install_log("[DualCannon] NOT installed: unexpected bytes at WeaponClass::Render %08X",
+                  (unsigned)g_addr->weapon_class_render);
+      return;
+   }
    void* fpInitTarget = resolve(exe_base, g_addr->first_person_init);
    if (std::memcmp(fpInitTarget, kFirstPersonInitPrologue, sizeof(kFirstPersonInitPrologue)) != 0) {
       install_log("[DualCannon] NOT installed: unexpected bytes at FirstPerson::Init %08X",
@@ -661,6 +715,7 @@ void dual_cannon_install(uintptr_t exe_base)
    original_create_base_classes = reinterpret_cast<fn_create_base_classes_t>(createTarget);
    original_fire                = reinterpret_cast<fn_fire_t>(fireTarget);
    original_first_person_init   = reinterpret_cast<fn_first_person_init_t>(fpInitTarget);
+   original_class_render        = reinterpret_cast<fn_class_render_t>(classRenderTarget);
    s_firstPersonAnims = static_cast<void**>(resolve(exe_base, g_addr->fp_anim_array));
 
    DetourTransactionBegin();
@@ -668,10 +723,12 @@ void dual_cannon_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
    DetourAttach(&(PVOID&)original_fire, hooked_fire);
    DetourAttach(&(PVOID&)original_first_person_init, hooked_first_person_init);
+   DetourAttach(&(PVOID&)original_class_render, hooked_class_render);
    if (DetourTransactionCommit() != NO_ERROR) {
       original_create_base_classes = nullptr;
       original_fire                = nullptr;
       original_first_person_init   = nullptr;
+      original_class_render        = nullptr;
       install_log("[DualCannon] NOT installed: detours failed");
       return;
    }
@@ -688,8 +745,10 @@ void dual_cannon_uninstall()
    DetourDetach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
    DetourDetach(&(PVOID&)original_fire, hooked_fire);
    DetourDetach(&(PVOID&)original_first_person_init, hooked_first_person_init);
+   DetourDetach(&(PVOID&)original_class_render, hooked_class_render);
    DetourTransactionCommit();
    original_create_base_classes = nullptr;
    original_fire                = nullptr;
    original_first_person_init   = nullptr;
+   original_class_render        = nullptr;
 }

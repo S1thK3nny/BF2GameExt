@@ -162,6 +162,12 @@ namespace modtools {
    // pointer. See weapon/dual_cannon.cpp.
    constexpr uintptr_t first_person_init = 0x004AB590;
 
+   // void __thiscall WeaponClass::Render(PblMatrix* world, RedPose* pose, RedColor* color,
+   //     uint flags, bool highRes), RET 0x14 (thunk 0x401E01). Draws the class model at
+   //     hp_weapons with no Weapon instance. Sole caller SoldierElement::RenderUsingContext
+   //     (0x00674F0E), the spawn screen preview soldier.
+   constexpr uintptr_t weapon_class_render = 0x0061D170;
+
    // Weapon::Render looks the weapon hardpoint up in a RedPose with
    // pbl_hash_table_find(pose + 4, 0x100, crc); that entry lives under Hashing below.
 
