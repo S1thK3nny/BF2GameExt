@@ -105,6 +105,32 @@ namespace modtools {
    // cdecl, result in ST(0).  ILT thunk 0x407581.
    constexpr uintptr_t collision_manager_ray_hit = 0x0042E230;
 
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
+   //
+   // void __cdecl GameState::CreateBaseWeaponClasses() - one `new XClass(PblHash(label))`
+   // per stock label, plain RET. Sole caller GameState::PreStateInit (0x0044F1B7), so
+   // it runs on every mission load. See docs/RE/WeaponClassFactory.md.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x0044C960;
+
+   // void* __cdecl operator new(uint) - allocates from RedCurrHeap. Class objects must
+   // come from here: PostStateCleanup only unlinks Factory::sList, never frees them.
+   constexpr uintptr_t engine_operator_new = 0x007E34A0;
+
+   // WeaponCannonClass::WeaponCannonClass(uint hash), __thiscall RET 4 (thunk 0x413156).
+   // Object size 0x3DC. Self-registers into Factory<Weapon,...>::sList (0x00AD43BC).
+   constexpr uintptr_t weapon_cannon_class_ctor = 0x00625A10;
+
+   // WeaponCannonClass vtable, 13 slots, no RTTI locator. +0x04 Derive (0x4142D1),
+   // +0x08 Build (0x40A8D0), +0x18 SetProperty, +0x20 PostLoadInit.
+   constexpr uintptr_t weapon_cannon_class_vftable = 0x00A525F4;
+
+   // WeaponCannon instance vtable, 61 slots (same order as Phantom 0xA1CB40).
+   constexpr uintptr_t weapon_cannon_vftable = 0x00A52468;
+
+   // Factory<Weapon,WeaponClass,WeaponDesc>::sCounter. Post-incremented into
+   // Factory::mNetIndex (+0x1C), which goes over the wire in 8 bits.
+   constexpr uintptr_t weapon_class_factory_counter = 0x00B91BE8;
+
    // ---- Loading Screen (LoadDisplay) -----------------------------------------
 
    constexpr uintptr_t load_data_file_real       = 0x0067e2b0;

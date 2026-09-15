@@ -11,6 +11,7 @@
 #include "weapon/disguise_model_override.hpp"
 #include "weapon/barrel_fire_origin.hpp"
 #include "weapon/held_ordnance_effect.hpp"
+#include "weapon/dual_cannon.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
 #include "entity/soldier_override_texture.hpp"
@@ -325,6 +326,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Held-effect preflight verifies the original soldier render receiver chain;
    // install before tentacle/texture wrappers replace its native render entries.
    held_ordnance_effect_install(exe_base);
+   // Copies the cannon vtables lazily on first mission load, so it inherits the
+   // barrel_fire_origin and held_ordnance_effect slot hooks installed above.
+   dual_cannon_install(exe_base);
    aim_assist_install(exe_base);
    prone_system_install(exe_base);
    prone_lvl_load_install(exe_base); // must follow prone_system_install — owns g_proneEnabled

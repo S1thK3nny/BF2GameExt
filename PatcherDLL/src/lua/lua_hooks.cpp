@@ -21,6 +21,7 @@
 #include "weapon/grappling_hook.hpp"
 #include "weapon/barrel_fire_origin.hpp"
 #include "weapon/held_ordnance_effect.hpp"
+#include "weapon/dual_cannon.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "render/particle_batch_spill.hpp"
@@ -354,6 +355,7 @@ void lua_hooks_uninstall()
    aim_assist_uninstall();
    game_logging_uninstall();
    terrain_texture_fix_uninstall();
+   dual_cannon_uninstall();
    held_ordnance_effect_uninstall();
    barrel_fire_origin_uninstall();
    land_on_arrival_uninstall();
