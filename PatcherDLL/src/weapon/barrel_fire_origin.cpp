@@ -99,6 +99,16 @@ static bool ownerIsLocalPlayer(const void* owner)
 // raw Tracker+0x14 read ignores the class camera-mode override), so read the flag
 // the engine actually computed.  The instance pointer is a one-element array
 // indexed by camera; PC never uses index 0's neighbours.
+// ---------------------------------------------------------------------------
+static uintptr_t s_scopeDisplay = 0;   // address of the ScopeDisplay* global
+
+static bool scopeTextureVisible()
+{
+   if (!s_scopeDisplay) return false;
+   const char* sd = *(const char* const*)s_scopeDisplay;
+   if (!sd) return false;
+   return *(const bool*)(sd + 0x4C9);
+}
 
 // ---------------------------------------------------------------------------
 // CollisionManager::RayHit — used to find what the vanilla shot would hit, so the
@@ -492,6 +502,11 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
 
       if (aim_target* cached = targetSlot(aimer, false)) cached->valid = false;
 
+      // Scope texture up: hand the frame back to vanilla entirely -- no origin move,
+      // no direction correction.  Placed after the cache invalidation so a second
+      // muzzle cannot aim at a point resolved before the scope went up.
+      if (scopeTextureVisible()) return false;
+
       // Aimer::bDirect. Aimer::SetSoldierInfo is its only writer and sets it
       // unconditionally, so it means "UpdateWeaponAndAimer authored mRootPos and
       // mDirection as a matched pair this turn". A turret or vehicle aimer never
@@ -629,7 +644,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
 {
    uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, localIdsVA;
    uintptr_t cannonRenderVA, launcherRenderVA, renderImplVA, renderThunkVA;
-   uintptr_t grappleVA = 0, grappleRenderVA = 0;
+   uintptr_t grappleVA = 0, grappleRenderVA = 0, scopeVA;
    bool rayHitIsRelease;
    switch (g_build) {
    case GameBuild::Modtools:
@@ -647,6 +662,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       grappleVA       = game_addrs::modtools::weapon_grapple_vftable_override_aimer;
       grappleRenderVA = game_addrs::modtools::weapon_grapple_vftable_render;
       localIdsVA = game_addrs::modtools::net_comm_local_player_id;
+      scopeVA    = game_addrs::modtools::scope_display_instance;
       break;
 
    case GameBuild::Steam:
@@ -661,6 +677,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       rayHitVA   = game_addrs::steam::collision_manager_ray_hit;
       rayHitIsRelease = true;    // ECX/EDX/XMM2 + six stack args, result in XMM0
       localIdsVA = game_addrs::steam::net_comm_local_player_id;
+      scopeVA    = game_addrs::steam::scope_display_instance;
       break;
 
    case GameBuild::GOG:
@@ -675,6 +692,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
       rayHitVA   = game_addrs::gog::collision_manager_ray_hit;
       rayHitIsRelease = true;    // same LTCG RayHit convention as Steam
       localIdsVA = game_addrs::gog::net_comm_local_player_id;
+      scopeVA    = game_addrs::gog::scope_display_instance;
       break;
    default:
       return; // unknown build
@@ -687,6 +705,7 @@ void barrel_fire_origin_install(uintptr_t exe_base)
    s_rayHit   = rayHitIsRelease ? &rayhit_release_thunk : (RayHit_t)s_rayHitFn;
 
    s_localPlayerIds = localIdsVA ? (const int*)resolve(exe_base, localIdsVA) : nullptr;
+   s_scopeDisplay   = (uintptr_t)resolve(exe_base, scopeVA);
 
    void* aimer_impl  = resolve(exe_base, implVA);
    void* aimer_thunk = resolve(exe_base, thunkVA);

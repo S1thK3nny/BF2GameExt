@@ -47,6 +47,8 @@ Scripts can check the running version through `GameExt.version`.
 - A crash shortly after a loading screen that loads its own sounds.
 - Random crashes while writing to the log on the modtools executable, when a sound
   thread and the game logged at the same moment.
+- While looking through a scope, shots left the barrel instead of the centre of the
+  scope, so they visibly angled in towards the target.
 
 ## 1.0.0
 
