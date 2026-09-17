@@ -119,6 +119,7 @@
     <ClInclude Include="src\core\game_addrs.hpp" />
     <ClInclude Include="src\core\lvl_read.hpp" />
     <ClInclude Include="src\entity\flyer_carrier_fixes.hpp" />
+    <ClInclude Include="src\entity\instance_props.hpp" />
     <ClInclude Include="src\entity\soldier_prone.hpp" />
     <ClInclude Include="src\entity\prone_lvl_load.hpp" />
     <ClInclude Include="src\entity\soldier_fp_animation_override.hpp" />
@@ -215,6 +216,7 @@
     <ClCompile Include="src\util\game_log_lock.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
+    <ClCompile Include="src\entity\instance_props.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />
     <ClCompile Include="src\entity\prone_lvl_load.cpp" />
     <ClCompile Include="src\entity\soldier_fp_animation_override.cpp" />

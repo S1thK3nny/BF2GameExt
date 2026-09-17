@@ -32,36 +32,72 @@ Currently this gates the **Prone** feature (the only feature that modifies mod c
 
 ## Character & Weapon Queries
 
-| Function | Description |
-|----------|-------------|
-| `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary, ...). Returns nil if the slot is empty. |
-| `SetCharacterWeapon(charIndex, odfName [, channel])` | Replaces the active weapon in a channel (0 = primary, 1 = secondary) with another already-loaded weapon ODF. Builds a real Weapon through the engine's own factory and destroys the old one , ammo, animation stance, and aimer all come out correct. Singleplayer only; slots using `WeaponShareAmmo`/`WeaponShareEnergy` are refused, as are weapons the unit's animation bank has no animmap for (e.g. giving a jedi-bank unit a rifle). The old weapon is kept in that case. Works in first person. Melee-family weapons (sabers, saber throw) are untested and unsupported. Returns 1 on success, nil on failure. |
-| `GetWeaponAmmo(charIndex [, channel])` | Returns four numbers: `curClip, numClips, maxClips, roundsPerClip` for the active weapon in the channel (default 0). Ammo is tracked in **clips**, with `curClip` being a fractional 0.0-1.0 of one loaded clip. |
-| `SetWeaponAmmo(charIndex, curClip [, numClips [, channel]])` | Writes `curClip` (fractional 0.0-1.0) and optionally `numClips` (spare clips) on the active weapon. Pass nil for `numClips` to leave it untouched. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary, ...). Returns nil if the slot is empty. | 1.0.0 |
+| `SetCharacterWeapon(charIndex, odfName [, channel])` | Replaces the active weapon in a channel (0 = primary, 1 = secondary) with another already-loaded weapon ODF. Builds a real Weapon through the engine's own factory and destroys the old one , ammo, animation stance, and aimer all come out correct. Singleplayer only; slots using `WeaponShareAmmo`/`WeaponShareEnergy` are refused, as are weapons the unit's animation bank has no animmap for (e.g. giving a jedi-bank unit a rifle). The old weapon is kept in that case. Works in first person. Melee-family weapons (sabers, saber throw) are untested and unsupported. Returns 1 on success, nil on failure. | 1.0.0 |
+| `GetWeaponAmmo(charIndex [, channel])` | Returns four numbers: `curClip, numClips, maxClips, roundsPerClip` for the active weapon in the channel (default 0). Ammo is tracked in **clips**, with `curClip` being a fractional 0.0-1.0 of one loaded clip. | 1.0.0 |
+| `SetWeaponAmmo(charIndex, curClip [, numClips [, channel]])` | Writes `curClip` (fractional 0.0-1.0) and optionally `numClips` (spare clips) on the active weapon. Pass nil for `numClips` to leave it untouched. | 1.0.0 |
 
 ## Spawn Menu
 
-| Function | Description |
-|----------|-------------|
-| `RemoveUnitClass(team, className)` | Removes a unit class from a team's spawn menu at runtime. Compact-shifts the team's class arrays to preserve order. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `RemoveUnitClass(team, className)` | Removes a unit class from a team's spawn menu at runtime. Compact-shifts the team's class arrays to preserve order. | 1.0.0 |
+
+## World Objects
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetInstanceProperty(name, property, value)` | Writes an `[InstanceProperties]` key on the world object of that name, the way the world layer would have at load time. `name` is the name the object was given in ZeroEditor. Returns how many objects were written, or nil if the name matched nothing. | 1.1.0 |
+
+Works on any named world object. Vehicle spawners are the reason it exists: stock
+`SetProperty` cannot reach them at all, so before this there was no way to change
+one after the map loaded.
+
+```lua
+SetInstanceProperty("cp2_vspawn1", "ClassAllDEF", "cis_fly_droidfighter")
+SetInstanceProperty("cp2_vspawn1", "SpawnTime", 15)
+```
+
+A spawner's vehicle carries the spawner's name. While both exist, the spawner is the
+one written; use `SetProperty` for the vehicle.
+
+A spawner takes the same keys its ODF does: `SpawnTime`, `DecayTime`, `ControlZone`,
+`Team`, and the per-side class keys. Beyond the keys in the stock template,
+`ClassAlliance`, `ClassEmpire`, `ClassRepublic`, `ClassCIS` and `ClassHistorical`
+also work, and are the only way to set the vehicle for teams 3 through 7.
+
+Things to know:
+
+- The vehicle class you name has to already be loaded in the level. Naming one that
+  is not leaves the spawner with nothing to spawn.
+- A new class only takes effect once the vehicle already parked at the spawner is
+  gone.
+- `SpawnTime` applies from the next respawn onward, not to a countdown already
+  running.
+- `SpawnCount` is refused at runtime and logged. It resizes a memory pool that live
+  vehicles are allocated out of, so it stays a load-time key.
+
+In multiplayer, vehicle spawning only runs on the host, so call it there.
 
 ## Event Callbacks
 
 Register Lua callbacks that fire when soldiers dismount vehicles. All registration functions return a handle that can be passed to `ReleaseCharacterExitVehicle` to unsubscribe.
 
-| Function | Description |
-|----------|-------------|
-| `OnCharacterExitVehicle(fn)` | Fires on every character exiting any vehicle. |
-| `OnCharacterExitVehicleName(name, fn)` | Filtered to vehicles with the given entity name. |
-| `OnCharacterExitVehicleTeam(team, fn)` | Filtered to a specific team index. |
-| `OnCharacterExitVehicleClass(className, fn)` | Filtered to a specific vehicle ODF class. |
-| `ReleaseCharacterExitVehicle(handle)` | Unregister a previously-registered callback. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `OnCharacterExitVehicle(fn)` | Fires on every character exiting any vehicle. | 1.0.0 |
+| `OnCharacterExitVehicleName(name, fn)` | Filtered to vehicles with the given entity name. | 1.0.0 |
+| `OnCharacterExitVehicleTeam(team, fn)` | Filtered to a specific team index. | 1.0.0 |
+| `OnCharacterExitVehicleClass(className, fn)` | Filtered to a specific vehicle ODF class. | 1.0.0 |
+| `ReleaseCharacterExitVehicle(handle)` | Unregister a previously-registered callback. | 1.0.0 |
 
 ## Loading Screen
 
-| Function | Description |
-|----------|-------------|
-| `SetLoadDisplayLevel(path)` | Redirects the loading screen to a custom load lvl. Call from script root or ScriptPreInit. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetLoadDisplayLevel(path)` | Redirects the loading screen to a custom load lvl. Call from script root or ScriptPreInit. | 1.0.0 |
 
 `SetLoadDisplayLevel` resolves its path the same way `ReadDataFile` does, minus
 the sublevel suffix. The trailing `.lvl` is optional.
@@ -93,20 +129,20 @@ script passed, not the path it looked in, so it cannot tell you that on its own.
 
 ## Rendering
 
-| Function | Description |
-|----------|-------------|
-| `SetFogEnable(0/1)` | Toggles the D3D fog render state. |
-| `SetFogRange(start, end)` | Sets near/far fog distances. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetFogEnable(0/1)` | Toggles the D3D fog render state. | 1.0.0 |
+| `SetFogRange(start, end)` | Sets near/far fog distances. | 1.0.0 |
 
 ## HTTP
 
 Make HTTP requests directly from Lua. Useful for telemetry, live configuration, or external API integration in either singleplayer or multiplayer missions.
 
-| Function | Description |
-|----------|-------------|
-| `HttpGet(url)` | Synchronous GET. Returns response body as a string, or nil on failure. |
-| `HttpPut(url, body)` | Synchronous PUT. Returns response body. |
-| `HttpPost(url, body)` | Synchronous POST. Returns response body. |
-| `HttpGetAsync(url)` | Fire-and-forget GET on a background thread. |
-| `HttpPutAsync(url, body)` | Fire-and-forget PUT. |
-| `HttpPostAsync(url, body)` | Fire-and-forget POST. |
+| Function | Description | Since |
+|----------|-------------|-------|
+| `HttpGet(url)` | Synchronous GET. Returns response body as a string, or nil on failure. | 1.0.0 |
+| `HttpPut(url, body)` | Synchronous PUT. Returns response body. | 1.0.0 |
+| `HttpPost(url, body)` | Synchronous POST. Returns response body. | 1.0.0 |
+| `HttpGetAsync(url)` | Fire-and-forget GET on a background thread. | 1.0.0 |
+| `HttpPutAsync(url, body)` | Fire-and-forget PUT. | 1.0.0 |
+| `HttpPostAsync(url, body)` | Fire-and-forget POST. | 1.0.0 |

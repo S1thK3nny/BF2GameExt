@@ -135,6 +135,10 @@ which may work fine for a regular jetpack, but not if you want to do something a
 like Cad Banes jetpack boots, which would require the effect to be attached to bone_l_foot and bone_r_foot. 
 The fix is to add a new ODF property to the jetpack class that allows you to specify the bone name for the effect origin.
 
+**Jetpack Directional Animations** - The jetpack only has one animation: jetpack_hover. 
+The goal is to add directional animations based on the player's movement direction, similarly to how the flying
+or land animations for units have it.
+
 **Real riot shields** - A shield that actually stops shots by geometry rather than by a
 deflect rule. Needs per-unit collision on the shield part, which the soldier collision model
 does not currently provide: soldiers use a single capsule, and the only existing example of
@@ -259,6 +263,16 @@ regions and streams. Current state of the problem:
 - Lua `SetProperty` can never reach sound entities. `EntitySound` derives from `Entity`,
   not `EntityEx`, so it is absent from the id map `SetProperty` looks in. This is
   structural, not a missing case.
+- **`SetInstanceProperty` should handle sound entities.** It exists for exactly this
+  wall: vehicle spawners are the same `Entity`-not-`EntityEx` case and are handled by
+  walking their global list and calling their own `SetProperty`. Sound entities fit
+  the same shape: add a family in `entity/instance_props.cpp` that walks
+  `sEntitySoundList`, matches the instance name, and calls `EntitySound::SetProperty`.
+  Mapped on the Phantom build only so far (ctors link into `sEntitySoundList` through
+  `0x0043E1B0`, `SetProperty` at `0x0058C620`); needs porting to modtools, Steam and
+  GOG, and where the instance name lives on `EntitySound` is not yet known. That
+  handler does not chain to `Entity::SetProperty` on an unmatched key, so only its own
+  keys will work.
 - `SetClassProperty` does work on `SoundAmbienceStatic` and `SoundAmbienceStreaming`, but
   only for four properties (`Sound`, `SoundStream`, `MinDistance`, `MaxDistance`) and only
   before the entity is created, since it edits the class and not the instance.
@@ -648,7 +662,8 @@ lot of screens rather than one repro.
 **`GetProperty` / `GetClassProperty`** - The read side of the existing `SetProperty` /
 `SetClassProperty` pair. Same entity and class lookup, same property name resolution,
 returning the current value instead of writing one. The sound entity limitation above
-applies identically to `GetProperty`.
+applies identically to `GetProperty`, and a `GetInstanceProperty` would need the same
+per-family handling as `SetInstanceProperty`.
 
 **Hero health drain switch** - A way to stop heroes from bleeding health over time. This
 belongs in Lua rather than in an ODF property: the drain is a game rule, and an ODF entry

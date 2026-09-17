@@ -20,7 +20,7 @@
 //
 
 #define GAMEEXT_VERSION_MAJOR 1
-#define GAMEEXT_VERSION_MINOR 0
+#define GAMEEXT_VERSION_MINOR 1
 #define GAMEEXT_VERSION_PATCH 0
 
 // Indirection so the argument is macro-expanded before stringification.
