@@ -64,13 +64,35 @@ BF1 addresses: `~SpawnVehicleList` `0x003B7E40` / `0x003B7E70`, vtable `0x00449C
 | `+0x30` | `mMatrix` | |
 | `+0x70` | `mClass` | `VehicleSpawnClass*` |
 | `+0x74` | `mCommandPost` | `ConstCommandPostHandle`, **live** |
+| `+0x78` | `mNameId` | hash of the world-layer instance name |
 | `+0x7C` | `mSpawnCount` | |
 | `+0x80` | `mSpawnTime` | |
+| `+0x84` | `mExpireTimeEnemy` | live field, **unsettable**, see below |
+| `+0x88` | `mExpireTimeField` | live field, **unsettable**, see below |
+| `+0x8C` | `mDecayTime` | |
 | `+0x90` | `mSpawnClass[8]` | `EntityClass*` per team, **live** |
 | `+0xB0` | `mFlyerClass[8]` | `EntityFlyerClass*` per team, **live** |
 | `+0xD0` | `mUseCarrier[8]` | |
+| `+0xD8` | `mTrackerList` | `PblList<VehicleTracker>`, one node per live vehicle |
 | `+0xF4` | `mVehicleTeam` | |
 | `+0xF8` | `mSpawnTeam` | |
+| `+0xFC` | `mSpawnTrigger` | false means the respawn timer needs re-arming |
+| `+0x100` | `mSpawnTimer` | countdown to the next spawn |
+
+`mNameId` is the name you typed in ZeroEditor. `UpdateSpawn` reverse-hashes it
+through the string pool to name the vehicles it creates. It first looks the bare
+name up in `EntityEx::mIdMap_`; the spawner itself is not an `EntityEx`, so while no
+earlier vehicle holds the name, the new vehicle gets the spawner's name unchanged.
+Only when it is taken does it probe `<spawnername>1`, `<spawnername>2` and so on.
+
+Removing a spawner's vehicle from Lua: use `KillObject`, never `DeleteEntity`.
+`Lua_Callbacks::DeleteEntity` (`0x00472880`) is `FindEntity_` followed straight by
+the scalar deleting destructor (`vtable+0xC`, flag 1). Nothing ejects the
+occupants, so a `Character` still holding the vehicle at `+0x14C`/`+0x150` reads a
+freed vtable on its next `Character::Update` (crash at `0x006463B5`,
+`call [eax+0x28]` with `EAX=0xDDDDDDDD`). `Lua_Callbacks::KillObject` (`0x00472240`)
+sets health to 0 and calls the `Damageable` death virtual, the same path as being
+shot down.
 
 The BF1 -> BF2 offset shift is `mSpawnClass` `0x88` -> `0x90` and `mFlyerClass`
 `0xA8` -> `0xB0`, caused by `mDecayTime` being inserted.
@@ -81,11 +103,24 @@ Ghidra labels the `this` pointer as `VehicleSpawnClass*`; it is the world entity
 `VehicleSpawnClass` is `0x84` bytes, so decompiler expressions of the form
 `this[1].field_0xNN` are `0x84 + NN` into `VehicleSpawn`.
 
-Parses `CommandPost`, `SpawnTime`, `DecayTime`, `SpawnCount`, `Team`, plus the
-per-team class properties (loop over the 8 team slots against the shared
-per-team property-name table at `0x00AD5F28`, 3 name aliases per team).
+Signature is `void __thiscall(VehicleSpawn*, PblHash prop, const char* value)`.
+Nothing in it is load-time only, so it is safe to drive at runtime.
 
-The `CommandPost` branch resolves through `CommandPostManager::FindPost` and then
+| Key | PblHash | Writes |
+| --- | --- | --- |
+| `SpawnTime` | `0x4E99B371` | `+0x80` |
+| `DecayTime` | `0x1C098B3C` | `+0x8C` |
+| `ControlZone` | `0x447C6DB0` | `+0x74`, plus `mVehicleTeam` |
+| `SpawnCount` | `0x88923FF7` | `+0x7C`, and resizes `VehicleTracker::sMemoryPool` |
+| `Team` | `0xA2FD7D0C` | `mVehicleTeam` |
+| class keys | table at `0x00AD5F28` | `mSpawnClass[t]`, `mFlyerClass[t]`, `mUseCarrier[t]` |
+
+**The command post key is `ControlZone`, not `CommandPost`.** An earlier revision of
+this document said `CommandPost`; that is wrong. `CommandPost` hashes to
+`0x844CCDB4`, which is compared nowhere in this function. `ControlZone` is also what
+the stock `com_item_vehicle_spawn.odf` writes.
+
+The `ControlZone` branch resolves through `CommandPostManager::FindPost` and then
 validates, with three distinct messages from
 `C:\Battlefront2\main\Battlefront2\Source\VehicleSpawn.cpp`:
 
@@ -97,6 +132,58 @@ validates, with three distinct messages from
 
 This path is load-bearing for ordinary vehicle spawning, so `mCommandPost` can be
 relied on.
+
+### The class-key table at `0x00AD5F28`
+
+7 sides x 3 slots. For each team `t` from 0 upward, the engine reads that team's
+side out of `SpawnManager::sInstance`, then tests the incoming hash against slot 0
+first and against slot `t` (clamped to 0 for `t > 2`) second. First match wins and
+names the team slot written.
+
+| Side | slot 0 | slot 1 (ATK) | slot 2 (DEF) |
+| --- | --- | --- | --- |
+| Neutral | `ClassNeutral` | `ClassNeutral` | `ClassNeutral` |
+| Alliance | `ClassAlliance` | `ClassAllATK` | `ClassAllDEF` |
+| Empire | `ClassEmpire` | `ClassImpATK` | `ClassImpDEF` |
+| Republic | `ClassRepublic` | `ClassRepATK` | `ClassRepDEF` |
+| CIS | `ClassCIS` | `ClassCISATK` | `ClassCISDEF` |
+| Locals | `ClassLocals` | `ClassLocATK` | `ClassLocDEF` |
+| Historical | `ClassHistorical` | `ClassHisATK` | `ClassHisDEF` |
+
+Recovered by hashing candidates against the table constants. The slot-0 entries for
+Alliance, Empire, Republic, CIS and Historical are absent from the stock ODF
+template but work, and are the only way to address teams 3 through 7.
+
+The side lookup happens **at call time**, not at load, so these keys resolve
+correctly whenever they are used.
+
+Unverified: when `SpawnManager::sInstance->mHistorical` is set, teams 1 and 2 are
+redirected to table row 8, which reads as zeros. The ATK/DEF keys may not bind at
+all in that mode.
+
+### `ExpireTimeEnemy` and `ExpireTimeField` are dead keys
+
+Neither name is parsed anywhere. Their hashes (`0x98FCC969`, `0x937E6A7D`) and their
+literal strings each occur **zero times in the whole executable**, and ODF dispatch
+is by hash comparison against immediates, so nothing can ever match them.
+
+The fields behind them are live. `VehicleSpawn::UpdateTracker` (`0x00665300`, which
+Ghidra mislabels `EntityFlyer::CalculateDest`) chooses between them as the
+abandoned-vehicle timeout, then decays the vehicle's health by `mDecayTime`:
+
+```c
+timeout = mExpireTimeField;                  // +0x88, the default
+...
+timeout = mExpireTimeEnemy;                  // +0x84, CP held by the other side
+...
+tracker->mEmptyTimer += 1.0;                 // seconds, via the +0x104 accumulator
+if (tracker->mEmptyTimer <= timeout) return;
+damageScale = curHealth / mDecayTime;        // +0x8C
+```
+
+So every vehicle spawn in every shipped map runs on the constructor defaults,
+**10.0 enemy and 20.0 field**, and the `20.0` / `40.0` in the stock ODF template has
+never been read.
 
 ---
 

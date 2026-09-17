@@ -4,7 +4,7 @@
 
 # Controller Bindings
 
-Gamepad binding reference for BF2GameExt v1.0.0. Enable the pad itself with `[Controller] Enabled=1`. Aim assist is separate and is **off by default** - turn it on with `[AimAssist] Enabled=1`. See [CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the aim assist tuning values.
+Gamepad binding reference for BF2GameExt v1.1.0. Enable the pad itself with `[Controller] Enabled=1`. Aim assist is separate and is **off by default** - turn it on with `[AimAssist] Enabled=1`. See [CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the aim assist tuning values.
 
 > **Stick feel is not set here.** These sections decide *which* button does *what*, nothing more. If the stick drifts, feels twitchy or too slow, or moves you when you are not touching it, that is sensitivity and deadzone - set those in the game's own **Options -> Controls** screen. Rebinding will not fix it, and no INI key here changes it.
 

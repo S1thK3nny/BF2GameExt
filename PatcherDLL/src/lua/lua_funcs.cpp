@@ -7,6 +7,7 @@
 #include "core/game_build.hpp"
 #include "core/lvl_read.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
+#include "entity/instance_props.hpp"
 #include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
@@ -1428,6 +1429,44 @@ static int lua_SetLoadDisplayLevel(lua_State* L)
    return 0;
 }
 
+// SetInstanceProperty(name, property, value) - writes an [InstanceProperties] key
+// on a named world object, the way the world layer would have at load time.
+//
+// Works on any named world object. Stock `SetProperty` resolves names through
+// EntityEx::mIdMap_ and RTTI-checks against EntityEx, so a family deriving from
+// Entity alone is invisible to it; those families (vehicle spawns so far) are
+// handled explicitly, and every other name falls through to the same EntityEx
+// path the stock callback uses. See entity/instance_props.cpp.
+//
+//   SetInstanceProperty("cp2_vspawn1", "ClassAllDEF", "cis_fly_droidfighter")
+//   SetInstanceProperty("cp2_vspawn1", "SpawnTime", 15)
+//
+// The value is forwarded as a string because the engine's own property parsers
+// take one and sscanf/atol it themselves, so numbers and booleans are stringified
+// here to match what the ODF path would have handed them.
+//
+// Returns the number of objects written, or nil when the name matched nothing.
+static int lua_SetInstanceProperty(lua_State* L)
+{
+   const char* name = g_lua.tolstring(L, 1, nullptr);
+   const char* prop = g_lua.tolstring(L, 2, nullptr);
+   if (!name || !*name || !prop || !*prop) return 0;
+
+   // Lua 5.0's lua_tostring converts a number argument in place and hands back its
+   // string form, so strings and numbers both come out of tolstring. Booleans do
+   // not convert and come back null, so they are the only case to translate, and
+   // they map to "1"/"0" the same way the engine's own Lua_Callbacks::SetProperty
+   // maps them before calling a property parser.
+   const char* value = g_lua.tolstring(L, 3, nullptr);
+   if (!value) value = g_lua.toboolean(L, 3) ? "1" : "0";
+
+   const int written = instance_props_set(name, prop, value);
+   if (written == 0) return 0;
+
+   g_lua.pushnumber(L, (float)written);
+   return 1;
+}
+
 // SetFogRange(near, far) - sets the fog start/end distances.
 // Both the D3D render state and the engine's internal copy are updated.
 // Example: SetFogRange(0, 5) -- fog starts at 0m, fully opaque at 5m
@@ -1598,6 +1637,7 @@ static const lua_func_entry custom_functions[] = {
    { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
    { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
+   { "SetInstanceProperty",      lua_SetInstanceProperty },
    { "SetFogRange",              lua_SetFogRange },
    { "SetFogEnable",             lua_SetFogEnable },
    { nullptr, nullptr }

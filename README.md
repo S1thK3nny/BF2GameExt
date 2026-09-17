@@ -10,6 +10,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Configuration](docs/user/CONFIGURATION.md)** - `BF2GameExt.ini` reference
 - **[Controller](docs/user/CONTROLLER.md)** - gamepad bindings, inputs and actions
 - **[Troubleshooting](docs/user/TROUBLESHOOTING.md)** - it did not load, or a feature does nothing
+- **[Changelog](CHANGELOG.md)** - what changed in each release
 - **[Roadmap](ROADMAP.md)** - planned work, and what will not be attempted
 
 **Modding with it**

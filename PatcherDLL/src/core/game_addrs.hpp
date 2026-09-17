@@ -859,6 +859,16 @@ namespace modtools {
    // sVehicleSpawnList, PblList<VehicleSpawn>: _head at +0, _iCount at +0x10.
    // From the ctor's list link (0x00664C50) and the dtor's count decrement.
    constexpr uintptr_t vehicle_spawn_list            = 0x00AD6004;
+   // VehicleSpawn::SetProperty — __thiscall(this, PblHash prop, const char* value),
+   // two stack dwords, RET 8.  The sole parser for a spawner's [InstanceProperties]
+   // and safe to drive at runtime; see docs/RE/CommandPostVehicleList.md.
+   constexpr uintptr_t vehicle_spawn_set_property    = 0x00664E60;
+   // EntityEx::mIdMap_._uiTable, the 0x800-slot PblHashTable that every Lua
+   // name lookup goes through.  FindEntity_ 0x00471120 does
+   // `push hash / push 0x800 / push 0x00B7AD3C / call pbl_hash_table_find`, and
+   // Lua_Callbacks::SetProperty then calls the result's vtable+0x10 as
+   // __thiscall(PblHash prop, const char* value).
+   constexpr uintptr_t entityex_id_map               = 0x00B7AD3C;
    // EntityClass shape.  The debug build keeps the 32-byte filename, so the label
    // sits past it.  Both read out of SpawnDisplay::SetSlotInfo.
    constexpr uintptr_t entityclass_label_off         = 0x40;  // wchar_t*, localized
@@ -1991,6 +2001,21 @@ namespace steam {
    // against the ctor 0x0066E820 (mClass +0x70, mCommandPost +0x74, matrix +0x30,
    // trackers +0xD8, mVehicleTeam +0xF4).
    constexpr uintptr_t vehicle_spawn_list            = 0x007EBEBC;
+   // VehicleSpawn::SetProperty.  Located by the build-invariant property hashes:
+   // this is the only site in the image where SpawnTime 0x4E99B371, DecayTime
+   // 0x1C098B3C, ControlZone 0x447C6DB0, SpawnCount 0x88923FF7 and Team
+   // 0xA2FD7D0C all appear as immediates within one function.  Prologue is
+   // `55 8B EC 51 53 56 57 / 8B 7D 08 / 8B D9`, i.e. a plain EBP frame with the
+   // hash at [EBP+8] and the value at [EBP+0xC], so the modtools __thiscall
+   // shape carries over unchanged.  538 bytes against modtools' 944: the release
+   // builds drop the RedWarning::SetLogData file/line strings.
+   constexpr uintptr_t vehicle_spawn_set_property    = 0x0066EAD0;
+   // EntityEx::mIdMap_._uiTable.  Lua_Callbacks::SetProperty 0x0058EA50 (found
+   // through the "SetProperty" registration entry) calls FindEntity_ 0x00591170,
+   // which pushes 0x01EB9874 / 0x800 and calls 0x00726E00, the
+   // pbl_hash_table_find above; the setter is `call [edx+0x10]` exactly as in
+   // modtools.
+   constexpr uintptr_t entityex_id_map               = 0x01EB9874;
    // Release EntityClass drops the debug filename, so the label moves down to
    // +0x20 and the fallback becomes the name hash printed as "0x%08X".
    constexpr uintptr_t entityclass_label_off         = 0x20;  // wchar_t*, localized
@@ -2442,6 +2467,14 @@ namespace gog {
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E5827C;
    // sVehicleSpawnList: ~VehicleSpawn 0x0066FAC0 does `dec [0x007ECE9C]` (_iCount).
    constexpr uintptr_t vehicle_spawn_list            = 0x007ECE8C;
+   // VehicleSpawn::SetProperty, same hash-cluster derivation as Steam.  Same 538
+   // bytes and the same instruction sequence as the Steam build; 37 bytes differ,
+   // all of them relocated absolutes and call displacements.
+   constexpr uintptr_t vehicle_spawn_set_property    = 0x0066FB70;
+   // EntityEx::mIdMap_._uiTable, same derivation as Steam: SetProperty
+   // 0x0058F9F0 -> FindEntity_ 0x00592110 -> push 0x01EBAD24 / 0x800 and call
+   // 0x00727ED0.  Setter at vtable+0x10.
+   constexpr uintptr_t entityex_id_map               = 0x01EBAD24;
    // Release EntityClass, same as Steam (SpawnDisplay::SetSlotInfo).
    constexpr uintptr_t entityclass_label_off         = 0x20;
    constexpr uintptr_t entityclass_filename_off      = 0;

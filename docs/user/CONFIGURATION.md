@@ -4,7 +4,7 @@
 
 # Configuration
 
-Every option BF2GameExt v1.0.0 reads from `BF2GameExt.ini`, which sits next to the DLL in `GameData`. The INI is only consulted by the DInput8 proxy install, and it is optional: with no file present every key falls back to the default listed below.
+Every option BF2GameExt v1.1.0 reads from `BF2GameExt.ini`, which sits next to the DLL in `GameData`. The INI is only consulted by the DInput8 proxy install, and it is optional: with no file present every key falls back to the default listed below.
 
 Values are `1` for on and `0` for off unless a range is given. Lines starting with `;` are comments.
 
