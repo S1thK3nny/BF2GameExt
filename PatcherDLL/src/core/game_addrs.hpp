@@ -168,6 +168,19 @@ namespace modtools {
    //     (0x00674F0E), the spawn screen preview soldier.
    constexpr uintptr_t weapon_class_render = 0x0061D170;
 
+   // WeaponClass/Weapon field offsets for the dualcannon set.  These were inline
+   // constants in dual_cannon.cpp until the retail port; the debug build carries
+   // extra WeaponClass members, so the class-side ones do NOT match Steam/GOG.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x290;
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x354;
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x358;
+   constexpr uintptr_t weapon_salvo_count_off           = 0x144;
+   constexpr uintptr_t weapon_cannon_class_size         = 0x3DC;
+   // Flags WeaponClass::Render hands the model's own Render (vtable slot 1).
+   // 0 means "forward whatever this function was called with", which is what the
+   // debug build does (`MOV ECX,[EBP+0x14]` / `PUSH ECX` at 0x0061D200).
+   constexpr uintptr_t weapon_class_render_model_flags = 0;
+
    // Weapon::Render looks the weapon hardpoint up in a RedPose with
    // pbl_hash_table_find(pose + 4, 0x100, crc); that entry lives under Hashing below.
 
@@ -1344,6 +1357,46 @@ namespace steam {
    constexpr uintptr_t lua_settop        = 0x69c400;
    constexpr uintptr_t lua_insert        = 0x69bc00;
    constexpr uintptr_t lua_newtable      = 0x69bdb0;
+
+
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
+   //
+   // Derived 2026-09-17 against this exe; see docs/RE/WeaponClassFactory.md.  Every
+   // return convention below was read off the epilogue, not assumed from modtools,
+   // because this build folds argument passing under LTCG.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x00539AA0; // RET 0
+   constexpr uintptr_t engine_operator_new = 0x006C3540;                   // __cdecl, RET 0
+   constexpr uintptr_t weapon_cannon_class_ctor = 0x00680050;              // __thiscall(uint), RET 4
+                                                                           // (0x00680210 is the copy ctor)
+   constexpr uintptr_t weapon_cannon_class_vftable = 0x007B0674;           // 13 slots; `MOV [ESI],0x7b0674`
+   constexpr uintptr_t weapon_cannon_vftable = 0x007B057C;                 // 61 slots, ends exactly at the class vftable
+   constexpr uintptr_t weapon_class_factory_counter = 0x01FAA758;          // Factory ctor 0x0067BFE0: read -> +0x1C, INC, store
+   constexpr uintptr_t red_model_find = 0x00411C50;                        // __cdecl(hash), RET 0; table 0x93EBDC, 0x800 buckets
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x006C41E0;  // __thiscall(crc, out), RET 8
+   constexpr uintptr_t weapon_cannon_fire = 0x0067F320;                    // __fastcall(this), RET 0; sole caller UpdateFire 0x0067EDF8
+   constexpr uintptr_t weapon_class_render_flash = 0x0067BD30;             // __thiscall(pos, dir), RET 8 -- `t` arrives in XMM3,
+                                                                           // NOT on the stack (call site 0x006794D4).  Modtools is
+                                                                           // RET 0xC with three stack args; dual_cannon.cpp bridges
+                                                                           // the two with a naked thunk.
+   constexpr uintptr_t game_loop_get_mission_time = 0x00530EA0;            // RET 0, result in ST(0)
+   constexpr uintptr_t first_person_init = 0x00521000;                     // RET 0; sole writer of fp_anim_array 0x01E55E30
+   constexpr uintptr_t weapon_class_render = 0x0067BF00;                   // __thiscall, RET 0x14; sole caller
+                                                                           // SoldierElement::RenderUsingContext 0x0048E36E
+
+   // WeaponClass/Weapon field offsets.  Weapon and Aimer match modtools exactly
+   // (re-verified in asm); WeaponClass does NOT, because the debug build carries
+   // extra members.  WeaponClass_data starts at object+0x20 here, confirmed three
+   // ways: mFirePointOffset 0x24, mModel 0x64, mNameHash 0x54.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x1B8; // `DIVSS XMM0,[EAX+0x1b8]` at 0x006794BA
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x280; // key 0x03B38558, `LEA EAX,[EDI+0x280]` at 0x006804BF
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x27C; // `CMP EAX,[ECX+0x27c]` at 0x0067ED96 (two alias keys)
+   constexpr uintptr_t weapon_salvo_count_off           = 0x114; // `MOV [ESI+0x114],EAX` at 0x0067ED64
+   constexpr uintptr_t weapon_cannon_class_size         = 0x2E0; // operator_new(0x2e0) in CreateBaseWeaponClasses
+   // WeaponClass::Render does NOT forward its caller's flags to the model here --
+   // it substitutes a constant (`PUSH 0x4000000` at 0x0067BFA6 Steam / 0x0067D046
+   // GOG).  Weapon::Render on the same build still forwards (`PUSH [EBP+0x14]`),
+   // so this applies to the spawn-screen path only.
+   constexpr uintptr_t weapon_class_render_model_flags = 0x04000000;
 
    // ---- Aimer / Weapon -------------------------------------------------------
 
@@ -2588,6 +2641,43 @@ namespace gog {
    constexpr uintptr_t lua_settop                     = 0x0069d490;
    constexpr uintptr_t lua_insert                     = 0x0069cc90;
    constexpr uintptr_t lua_newtable                   = 0x0069ce40;
+
+
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ------------------
+   //
+   // Ported from the Steam list with tools/port_gog.py, every entry score 1.00.
+   // The three data addresses came back with independent votes (the class vftable
+   // with 3), and fp_anim_array / weapon_cannon_vftable re-derived to the values
+   // already in this namespace, which cross-checks the shift map.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x0053A810; // steam 0x539aa0, shift +0xd70
+   constexpr uintptr_t engine_operator_new            = 0x006C45D0;        // steam 0x6c3540, shift +0x1090
+   constexpr uintptr_t weapon_cannon_class_ctor       = 0x006810D0;        // steam 0x680050, shift +0x1080
+   constexpr uintptr_t weapon_cannon_class_vftable    = 0x007B15EC;        // 3 votes
+   constexpr uintptr_t weapon_cannon_vftable          = 0x007B14F4;        // agrees with the existing entry above
+   constexpr uintptr_t weapon_class_factory_counter   = 0x01FABC08;
+   constexpr uintptr_t red_model_find                 = 0x00411C50;        // shift +0 here
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x006C5270;
+   constexpr uintptr_t weapon_cannon_fire             = 0x006803A0;
+   constexpr uintptr_t weapon_class_render_flash      = 0x0067CDD0;        // RET 8, `t` in XMM3 -- same as Steam,
+                                                                           // confirmed at call site 0x0067A574
+   constexpr uintptr_t game_loop_get_mission_time     = 0x00531BF0;
+   constexpr uintptr_t first_person_init              = 0x00521000;
+   constexpr uintptr_t weapon_class_render            = 0x0067CFA0;        // RET 0x14
+
+   // Identical to Steam, and not assumed -- re-read out of this image:
+   // `DIVSS XMM0,[EAX+0x1b8]` 0x0067A55A, `LEA EAX,[EDI+0x280]` 0x0068153F,
+   // `CMP EAX,[ECX+0x27c]` / `MOV EBX,[ECX+0x280]` / `MOV [ESI+0x114]` 0x0067FE10,
+   // and `PUSH 0x2e0` in CreateBaseWeaponClasses at 0x0053A82C.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x1B8;
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x280;
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x27C;
+   constexpr uintptr_t weapon_salvo_count_off           = 0x114;
+   constexpr uintptr_t weapon_cannon_class_size         = 0x2E0;
+   // WeaponClass::Render does NOT forward its caller's flags to the model here --
+   // it substitutes a constant (`PUSH 0x4000000` at 0x0067BFA6 Steam / 0x0067D046
+   // GOG).  Weapon::Render on the same build still forwards (`PUSH [EBP+0x14]`),
+   // so this applies to the spawn-screen path only.
+   constexpr uintptr_t weapon_class_render_model_flags = 0x04000000;
 
    // ---- Aimer / Weapon ----------------------------------------------------------
 

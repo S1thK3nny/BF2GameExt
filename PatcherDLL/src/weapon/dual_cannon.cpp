@@ -82,7 +82,6 @@ namespace {
 // PblHash("dualcannon"), from ToolsFL\bin\Hash.exe.
 constexpr uint32_t kDualCannonHash = 0x14064EC2;
 
-constexpr unsigned kCannonClassSize   = 0x3DC;
 constexpr unsigned kClassVtableSlots  = 13;
 constexpr unsigned kWeaponVtableSlots = 61;
 constexpr unsigned kFactoryNetIndex   = 0x1C;
@@ -98,11 +97,16 @@ constexpr unsigned kSlotSetProperty  = 6;
 constexpr unsigned kSlotDestroyWeapon = 0;
 constexpr unsigned kSlotRender        = 0x8C / 4;
 
-// WeaponClass fields (modtools).
-constexpr unsigned kClassName         = 0x30;  // mName, printed by the engine's own warnings
-constexpr unsigned kClassFlashLength  = 0x290;
-constexpr unsigned kClassShotsPerSalvo = 0x354;
-constexpr unsigned kClassShotsPerShot = 0x358;
+// WeaponClass fields and the class allocation size are PER BUILD: the debug build
+// carries extra WeaponClass members, so every class-side offset below differs on
+// retail (mFlashLength 0x290 vs 0x1B8, ShotsPerSalvo 0x354 vs 0x280, ...).  Filled
+// from g_addr in dual_cannon_install; see the tables in game_addrs.hpp for how each
+// one was read out of the image.
+unsigned kCannonClassSize    = 0;
+unsigned kClassName          = 0;
+unsigned kClassFlashLength   = 0;
+unsigned kClassShotsPerSalvo = 0;
+unsigned kClassShotsPerShot  = 0;
 
 // Weapon fields (modtools, see Weapon::Render 0x61DFA0 and WeaponCannon::UpdateFire 0x6274C0).
 constexpr unsigned kWeaponClass        = 0x64;
@@ -111,7 +115,7 @@ constexpr unsigned kWeaponAimer        = 0x70;
 constexpr unsigned kWeaponHideFlags    = 0xAC; // bit 0 = mHideWeapon
 constexpr unsigned kWeaponState        = 0xB0;
 constexpr unsigned kWeaponFlashStart   = 0xC4; // mMuzzleFlashStartTime
-constexpr unsigned kWeaponSalvoCount   = 0x144;
+unsigned kWeaponSalvoCount = 0; // per build: 0x144 modtools, 0x114 retail
 
 // Weapon::WeaponState
 constexpr uint32_t kStateFire  = 1;
@@ -198,7 +202,15 @@ using fn_model_render_t        = void(__thiscall*)(void* model, const float* wor
                                                    const uint8_t* color, uint32_t flags, int);
 using fn_render_flash_t        = void(__thiscall*)(void* cls, const float* pos, const float* dir,
                                                    float t);
+// Retail passes `t` in XMM3 with only pos/dir on the stack (RET 8); the debug build
+// passes all three on the stack (RET 0xC).  Same C++ source, different LTCG ABI.
+using fn_render_flash_retail_t = void(__thiscall*)(void* cls, const float* pos, const float* dir);
 using fn_mission_time_t        = float(__cdecl*)();
+// Retail returns the float in XMM0 (`MOVSS XMM0,[EBP-4]` / `XORPS XMM0,XMM0` before
+// the RET); the debug build returns it in ST(0) via `FLD`.  A `float(__cdecl*)()`
+// typedef means ST(0) to MSVC, so calling retail through it reads whatever happens
+// to be on the x87 stack.
+using fn_mission_time_xmm_t   = void(__cdecl*)();
 
 using fn_first_person_init_t   = void(__cdecl*)();
 using fn_class_render_t        = void(__fastcall*)(void* cls, void* edx, const float* world,
@@ -217,8 +229,52 @@ fn_class_ctor_t          s_classCtor       = nullptr;
 fn_find_model_t          s_findModel       = nullptr;
 fn_get_hardpoint_t       s_getHardPoint    = nullptr;
 fn_hash_table_find_t     s_hashTableFind   = nullptr;
-fn_render_flash_t        s_renderFlash     = nullptr;
-fn_mission_time_t        s_missionTime     = nullptr;
+fn_render_flash_t        s_renderFlashSt     = nullptr;
+fn_render_flash_retail_t s_renderFlashRetail = nullptr;
+
+// Naked bridge for the retail ABI.  Entry stack is [esp+4]=cls [esp+8]=pos
+// [esp+12]=dir [esp+16]=t; the callee wants ECX=cls, XMM3=t and (pos, dir) pushed
+// right to left, and cleans those two itself (RET 8), so ESP is back where it
+// started by the time we return and our own __cdecl caller cleans all four.
+__declspec(naked) void __cdecl render_flash_retail(void* /*cls*/, const float* /*pos*/,
+                                                   const float* /*dir*/, float /*t*/)
+{
+   __asm {
+      movss xmm3, dword ptr [esp + 16]  // t
+      mov   ecx,  dword ptr [esp + 4]   // this
+      push  dword ptr [esp + 12]        // dir
+      push  dword ptr [esp + 12]        // pos (shifted by the push above)
+      call  s_renderFlashRetail
+      ret
+   }
+}
+
+void call_render_flash(void* cls, const float* pos, const float* dir, float t)
+{
+   if (s_renderFlashRetail) render_flash_retail(cls, pos, dir, t);
+   else                     s_renderFlashSt(cls, pos, dir, t);
+}
+fn_mission_time_t        s_missionTimeSt0     = nullptr;
+fn_mission_time_xmm_t    s_missionTimeXmm  = nullptr;
+
+// Moves the retail return value from XMM0 onto the x87 stack so the C++ side can
+// keep treating it as an ordinary float return.
+__declspec(naked) float __cdecl mission_time_xmm()
+{
+   __asm {
+      call  s_missionTimeXmm
+      sub   esp, 4
+      movss dword ptr [esp], xmm0
+      fld   dword ptr [esp]
+      add   esp, 4
+      ret
+   }
+}
+
+float call_mission_time()
+{
+   return s_missionTimeXmm ? mission_time_xmm() : s_missionTimeSt0();
+}
 void**                   s_cannonClassVtable  = nullptr;
 void**                   s_cannonWeaponVtable = nullptr;
 uint32_t*                s_factoryCounter     = nullptr;
@@ -438,8 +494,15 @@ void __fastcall hooked_class_render(void* cls, void* edx, const float* world, vo
       hardPoint = it->second.hardPoint;
    }
 
+   // WeaponClass::Render substitutes a constant for the model's flags on retail
+   // instead of forwarding its own, so the offhand draw has to match or it renders
+   // with the wrong state.  Weapon::Render (dual_render) forwards on every build.
+   const uint32_t modelFlags = g_addr->weapon_class_render_model_flags
+                                  ? (uint32_t)g_addr->weapon_class_render_model_flags
+                                  : flags;
+
    float offhandWorld[16];
-   draw_offhand(model, hardPoint, world, pose, color, flags, offhandWorld);
+   draw_offhand(model, hardPoint, world, pose, color, modelFlags, offhandWorld);
 }
 
 // Weapon::Render draws the main gun at hp_weapons, the muzzle flash, and writes
@@ -501,10 +564,10 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    void* cls   = at<void*>(weapon, kWeaponClass);
    if (!aimer || !cls) return;
    const float flashLength = at<float>(cls, kClassFlashLength);
-   const float remaining   = savedFlashStart - s_missionTime();
+   const float remaining   = savedFlashStart - call_mission_time();
    if (remaining > 0.0f && flashLength > 0.0f)
-      s_renderFlash(at<void*>(weapon, kWeaponRenderClass), firePos,
-                    &at<float>(aimer, kAimerDirection), remaining / flashLength);
+      call_render_flash(at<void*>(weapon, kWeaponRenderClass), firePos,
+                        &at<float>(aimer, kAimerDirection), remaining / flashLength);
 }
 
 bool __fastcall hooked_fire(void* weapon, void* edx)
@@ -514,7 +577,7 @@ bool __fastcall hooked_fire(void* weapon, void* edx)
    void* cls = at<void*>(weapon, kWeaponClass);
    if (!cls) return original_fire(weapon, edx);
 
-   const float now        = s_missionTime();
+   const float now        = call_mission_time();
    const int   salvoCount = at<int>(weapon, kWeaponSalvoCount);
    const int   perSalvo   = at<int>(cls, kClassShotsPerSalvo);
    const int   perShotRaw = at<int>(cls, kClassShotsPerShot);
@@ -645,8 +708,6 @@ void __cdecl hooked_create_base_classes()
 
 void dual_cannon_install(uintptr_t exe_base)
 {
-   HOOK_REQUIRE_MODTOOLS();
-
    if (!g_addr->game_state_create_base_weapon_classes || !g_addr->engine_operator_new ||
        !g_addr->weapon_cannon_class_ctor || !g_addr->weapon_cannon_class_vftable ||
        !g_addr->weapon_cannon_vftable || !g_addr->weapon_class_factory_counter ||
@@ -658,46 +719,107 @@ void dual_cannon_install(uintptr_t exe_base)
       return;
    }
 
-   // A mismatch in either prologue means the address is wrong for this exe, and
-   // detouring it would be a guess.
-   // CreateBaseWeaponClasses: PUSH ECX / PUSH ESI / PUSH 0x3DC.
-   static constexpr uint8_t kCreatePrologue[] = {0x51, 0x56, 0x68, 0xDC, 0x03, 0x00, 0x00};
-   // WeaponCannon::Fire: PUSH EBP / MOV EBP,ESP / AND ESP,-16 / SUB ESP,0xC4.
-   static constexpr uint8_t kFirePrologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
-                                               0x81, 0xEC, 0xC4, 0x00, 0x00, 0x00};
+   // A mismatch in a prologue means the address is wrong for this exe, and detouring
+   // it would be a guess.  The debug and retail builds compile these four with
+   // different frames, so the expected bytes are per build.
+   //
+   // modtools                       retail (Steam and GOG are byte-identical here)
+   //   Create  PUSH ECX/ESI/0x3DC     PUSH EBP / MOV EBP,ESP / PUSH -1 / PUSH <SEH>
+   //   Fire    PUSH EBP ... SUB 0xC4  ... AND ESP,-16 / MOV EAX,FS:[0] / PUSH -1
+   //   FPInit  CALL rel32 / TEST AL   PUSH EBP / MOV EBP,ESP / PUSH -1 / PUSH <SEH>
+   //   Render  PUSH EBP ... SUB 0x84  ... AND ESP,-16 / SUB ESP,0x88 / PUSH ESI/EDI
+   //
+   // The SEH handler pointer differs per build, so it is left out of the guard.
+   // That makes the retail Create and FPInit guards identical, which on its own
+   // would only prove "some __ehhandler function lives here" -- so FPInit also has
+   // to reference fp_anim_array, which is what actually identifies it.
+   const bool retail = (g_build != GameBuild::Modtools);
 
-   // FirstPerson::Init: CALL rel32 (to thunk 0x411095) / TEST AL,AL / JE near.
-   static constexpr uint8_t kFirstPersonInitPrologue[] = {0xE8, 0x00, 0x5B, 0xF6, 0xFF,
-                                                          0x84, 0xC0, 0x0F, 0x84};
+   static constexpr uint8_t kCreatePrologueDbg[] = {0x51, 0x56, 0x68, 0xDC, 0x03, 0x00, 0x00};
+   static constexpr uint8_t kCreatePrologueRtl[] = {0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68};
 
-   void* createTarget = resolve(exe_base, g_addr->game_state_create_base_weapon_classes);
-   void* fireTarget   = resolve(exe_base, g_addr->weapon_cannon_fire);
-   // WeaponClass::Render: PUSH EBP / MOV EBP,ESP / AND ESP,-16 / SUB ESP,0x84.
-   static constexpr uint8_t kClassRenderPrologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
-                                                      0x81, 0xEC, 0x84, 0x00, 0x00, 0x00};
+   static constexpr uint8_t kFirePrologueDbg[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                  0x81, 0xEC, 0xC4, 0x00, 0x00, 0x00};
+   static constexpr uint8_t kFirePrologueRtl[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                  0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x6A, 0xFF};
 
+   static constexpr uint8_t kFirstPersonInitPrologueDbg[] = {0xE8, 0x00, 0x5B, 0xF6, 0xFF,
+                                                             0x84, 0xC0, 0x0F, 0x84};
+   static constexpr uint8_t kFirstPersonInitPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68};
+
+   static constexpr uint8_t kClassRenderPrologueDbg[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                         0x81, 0xEC, 0x84, 0x00, 0x00, 0x00};
+   static constexpr uint8_t kClassRenderPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                         0x81, 0xEC, 0x88, 0x00, 0x00, 0x00,
+                                                         0x56, 0x57};
+
+   struct guard {
+      const char*    what;
+      uintptr_t      addr;
+      const uint8_t* bytes;
+      size_t         size;
+   };
+
+   void* createTarget      = resolve(exe_base, g_addr->game_state_create_base_weapon_classes);
+   void* fireTarget        = resolve(exe_base, g_addr->weapon_cannon_fire);
+   void* fpInitTarget      = resolve(exe_base, g_addr->first_person_init);
    void* classRenderTarget = resolve(exe_base, g_addr->weapon_class_render);
-   if (std::memcmp(classRenderTarget, kClassRenderPrologue, sizeof(kClassRenderPrologue)) != 0) {
-      install_log("[DualCannon] NOT installed: unexpected bytes at WeaponClass::Render %08X",
-                  (unsigned)g_addr->weapon_class_render);
-      return;
+
+   const guard guards[] = {
+      {"CreateBaseWeaponClasses", g_addr->game_state_create_base_weapon_classes,
+       retail ? kCreatePrologueRtl : kCreatePrologueDbg,
+       retail ? sizeof(kCreatePrologueRtl) : sizeof(kCreatePrologueDbg)},
+      {"WeaponCannon::Fire", g_addr->weapon_cannon_fire,
+       retail ? kFirePrologueRtl : kFirePrologueDbg,
+       retail ? sizeof(kFirePrologueRtl) : sizeof(kFirePrologueDbg)},
+      {"FirstPerson::Init", g_addr->first_person_init,
+       retail ? kFirstPersonInitPrologueRtl : kFirstPersonInitPrologueDbg,
+       retail ? sizeof(kFirstPersonInitPrologueRtl) : sizeof(kFirstPersonInitPrologueDbg)},
+      {"WeaponClass::Render", g_addr->weapon_class_render,
+       retail ? kClassRenderPrologueRtl : kClassRenderPrologueDbg,
+       retail ? sizeof(kClassRenderPrologueRtl) : sizeof(kClassRenderPrologueDbg)},
+   };
+
+   void* const targets[] = {createTarget, fireTarget, fpInitTarget, classRenderTarget};
+
+   for (int i = 0; i < 4; ++i) {
+      if (std::memcmp(targets[i], guards[i].bytes, guards[i].size) != 0) {
+         install_log("[DualCannon] NOT installed: unexpected bytes at %s %08X",
+                     guards[i].what, (unsigned)guards[i].addr);
+         return;
+      }
    }
-   void* fpInitTarget = resolve(exe_base, g_addr->first_person_init);
-   if (std::memcmp(fpInitTarget, kFirstPersonInitPrologue, sizeof(kFirstPersonInitPrologue)) != 0) {
-      install_log("[DualCannon] NOT installed: unexpected bytes at FirstPerson::Init %08X",
-                  (unsigned)g_addr->first_person_init);
-      return;
+
+   if (retail) {
+      // FirstPerson::Init must actually touch the animation table it is hooked for.
+      // The operand in the loaded image is RELOCATED, so this has to compare against
+      // the resolved address, not the table's unrelocated VA. Steam/GOG do not load
+      // at their preferred base (observed delta +0x6E0000), so comparing the raw VA
+      // never matched and the whole set silently refused to install.
+      const uint32_t wanted =
+         (uint32_t)(uintptr_t)resolve(exe_base, g_addr->fp_anim_array);
+      const uint8_t* body   = static_cast<const uint8_t*>(fpInitTarget);
+      bool           found  = false;
+      for (size_t i = 0; i + sizeof(uint32_t) <= 0x120 && !found; ++i) {
+         uint32_t v;
+         std::memcpy(&v, body + i, sizeof(v));
+         found = (v == wanted);
+      }
+      if (!found) {
+         install_log("[DualCannon] NOT installed: FirstPerson::Init %08X does not reference "
+                     "fp_anim_array %08X",
+                     (unsigned)g_addr->first_person_init, (unsigned)g_addr->fp_anim_array);
+         return;
+      }
    }
-   if (std::memcmp(createTarget, kCreatePrologue, sizeof(kCreatePrologue)) != 0) {
-      install_log("[DualCannon] NOT installed: unexpected bytes at CreateBaseWeaponClasses %08X",
-                  (unsigned)g_addr->game_state_create_base_weapon_classes);
-      return;
-   }
-   if (std::memcmp(fireTarget, kFirePrologue, sizeof(kFirePrologue)) != 0) {
-      install_log("[DualCannon] NOT installed: unexpected bytes at WeaponCannon::Fire %08X",
-                  (unsigned)g_addr->weapon_cannon_fire);
-      return;
-   }
+
+   // Per-build struct offsets and the class allocation size.
+   kCannonClassSize    = (unsigned)g_addr->weapon_cannon_class_size;
+   kClassName          = (unsigned)g_addr->weapon_class_name_off;
+   kClassFlashLength   = (unsigned)g_addr->weapon_class_flash_length_off;
+   kClassShotsPerSalvo = (unsigned)g_addr->weapon_class_shots_per_salvo_off;
+   kClassShotsPerShot  = (unsigned)g_addr->weapon_class_shots_per_shot_off;
+   kWeaponSalvoCount   = (unsigned)g_addr->weapon_salvo_count_off;
 
    s_operatorNew   = reinterpret_cast<fn_operator_new_t>(resolve(exe_base, g_addr->engine_operator_new));
    s_classCtor     = reinterpret_cast<fn_class_ctor_t>(resolve(exe_base, g_addr->weapon_cannon_class_ctor));
@@ -705,8 +827,21 @@ void dual_cannon_install(uintptr_t exe_base)
    s_getHardPoint  = reinterpret_cast<fn_get_hardpoint_t>(
       resolve(exe_base, g_addr->red_model_get_parent_bone_and_offset));
    s_hashTableFind = reinterpret_cast<fn_hash_table_find_t>(resolve(exe_base, g_addr->pbl_hash_table_find));
-   s_renderFlash   = reinterpret_cast<fn_render_flash_t>(resolve(exe_base, g_addr->weapon_class_render_flash));
-   s_missionTime   = reinterpret_cast<fn_mission_time_t>(resolve(exe_base, g_addr->game_loop_get_mission_time));
+   // Retail's RenderFlash takes `t` in XMM3 (RET 8); the debug build takes it on the
+   // stack (RET 0xC).  Only one of these two is ever non-null, and call_render_flash
+   // picks on that.
+   if (retail)
+      s_renderFlashRetail = reinterpret_cast<fn_render_flash_retail_t>(
+         resolve(exe_base, g_addr->weapon_class_render_flash));
+   else
+      s_renderFlashSt = reinterpret_cast<fn_render_flash_t>(
+         resolve(exe_base, g_addr->weapon_class_render_flash));
+   if (retail)
+      s_missionTimeXmm = reinterpret_cast<fn_mission_time_xmm_t>(
+         resolve(exe_base, g_addr->game_loop_get_mission_time));
+   else
+      s_missionTimeSt0 = reinterpret_cast<fn_mission_time_t>(
+         resolve(exe_base, g_addr->game_loop_get_mission_time));
    s_cannonClassVtable  = static_cast<void**>(resolve(exe_base, g_addr->weapon_cannon_class_vftable));
    s_cannonWeaponVtable = static_cast<void**>(resolve(exe_base, g_addr->weapon_cannon_vftable));
    s_factoryCounter =
