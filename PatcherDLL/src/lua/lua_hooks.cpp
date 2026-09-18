@@ -45,6 +45,7 @@
 #include "weapon/shield_channel_fix.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -368,6 +369,7 @@ void lua_hooks_uninstall()
    lightsaber_illumination_uninstall();
    // After it, so its deactivate_all() above is still covered by the guard.
    water_texture_count_fix_uninstall();
+   light_projected_texture_fix_uninstall();
    red_light_stale_node_fix_uninstall();
    // Last of the Snd::EngineBase::Update hooks to come off: it went on
    // before the saber lights did, so it is the inner detour of the two and

@@ -54,6 +54,7 @@
 #include "render/spawn_vehicle_list.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
@@ -339,6 +340,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    blur_downsize_clamp_install(exe_base);
    screenshot_fix_install(exe_base);
    water_texture_count_fix_install(exe_base); // byte-patches .text — needs the RW window
+   light_projected_texture_fix_install(exe_base); // byte-patches .text — needs the RW window
    error_dialog_fix_install(exe_base); // byte-patches .text — needs the RW window
    dlc_mission_init_fix_install(exe_base);
    map_queue_fix_install(exe_base);    // byte-patches .text — needs the RW window

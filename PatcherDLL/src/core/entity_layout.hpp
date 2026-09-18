@@ -46,6 +46,16 @@ struct SoldierLayout {
    int clsWeaponClass;   // WeaponClass*[] per-slot class
    int clsWeaponAmmo;    // int[]  per-slot WeaponAmmo config word
    int clsWeaponChannel; // int8[] per-slot channel
+
+   // ---- Stance-transition input lock ---------------------------------------
+   // EntitySoldier::m_uiInputLockMask (3 bits starting at bit 2 of a flags byte,
+   // packed behind mAILastCollisionDirection:2) and EntitySoldier::mInputLockTime.
+   // The engine's own knockback path writes both: ApplyPush does
+   // `OR byte[flags],0x3C` then `MOV [time],<seconds>` (Steam/GOG 0x004E193B,
+   // modtools the same pair on [EDI+0x489]/[EDI+0x48C]), which is where these
+   // were read off.  Note inputLockFlags is the same byte as dualWieldFlag.
+   int inputLockFlags;   // byte: bits 2-4 = m_uiInputLockMask
+   int inputLockTime;    // float, seconds remaining
 };
 
 // Offsets verified against the live binaries (MemExt :8192 / Steam :8193).
@@ -56,6 +66,7 @@ constexpr SoldierLayout kSoldierModtools = {
    /* weaponIndexMap */ 0x510, /* slot0Cache */ 0x4D8, /* animator */ 0x520,
    /* clsWeaponCount */ 0x984, /* clsWeaponClass */ 0x93C,
    /* clsWeaponAmmo */ 0x95C, /* clsWeaponChannel */ 0x97C,
+   /* inputLockFlags */ 0x249, /* inputLockTime */ 0x24C,
 };
 // Steam foleyProne: release FoleyFXSoldier packs 13 8-byte GameSound slots
 // after a 0x18-byte header (debug uses 20-byte GameSounds from +0x24).  Grid
@@ -80,6 +91,7 @@ constexpr SoldierLayout kSoldierRelease = {
    /* weaponIndexMap */ 0x500, /* slot0Cache */ 0x4C8, /* animator */ 0x510,
    /* clsWeaponCount */ 0x790, /* clsWeaponClass */ 0x748,
    /* clsWeaponAmmo */ 0x768, /* clsWeaponChannel */ 0x788,
+   /* inputLockFlags */ 0x231, /* inputLockTime */ 0x234,
 };
 
 // Active build's layout; defaults to modtools (set in game_build_select()).

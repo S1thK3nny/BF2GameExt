@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <detours.h>
 
 // =============================================================================
@@ -24,8 +25,9 @@
 //   4. AI prone support:
 //      a. Patches the height dispatch jump table so HEIGHT_PRONE (case 2)
 //         calls Prone() instead of Crouch().
-//      b. Patches GetRandomPrimaryStance to extract 3 bits (& 7) instead
-//         of 2 (& 3), allowing the Prone stance bit to be read from hints.
+//      b. Restores the hint node prone stance: levels author a 3-bit stance
+//         mask per hint node, but the engine masks the prone bit off. See
+//         the hint node prone stance block below.
 //
 //   5. Acklay terrain alignment fix: patches the gate condition in
 //      PostCollisionUpdate (0x0052C0F0) so the prone-specific terrain
@@ -63,6 +65,46 @@ static constexpr int kSoldierAction = 0x70;   // SoldierState mSoldierAction
 static constexpr int kMAction       = 0x1FEC; // ActionAnimation mAction
 static constexpr int kMPosture      = 0x1FE8; // Posture mPosture
 
+// BaseHint (64-byte pooled object, identical on all three builds).  The PDB
+// declares one ushort bitfield at +0x3C:
+//
+//   bits 0-7   mType             Snipe=1, Patrol=2, Cover=4, JetJump=8,
+//                                Mine=0x10, Land=0x20, Fortification=0x40,
+//                                VehicleCover=0x80
+//   bits 8-9   mPrimaryStance    2-bit mask, bit0=Stand, bit1=Crouch
+//   bits 10-11 mSecondaryStance  same
+//   bits 12-13 mSidestep         bit0=Left, bit1=Right
+//   bits 14-15 unused            <- where the prone bits go, see below
+static constexpr int kHintStanceWord = 0x3C;
+
+static constexpr int kHintPrimaryShift   = 8;
+static constexpr int kHintSecondaryShift = 10;
+static constexpr uint16_t kHintPronePrimary   = 0x4000;
+static constexpr uint16_t kHintProneSecondary = 0x8000;
+
+// PblHash of the two hint node stance properties, as ProcessHint hands them to
+// BaseHint::SetProperty.
+static constexpr uint32_t kHintPropPrimaryStance   = 0xBF0F1CD1;
+static constexpr uint32_t kHintPropSecondaryStance = 0x92C05A59;
+
+// ControllableHeight (AILowLevel::mHeight): Stand=0, Crouch=1, Prone=2
+static constexpr int HEIGHT_STAND = 0;
+
+// Weapon foley id for the prone transition.  Crouch uses 8, prone 7.
+static constexpr int kWeaponFoleyProne = 7;
+
+// m_uiInputLockMask is 3 bits starting at bit 2; EntitySoldier::Prone sets all
+// three (0x1C).  ApplyPush uses 0x3C, which also raises the neighbouring
+// m_bSlide bit -- not wanted here.
+static constexpr uint8_t kInputLockMaskBits = 0x1C;
+
+// How long the getdown animation holds input.  The engine derives this as
+// (clipFrames - 1) / 30 from the lower-body action animation; our prone.lvl
+// ships crouch_getdown_prone and stand_getdown_prone at 40 frames, so 39/30.
+// Only wrong if a replacement prone.lvl retimes those clips, and then only by
+// the difference in clip length.
+static constexpr float kProneGetdownSeconds = 39.0f / 30.0f;
+
 // ActionAnimation enum values for prone transitions (confirmed from PDB + SetupPose switch table)
 static constexpr int ACTION_PRONE_TO_STAND  = 27; // 0x1B
 static constexpr int ACTION_CROUCH_TO_PRONE = 28; // 0x1C
@@ -90,6 +132,25 @@ typedef unsigned short (__fastcall* fn_AnimAccessor_t)(void* ecx, void* edx);
 // Sets mPosture, mAction, mSoldierAction based on the entity's current SoldierState.
 typedef void (__fastcall* fn_SetAction_t)(void* ecx, void* edx, int param_2, void* param_3, unsigned int param_4);
 
+// BaseHint::GetRandom{Primary,Secondary}Stance — ECX = BaseHint*, no arguments,
+// returns a ControllableHeight.
+typedef int (__fastcall* fn_HintStanceGetter_t)(void* ecx, void* edx);
+
+// BaseHint::GetRandomStance — ECX = BaseHint* (unused by the body), stance mask
+// as a byte-sized stack argument, callee-cleaned.
+typedef int (__fastcall* fn_GetRandomStance_t)(void* ecx, void* edx, int mask);
+
+// Weapon::PlayFoleyFX — ECX = Weapon*, foley id as a stack argument.
+typedef void (__fastcall* fn_PlayFoleyFX_t)(void* ecx, void* edx, int id);
+
+// FirstPerson::CrouchToProne — __cdecl, one stack argument (the first person
+// index), no return.
+typedef void (__cdecl* fn_FpCrouchToProne_t)(int index);
+
+// BaseHint::SetProperty — ECX = BaseHint*, PblHash of the property name and its
+// value as a string, callee-cleaned.
+typedef void (__fastcall* fn_HintSetProperty_t)(void* ecx, void* edx, uint32_t hash, const char* value);
+
 
 // ---------------------------------------------------------------------------
 // Resolved pointers (set during install)
@@ -102,6 +163,17 @@ static fn_GameSoundPlay_t    fn_gameSoundPlay   = nullptr;
 
 static fn_AnimAccessor_t     original_animAccessor = nullptr;
 static fn_SetAction_t        original_SetAction    = nullptr;
+
+static fn_PlayFoleyFX_t      fn_playFoleyFX     = nullptr;
+static fn_FpCrouchToProne_t  fn_fpCrouchToProne = nullptr;
+
+static fn_HintStanceGetter_t original_GetRandomPrimaryStance   = nullptr;
+static fn_HintStanceGetter_t original_GetRandomSecondaryStance = nullptr;
+static fn_HintSetProperty_t  original_HintSetProperty          = nullptr;
+static fn_GetRandomStance_t  fn_getRandomStance                = nullptr;
+
+// BaseHint constructor stance-init mask patch (one byte)
+static uint8_t* g_hintStanceInitPtr = nullptr;
 
 // Vtable patch state
 static void** g_proneVtableSlotPtr  = nullptr;
@@ -214,10 +286,44 @@ static bool do_prone_transition(void* entity)
             }
         }
 
-        // Weapon foley skipped for prone transitions — the weapon slot can
-        // hold a stale pointer after SetState(PRONE), and any dereference
-        // faults under the debug heap (x32dbg).  The body sound
-        // (FoleyFXSoldier::mProne above) is the audible stance cue anyway.
+        // Weapon foley, the same call Crouch makes with id 8.  Uses the
+        // engine's own slot guard: the active-slot nibble is read as a signed
+        // 4-bit value, so an empty slot (8..15 -> negative) is rejected.
+        if (fn_playFoleyFX) {
+            int8_t slot = (int8_t)(*(uint8_t*)((char*)entity + g_soldier->weaponIndex) << 4);
+            if (slot >= 0) {
+                void* weapon = *(void**)((char*)entity + g_soldier->weaponArray + (slot >> 4) * 4);
+                if (weapon) fn_playFoleyFX(weapon, nullptr, kWeaponFoleyProne);
+            }
+        }
+
+        // Transition input lock.  EntitySoldier::Prone sets the full 3-bit
+        // m_uiInputLockMask and holds it for the length of the getdown clip so
+        // the soldier cannot walk or turn out of the animation; the engine's
+        // own knockback path (ApplyPush) uses the same two fields, and ticks
+        // the timer back down for us.
+        {
+            uint8_t* flags = (uint8_t*)((char*)entity + g_soldier->inputLockFlags);
+            float*   timer = (float*)((char*)entity + g_soldier->inputLockTime);
+            *flags |= kInputLockMaskBits;
+            if (*timer < kProneGetdownSeconds) *timer = kProneGetdownSeconds;
+        }
+
+        // First-person transition (hands down + camera path).  Only the
+        // modtools executable still carries it: the retail builds dropped the
+        // prone FP camera paths, so fp_crouch_to_prone is 0 there and first
+        // person simply keeps the stance pose it already had.
+        //
+        // The player can only ever reach prone from crouch (double-tap crouch),
+        // so CrouchToProne is the whole first-person story; AI entering prone
+        // from standing has no first-person view to update.
+        if (fn_fpCrouchToProne) {
+            // EntitySoldier::GetFirstPersonIndex: bits 4-5 of the weapon-index
+            // byte, sign-extended, so 3 (both bits set) reads as -1 = not in
+            // first person.
+            int fpIndex = (int8_t)(*(uint8_t*)((char*)entity + g_soldier->weaponIndex) << 2) >> 6;
+            if (fpIndex >= 0) fn_fpCrouchToProne(fpIndex);
+        }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -371,6 +477,102 @@ static void __fastcall hooked_SetAction(void* ecx, void* edx, int param_2, void*
 }
 
 // ---------------------------------------------------------------------------
+// Hint node prone stances
+//
+// ZeroEditor writes PrimaryStance()/SecondaryStance() into every hint node it
+// exports, and the authored value is a 3-bit stance mask: bit0 Stand, bit1
+// Crouch, bit2 Prone (SecondaryStance packs the 2-bit sidestep mask on top, at
+// bits 3-4, which is why the engine range-checks the value against 0x20).
+// Pandemic's own levels use the prone bit -- end1.hnt has PrimaryStance(4)
+// (prone only) and tat2.hnt has PrimaryStance(6) (crouch or prone).
+//
+// The engine throws that bit away.  BaseHint stores each stance two bits wide
+// (see the bitfield above), and BaseHint::SetProperty masks the parsed value
+// with & 3 before storing it.  A prone-only hint masks to 0, which SetProperty
+// treats as "no value given" and skips, leaving the constructor's Stand.  So
+// prone hint nodes have always behaved as stand/crouch ones.
+//
+// The two unused top bits of the bitfield are where the dropped prone bits go:
+//
+//   1. The constructor's stance-init mask (AND 0xC5FF) is patched to 0x05FF so
+//      bits 14-15 start cleared instead of holding memory-pool garbage.
+//   2. SetProperty is hooked: after the original runs, the authored value is
+//      re-parsed and its prone bit stored in bit 14 (primary) or bit 15
+//      (secondary).  For a prone-only hint the vanilla 2-bit field is cleared
+//      too, since the original left it at the default Stand.
+//   3. GetRandomPrimaryStance / GetRandomSecondaryStance are hooked to rebuild
+//      the full 3-bit mask and hand that to BaseHint::GetRandomStance, which
+//      already rolls GetRandomInt(0, 2) over all three heights.
+//
+// Consumers: CoverHelper and SnipeHelper EnterState state 3 take the primary
+// stance, CoverHelper states 4 and 5 the secondary; both end up in
+// AILowLevel::mHeight, whose prone case reaches Prone() through the height
+// dispatch patch in the installer below.
+//
+// With prone off for the mission (no prone.lvl) the prone bit is filtered back
+// out, and a mask left empty by that falls back to Stand -- which is what the
+// vanilla engine did with those hints anyway.
+// ---------------------------------------------------------------------------
+static int hint_roll_stance(void* hint, bool primary)
+{
+    const uint16_t word = *(const uint16_t*)((const char*)hint + kHintStanceWord);
+    const int shift     = primary ? kHintPrimaryShift : kHintSecondaryShift;
+    const uint16_t bit  = primary ? kHintPronePrimary : kHintProneSecondary;
+
+    int mask = (word >> shift) & 3;
+    if (g_proneEnabled && (word & bit))
+        mask |= 4;
+
+    // Only reachable for a prone-only hint with prone off: the engine would
+    // spin forever on an empty mask, so answer Stand as vanilla effectively did.
+    if (mask == 0) return HEIGHT_STAND;
+
+    return fn_getRandomStance(hint, nullptr, mask);
+}
+
+static int __fastcall hooked_GetRandomPrimaryStance(void* ecx, void* edx)
+{
+    if (!ecx) return original_GetRandomPrimaryStance(ecx, edx);
+    return hint_roll_stance(ecx, true);
+}
+
+static int __fastcall hooked_GetRandomSecondaryStance(void* ecx, void* edx)
+{
+    if (!ecx) return original_GetRandomSecondaryStance(ecx, edx);
+    return hint_roll_stance(ecx, false);
+}
+
+// Runs for every PROP chunk of every hint node at world load.  The original
+// applies the vanilla fields (including the sidestep bits and the command post
+// cross-check warnings); this only adds the prone bit it discards.
+static void __fastcall hooked_HintSetProperty(void* ecx, void* edx, uint32_t hash, const char* value)
+{
+    original_HintSetProperty(ecx, edx, hash, value);
+
+    if (!ecx || !value) return;
+    if (hash != kHintPropPrimaryStance && hash != kHintPropSecondaryStance) return;
+
+    const bool primary  = (hash == kHintPropPrimaryStance);
+    const int  authored = atoi(value);
+    const int  stance   = authored & 7;
+
+    uint16_t* word     = (uint16_t*)((char*)ecx + kHintStanceWord);
+    const int shift    = primary ? kHintPrimaryShift : kHintSecondaryShift;
+    const uint16_t bit = primary ? kHintPronePrimary : kHintProneSecondary;
+
+    if (stance & 4) {
+        *word |= bit;
+        // Prone only: the original skipped its write, so the 2-bit field still
+        // holds the constructor's Stand. Clear it or the hint reads as
+        // stand-or-prone.
+        if ((stance & 3) == 0)
+            *word &= (uint16_t)~(3u << shift);
+    } else {
+        *word &= (uint16_t)~bit;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // vtable_Prone — replaces the vanilla "return false" stub at vtable+0xA0
 //
 // Called by AI posture system or any code that explicitly invokes Prone().
@@ -405,6 +607,11 @@ void prone_system_install(uintptr_t exe_base)
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, g_addr->SoldierAnimator_SetAction);
 
     g_weaponMeleeVtable   = (void*)resolve(exe_base, g_addr->WeaponMeleeClass_vftable);
+
+    if (g_addr->weapon_play_foley_fx)
+        fn_playFoleyFX = (fn_PlayFoleyFX_t)resolve(exe_base, g_addr->weapon_play_foley_fx);
+    if (g_addr->fp_crouch_to_prone)
+        fn_fpCrouchToProne = (fn_FpCrouchToProne_t)resolve(exe_base, g_addr->fp_crouch_to_prone);
 
     // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
@@ -513,16 +720,40 @@ void prone_system_install(uintptr_t exe_base)
     }
 
     // -----------------------------------------------------------------------
-    // AI prone fix 2: Patch GetRandomPrimaryStance bitmask extraction.
+    // AI prone fix 2: carry the hint node prone stance bit that the engine
+    // discards — see the hint node prone stance block above.
     //
-    // The function reads the stance bitmask with AND EAX, 0xFFFFFF03 (& 3),
-    // which masks out the Prone bit (bit 2).  Change the AND immediate from
-    // 0x03 to 0x07 so all three stance bits (Stand, Crouch, Prone) are kept.
+    // Not gated on g_proneEnabled: that flag is per-mission and still false
+    // here, so the bit is always captured at load and filtered at use.
     // -----------------------------------------------------------------------
-    {
-        uint8_t* pAnd = (uint8_t*)resolve(exe_base, g_addr->prone_primary_stance_and);
-        if (*pAnd == 0x03)
-            *pAnd = 0x07;
+    if (g_addr->hint_get_primary_stance && g_addr->hint_get_secondary_stance &&
+        g_addr->hint_get_random_stance && g_addr->hint_set_property &&
+        g_addr->hint_stance_init_mask_byte) {
+
+        // Clear the two spare bitfield bits on construction: the engine's
+        // stance-init mask keeps them, so they would otherwise carry whatever
+        // the previous owner of that memory pool block left behind.
+        //   AND <reg>, 0xC5FF  ->  AND <reg>, 0x05FF
+        uint8_t* pMask = (uint8_t*)resolve(exe_base, g_addr->hint_stance_init_mask_byte);
+        if (*pMask == 0xC5) {
+            *pMask = 0x05;
+            g_hintStanceInitPtr = pMask;
+        }
+
+        fn_getRandomStance = (fn_GetRandomStance_t)resolve(exe_base, g_addr->hint_get_random_stance);
+        original_GetRandomPrimaryStance =
+            (fn_HintStanceGetter_t)resolve(exe_base, g_addr->hint_get_primary_stance);
+        original_GetRandomSecondaryStance =
+            (fn_HintStanceGetter_t)resolve(exe_base, g_addr->hint_get_secondary_stance);
+        original_HintSetProperty =
+            (fn_HintSetProperty_t)resolve(exe_base, g_addr->hint_set_property);
+
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourAttach(&(PVOID&)original_GetRandomPrimaryStance, hooked_GetRandomPrimaryStance);
+        DetourAttach(&(PVOID&)original_GetRandomSecondaryStance, hooked_GetRandomSecondaryStance);
+        DetourAttach(&(PVOID&)original_HintSetProperty, hooked_HintSetProperty);
+        DetourTransactionCommit();
     }
 
     // -----------------------------------------------------------------------
@@ -645,6 +876,13 @@ void prone_system_uninstall()
         g_proneDispatchStub = nullptr;
     }
 
+    // Restore the hint node stance-init mask
+    if (g_hintStanceInitPtr) {
+        const uint8_t orig = 0xC5;
+        protected_write(g_hintStanceInitPtr, &orig, 1);
+        g_hintStanceInitPtr = nullptr;
+    }
+
     // Restore Acklay gate patch
     if (g_acklayGatePtr) {
         protected_write(g_acklayGatePtr, g_acklayGateOrig, 6);
@@ -683,5 +921,11 @@ void prone_system_uninstall()
     if (original_StandUp)      DetourDetach(&(PVOID&)original_StandUp, hooked_StandUp);
     if (original_animAccessor) DetourDetach(&(PVOID&)original_animAccessor, hooked_animAccessor);
     if (original_SetAction)    DetourDetach(&(PVOID&)original_SetAction, hooked_SetAction);
+    if (original_GetRandomPrimaryStance)
+        DetourDetach(&(PVOID&)original_GetRandomPrimaryStance, hooked_GetRandomPrimaryStance);
+    if (original_GetRandomSecondaryStance)
+        DetourDetach(&(PVOID&)original_GetRandomSecondaryStance, hooked_GetRandomSecondaryStance);
+    if (original_HintSetProperty)
+        DetourDetach(&(PVOID&)original_HintSetProperty, hooked_HintSetProperty);
     DetourTransactionCommit();
 }

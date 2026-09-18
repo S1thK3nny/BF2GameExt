@@ -191,6 +191,7 @@
     <ClInclude Include="src\render\spawn_vehicle_list.hpp" />
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
+    <ClInclude Include="src\render\light_projected_texture_fix.hpp" />
     <ClInclude Include="src\render\water_texture_count_fix.hpp" />
     <ClInclude Include="src\render\particle_batch_spill.hpp" />
     <ClInclude Include="src\render\particle_density.hpp" />
@@ -286,6 +287,7 @@
     <ClCompile Include="src\render\spawn_vehicle_list.cpp" />
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
+    <ClCompile Include="src\render\light_projected_texture_fix.cpp" />
     <ClCompile Include="src\render\water_texture_count_fix.cpp" />
     <ClCompile Include="src\render\particle_batch_spill.cpp" />
     <ClCompile Include="src\render\particle_density.cpp" />

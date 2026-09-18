@@ -70,6 +70,7 @@ General engine bug fixes, several of them ported from PrismaticFlower's upstream
 - **Reverb Restore On Map Exit** - Environmental audio effects (EAX, as provided by wrappers such as DSOAL) stopped working for the rest of the session once you left a map through the pause menu. Restarting a mission kept them, quitting to the main menu and loading anything else killed them until the game was closed and reopened. Reverb now comes back on every map you load. Always on.
 - **Multiplayer Spawn Delay** - Multiplayer always makes you wait 15 seconds to respawn. The number is hardcoded, and the game reads the mission script's `SetSpawnDelay` and then throws it away online, so no map could change it and neither could a host. Set this to the wait you want, in seconds; anything from 0.1 to 300, decimals allowed. Only the host sets it; everyone else follows with nothing installed. INI: `[Features] MPSpawnDelay=15`
 - **Custom In-Game Movies** - `ScriptCB_PlayInGameMovie("ingame.mvs", "segment")` looks like it takes a movie file, but every shipping build throws that first argument away and hardcodes the file, picking `ingame.mvs` (or `ingamefr.mvs` / `ingamegr.mvs` on French and German) from a language table. A custom in-game movie could therefore only ever be played by overwriting the stock `ingame.mvs` in the base game folder. The argument now works, and understands the `dc:` addon prefix, so a mod can ship its movie in its own addon folder. The three stock names still take the old path, so the localised campaign movies are unchanged. See **[Lua API](LUA_API.md)** for the usage.
+- **EntityLightClass Animated ProjectedTexture** - This fixes not being able to use animated Projected Textures for lights.
 
 ## Loading Screen System
 
@@ -80,7 +81,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 ## Soldier Systems
 
-- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
+- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Going down holds your input for the length of the animation, so you commit to the move, and AI take the prone positions the map designers already marked out. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
 
   <img width="800" alt="Soldier going prone" src="../images/LegacyProne.webp" />
 
