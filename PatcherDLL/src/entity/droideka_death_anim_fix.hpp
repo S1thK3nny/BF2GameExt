@@ -9,10 +9,11 @@
 // droideka bank defines one. Regular walkers (ATST/ATTE/ATAT) do.
 //
 // Also drops the personal shield for the duration of the death animation, by
-// widening WeaponShield::Update's existing droideka ball-state test to cover
-// the dying/dead states.
+// running the engine's own shield teardown once on the frame the droideka
+// starts dying, and locks out steering while it is dying so the corpse cannot
+// turn to face whatever killed it.
 //
-// Build-aware (modtools + Steam): install from dllmain's build-aware section,
+// Build-aware (modtools + Steam + GOG): install from dllmain's build-aware section,
 // while .text is still writable.  INI: [Fixes] DroidekaDeathAnimation=1
 // =============================================================================
 

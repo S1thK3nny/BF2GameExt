@@ -511,6 +511,14 @@ namespace modtools {
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004EF2FA;
 
+   // EntityDroideka::UpdateState(dt, moveX, moveZ, turn) - the movement state
+   // machine's per-frame body update, reached from Update through entity vtable
+   // +0x128.  It steers the droideka from the control inputs with no dying-state
+   // gate: AdjustRotation @0x4e395c turns the entity by the turn control, and the
+   // block after CMP EAX,1 / CMP EAX,2 @0x4e3a56 turns the body (mTurnOffset,
+   // +0x1a7c) toward the movement control.  mState is read at +0x1a74.
+   constexpr uintptr_t droideka_update_state = 0x004E3890;
+
    // The PblHash value WeaponShield::Update pushes into EntityDroideka::IsA at
    // its RTTI check (@0x63f3e8: MOV ECX,[0xb7d934]; PUSH ECX; CALL [vtable+0]).
    // Read as a dword; entity/droideka_death_anim_fix.cpp reuses it to tell
@@ -1636,6 +1644,11 @@ namespace steam {
    // the call.  Guard above it: CMP [EBX+0x1a54],4 @0x4a4ae0 (mState==dead).
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004A4B94;
+
+   // EntityDroideka::UpdateState(dt, moveX, moveZ, turn), entity vtable +0x128.
+   // AdjustRotation @0x4a243d, state dispatch CMP EAX,1 / CMP EAX,2 @0x4a2586,
+   // mState +0x1a54, mTurnOffset +0x1a5c.
+   constexpr uintptr_t droideka_update_state = 0x004A2370;
 
    // Same EntityDroideka RTTI hash value, read at WeaponShield::Update 0x691af9
    // (PUSH dword ptr [0x1ebbc58]).
@@ -2841,6 +2854,7 @@ namespace gog {
    // ---- Entity / Droideka death animation fix -----------------------------------
 
    constexpr uintptr_t droideka_update_nextstate_call = 0x004a4b94;
+   constexpr uintptr_t droideka_update_state          = 0x004a2370;
    constexpr uintptr_t entity_droideka_rtti_hash      = 0x01ebd06c;
    constexpr uintptr_t lowres_prone_anim_name_ptr     = 0x007ea9e0;
    constexpr uintptr_t lowres_prone_case_imm          = 0x0064a26a;
