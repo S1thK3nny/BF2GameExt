@@ -59,6 +59,8 @@ Scripts can check the running version through `GameExt.version`.
   thread and the game logged at the same moment.
 - With prone enabled, AI soldiers dropped prone at roughly half the cover positions
   they took, including positions meant to be used standing.
+- Animated projected textures on `light` class objects showed the same frame for
+  every step of the animation. Credit to Sleepy, who found and fixed this one.
 
 ## 1.0.0
 
