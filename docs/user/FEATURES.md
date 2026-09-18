@@ -80,7 +80,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 ## Soldier Systems
 
-- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
+- **Prone Stance** - Re-enables, fixes, and adapts the cut prone posture. Double-tap crouch to go prone, any crouch press to stand back up. Going down holds your input for the length of the animation, so you commit to the move, and AI take the prone positions the map designers already marked out. Includes a terrain fix that stopped prone working on slopes. The prone animations live in their own `prone.lvl`, which is read automatically after every `ingame.lvl`. Drop `prone.lvl` into `data\_lvl_pc\`; if it is not there, prone stays off for that mission. INI: `[Features] Prone=1`
 
   <img width="800" alt="Soldier going prone" src="../images/LegacyProne.webp" />
 

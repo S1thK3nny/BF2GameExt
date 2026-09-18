@@ -38,6 +38,11 @@ Scripts can check the running version through `GameExt.version`.
   previously off.
 - Starting the game on the original 2006 executable now names that as the problem,
   instead of a generic failure. That executable is still not supported.
+- **Going prone is now a committed move.** It plays the weapon handling sound,
+  and your input is held for the length of the getdown animation instead of
+  letting you walk out of it halfway. On the modtools executable it also plays
+  the first-person hands-down transition; the retail executables do not contain
+  that animation path at all, so first person there is unchanged.
 - **AI now uses the prone positions the levels already mark out.** Map layouts give
   every AI cover, patrol and sniper position a list of stances the AI may take there,
   prone among them, but the game only ever read stand and crouch out of that list.

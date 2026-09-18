@@ -90,6 +90,21 @@ static constexpr uint32_t kHintPropSecondaryStance = 0x92C05A59;
 // ControllableHeight (AILowLevel::mHeight): Stand=0, Crouch=1, Prone=2
 static constexpr int HEIGHT_STAND = 0;
 
+// Weapon foley id for the prone transition.  Crouch uses 8, prone 7.
+static constexpr int kWeaponFoleyProne = 7;
+
+// m_uiInputLockMask is 3 bits starting at bit 2; EntitySoldier::Prone sets all
+// three (0x1C).  ApplyPush uses 0x3C, which also raises the neighbouring
+// m_bSlide bit -- not wanted here.
+static constexpr uint8_t kInputLockMaskBits = 0x1C;
+
+// How long the getdown animation holds input.  The engine derives this as
+// (clipFrames - 1) / 30 from the lower-body action animation; our prone.lvl
+// ships crouch_getdown_prone and stand_getdown_prone at 40 frames, so 39/30.
+// Only wrong if a replacement prone.lvl retimes those clips, and then only by
+// the difference in clip length.
+static constexpr float kProneGetdownSeconds = 39.0f / 30.0f;
+
 // ActionAnimation enum values for prone transitions (confirmed from PDB + SetupPose switch table)
 static constexpr int ACTION_PRONE_TO_STAND  = 27; // 0x1B
 static constexpr int ACTION_CROUCH_TO_PRONE = 28; // 0x1C
@@ -125,6 +140,13 @@ typedef int (__fastcall* fn_HintStanceGetter_t)(void* ecx, void* edx);
 // as a byte-sized stack argument, callee-cleaned.
 typedef int (__fastcall* fn_GetRandomStance_t)(void* ecx, void* edx, int mask);
 
+// Weapon::PlayFoleyFX — ECX = Weapon*, foley id as a stack argument.
+typedef void (__fastcall* fn_PlayFoleyFX_t)(void* ecx, void* edx, int id);
+
+// FirstPerson::CrouchToProne — __cdecl, one stack argument (the first person
+// index), no return.
+typedef void (__cdecl* fn_FpCrouchToProne_t)(int index);
+
 // BaseHint::SetProperty — ECX = BaseHint*, PblHash of the property name and its
 // value as a string, callee-cleaned.
 typedef void (__fastcall* fn_HintSetProperty_t)(void* ecx, void* edx, uint32_t hash, const char* value);
@@ -141,6 +163,9 @@ static fn_GameSoundPlay_t    fn_gameSoundPlay   = nullptr;
 
 static fn_AnimAccessor_t     original_animAccessor = nullptr;
 static fn_SetAction_t        original_SetAction    = nullptr;
+
+static fn_PlayFoleyFX_t      fn_playFoleyFX     = nullptr;
+static fn_FpCrouchToProne_t  fn_fpCrouchToProne = nullptr;
 
 static fn_HintStanceGetter_t original_GetRandomPrimaryStance   = nullptr;
 static fn_HintStanceGetter_t original_GetRandomSecondaryStance = nullptr;
@@ -261,10 +286,44 @@ static bool do_prone_transition(void* entity)
             }
         }
 
-        // Weapon foley skipped for prone transitions — the weapon slot can
-        // hold a stale pointer after SetState(PRONE), and any dereference
-        // faults under the debug heap (x32dbg).  The body sound
-        // (FoleyFXSoldier::mProne above) is the audible stance cue anyway.
+        // Weapon foley, the same call Crouch makes with id 8.  Uses the
+        // engine's own slot guard: the active-slot nibble is read as a signed
+        // 4-bit value, so an empty slot (8..15 -> negative) is rejected.
+        if (fn_playFoleyFX) {
+            int8_t slot = (int8_t)(*(uint8_t*)((char*)entity + g_soldier->weaponIndex) << 4);
+            if (slot >= 0) {
+                void* weapon = *(void**)((char*)entity + g_soldier->weaponArray + (slot >> 4) * 4);
+                if (weapon) fn_playFoleyFX(weapon, nullptr, kWeaponFoleyProne);
+            }
+        }
+
+        // Transition input lock.  EntitySoldier::Prone sets the full 3-bit
+        // m_uiInputLockMask and holds it for the length of the getdown clip so
+        // the soldier cannot walk or turn out of the animation; the engine's
+        // own knockback path (ApplyPush) uses the same two fields, and ticks
+        // the timer back down for us.
+        {
+            uint8_t* flags = (uint8_t*)((char*)entity + g_soldier->inputLockFlags);
+            float*   timer = (float*)((char*)entity + g_soldier->inputLockTime);
+            *flags |= kInputLockMaskBits;
+            if (*timer < kProneGetdownSeconds) *timer = kProneGetdownSeconds;
+        }
+
+        // First-person transition (hands down + camera path).  Only the
+        // modtools executable still carries it: the retail builds dropped the
+        // prone FP camera paths, so fp_crouch_to_prone is 0 there and first
+        // person simply keeps the stance pose it already had.
+        //
+        // The player can only ever reach prone from crouch (double-tap crouch),
+        // so CrouchToProne is the whole first-person story; AI entering prone
+        // from standing has no first-person view to update.
+        if (fn_fpCrouchToProne) {
+            // EntitySoldier::GetFirstPersonIndex: bits 4-5 of the weapon-index
+            // byte, sign-extended, so 3 (both bits set) reads as -1 = not in
+            // first person.
+            int fpIndex = (int8_t)(*(uint8_t*)((char*)entity + g_soldier->weaponIndex) << 2) >> 6;
+            if (fpIndex >= 0) fn_fpCrouchToProne(fpIndex);
+        }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -548,6 +607,11 @@ void prone_system_install(uintptr_t exe_base)
     original_SetAction    = (fn_SetAction_t)resolve(exe_base, g_addr->SoldierAnimator_SetAction);
 
     g_weaponMeleeVtable   = (void*)resolve(exe_base, g_addr->WeaponMeleeClass_vftable);
+
+    if (g_addr->weapon_play_foley_fx)
+        fn_playFoleyFX = (fn_PlayFoleyFX_t)resolve(exe_base, g_addr->weapon_play_foley_fx);
+    if (g_addr->fp_crouch_to_prone)
+        fn_fpCrouchToProne = (fn_FpCrouchToProne_t)resolve(exe_base, g_addr->fp_crouch_to_prone);
 
     // Detour Crouch, StandUp, animation accessor, SetAction
     DetourTransactionBegin();
