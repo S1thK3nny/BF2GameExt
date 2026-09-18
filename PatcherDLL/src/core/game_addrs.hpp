@@ -382,7 +382,11 @@ namespace modtools {
    constexpr uintptr_t prone_acklay_gate_jnz       = 0x0052C28E;
    constexpr uintptr_t prone_height_jump_table     = 0x0053C000;
    constexpr uintptr_t prone_height_switch_end     = 0x0053BD67;
-   constexpr uintptr_t prone_primary_stance_and    = 0x005C4506;
+   constexpr uintptr_t hint_get_primary_stance     = 0x005C4500;
+   constexpr uintptr_t hint_get_secondary_stance   = 0x005C4520;
+   constexpr uintptr_t hint_get_random_stance      = 0x005C44D0;
+   constexpr uintptr_t hint_set_property           = 0x005C45B0;
+   constexpr uintptr_t hint_stance_init_mask_byte  = 0x005C5CAF;
    constexpr uintptr_t WeaponMeleeClass_vftable   = 0x00A5434C;
 
    constexpr uintptr_t lua_read_data_file          = 0x0046A790;
@@ -1456,7 +1460,11 @@ namespace steam {
    constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
-   constexpr uintptr_t prone_primary_stance_and  = 0x005435E4;
+   constexpr uintptr_t hint_get_primary_stance   = 0x005435E0;
+   constexpr uintptr_t hint_get_secondary_stance = 0x005435F0;
+   constexpr uintptr_t hint_get_random_stance    = 0x005435B0;
+   constexpr uintptr_t hint_set_property         = 0x00543670;
+   constexpr uintptr_t hint_stance_init_mask_byte = 0x005433C3;
    constexpr uintptr_t WeaponMeleeClass_vftable  = 0x007B1534;
 
    constexpr uintptr_t lua_read_data_file        = 0x0058AC50;
@@ -2627,7 +2635,11 @@ namespace gog {
    constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
    constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;
-   constexpr uintptr_t prone_primary_stance_and       = 0x00544334;
+   constexpr uintptr_t hint_get_primary_stance        = 0x00544330;
+   constexpr uintptr_t hint_get_secondary_stance      = 0x00544340;
+   constexpr uintptr_t hint_get_random_stance         = 0x00544300;
+   constexpr uintptr_t hint_set_property              = 0x005443C0;
+   constexpr uintptr_t hint_stance_init_mask_byte     = 0x00544113;
    constexpr uintptr_t WeaponMeleeClass_vftable       = 0x007b24ac;
    constexpr uintptr_t lua_read_data_file             = 0x0058bc00;
    constexpr uintptr_t load_util_read_data_file       = 0x0057a9a0;

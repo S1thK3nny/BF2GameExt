@@ -420,6 +420,90 @@ they are null.
 
 ---
 
+## BaseHint stances - the hint node prone bit the engine drops
+
+`BaseHint` is a 64-byte pooled object whose PDB declares one ushort bitfield at +0x3C:
+
+| Bits | Field |
+|---|---|
+| 0-7 | `mType` bitmask: Snipe=1, Patrol=2, Cover=4, JetJump=8, Mine=0x10, Land=0x20, Fortification=0x40, VehicleCover=0x80 |
+| 8-9 | `mPrimaryStance` mask |
+| 10-11 | `mSecondaryStance` mask |
+| 12-13 | `mSidestep` mask |
+| 14-15 | unused |
+
+`BaseHint::GetRandomStance` (Phantom 0x5EC0D0, modtools 0x5C44D0, Steam 0x5435B0, GOG 0x544300)
+rolls `AIUtil::GetRandomInt(0, 2)` until `mask & (1 << roll)` is set, so the mask is indexed by
+`ControllableHeight`: bit0 = Stand, bit1 = Crouch, **bit2 = Prone**.
+
+### Where hint stances come from
+
+`LoadUtil::ProcessHintInfo` handles only the `INFO` chunk (`NAME`, `TYPE`, `XFRM`) and constructs
+the hint. The stances arrive separately: `LoadUtil::ProcessHint` (Phantom 0x638310, modtools
+0x451AE0) walks the sibling `PROP` chunks and calls `BaseHint::SetProperty(hash, valueString)`
+(Phantom 0x5EC750, modtools 0x5C45B0, Steam 0x543670, GOG 0x5443C0) for each. The property hashes:
+
+| PblHash | Property | Parsed as |
+|---|---|---|
+| 0xBF0F1CD1 | `PrimaryStance` | 3-bit stance mask |
+| 0x92C05A59 | `SecondaryStance` | 3-bit stance mask, plus a 2-bit sidestep mask at bits 3-4 |
+| 0x844CCDB4 | command post name | validated against `CommandPostManager::FindPost` |
+
+Both are `sscanf("%d")`'d and range-checked against `0x20` - five bits, i.e. three stance bits plus
+two sidestep bits. `.hnt` source files carry them verbatim, e.g.
+
+```
+Hint("HintNode42", "0")
+{
+	Position(228.444077, 1.181329, 47.504223);
+	Rotation(0.674962, 0.000000, -0.737853, 0.000000);
+	PrimaryStance(4);
+	SecondaryStance(2);
+	Mode(0);
+}
+```
+
+### The prone bit is parsed, then masked off
+
+`SetProperty` extracts the stance with `& 7` (secondary) but stores it with `& 3`, two bits wide,
+because that is all the bitfield holds:
+
+- `PrimaryStance(1|2|3)` stores normally.
+- `PrimaryStance(4)` (prone only) masks to 0, and 0 is the "no value given" case that `SetProperty`
+  skips entirely, so the hint keeps the constructor default of Stand.
+- `PrimaryStance(6)` (crouch or prone) stores as 2, plain Crouch.
+
+Pandemic's own levels author the bit: `assets/worlds/END/world1/end1.hnt` uses `PrimaryStance(4)`,
+`assets/worlds/TAT/world2/tat2.hnt` uses `PrimaryStance(6)`, and `SecondaryStance(6)` appears too.
+The prone stance was authored into the shipped levels and then cut on the reading side, matching the
+rest of the stubbed-out prone system. The engine's hint debug draw
+(`HintManager::_NFINAL_DrawHintNodes`, `AiShowHintNodes`) is 2-bit for the same reason: its label
+table is only `""`, `"St"`, `"Cr"`, `"St Cr"`.
+
+Consumers of the stored stance: `CoverHelper::EnterState` and `SnipeHelper::EnterState` state 3 take
+the primary, `CoverHelper` states 4 and 5 the secondary; the result is held as the helper's stance
+and pushed into `AILowLevel::mHeight`.
+
+### How BF2GameExt restores it
+
+`entity/soldier_prone.cpp` stores the dropped bit in the two unused bitfield bits (14 = primary,
+15 = secondary):
+
+1. The constructor's stance-init mask (`AND 0xC5FF`, modtools 0x5C5CAF, Steam 0x5433C3, GOG
+   0x544113) is patched to `0x05FF` so those bits start cleared rather than holding pool garbage.
+2. `BaseHint::SetProperty` is hooked to re-parse the value and set the prone bit, clearing the
+   vanilla 2-bit field when the hint is prone-only.
+3. `GetRandomPrimaryStance` (modtools 0x5C4500, Steam 0x5435E0, GOG 0x544330) and
+   `GetRandomSecondaryStance` (modtools 0x5C4520, Steam 0x5435F0, GOG 0x544340) are hooked to
+   rebuild the 3-bit mask and pass it to `GetRandomStance`.
+
+**Trap:** widening `GetRandomPrimaryStance`'s own `& 3` to `& 7` does not do this. Bit 2 of the byte
+at +0x3D is the *secondary* stance's Stand bit, which is set on practically every hint, so that
+turns every cover and fortification hint into a 50/50 stand-or-prone roll. BF2GameExt shipped that
+mistake before this was worked out.
+
+---
+
 ## AI::AIGoalManager - Strategic Goal Assignment
 
 Singleton that manages high-level AI goals (capture CP, defend, destroy target, CTF):
