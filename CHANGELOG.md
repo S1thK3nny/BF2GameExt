@@ -61,6 +61,8 @@ Scripts can check the running version through `GameExt.version`.
   they took, including positions meant to be used standing.
 - Animated projected textures on `light` class objects showed the same frame for
   every step of the animation. Credit to Sleepy, who found and fixed this one.
+- Droidekas turned on the spot to face whatever killed them while their death
+  animation played.
 
 ## 1.0.0
 

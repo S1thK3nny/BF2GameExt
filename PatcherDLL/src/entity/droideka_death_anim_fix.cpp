@@ -89,8 +89,38 @@
 // the disassembly (array +0x470, index +0x480) disagrees with the Ghidra struct
 // (+0x46C / +0x470), so neither is trustworthy enough to dereference.
 //
-// Both halves are gated on the same flag: without the death-animation fix
-// state 3 lasts one frame and there is nothing to hide.
+// Steering during the death animation.
+//
+// Same story as the shield: state 3 used to last one frame, so nobody ever saw
+// what the state machine does while it is in it.  It steers.
+//
+// EntityDroideka::UpdateState(dt, moveX, moveZ, turn) is the FSM's per-frame
+// body update, and it applies the control inputs before it looks at the state:
+//
+//   * AdjustRotation(this, dt * turn * mMaxTurnSpeed) yaws the whole entity by
+//     the turn control, unconditionally, at the top of the function.
+//   * the block the state dispatch falls into for every state that is not 0, 1
+//     or 2 -- which includes 3, dying -- rotates mTurnOffset, the body's yaw
+//     relative to the entity, toward the direction of the movement control, at
+//     mMaxTurnSpeed.
+//
+// Neither is gated on the dying state or on mIsDead, and the entity's rendered
+// facing is the sum of the two, so a droideka that dies while its controller is
+// still steering (an AI one is steering at whatever hurt it) spends the whole
+// death animation turning in place to face its killer.  EntityWalker::UpdateState
+// has the same shape, but it ends by calling ResetRotation for every state from 3
+// (dying) through 10, so a dying walker's body cannot drift off its entity.
+//
+// The fix hooks UpdateState and, while mState is 3, passes zeroed movement and
+// turn controls and restores mTurnOffset afterwards.  Zeroing the turn alone is
+// not enough (the body would still chase the movement control) and freezing
+// mTurnOffset alone is not enough either (the body is entity-relative, so it
+// would ride along with the entity yaw).  The animation itself is untouched:
+// state 3 takes neither the MoveForward nor the turn-animation case of the pose
+// advance, so the death clip plays exactly as before, just without the spin.
+//
+// All three halves are gated on the same flag: without the death-animation fix
+// state 3 lasts one frame and there is nothing to hide, tear down or freeze.
 // =============================================================================
 
 bool g_droidekaDeathAnimEnabled = true;
@@ -228,6 +258,45 @@ void droideka_shield_tracker_install(uintptr_t exe_base)
    DetourTransactionCommit();
 }
 
+// ---------------------------------------------------------------------------
+// Steering lock while dying.
+//
+// mTurnOffset (a PblAngle: {cos, sin}) sits immediately after mState and
+// mDirection in every build -- modtools +0x1a7c against mState +0x1a74,
+// Steam/GOG +0x1a5c against +0x1a54 -- so it needs no address of its own.
+// ---------------------------------------------------------------------------
+
+static constexpr uint32_t kTurnOffsetFromState = 8;
+
+typedef void(__thiscall* fn_DroidekaUpdateState_t)(void* ecx, float dt, float moveX,
+                                                   float moveZ, float turn);
+static fn_DroidekaUpdateState_t s_origUpdateState = nullptr;
+
+static void __fastcall hooked_DroidekaUpdateState(void* ecx, void* /*edx*/, float dt,
+                                                  float moveX, float moveZ, float turn)
+{
+   const uintptr_t ent = (uintptr_t)ecx;
+
+   if (*(int*)(ent + s_mStateOff) != kStateDying) {
+      s_origUpdateState(ecx, dt, moveX, moveZ, turn);
+      return;
+   }
+
+   // Dying: no steering.  Zero controls stop AdjustRotation from yawing the
+   // entity and stop the body from being told to face the movement direction;
+   // restoring mTurnOffset undoes the residual rotation the body block applies
+   // anyway when the movement control is zero (it aims the body at the entity's
+   // own forward).  Everything else in the function runs untouched.
+   float turnOffset[2];
+   std::memcpy(turnOffset, (const void*)(ent + s_mStateOff + kTurnOffsetFromState),
+               sizeof(turnOffset));
+
+   s_origUpdateState(ecx, dt, 0.0f, 0.0f, 0.0f);
+
+   std::memcpy((void*)(ent + s_mStateOff + kTurnOffsetFromState), turnOffset,
+               sizeof(turnOffset));
+}
+
 // Called from the naked thunk below with the dying entity, before the state
 // advances.
 //
@@ -301,6 +370,14 @@ static const uint8_t kPrevModtools[] = {0x8B, 0x16, 0x6A, 0x06, 0x8B, 0xCE};
 static const uint8_t kSiteSteam[]    = {0xFF, 0x90, 0x30, 0x01, 0x00, 0x00};
 static const uint8_t kPrevSteam[]    = {0x8B, 0x03, 0x8B, 0xCB, 0x6A, 0x06};
 
+// EntityDroideka::UpdateState prologues, for the same positive-ID reason: a
+// wrong address here would detour whatever function happens to live there.
+//   modtools: SUB ESP,0x14; FLD [ESP+0x1c]; PUSH EBX
+//   retail:   PUSH EBP; MOV EBP,ESP; AND ESP,-8; SUB ESP,0x20; MOVSS XMM2,[EBP+0x10]
+static const uint8_t kUpdStateModtools[] = {0x83, 0xEC, 0x14, 0xD9, 0x44, 0x24, 0x1C, 0x53};
+static const uint8_t kUpdStateRetail[]   = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8, 0x83, 0xEC,
+                                            0x20, 0xF3, 0x0F, 0x10, 0x55, 0x10};
+
 static uint8_t* s_site    = nullptr;
 static uint8_t  s_orig[6] = {};
 
@@ -308,23 +385,31 @@ void droideka_death_anim_install(uintptr_t exe_base)
 {
    if (!g_droidekaDeathAnimEnabled) return;
 
-   uintptr_t siteVA;
-   const uint8_t *kSite, *kPrev;
+   uintptr_t siteVA, updStateVA;
+   const uint8_t *kSite, *kPrev, *kUpdState;
+   size_t kUpdStateLen;
    switch (g_build) {
    case GameBuild::Modtools:
       siteVA = game_addrs::modtools::droideka_update_nextstate_call;
+      updStateVA = game_addrs::modtools::droideka_update_state;
       kSite = kSiteModtools; kPrev = kPrevModtools;
+      kUpdState = kUpdStateModtools; kUpdStateLen = sizeof(kUpdStateModtools);
       s_mStateOff = 0x1A74;
       break;
    case GameBuild::Steam:
       siteVA = game_addrs::steam::droideka_update_nextstate_call;
+      updStateVA = game_addrs::steam::droideka_update_state;
       kSite = kSiteSteam; kPrev = kPrevSteam;
+      kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
       s_mStateOff = 0x1A54;
       break;
    case GameBuild::GOG:
       siteVA = game_addrs::gog::droideka_update_nextstate_call;
-      // Byte-identical call site and lead-in on GOG (verified against the exe).
+      updStateVA = game_addrs::gog::droideka_update_state;
+      // Byte-identical call site, lead-in and UpdateState prologue on GOG
+      // (verified against the exe).
       kSite = kSiteSteam; kPrev = kPrevSteam;
+      kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
       s_mStateOff = 0x1A54;
       break;
    default:
@@ -345,10 +430,31 @@ void droideka_death_anim_install(uintptr_t exe_base)
    site[0] = 0xE8;
    *(int32_t*)(site + 1) = rel;
    site[5] = 0x90;
+
+   // Steering lock.  Only worth installing now that state 3 actually holds, so
+   // it hangs off the same signature check as the call-site patch above.
+   if (updStateVA == 0) return;
+   uint8_t* const updState = (uint8_t*)resolve(exe_base, updStateVA);
+   if (std::memcmp(updState, kUpdState, kUpdStateLen) != 0) return;
+
+   s_origUpdateState = (fn_DroidekaUpdateState_t)updState;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)s_origUpdateState, hooked_DroidekaUpdateState);
+   DetourTransactionCommit();
 }
 
 void droideka_death_anim_uninstall()
 {
+   if (s_origUpdateState) {
+      DetourTransactionBegin();
+      DetourUpdateThread(GetCurrentThread());
+      DetourDetach(&(PVOID&)s_origUpdateState, hooked_DroidekaUpdateState);
+      DetourTransactionCommit();
+      s_origUpdateState = nullptr;
+   }
+
    if (s_origShieldUpdate) {
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
