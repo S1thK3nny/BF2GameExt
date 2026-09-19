@@ -1223,172 +1223,6 @@ static int lua_HttpPostAsync(lua_State* L)
 }
 
 
-// ---------------------------------------------------------------------------
-// OnCharacterExitVehicle / Name / Team / Class / Release
-//
-// Custom Lua C functions that store callbacks in the Lua registry and track
-// filter metadata in g_cevCallbacks[].  The C++ hook in lua_hooks.cpp scans
-// the character array, resolves name/team/class, and fires matching callbacks.
-//
-// Returns a lightuserdata handle (pointer to the g_cevCallbacks slot).
-// ReleaseCharacterExitVehicle(handle) clears the slot and nils the registry entry.
-// ---------------------------------------------------------------------------
-
-// Helper: store the value at Lua stack top into globals[key].
-// Pops the value.  Returns the key.
-// Uses LUA_GLOBALSINDEX (-10001) with negative integer keys to avoid
-// conflicts with luaL_ref positive keys in LUA_REGISTRYINDEX (-10000).
-static int cev_store_ref(lua_State* L)
-{
-   int key = g_cevNextKey--;
-   // Stack: [..., value]
-   g_lua.pushnumber(L, (float)key);
-   g_lua.insert(L, -2);
-   // Stack: [..., key, value]
-   g_lua.settable(L, -10001);   // _G[key] = value
-   return key;
-}
-
-// Helper: remove a globals reference.
-static void cev_remove_ref(lua_State* L, int key)
-{
-   g_lua.pushnumber(L, (float)key);
-   g_lua.pushnil(L);
-   g_lua.settable(L, -10001);   // _G[key] = nil
-}
-
-// OnCharacterExitVehicle(callback) -> handle
-static int lua_OnCEV(lua_State* L)
-{
-   for (int i = 0; i < CEV_MAX_CBS; i++) {
-      if (g_cevCallbacks[i].regKey == 0) {
-         int key = cev_store_ref(L);
-         g_cevCallbacks[i].regKey     = key;
-         g_cevCallbacks[i].filterType = CEV_PLAIN;
-         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
-         return 1;
-      }
-   }
-   g_lua.pushnil(L);
-   return 1;
-}
-
-// OnCharacterExitVehicleName(callback, nameStr) -> handle
-static int lua_OnCEVName(lua_State* L)
-{
-   const char* name = g_lua.tolstring(L, 2, nullptr);
-   if (!name) { g_lua.pushnil(L); return 1; }
-
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
-   if (!g_addr->hash_string_thiscall) { g_lua.pushnil(L); return 1; }
-   typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(g_addr->hash_string_thiscall);
-   alignas(4) int hashBuf[2] = {};
-   fn_Hash(hashBuf, name);
-   const uint32_t nameHash = (uint32_t)hashBuf[0];
-
-   for (int i = 0; i < CEV_MAX_CBS; i++) {
-      if (g_cevCallbacks[i].regKey == 0) {
-         g_cevCallbacks[i].nameHash   = nameHash;
-         g_lua.settop(L, 1);
-         int key = cev_store_ref(L);
-         g_cevCallbacks[i].regKey     = key;
-         g_cevCallbacks[i].filterType = CEV_NAME;
-         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
-         return 1;
-      }
-   }
-   g_lua.pushnil(L);
-   return 1;
-}
-
-// OnCharacterExitVehicleTeam(callback, teamIndex) -> handle
-static int lua_OnCEVTeam(lua_State* L)
-{
-   if (!g_lua.isnumber(L, 2)) { g_lua.pushnil(L); return 1; }
-   int team = g_lua.tointeger(L, 2);
-
-   for (int i = 0; i < CEV_MAX_CBS; i++) {
-      if (g_cevCallbacks[i].regKey == 0) {
-         g_cevCallbacks[i].teamFilter = team;
-         g_lua.settop(L, 1);
-         int key = cev_store_ref(L);
-         g_cevCallbacks[i].regKey     = key;
-         g_cevCallbacks[i].filterType = CEV_TEAM;
-         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
-         return 1;
-      }
-   }
-   g_lua.pushnil(L);
-   return 1;
-}
-
-// OnCharacterExitVehicleClass(callback, classStr) -> handle
-static int lua_OnCEVClass(lua_State* L)
-{
-   const char* cls = g_lua.tolstring(L, 2, nullptr);
-   if (!cls) { g_lua.pushnil(L); return 1; }
-
-   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
-   if (!g_addr->hash_string_thiscall || !g_addr->game_log || !g_addr->class_def_list) {
-      g_lua.pushnil(L); return 1;
-   }
-   typedef void* (__thiscall* HashString_t)(void* buf, const char* s);
-   const auto fn_Hash = (HashString_t)res(g_addr->hash_string_thiscall);
-   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
-
-   // Hash the class name and walk the EntityClass global registry to resolve it
-   // to a live EntityClass pointer. Registration fails if the class isn't loaded.
-   alignas(4) int hashBuf[2] = {};
-   fn_Hash(hashBuf, cls);
-   const uint32_t targetHash = (uint32_t)hashBuf[0];
-
-   void* classPtr = nullptr;
-   uintptr_t node = *(uintptr_t*)res(g_addr->class_def_list);
-   for (int guard = 0; guard < 4096; ++guard) {
-      void* ec = *(void**)(node + 0x0C);
-      if (!ec) break;
-      if (*(uint32_t*)((char*)ec + 0x18) == targetHash) { classPtr = ec; break; }
-      node = *(uintptr_t*)(node + 0x04);
-   }
-
-   if (!classPtr) {
-      fn_GameLog("OnCharacterExitVehicleClass: class '%s' not found in EntityClass registry\n", cls);
-      g_lua.pushnil(L);
-      return 1;
-   }
-
-   for (int i = 0; i < CEV_MAX_CBS; i++) {
-      if (g_cevCallbacks[i].regKey == 0) {
-         g_cevCallbacks[i].classPtr   = classPtr;
-         g_lua.settop(L, 1);
-         int key = cev_store_ref(L);
-         g_cevCallbacks[i].regKey     = key;
-         g_cevCallbacks[i].filterType = CEV_CLASS;
-         g_lua.pushlightuserdata(L, (void*)&g_cevCallbacks[i]);
-         return 1;
-      }
-   }
-   g_lua.pushnil(L);
-   return 1;
-}
-
-// ReleaseCharacterExitVehicle(handle)
-static int lua_ReleaseCEV(lua_State* L)
-{
-   void* handle = g_lua.touserdata(L, 1);
-   if (!handle) return 0;
-
-   CEVCallback* cb = (CEVCallback*)handle;
-   if (cb >= g_cevCallbacks && cb < g_cevCallbacks + CEV_MAX_CBS && cb->regKey != 0) {
-      cev_remove_ref(L, cb->regKey);
-      memset(cb, 0, sizeof(*cb));
-   }
-   return 0;
-}
-
 // SetLoadDisplayLevel(path) - overrides the lvl the loading screen loads.
 // The default is "Load\\load" (the vanilla load screen level).
 // Call from Script root or ScriptPreInit.
@@ -1615,6 +1449,116 @@ static int lua_ContentCensus(lua_State* L)
    return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Mission-script name validity
+//
+// GameLoop::SetNextMission is the only writer of mMissionScript, and the only
+// caller that ever passes null is a path the shell does not take: MissionPlayList
+// ::SelectNextEntry just returns false when the playlist runs out, leaving the
+// buffer holding the last map. So the buffer alone cannot say whether a mission
+// is live, and GetScriptName() would report a stale map to shell scripts forever.
+//
+// Two detours settle it. Entering the shell invalidates the name; setting a next
+// mission validates it. The ordering is safe in every direction, because
+// SetNextMission always runs after the last ShellState::Enter and before the
+// mission's own Lua sees ScriptPreInit -- and the engine's own consumers
+// (NetSetup::GetMapName, SetReinforcementCount, the playlist) never see a
+// modified buffer, because this touches a DLL-side flag and not the engine's
+// memory.
+// ---------------------------------------------------------------------------
+
+static bool s_missionScriptValid = false;
+
+// modtools compiles SetNextMission __cdecl(char*); the retail LTCG builds made
+// it __fastcall(char* ECX). Detours needs a trampoline matching each shape.
+using fn_set_next_mission_cdecl    = void(__cdecl*)(const char*);
+using fn_set_next_mission_fastcall = void(__fastcall*)(const char*, void*);
+using fn_shell_state_enter         = void(__fastcall*)(void*, void*);
+
+static fn_set_next_mission_cdecl    s_origSetNextMissionCdecl    = nullptr;
+static fn_set_next_mission_fastcall s_origSetNextMissionFastcall = nullptr;
+static fn_shell_state_enter         s_origShellStateEnter        = nullptr;
+
+static void note_next_mission(const char* name)
+{
+   bool valid = false;
+   __try {
+      valid = (name != nullptr && name[0] != '\0');
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      valid = false;
+   }
+   s_missionScriptValid = valid;
+}
+
+static void __cdecl hooked_set_next_mission_cdecl(const char* name)
+{
+   s_origSetNextMissionCdecl(name);
+   note_next_mission(name);
+}
+
+static void __fastcall hooked_set_next_mission_fastcall(const char* name, void* edx)
+{
+   s_origSetNextMissionFastcall(name, edx);
+   note_next_mission(name);
+}
+
+static void __fastcall hooked_shell_state_enter(void* thisPtr, void* edx)
+{
+   // Invalidate before the original runs: nothing between here and the shell's
+   // own scripts can set a new mission, and this way a shell script that runs
+   // early in ShellLoop::Init already sees nil rather than the last map.
+   s_missionScriptValid = false;
+   s_origShellStateEnter(thisPtr, edx);
+}
+
+void script_name_mark_mission_started()
+{
+   // Safety net for the commandline-launch path (bxGameMain -> SetNextMission),
+   // where a shell enter can land after the name was set.
+   s_missionScriptValid = true;
+}
+
+void script_name_tracker_install(uintptr_t exe_base)
+{
+   if (!g_addr->game_loop_set_next_mission || !g_addr->gamestate_shell_state_enter)
+      return;
+
+   s_origShellStateEnter = (fn_shell_state_enter)
+      resolve(exe_base, g_addr->gamestate_shell_state_enter);
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   if (g_build == GameBuild::Modtools) {
+      s_origSetNextMissionCdecl = (fn_set_next_mission_cdecl)
+         resolve(exe_base, g_addr->game_loop_set_next_mission);
+      DetourAttach(&(PVOID&)s_origSetNextMissionCdecl, hooked_set_next_mission_cdecl);
+   } else {
+      s_origSetNextMissionFastcall = (fn_set_next_mission_fastcall)
+         resolve(exe_base, g_addr->game_loop_set_next_mission);
+      DetourAttach(&(PVOID&)s_origSetNextMissionFastcall, hooked_set_next_mission_fastcall);
+   }
+   DetourAttach(&(PVOID&)s_origShellStateEnter, hooked_shell_state_enter);
+   DetourTransactionCommit();
+}
+
+void script_name_tracker_uninstall()
+{
+   if (!s_origShellStateEnter) return;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   if (s_origSetNextMissionCdecl)
+      DetourDetach(&(PVOID&)s_origSetNextMissionCdecl, hooked_set_next_mission_cdecl);
+   if (s_origSetNextMissionFastcall)
+      DetourDetach(&(PVOID&)s_origSetNextMissionFastcall, hooked_set_next_mission_fastcall);
+   DetourDetach(&(PVOID&)s_origShellStateEnter, hooked_shell_state_enter);
+   DetourTransactionCommit();
+
+   s_origSetNextMissionCdecl    = nullptr;
+   s_origSetNextMissionFastcall = nullptr;
+   s_origShellStateEnter        = nullptr;
+}
+
 // GetScriptName() - returns the mission-script name the match was launched
 // from, e.g. "cor1l_con". Returns nil if the name is not available.
 //
@@ -1623,11 +1567,15 @@ static int lua_ContentCensus(lua_State* L)
 // ScriptPreInit and stays put for the whole match. The engine never exposed it:
 // stock Lua has GetWorldFilename() for the .wld, but nothing for the script.
 //
-// Shell scripts can call it too, but there it names the mission that was set
-// last - the queued or previous map, not a running one.
+// Returns nil in the shell. The engine never clears mMissionScript when a match
+// ends, so the raw buffer would keep naming the last map played; s_missionScriptValid
+// tracks whether it still describes a live mission (see the detours below).
 static int lua_GetScriptName(lua_State* L)
 {
    if (!g_addr->game_loop_mission_script) { g_lua.pushnil(L); return 1; }
+
+   // Back in the shell, or no mission ever set: no name to report.
+   if (!s_missionScriptValid) { g_lua.pushnil(L); return 1; }
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    const char* src = (const char*)(g_addr->game_loop_mission_script - kUnrelocatedBase + base);
@@ -1666,11 +1614,6 @@ static const lua_func_entry custom_functions[] = {
    { "HttpPutAsync",          lua_HttpPutAsync },
    { "HttpPostAsync",         lua_HttpPostAsync },
    { "RemoveUnitClass",       lua_RemoveUnitClass },
-   { "OnCharacterExitVehicle",       lua_OnCEV },
-   { "OnCharacterExitVehicleName",   lua_OnCEVName },
-   { "OnCharacterExitVehicleTeam",   lua_OnCEVTeam },
-   { "OnCharacterExitVehicleClass",  lua_OnCEVClass },
-   { "ReleaseCharacterExitVehicle",  lua_ReleaseCEV },
    { "SetLoadDisplayLevel",      lua_SetLoadDisplayLevel },
    { "SetInstanceProperty",      lua_SetInstanceProperty },
    { "SetFogRange",              lua_SetFogRange },

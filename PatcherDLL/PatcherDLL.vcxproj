@@ -144,6 +144,7 @@
     <ClInclude Include="src\weapon\shield_channel_fix.hpp" />
     <ClInclude Include="src\lua\lua_hooks.hpp" />
     <ClInclude Include="src\lua\lua_funcs.hpp" />
+    <ClInclude Include="src\lua\lua_events.hpp" />
     <ClInclude Include="src\debug_commands\command_registry.hpp" />
     <ClInclude Include="src\debug_commands\hover_springs.hpp" />
     <ClInclude Include="src\debug_commands\weapon_ranges.hpp" />
@@ -254,6 +255,7 @@
     <ClCompile Include="src\weapon\shield_channel_fix.cpp" />
     <ClCompile Include="src\lua\lua_hooks.cpp" />
     <ClCompile Include="src\lua\lua_funcs.cpp" />
+    <ClCompile Include="src\lua\lua_events.cpp" />
     <ClCompile Include="src\debug_commands\debug_command.cpp" />
     <ClCompile Include="src\debug_commands\command_registry.cpp" />
     <ClCompile Include="src\debug_commands\hover_springs.cpp" />
