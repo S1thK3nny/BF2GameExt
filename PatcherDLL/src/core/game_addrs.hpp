@@ -48,6 +48,11 @@ namespace modtools {
    // spawned this way can actually fire weapons.
    constexpr uintptr_t lua_create_entity = 0x00472730;
 
+   // GameLoop::mMissionScript - char[0x40] holding the mission-script name the
+   // match was launched from ("cor1l_con"). Sole writer GameLoop::SetNextMission
+   // 0x00733680, which does strncpy_safe(dst, src, 0x40). Read by GetScriptName().
+   constexpr uintptr_t game_loop_mission_script = 0x00c6aa78;
+
    // ---- Aimer / Weapon -------------------------------------------------------
 
    // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
@@ -2191,6 +2196,9 @@ namespace steam {
    constexpr uintptr_t class_def_list      = 0x007EC560;  // Factory<Entity,EntityClass,EntityDesc>::sList (node+0x4 next, +0xC def; def+0x18 hash)
    constexpr uintptr_t aimer_set_weapon    = 0x0043E400;  // Aimer::SetWeapon (EntitySoldier ctor fixup @0x4defa2)
    constexpr uintptr_t lua_create_entity   = 0x0058EB20;  // Lua_Callbacks::CreateEntity (reg table 0x7e7830)
+   // GameLoop::mMissionScript, char[0x40]. Derived from the strrchr(buf, '_')
+   // in Lua_Callbacks::SetReinforcementCount 0x0058ba90.
+   constexpr uintptr_t game_loop_mission_script = 0x01e560e0;
    constexpr uintptr_t enter_state_path_op = 0x00577661;  // "Load\\load" MOV ECX,imm32 operand in LoadDataFile (release: MOV not PUSH)
 
    // netEnabled/netEnabledNext are laid out in REVERSE order vs modtools —
@@ -3115,6 +3123,9 @@ namespace gog {
    constexpr uintptr_t class_def_list                 = 0x007ed4f0;
    constexpr uintptr_t aimer_set_weapon               = 0x0043e3f0;
    constexpr uintptr_t lua_create_entity              = 0x0058fac0;
+   // GameLoop::mMissionScript, char[0x40]. Ported from steam 0x01e560e0 with
+   // tools/port_gog.py data (18 agreeing reference sites).
+   constexpr uintptr_t game_loop_mission_script       = 0x01e57578;
    constexpr uintptr_t enter_state_path_op            = 0x005783e1;
    constexpr uintptr_t net_in_shell                   = 0x007e9007;
    constexpr uintptr_t net_enabled                    = 0x01e64359;

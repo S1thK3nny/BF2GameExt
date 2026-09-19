@@ -10,6 +10,11 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **`GetScriptName()`** - Returns the mission-script name the match was launched
+  from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
+  script, so a mission could not tell which map or mode it was running as without
+  the name being hardcoded. See the
+  [Lua API](docs/user/LUA_API.md#match-info).
 - **`SetInstanceProperty(name, property, value)`** - Changes a world object's
   instance properties after the map has loaded. Works on vehicle spawners, which no
   stock Lua function could reach, so a script can now change which vehicle a

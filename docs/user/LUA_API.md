@@ -127,6 +127,25 @@ movie will not play, that line names the exact path that was tried and why it
 failed. The engine's own `Unable to open movie file` warning quotes the name your
 script passed, not the path it looked in, so it cannot tell you that on its own.
 
+## Match Info
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `GetScriptName()` | Returns the mission-script name the match was launched from, e.g. `"cor1c_con"`. Returns nil if no mission has been set yet. | 1.1.0 |
+
+The name is set before `ScriptPreInit` runs and does not change for the rest of
+the match, so a script can branch on its own map or mode without having the name
+hardcoded into it. Stock Lua only offers `GetWorldFilename()`, which returns the
+world file, not the script and only after the world has been loaded.
+
+```lua
+local script = GetScriptName()          -- "cor1l_con"
+local mode   = string.sub(script, -4)   -- "_con"
+```
+
+Called from a shell script it returns whichever mission was set last, which is
+the queued or previous map rather than a running one.
+
 ## Rendering
 
 | Function | Description | Since |

@@ -1615,8 +1615,43 @@ static int lua_ContentCensus(lua_State* L)
    return 0;
 }
 
+// GetScriptName() - returns the mission-script name the match was launched
+// from, e.g. "cor1l_con". Returns nil if the name is not available.
+//
+// Reads GameLoop::mMissionScript, the char[0x40] GameLoop::SetNextMission fills
+// before the mission's Lua state is created, so it is already correct in
+// ScriptPreInit and stays put for the whole match. The engine never exposed it:
+// stock Lua has GetWorldFilename() for the .wld, but nothing for the script.
+//
+// Shell scripts can call it too, but there it names the mission that was set
+// last - the queued or previous map, not a running one.
+static int lua_GetScriptName(lua_State* L)
+{
+   if (!g_addr->game_loop_mission_script) { g_lua.pushnil(L); return 1; }
+
+   const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+   const char* src = (const char*)(g_addr->game_loop_mission_script - kUnrelocatedBase + base);
+
+   // Copy out under a bounded scan rather than pushing the engine buffer
+   // directly: SetNextMission fills it with strncpy_safe(dst, src, 0x40), so a
+   // name of exactly 0x40 chars would leave no terminator to stop at.
+   char name[0x41];
+   size_t len = 0;
+   __try {
+      while (len < 0x40 && src[len] != '\0') { name[len] = src[len]; ++len; }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      len = 0;
+   }
+   name[len] = '\0';
+
+   if (len == 0) { g_lua.pushnil(L); return 1; }   // shell before any map was set
+   g_lua.pushlstring(L, name, len);
+   return 1;
+}
+
 static const lua_func_entry custom_functions[] = {
    { "ContentCensus",         lua_ContentCensus },
+   { "GetScriptName",         lua_GetScriptName },
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },
