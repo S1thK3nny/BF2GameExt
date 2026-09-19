@@ -57,6 +57,7 @@
 #include "render/water_texture_count_fix.hpp"
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
+#include "render/scene_tree_depth_guard.hpp"
 #include "weapon/anim_textures.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
@@ -383,6 +384,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread
+   scene_tree_depth_guard_install(exe_base); // crash fix, always on
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
