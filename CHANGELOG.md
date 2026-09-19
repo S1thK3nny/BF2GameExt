@@ -51,6 +51,12 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- A map could die at the very end of loading, after the loading screen, with a
+  stack overflow. The engine's world splitter recursed forever on objects it
+  cannot tell apart: objects at exactly the same spot, objects stacked at one
+  point, or an object with a broken position. The split now stops once it has
+  gone deeper than any real map needs, and that group of objects is left as it
+  is.
 - Tentacles beyond the fourth lost their pose whenever another unit was drawn.
 - Above 60 FPS, the top of a cape detached from the body and jittered while the
   wearer moved. This was caused by BF2GameExt's own cloth collision fix.

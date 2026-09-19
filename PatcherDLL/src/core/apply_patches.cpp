@@ -7,6 +7,7 @@
 #include "util/ini_config.hpp"
 #include "util/ini_registry.hpp"
 #include "patch_table.hpp"
+#include "version.h"
 
 #include <string.h>
 
@@ -236,7 +237,20 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
 
    if (not log) return false;
 
+   // Windows caches the most recently used profile file in memory and decides
+   // whether the cache is stale from the file's last-write time, so an edit
+   // that lands without moving that timestamp is served from the old copy and
+   // looks like "the INI did not apply until I saved it again". The documented
+   // flush is a write call with all three name arguments null; it writes
+   // nothing, because we never write through this API.
+   if (ini_path && ini_path[0]) WritePrivateProfileStringA(nullptr, nullptr, nullptr, ini_path);
+
    ini_config cfg{ini_path};
+
+   // Which DLL is actually running. Without this line a stale copy in the game
+   // folder is indistinguishable from a feature that did not fire, which has
+   // cost a full test round at least once.
+   log.printf("BF2GameExt %s (built %s %s)\n", GAMEEXT_VERSION_STRING, __DATE__, __TIME__);
 
    // Name the host process. When identification fails this is the single most
    // useful line in the log -- it says which executable we were actually loaded
