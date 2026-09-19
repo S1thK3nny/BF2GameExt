@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "lua_hooks.hpp"
 #include "lua_funcs.hpp"
+#include "lua_events.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
@@ -58,44 +59,35 @@ lua_State* g_L = nullptr;
 char g_loadDisplayPath[260] = "Load\\load";
 
 // ---------------------------------------------------------------------------
-// OnCharacterExitVehicle event system
+// CharacterExitVehicle
 //
-// Fully custom callback storage + dispatch.  Registration functions
-// (OnCharacterExitVehicle, Name/Team/Class, Release) are Lua C functions
-// in lua_funcs.cpp that store callbacks in the Lua registry and track
-// filter metadata in the g_cevCallbacks[] array below.
+// The engine fires CharacterEnterVehicle from EntitySoldier::EnterControllable
+// but never wired up the exit side, so this hook supplies the missing half.
 //
-// The C++ Detours hook on the exit-vehicle function (0x0052FC70) scans the
-// character array to find charIndex + vehicleCtrl, resolves the character's
-// name/team/class, then fires all matching callbacks via rawgeti + pcall.
+// Everything Lua-facing -- OnCharacterExitVehicle, ...Name/...Team/...Class,
+// ReleaseCharacterExitVehicle, the filter tree, the registry refs and the
+// multiplayer client stubbing -- is the engine's own EventManager machinery,
+// driven by an Event<Character,GameObject> object GameExt hands it. See
+// lua_events.cpp and docs/RE/OnEventSystem.md. All this hook does is work out
+// who exited what and broadcast it.
 //
-// Lua usage (identical to vanilla On-Events):
-//   local h = OnCharacterExitVehicle(function(player, vehicle) ... end)
+//   local h = OnCharacterExitVehicle(function(charIndex, vehicle) ... end)
 //   ReleaseCharacterExitVehicle(h)
-//   h = nil
 // ---------------------------------------------------------------------------
-
-CEVCallback g_cevCallbacks[CEV_MAX_CBS] = {};
-int g_cevNextKey = -1000;
 
 // __fastcall mirrors __thiscall ABI: ECX=this, EDX=unused, then stack args.
 using fn_char_exit_vehicle = void(__fastcall*)(void* ecx, void* edx_unused, int arg1, int arg2);
 static fn_char_exit_vehicle original_char_exit_vehicle = nullptr;
 
-
-
 static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, int arg1, int arg2)
 {
    // thisPtr = character Controllable* (EntitySoldier + 0x240; base invariant
    // across builds).  Character slot layout (stride 0x1B0, +0x148 ctrl, +0x14C
-   // vehicle ctrl, +0x134 team) is build-invariant — verified on Steam via
+   // vehicle ctrl) is build-invariant -- verified on Steam via
    // Lua_Callbacks::GetCharacterUnit/GetCharacterTeam.
    // Scan the character array BEFORE calling original (original clears state).
-   int       charIndex      = -1;
-   void*     vehicleCtrl    = nullptr;
-   int       charTeam       = -1;
-   uint32_t  entityNameHash = 0;
-   void*     entityClassPtr = nullptr;
+   int   charIndex   = -1;
+   void* vehicleCtrl = nullptr;
 
    const uintptr_t exe_base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + exe_base; };
@@ -107,13 +99,8 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
          for (int i = 0; i < maxChars; i++) {
             const uintptr_t slot = arrayBase + (uintptr_t)i * 0x1B0;
             if (*(void**)(slot + 0x148) == thisPtr) {
-               charIndex    = i;
-               vehicleCtrl  = *(void**)(slot + 0x14C);
-               charTeam     = *(int*)(slot + 0x134);
-
-               char* entitySoldier = (char*)thisPtr - 0x240;
-               entityNameHash  = *(uint32_t*)(entitySoldier + 4);   // EntityEx::mId
-               entityClassPtr  = *(void**)   (entitySoldier + 8);   // EntityEx::mEntityClass
+               charIndex   = i;
+               vehicleCtrl = *(void**)(slot + 0x14C);
                break;
             }
          }
@@ -121,36 +108,15 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-   // vehicleEntity = vehicleCtrl - 0x240 (EntitySoldier base)
-   void* vehicleEntity = vehicleCtrl ? (char*)vehicleCtrl - 0x240 : nullptr;
-
-   // Fire all matching callbacks.
-   if (charIndex >= 0 && g_L) {
-      for (int i = 0; i < CEV_MAX_CBS; i++) {
-         if (g_cevCallbacks[i].regKey == 0) continue;
-
-         bool match = false;
-         switch (g_cevCallbacks[i].filterType) {
-            case CEV_PLAIN: match = true; break;
-            case CEV_NAME:  match = (entityNameHash != 0) && (entityNameHash == g_cevCallbacks[i].nameHash); break;
-            case CEV_TEAM:  match = (charTeam == g_cevCallbacks[i].teamFilter); break;
-            case CEV_CLASS: match = (entityClassPtr != nullptr) && (entityClassPtr == g_cevCallbacks[i].classPtr); break;
-         }
-
-         if (match) {
-            __try {
-               g_lua.rawgeti(g_L, -10001, g_cevCallbacks[i].regKey);
-               g_lua.pushnumber(g_L, (float)charIndex);
-               g_lua.pushlightuserdata(g_L, vehicleEntity);
-               int rc = g_lua.pcall(g_L, 2, 0, 0);
-               if (rc != 0 && g_lua.tolstring) {
-                  size_t len = 0;
-                  const char* err = g_lua.tolstring(g_L, -1, &len);
-                  if (err) get_gamelog()("[CEV] pcall error: %s\n", err);
-                  g_lua.settop(g_L, -2);
-               }
-            } __except (EXCEPTION_EXECUTE_HANDLER) {}
-         }
+   // The engine's own filters read the character's name, team and class off the
+   // Character*, so pass that rather than the index; LuaPushItem<Character>
+   // turns it back into the index the callback receives.
+   // vehicleEntity = vehicleCtrl - 0x240 (EntitySoldier base), the same light
+   // userdata this event has handed scripts since it was introduced.
+   if (charIndex >= 0) {
+      if (void* character = lua_event_character_from_index(charIndex)) {
+         void* vehicleEntity = vehicleCtrl ? (char*)vehicleCtrl - 0x240 : nullptr;
+         lua_event_fire(LuaEventId::CharacterExitVehicle, character, vehicleEntity);
       }
    }
 
@@ -183,10 +149,6 @@ static void __cdecl hooked_init_state()
    strncpy_s(g_loadDisplayPath, sizeof(g_loadDisplayPath), "Load\\load", _TRUNCATE);
 
    g_L = *(lua_State**)resolve((uintptr_t)GetModuleHandleW(nullptr), g_addr->g_lua_state_ptr);
-
-   // Reset callback storage for the new Lua state.
-   memset(g_cevCallbacks, 0, sizeof(g_cevCallbacks));
-   g_cevNextKey = -1000;
 
    // Reset FP animation bank mappings (stale class pointers from previous level)
    fp_anim_bank_reset();
@@ -316,6 +278,8 @@ void lua_hooks_install(uintptr_t exe_base)
       DebugCommandRegistry::install(exe_base);
    }
 
+   lua_events_install(exe_base);              // EventManager::Init/Cleanup detours, guards internally
+   script_name_tracker_install(exe_base);     // GetScriptName() shell/mission gating
    loading_screen_install(exe_base);          // guards internally (see lifecycle.cpp)
    flyer_boost_anim_install(exe_base);        // build-aware (all three), guards internally
 
@@ -364,6 +328,8 @@ void lua_hooks_uninstall()
    droideka_ball_mode_uninstall();
    droideka_death_anim_uninstall();
    ingame_movie_path_uninstall();
+   lua_events_uninstall();
+   script_name_tracker_uninstall();
    // Must run while the hooks are still live: it unlinks our omni lights from
    // the engine's global light lists first, and nothing else ever would.
    lightsaber_illumination_uninstall();

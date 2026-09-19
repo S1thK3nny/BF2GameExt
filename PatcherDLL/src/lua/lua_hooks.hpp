@@ -140,25 +140,6 @@ extern lua_State* g_L;
 extern char g_loadDisplayPath[260];
 
 // =============================================================================
-// OnCharacterExitVehicle — custom callback storage
-// =============================================================================
-
-#define CEV_MAX_CBS 64
-
-enum CEVFilterType { CEV_PLAIN = 0, CEV_NAME = 1, CEV_TEAM = 2, CEV_CLASS = 3 };
-
-struct CEVCallback {
-   int      regKey;       // Lua globals key (for rawgeti), 0 if empty slot
-   int      filterType;   // CEVFilterType
-   int      teamFilter;   // for CEV_TEAM
-   uint32_t nameHash;     // for CEV_NAME  — PblHash of the instance name string
-   void*    classPtr;     // for CEV_CLASS — resolved EntityClass* from registry
-};
-
-extern CEVCallback g_cevCallbacks[CEV_MAX_CBS];
-extern int g_cevNextKey;
-
-// =============================================================================
 // Public interface
 // =============================================================================
 

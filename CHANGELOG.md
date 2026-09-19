@@ -34,6 +34,12 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Changed
 
+- **`OnCharacterExitVehicle` now runs on the engine's own event manager.** The
+  callback names, arguments and handles are unchanged, but registration, filtering,
+  release and multiplayer behaviour are the engine's rather than a parallel
+  implementation, so the event behaves exactly like the stock `On*` family. Lifts
+  the old 64-callback ceiling and fixes callbacks surviving into the next mission.
+  See [the RE notes](docs/RE/OnEventSystem.md).
 - **Combo animation limits are now raised by default.** Combo animation names go
   from 30 to 90, animation banks from 16 to 64, bank/weapon maps from 30 to 90 and
   animation references from 256 to 768, and the extra animations actually play.
@@ -55,6 +61,11 @@ Scripts can check the running version through `GameExt.version`.
   prone enabled; with it off, those positions behave as before.
 
 ### Fixed
+
+- **The `OnCharacterExitVehicle*` filter arguments were documented in the wrong
+  order.** The 1.0.0 Lua API reference listed `OnCharacterExitVehicleName(name, fn)`;
+  the functions have always taken `(fn, name)`, matching the stock `On*` events, and
+  a script written from the old docs silently registered nothing.
 
 - A map could die at the very end of loading, after the loading screen, with a
   stack overflow. The engine's world splitter recursed forever on objects it
