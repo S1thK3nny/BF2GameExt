@@ -1456,7 +1456,7 @@ static int lua_ContentCensus(lua_State* L)
 // caller that ever passes null is a path the shell does not take: MissionPlayList
 // ::SelectNextEntry just returns false when the playlist runs out, leaving the
 // buffer holding the last map. So the buffer alone cannot say whether a mission
-// is live, and GetScriptName() would report a stale map to shell scripts forever.
+// is live, and GetMissionName() would report a stale map to shell scripts forever.
 //
 // Two detours settle it. Entering the shell invalidates the name; setting a next
 // mission validates it. The ordering is safe in every direction, because
@@ -1559,7 +1559,7 @@ void script_name_tracker_uninstall()
    s_origShellStateEnter        = nullptr;
 }
 
-// GetScriptName() - returns the mission-script name the match was launched
+// GetMissionName() - returns the mission-script name the match was launched
 // from, e.g. "cor1l_con". Returns nil if the name is not available.
 //
 // Reads GameLoop::mMissionScript, the char[0x40] GameLoop::SetNextMission fills
@@ -1570,7 +1570,7 @@ void script_name_tracker_uninstall()
 // Returns nil in the shell. The engine never clears mMissionScript when a match
 // ends, so the raw buffer would keep naming the last map played; s_missionScriptValid
 // tracks whether it still describes a live mission (see the detours below).
-static int lua_GetScriptName(lua_State* L)
+static int lua_GetMissionName(lua_State* L)
 {
    if (!g_addr->game_loop_mission_script) { g_lua.pushnil(L); return 1; }
 
@@ -1599,7 +1599,7 @@ static int lua_GetScriptName(lua_State* L)
 
 static const lua_func_entry custom_functions[] = {
    { "ContentCensus",         lua_ContentCensus },
-   { "GetScriptName",         lua_GetScriptName },
+   { "GetMissionName",        lua_GetMissionName },
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },

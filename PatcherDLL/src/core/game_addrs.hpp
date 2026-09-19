@@ -50,10 +50,10 @@ namespace modtools {
 
    // GameLoop::mMissionScript - char[0x40] holding the mission-script name the
    // match was launched from ("cor1l_con"). Sole writer GameLoop::SetNextMission
-   // 0x00733680, which does strncpy_safe(dst, src, 0x40). Read by GetScriptName().
+   // 0x00733680, which does strncpy_safe(dst, src, 0x40). Read by GetMissionName().
    constexpr uintptr_t game_loop_mission_script = 0x00c6aa78;
    // GameLoop::SetNextMission, paired with the existing gamestate_shell_state_enter
-   // below, tells GetScriptName() whether mMissionScript still describes a live
+   // below, tells GetMissionName() whether mMissionScript still describes a live
    // mission. Nothing in the engine clears the buffer on the way back to the shell,
    // so without this it would keep reporting the last map played forever.
    constexpr uintptr_t game_loop_set_next_mission   = 0x00733680;  // __cdecl(char*)
@@ -2110,7 +2110,7 @@ namespace steam {
    // in Lua_Callbacks::SetReinforcementCount 0x0058ba90.
    constexpr uintptr_t game_loop_mission_script = 0x01e560e0;
    // GameLoop::SetNextMission, paired with the existing gamestate_shell_state_enter
-   // below, tells GetScriptName() whether mMissionScript still describes a live
+   // below, tells GetMissionName() whether mMissionScript still describes a live
    // mission. Nothing in the engine clears the buffer on the way back to the shell,
    // so without this it would keep reporting the last map played forever.
    // LTCG turned SetNextMission into __fastcall(char* ECX).
@@ -3027,7 +3027,7 @@ namespace gog {
    // tools/port_gog.py data (18 agreeing reference sites).
    constexpr uintptr_t game_loop_mission_script       = 0x01e57578;
    // GameLoop::SetNextMission, paired with the existing gamestate_shell_state_enter
-   // below, tells GetScriptName() whether mMissionScript still describes a live
+   // below, tells GetMissionName() whether mMissionScript still describes a live
    // mission. Nothing in the engine clears the buffer on the way back to the shell,
    // so without this it would keep reporting the last map played forever.
    constexpr uintptr_t game_loop_set_next_mission     = 0x00534470;

@@ -10,7 +10,7 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
-- **`GetScriptName()`** - Returns the mission-script name the match was launched
+- **`GetMissionName()`** - Returns the mission-script name the match was launched
   from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
   script, so a mission could not tell which map or mode it was running as without
   the name being hardcoded. See the
