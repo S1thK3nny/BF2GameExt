@@ -279,7 +279,7 @@ void lua_hooks_install(uintptr_t exe_base)
    }
 
    lua_events_install(exe_base);              // EventManager::Init/Cleanup detours, guards internally
-   script_name_tracker_install(exe_base);     // GetScriptName() shell/mission gating
+   script_name_tracker_install(exe_base);     // GetMissionName() shell/mission gating
    loading_screen_install(exe_base);          // guards internally (see lifecycle.cpp)
    flyer_boost_anim_install(exe_base);        // build-aware (all three), guards internally
 

@@ -151,7 +151,7 @@ script passed, not the path it looked in, so it cannot tell you that on its own.
 
 | Function | Description | Since |
 |----------|-------------|-------|
-| `GetScriptName()` | Returns the mission-script name the match was launched from, e.g. `"cor1c_con"`. Returns nil in the shell. | 1.1.0 |
+| `GetMissionName()` | Returns the mission-script name the match was launched from, e.g. `"cor1c_con"`. Returns nil in the shell. | 1.1.0 |
 
 The name is set before `ScriptPreInit` runs and does not change for the rest of
 the match, so a script can branch on its own map or mode without having the name
@@ -159,8 +159,8 @@ hardcoded into it. Stock Lua only offers `GetWorldFilename()`, which returns the
 world file, not the script and only after the world has been loaded.
 
 ```lua
-local script = GetScriptName()          -- "cor1l_con"
-local mode   = string.sub(script, -4)   -- "_con"
+local mission = GetMissionName()          -- "cor1l_con"
+local mode    = string.sub(mission, -4)   -- "_con"
 ```
 
 It returns nil in the shell. The engine never clears the name when a match ends,
