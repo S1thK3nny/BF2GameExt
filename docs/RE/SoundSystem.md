@@ -492,6 +492,112 @@ DirectSound - Windows Vista and later report zero - so a DirectSound wrapper is 
 the path, and the wrapper is the remaining suspect. This is a conclusion about
 where not to look inside BF2, not a fix.
 
+## The crackle, revisited: doppler goes through SetFrequency
+
+Follow-up to the section above, 2026-09-03, prompted by a community report that
+disabling doppler (`SetDopplerFactor(0)` in the map script) stopped the bursts.
+The report's conclusion holds; its mechanism was one layer off. Addresses in this
+section are **Phantom**, not modtools -- not yet ported.
+
+**BF2 does not resample for doppler. It sets the DirectSound buffer's playback
+rate, and the wrapper resamples.** That is why the theory-free output watch above
+found nothing: `DSBufferRenderer::WriteData` is upstream of the wrapper's
+resampler, so BF2's PCM is clean at any playback rate. The two findings agree.
+
+The chain, identical at `UpdateBufferParameters` (`0x00815505`, `0x00815652`) and
+`UpdateParameters` (`0x00815f7b`, `0x008160c9`):
+
+```
+MOV   EAX, [ESI + 0x13c]      ; buffer base sample rate
+CVTDQ2PD / fixup / CVTPD2PS   ; -> float
+MULSS XMM0, [ESI + 0x28]      ; x pitch multiplier -- NEVER BOUNDED
+CVTTSS2SI EAX, XMM0
+PUSH  EAX
+CALL  Snd::DSBuffer::SetFrequency
+```
+
+`Snd::DSBuffer::SetFrequency` (`0x0081b730`) then clamps to
+`[100, Engine::smSecBufSampleRateMax]` and calls `IDirectSoundBuffer::SetFrequency`
+(vtable `+0x44`) on both its direct and its interpolating path.
+
+- The ceiling is not a constant. `Open` (`0x007fd7d6`) computes
+  `smSecBufSampleRateMax` (`0x024debac`, float) from the driver's reported
+  `DSCAPS.dwMaxSecondarySampleRate` -- under DSOAL it is whatever DSOAL
+  advertises. `smSecBufSampleRateMin` (`0x024deba8`) is written beside it and
+  read nowhere.
+- The floor is a literal `0x64`: 100 Hz.
+
+A negative or near-zero multiplier -- the doppler denominator passing through
+zero on a supersonic source; 61 of 121 ordnance ODFs in `data_BF3` exceed 343,
+the fastest at 20000 -- converts to a negative int, fails `(int)f < 100`, and is
+pinned to **100 Hz**. A 44100 Hz sample at 100 Hz is stretched 441x into a
+constant-amplitude periodic buzz, which matches the reported spectrogram: a
+repeating tone at full strength across the dynamic range.
+
+Not confirmed: the doppler formula upstream of `+0x28`, so the sign flip is
+inferred from the general form rather than read from BF2's math. `+0x28` also
+looks like a combined pitch (`GetPitchSpread` / `GetPitchAdjusted` feed this
+area), so any clamp bounds deliberate pitch effects too.
+
+Not built, by decision. If it is ever wanted, the right intervention is a clamp
+on the multiplier at `+0x28` to roughly `[0.5, 2.0]` in the two update
+functions: it keeps every doppler case that currently works and removes only the
+blowup. Patching `smSecBufSampleRateMax` alone fixes the wrong end. The community
+workaround -- disabling doppler entirely -- also works, at the cost of all of it.
+
+### The wrapper side, 2026-09-11: decimation without a filter
+
+A follow-up report narrowed the symptom to sounds whose effective rate reaches
+about 48 kHz under any pitch modifier. That is the *device* rate, and the whole
+chain from `SetFrequency` to the mixer step is now read from source
+([kcat/dsoal](https://github.com/kcat/dsoal), [kcat/openal-soft](https://github.com/kcat/openal-soft)):
+
+- DSOAL `GetCaps` reports `dwMaxSecondarySampleRate = DSBFREQUENCY_MAX`
+  (200000), so under DSOAL the `smSecBufSampleRateMax` clamp above is 200 kHz.
+- DSOAL `SetFrequency` range-checks to `[100, 200000]` and applies
+  `AL_PITCH = freq / buffer native rate`. Nothing else.
+- OpenAL Soft (`alc/alu.cpp`): `step = pitch * srcRate / deviceRate` in 16.16,
+  clamped at `MaxPitch = 10`. **A step above 1.0 is decimation, and that begins
+  the moment the effective rate passes the device rate.** With no `frequency` in
+  `alsoft.ini` the device rate is the system default, typically 48000.
+- The default resampler is **not band-limited** in any version: `cubic`
+  (Catmull-Rom) in 1.23.1, `spline` on master. Only the `bsinc12/24/48` family
+  anti-aliases when downsampling (`alsoftrc.sample`). Cubic or spline decimation
+  of bright content folds the spectrum back into band.
+
+The environment this was measured on, 2026-09-11:
+
+| | |
+|---|---|
+| wrapper | **Creative ALchemy 2.4.2.18** as `dsound.dll` (Steam "Classic" install); GOG install has no wrapper at all |
+| OpenAL | system `OpenAL32.dll` / `soft_oal.dll` = **OpenAL Soft 1.23.1** (ALchemy forwards into it) |
+| device | Speakers, `WAVE_FORMAT_EXTENSIBLE`, **48000 Hz**, 2ch, 32-bit |
+| `alsoft.ini` | `%APPDATA%`, sets only `hrtf-paths` -- so `frequency` = system 48000, `resampler` = cubic |
+| BF2 mixer | `[SndDiag]`: `mixConfig=1 (Software)` in the shell, **`mixConfig=2 (DirectSoundHardware)` in play**, 119 managed voices, `hwFree3D` 129 -> 127 |
+
+So in play every pitch change travels `Snd::DSBuffer::SetFrequency ->
+IDirectSoundBuffer::SetFrequency -> ALchemy -> AL_PITCH -> OpenAL Soft cubic`,
+and any voice whose `baseRate * pitch` exceeds 48000 is decimated without a
+filter. That is the whole reported symptom -- "sounds that end up around 48 kHz
+under any pitch modifier" -- with the threshold being the device rate. Doppler is
+merely the commonest upward pitch; `PitchSpread` and the like reach it too, which
+is why disabling doppler reduces the bursts without removing them.
+
+Pitch needed to cross 48 kHz by source rate: 22050 -> 2.18x, 44100 -> 1.089x,
+48000 -> anything above 1.0.
+
+Decisive zero-code test: `resampler = bsinc24` and `frequency = 48000` in
+`%APPDATA%\alsoft.ini`, doppler left on. Gone means the wrapper's filterless
+decimation was the mechanism and no DLL work is needed. Persisting only in BF2's
+*software* mixer mode (mixConfig 1, where BF2 resamples itself through
+`StreamResampler` and DirectSound never sees a pitch) would put it back inside
+BF2 -- on the interpolating path already flagged above as inconsistent and never
+exercised by the earlier measurement. That branch has not been read; the Ghidra
+instance on :8089 had the "SWBF3 Decomp" project open when this was written.
+
+---
+
+
 ---
 
 ## The environmental reverb (EAX) path, and the pause-menu latch
