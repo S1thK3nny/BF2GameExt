@@ -327,6 +327,22 @@ static int lua_GetCharacterWeapon(lua_State* L)
    }
 }
 
+// PblHash: FNV-1a over `c | 0x20`.  '_' is 0x5F, so the OR lands it on 0x7F all by
+// itself, which is what the engine's own hash does.
+static uint32_t pbl_hash(const char* s)
+{
+   uint32_t h = 0x811c9dc5u;
+   for (; *s; ++s) {
+      h ^= (uint32_t)(uint8_t)(*s | 0x20);
+      h *= 0x01000193u;
+   }
+   return h;
+}
+
+// WeaponClass ODF-name hash, Factory_data+0x14.  Build-invariant - see the walk
+// in lua_SetCharacterWeapon for why this is used instead of a name string.
+constexpr uint32_t kWcNameHash = 0x18;
+
 // ---------------------------------------------------------------------------
 // SetCharacterWeapon(charIndex, odfName [, channel]) - replaces the currently
 // active weapon in a channel with a different already-loaded weapon ODF.
@@ -381,7 +397,10 @@ static int lua_SetCharacterWeapon(lua_State* L)
        !g_addr->net_in_shell || !g_addr->aimer_set_weapon) {
       g_lua.pushnil(L); return 1;
    }
-   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
+   // get_gamelog() stamps our own file and line on each line; the raw
+   // RedWarning::LogMessage inherits whatever context the last engine warning
+   // left behind, which is why these used to show up under unrelated files.
+   const auto fn_GameLog = get_gamelog();
    const SoldierLayout& lay = *g_soldier;
 
    if (!g_lua.isnumber(L, 1)) { g_lua.pushnil(L); return 1; }
@@ -477,20 +496,30 @@ static int lua_SetCharacterWeapon(lua_State* L)
       }
 
       // Walk the WeaponClass global linked list.
-      // Flink/Blink (WC+0x008/0x00C) store adjacentWC+0x004; subtract 4 when following.
-      // Name matching: accept exact OR suffix so callers can omit faction prefixes.
-      auto wcNameMatches = [](const char* wcName, const char* target) -> bool {
-         if (_stricmp(wcName, target) == 0) return true;
-         size_t wl = strlen(wcName), tl = strlen(target);
-         return (wl > tl && _stricmp(wcName + wl - tl, target) == 0);
-      };
+      // Flink/Blink (WC+0x008/0x00C) store adjacentWC+0x004; subtract 4 when
+      // following.  Verified identical on all three builds - the Factory base
+      // occupies WC+0x04..+0x1F and links exactly this way (modtools ctor
+      // 0x00406154, Steam 0x0067BFE0).
+      //
+      // Match on the ODF name HASH at WC+0x18 rather than on the name string.
+      // Factory::Factory(this[, parent], nameHash) stores the hash at
+      // Factory_data+0x14 = WC+0x18 on every build, and ODF-derived classes
+      // arrive at the same field through clone() -> the copy ctor.
+      //
+      // WC+0x30 (char[32] mFilename) does exist and is populated on all three
+      // builds, so a string compare would also work; the hash is preferred
+      // because it is exact, needs no case folding, and is not subject to the
+      // 32-character truncation of that buffer.
+      //
+      // Hash matching is exact, so the full ODF name is required; the old
+      // suffix shorthand ("rifle" for "rep_weap_inf_rifle") is gone.
+      const uint32_t targetHash = pbl_hash(targetOdf);
 
       uintptr_t foundWc  = 0;
       uintptr_t searchWc = startWc;
       for (int guard = 0; guard < 512; guard++) {
          __try {
-            const char* name = (const char*)(searchWc + 0x30);
-            if (wcNameMatches(name, targetOdf)) { foundWc = searchWc; break; }
+            if (*(uint32_t*)(searchWc + kWcNameHash) == targetHash) { foundWc = searchWc; break; }
             uintptr_t linkRaw = *(uintptr_t*)(searchWc + 0x008);
             if (!linkRaw || linkRaw == 0xCDCDCDCDu || linkRaw < 0x01000000u) break;
             uintptr_t nextWc = linkRaw - 0x004;
@@ -509,8 +538,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
                if (!linkRaw || linkRaw == 0xCDCDCDCDu || linkRaw < 0x01000000u) break;
                uintptr_t prevWc = linkRaw - 0x004;
                if (prevWc == startWc) break;
-               const char* name = (const char*)(prevWc + 0x30);
-               if (wcNameMatches(name, targetOdf)) { foundWc = prevWc; break; }
+               if (*(uint32_t*)(prevWc + kWcNameHash) == targetHash) { foundWc = prevWc; break; }
                searchWc = prevWc;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { break; }
@@ -523,9 +551,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
          return 1;
       }
 
-      // Already holding the requested class — nothing to do. (Note: name matching
-      // accepts suffixes, so this also triggers if the argument suffix-matches
-      // the weapon already held.)
+      // Already holding the requested class - nothing to do.
       if (foundWc == startWc) {
          fn_GameLog("SetCharacterWeapon: char %d already holds '%s' - no-op.\n", charIndex, targetOdf);
          g_lua.pushnumber(L, 1); return 1;
@@ -645,10 +671,28 @@ static int lua_SetCharacterWeapon(lua_State* L)
             } __except(EXCEPTION_EXECUTE_HANDLER) { bank = -1; }
 
             if (bank != -1) {
+               // SoldierAnimationBank::FindMap is __cdecl on the debug build and
+               // __fastcall (ECX=bank, EDX=weapon) on both release builds - the
+               // release compiler picked up the register convention for this
+               // free function.  Calling it __cdecl on retail leaves ECX/EDX
+               // holding whatever the last call left there, so the table scan
+               // compares garbage, returns INVALID_MAP, and the swap is refused
+               // with a "has no animmap" that is not true.
+               //
+               // The engine's own call site is Weapon::Weapon (Steam 0x00677A19):
+               //     MOV EDX,[EBX+0x20]   ; WeaponClass::mSoldierAnimationWeapon
+               //     MOV ECX,EAX          ; owner->GetAnimationBank() result
+               //     CALL <FindMap>
+               //     MOV [ESI+0xC8],EAX   ; -> Weapon::mWeaponAnimationMap
+               // which also confirms +0x20 and the +0x4C bank virtual on retail.
                int32_t preMap = -1;
                __try {
-                  typedef int32_t (__cdecl* FindMap_t)(int32_t bank, int32_t weapon);
-                  preMap = ((FindMap_t)res(g_addr->get_weapon_anim_map))(bank, wantWeapon);
+                  typedef int32_t (__cdecl*    FindMapCdecl_t)(int32_t bank, int32_t weapon);
+                  typedef int32_t (__fastcall* FindMapFast_t)(int32_t bank, int32_t weapon);
+                  const uintptr_t fnFindMap = (uintptr_t)res(g_addr->get_weapon_anim_map);
+                  preMap = (g_build == GameBuild::Modtools)
+                           ? ((FindMapCdecl_t)fnFindMap)(bank, wantWeapon)
+                           : ((FindMapFast_t)fnFindMap)(bank, wantWeapon);
                } __except(EXCEPTION_EXECUTE_HANDLER) { preMap = -1; }
 
                if (preMap == -1) {
@@ -961,7 +1005,10 @@ static int lua_RemoveUnitClass(lua_State* L)
    if (!g_addr->team_array_base || !g_addr->game_log ||
        !g_addr->class_def_list || !g_addr->hash_string_thiscall)
       return 0;
-   const auto fn_GameLog = (GameLog_t)res(g_addr->game_log);
+   // get_gamelog() stamps our own file and line on each line; the raw
+   // RedWarning::LogMessage inherits whatever context the last engine warning
+   // left behind, which is why these used to show up under unrelated files.
+   const auto fn_GameLog = get_gamelog();
 
    if (!g_lua.isnumber(L, 1)) return 0;
 
