@@ -991,55 +991,6 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                   },
             },
 
-            // ================= TEMPORARY, REMOVE BEFORE RELEASE =================
-            // Dev-only: lets a second BF2 run alongside the first, so one machine
-            // can host and join its own multiplayer game.  Deliberately has NO INI
-            // key, so it always applies.  Delete this set from all three lists
-            // once MP testing is done.
-            //
-            // Two guards, and both use names shared by every build, which is why
-            // any two of modtools/Steam/GOG block each other rather than only two
-            // copies of the same exe:
-            //
-            //  1. CreateMutexA(NULL, FALSE, "PlayBF"), then GetLastError() ==
-            //     ERROR_ALREADY_EXISTS (0xB7) -> close the handle, return false,
-            //     WinMain bails.  NOPing the JE falls through to the success arm,
-            //     which still sets the "we own the mutex" byte, so the normal
-            //     CloseHandle on shutdown is unchanged.
-            //  2. FindWindowA("Star Wars Battlefront II", NULL) -> on a hit,
-            //     ShowWindow(hwnd, SW_RESTORE) and return 0 out of WinMain.  That
-            //     block is already skipped when the /norender flag byte is set, so
-            //     turning the JNE into a JMP takes the same, existing exit path
-            //     unconditionally.
-            //
-            // Nothing else needs patching: the game socket reads its base port
-            // from a global (3658) and retries port+1 in a loop on bind failure,
-            // and the LAN discovery socket binds 3656 with SO_REUSEADDR already
-            // set.  Run the second copy from its own game folder though --
-            // BF2GameExt.log is opened "w" on a bare relative path, as are
-            // BFront2.log and the profile .cfg.
-            // ====================================================================
-
-            patch_set{
-               .name = "TEMP Multiple Instances",
-               .patches =
-                  {
-                     //   007377D8  FF 15 D8C83402  CALL GetLastError
-                     //   007377DE  3D B7000000     CMP  EAX,0xB7
-                     //   007377E3  74 08           JE   -> fail arm
-                     //   ...
-                     //   0073804F  A0 A492C600     MOV  AL,[0xC692A4]   ; /norender
-                     //   00738057  84 C0           TEST AL,AL
-                     //   00738059  75 28           JNE  -> past FindWindow block
-                     //   0073805B  55              PUSH EBP
-                     //   0073805C  68 98B5AD00     PUSH "Star Wars Battlefront II"
-                     //   00738061  FF 15 90CB3402  CALL FindWindowA
-                     patch{0x007377e3, 0x74, 0x90, {.values_are_8bit = true}},
-                     patch{0x007377e4, 0x08, 0x90, {.values_are_8bit = true}},
-                     patch{0x00738059, 0x75, 0xEB, {.values_are_8bit = true}},
-                  },
-            },
-
          },
    },
 
@@ -1724,54 +1675,6 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      // GOG.  Ported from Steam with tools/port_gog.py (score 1.00,
                      // shift +0xD70) and the bytes read back from both images.
                      patch{0x005398CC, 0x6A06C883, 0x6A0EC883}, // OR EAX,0x6 -> OR EAX,0xE
-                  },
-            },
-
-            // ================= TEMPORARY, REMOVE BEFORE RELEASE =================
-            // Dev-only: lets a second BF2 run alongside the first, so one machine
-            // can host and join its own multiplayer game.  Deliberately has NO INI
-            // key, so it always applies.  Delete this set from all three lists
-            // once MP testing is done.
-            //
-            // Two guards, and both use names shared by every build, which is why
-            // any two of modtools/Steam/GOG block each other rather than only two
-            // copies of the same exe:
-            //
-            //  1. CreateMutexA(NULL, FALSE, "PlayBF"), then GetLastError() ==
-            //     ERROR_ALREADY_EXISTS (0xB7) -> close the handle, return false,
-            //     WinMain bails.  NOPing the JE falls through to the success arm,
-            //     which still sets the "we own the mutex" byte, so the normal
-            //     CloseHandle on shutdown is unchanged.
-            //  2. FindWindowA("Star Wars Battlefront II", NULL) -> on a hit,
-            //     ShowWindow(hwnd, SW_RESTORE) and return 0 out of WinMain.  That
-            //     block is already skipped when the /norender flag byte is set, so
-            //     turning the JNE into a JMP takes the same, existing exit path
-            //     unconditionally.
-            //
-            // Nothing else needs patching: the game socket reads its base port
-            // from a global (3658) and retries port+1 in a loop on bind failure,
-            // and the LAN discovery socket binds 3656 with SO_REUSEADDR already
-            // set.  Run the second copy from its own game folder though --
-            // BF2GameExt.log is opened "w" on a bare relative path, as are
-            // BFront2.log and the profile .cfg.
-            // ====================================================================
-
-            patch_set{
-               .name = "TEMP Multiple Instances",
-               .patches =
-                  {
-                     //   00618208  FF 15 DCC07600  CALL GetLastError
-                     //   0061820E  3D B7000000     CMP  EAX,0xB7
-                     //   00618213  74 0A           JE   -> fail arm
-                     //   ...
-                     //   0061871B  80 3D 32E9EA01 00  CMP byte [0x1EAE932],0  ; /norender
-                     //   00618722  75 25              JNE -> past FindWindow block
-                     //   00618724  6A 00              PUSH 0
-                     //   00618726  68 F89E7E00        PUSH "Star Wars Battlefront II"
-                     //   0061872B  FF 15 5CC47600     CALL FindWindowA
-                     patch{0x00618213, 0x74, 0x90, {.values_are_8bit = true}},
-                     patch{0x00618214, 0x0a, 0x90, {.values_are_8bit = true}},
-                     patch{0x00618722, 0x75, 0xEB, {.values_are_8bit = true}},
                   },
             },
 
@@ -2461,54 +2364,6 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                      //   00538B5F  6A 00        PUSH 0x0
                      //   00538B61  89 06        MOV [ESI],EAX
                      patch{0x00538B5C, 0x6A06C883, 0x6A0EC883}, // OR EAX,0x6 -> OR EAX,0xE
-                  },
-            },
-
-            // ================= TEMPORARY, REMOVE BEFORE RELEASE =================
-            // Dev-only: lets a second BF2 run alongside the first, so one machine
-            // can host and join its own multiplayer game.  Deliberately has NO INI
-            // key, so it always applies.  Delete this set from all three lists
-            // once MP testing is done.
-            //
-            // Two guards, and both use names shared by every build, which is why
-            // any two of modtools/Steam/GOG block each other rather than only two
-            // copies of the same exe:
-            //
-            //  1. CreateMutexA(NULL, FALSE, "PlayBF"), then GetLastError() ==
-            //     ERROR_ALREADY_EXISTS (0xB7) -> close the handle, return false,
-            //     WinMain bails.  NOPing the JE falls through to the success arm,
-            //     which still sets the "we own the mutex" byte, so the normal
-            //     CloseHandle on shutdown is unchanged.
-            //  2. FindWindowA("Star Wars Battlefront II", NULL) -> on a hit,
-            //     ShowWindow(hwnd, SW_RESTORE) and return 0 out of WinMain.  That
-            //     block is already skipped when the /norender flag byte is set, so
-            //     turning the JNE into a JMP takes the same, existing exit path
-            //     unconditionally.
-            //
-            // Nothing else needs patching: the game socket reads its base port
-            // from a global (3658) and retries port+1 in a loop on bind failure,
-            // and the LAN discovery socket binds 3656 with SO_REUSEADDR already
-            // set.  Run the second copy from its own game folder though --
-            // BF2GameExt.log is opened "w" on a bare relative path, as are
-            // BFront2.log and the profile .cfg.
-            // ====================================================================
-
-            patch_set{
-               .name = "TEMP Multiple Instances",
-               .patches =
-                  {
-                     //   00617168  FF 15 08B17600  CALL GetLastError
-                     //   0061716E  3D B7000000     CMP  EAX,0xB7
-                     //   00617173  74 0A           JE   -> fail arm
-                     //   ...
-                     //   006176A4  80 3D 7BD4EA01 00  CMP byte [0x1EAD47B],0  ; /norender
-                     //   006176AB  75 25              JNE -> past FindWindow block
-                     //   006176AD  6A 00              PUSH 0
-                     //   006176AF  68 F88E7E00        PUSH "Star Wars Battlefront II"
-                     //   006176B4  FF 15 74B47600     CALL FindWindowA
-                     patch{0x00617173, 0x74, 0x90, {.values_are_8bit = true}},
-                     patch{0x00617174, 0x0a, 0x90, {.values_are_8bit = true}},
-                     patch{0x006176ab, 0x75, 0xEB, {.values_are_8bit = true}},
                   },
             },
 
