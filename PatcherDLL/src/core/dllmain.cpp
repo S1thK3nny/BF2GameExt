@@ -26,6 +26,7 @@
 #include "entity/prone_lvl_load.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "entity/hover_pilot_null_fix.hpp"
+#include "entity/attached_effects_cleanup.hpp"
 #include "entity/soldier_bone_effect_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
 #include "entity/combo_damage_anim_guard.hpp"
@@ -358,6 +359,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    soldier_bone_effect_null_fix_install(exe_base); // byte-patches .text — needs the RW window
+   attached_effects_cleanup_install(exe_base);     // patches a vftable in .rdata — needs the RW window
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window

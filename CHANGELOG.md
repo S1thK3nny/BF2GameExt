@@ -73,6 +73,13 @@ Scripts can check the running version through `GameExt.version`.
   point, or an object with a broken position. The split now stops once it has
   gone deeper than any real map needs, and that group of objects is left as it
   is.
+- An effect attached with `AttachEffect` stayed on screen after the object that
+  carried it was deleted. The effect is now removed along with the object.
+- **`SetCharacterWeapon` did nothing on Steam and GOG.** It asked the game whether the
+  new weapon had animations for that unit in a way those two builds do not answer, so
+  every swap was refused as if the animations were missing. It now works on all three
+  builds. The weapon name must be the full ODF name; shortened names are no longer
+  accepted on any build.
 - Tentacles beyond the fourth lost their pose whenever another unit was drawn.
 - Above 60 FPS, the top of a cape detached from the body and jittered while the
   wearer moved. This was caused by BF2GameExt's own cloth collision fix.
