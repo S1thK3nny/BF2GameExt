@@ -73,6 +73,8 @@ Scripts can check the running version through `GameExt.version`.
   point, or an object with a broken position. The split now stops once it has
   gone deeper than any real map needs, and that group of objects is left as it
   is.
+- An effect attached with `AttachEffect` stayed on screen after the object that
+  carried it was deleted. The effect is now removed along with the object.
 - Tentacles beyond the fourth lost their pose whenever another unit was drawn.
 - Above 60 FPS, the top of a cape detached from the body and jittered while the
   wearer moved. This was caused by BF2GameExt's own cloth collision fix.

@@ -1306,6 +1306,18 @@ namespace modtools {
    constexpr uintptr_t soldier_render_bone_copy_continue = 0;  // length-neutral patch, no trampoline
    constexpr uintptr_t soldier_render_bone_copy_skip     = 0;
 
+
+   // ---- AttachedEffects destructor: ODF AttachEffect cleanup ----------------
+
+   // `AttachedEffects` vftable, and the deleting destructor it holds in slot 0.
+   // The destructor is only `Thread::~Thread` + `operator delete`, so the
+   // FLEffectObjects the class created in AttachedEffectsClass::BuildEffects are
+   // never destroyed: deleting an entity orphans its ODF AttachEffect, which then
+   // keeps dereferencing the freed owner. See attached_effects_cleanup.cpp.
+   // 0 = not derived on this build.
+   constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
+   constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
+
 } // namespace modtools
 
 // =============================================================================
@@ -2440,6 +2452,18 @@ namespace steam {
    constexpr uintptr_t soldier_render_bone_copy_continue = 0x4E3B63;  // CALL <copy 4x4 matrix>
    constexpr uintptr_t soldier_render_bone_copy_skip     = 0x4E3B7E;  // loop tail; reloads the counter
 
+
+   // ---- AttachedEffects destructor: ODF AttachEffect cleanup ----------------
+
+   // `AttachedEffects` vftable, and the deleting destructor it holds in slot 0.
+   // The destructor is only `Thread::~Thread` + `operator delete`, so the
+   // FLEffectObjects the class created in AttachedEffectsClass::BuildEffects are
+   // never destroyed: deleting an entity orphans its ODF AttachEffect, which then
+   // keeps dereferencing the freed owner. See attached_effects_cleanup.cpp.
+   // 0 = not derived on this build.
+   constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
+   constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
+
 } // namespace steam
 
 // =============================================================================
@@ -3306,6 +3330,18 @@ namespace gog {
    constexpr uintptr_t soldier_render_bone_matrix_copy   = 0x4E3B5B;  // PUSH EAX (the lookup result)
    constexpr uintptr_t soldier_render_bone_copy_continue = 0x4E3B63;  // CALL <copy 4x4 matrix>
    constexpr uintptr_t soldier_render_bone_copy_skip     = 0x4E3B7E;  // loop tail; reloads the counter
+
+
+   // ---- AttachedEffects destructor: ODF AttachEffect cleanup ----------------
+
+   // `AttachedEffects` vftable, and the deleting destructor it holds in slot 0.
+   // The destructor is only `Thread::~Thread` + `operator delete`, so the
+   // FLEffectObjects the class created in AttachedEffectsClass::BuildEffects are
+   // never destroyed: deleting an entity orphans its ODF AttachEffect, which then
+   // keeps dereferencing the freed owner. See attached_effects_cleanup.cpp.
+   // 0 = not derived on this build.
+   constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
+   constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
 
 } // namespace gog
 
