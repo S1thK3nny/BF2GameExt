@@ -178,6 +178,7 @@
     <ClInclude Include="src\controller\aim_assist.hpp" />
     <ClInclude Include="src\util\ini_registry.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
+    <ClInclude Include="src\util\snd_engine_open_fix.hpp" />
     <ClInclude Include="src\util\sound_diag.hpp" />
     <ClInclude Include="src\util\game_log_lock.hpp" />
     <ClInclude Include="src\util\voice_limit.hpp" />
@@ -267,6 +268,7 @@
     <ClCompile Include="src\util\cfile.cpp" />
     <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\util\audio_stream_limit.cpp" />
+    <ClCompile Include="src\util\snd_engine_open_fix.cpp" />
     <ClCompile Include="src\util\sound_diag.cpp" />
     <ClCompile Include="src\util\voice_limit.cpp" />
     <ClCompile Include="src\util\mp_spawn_delay.cpp" />

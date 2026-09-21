@@ -92,6 +92,10 @@ Scripts can check the running version through `GameExt.version`.
   every step of the animation. Credit to Sleepy, who found and fixed this one.
 - Droidekas turned on the spot to face whatever killed them while their death
   animation played.
+- The game could crash on startup, most often with the modtools exe, and keep
+  crashing until the PC was restarted. It now starts with a slightly smaller sound
+  memory pool when the full one does not fit, and says so in the log. If sound
+  cannot start at all, the game runs without sound instead of crashing.
 
 ## 1.0.0
 

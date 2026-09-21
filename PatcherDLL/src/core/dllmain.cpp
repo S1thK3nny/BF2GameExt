@@ -55,6 +55,7 @@
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
+#include "util/snd_engine_open_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
@@ -369,6 +370,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
    audio_stream_limit_install(exe_base);
+   snd_engine_open_fix_install(exe_base); // byte-patches .text - needs the RW window
    voice_limit_install(exe_base);  // byte-patches .text/.data - needs the RW window
    mp_spawn_delay_install(exe_base);  // byte-patches .text - needs the RW window
    sound_diag_install(exe_base);
