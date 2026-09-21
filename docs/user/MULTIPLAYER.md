@@ -123,6 +123,7 @@ Labels answer one question: **what happens if only some machines have it.**
 | DisableAwardWeapons | **MATCH REQUIRED** | Same dual-path grant/apply structure; asymmetry produces inconsistent loadout state between what the host simulates and what the client shows. |
 | GameLogging | **SAFE** | Local file output only. Costs frame time and disk on a busy host. |
 | EnableSoundWarnings | **SAFE** | Local diagnostic output only. |
+| Floating Target Bar (inherently on; HUD opt-in) | **SAFE** *(not yet confirmed in an online session)* | Client-local presentation. It publishes one HUD event and, only while a `.hud` binds it, lends the latched handle to the local controllable's reticule-target slot for the length of `HUD::GameEvents::Update`, restoring it before anything else runs; nothing reaches the wire or the simulation. The latch is taken in `Damageable::ApplyDamage`, which runs for locally simulated hits on host and client alike - `Character::RegisterHit` would not, because a client diverts into `ApplyNetClientDamage`. A host sees every player's hits pass through that hook, so the attacker is compared against the local `Character*`. No match needed between host and client. |
 
 ### Fixes
 

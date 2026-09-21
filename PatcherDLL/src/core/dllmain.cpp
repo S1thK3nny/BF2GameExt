@@ -52,6 +52,7 @@
 #include "render/hud_widescreen.hpp"
 #include "render/hud_weapon_icon_fix.hpp"
 #include "render/spawn_vehicle_list.hpp"
+#include "render/target_bar_latch.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
@@ -299,6 +300,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
+      g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 2.5f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -351,6 +353,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    hud_weapon_icon_fix_install(exe_base);
    spawn_vehicle_list_install(exe_base);
+   // After aim_assist_install: both detour Damageable::ApplyDamage, and this one's
+   // prologue guard knows how to read past a JMP a sibling has already written.
+   target_bar_latch_install(exe_base);
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window

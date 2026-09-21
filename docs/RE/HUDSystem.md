@@ -954,6 +954,345 @@ the table in a 256-entry stack scratch array, and `ReadData` warns
 255. Inherited entries count against the same budget. For reference the largest shipped
 community table is `995_extraweapons.hud` at 70 entries.
 
+## Floating elements: `EventPosition`, target events and the hit signal
+
+Read 2026-09-19 for a floating, latching target health bar. **Addresses in this
+section are Phantom**, not modtools, and are not ported.
+
+### `EventPosition` takes HUD-space coordinates
+
+`HUD::ElementGroupBase::EventPosition` (`0x005FB930`) requires `type_Vector3`, copies
+the vector out of the payload immediately, and runs x and y through the same
+conversion a static `Position()` line gets:
+
+```c
+mode = *(byte*)(self + 0x144);                          // the group's RelativeMode
+x = ConvertRelativeToPixels(mode, v.x, ContainerFrameWidth,  ContainerViewWidth,  screenW);
+y = ConvertRelativeToPixels(mode, v.y, ContainerFrameHeight, ContainerViewHeight, screenH);
+RedInterfaceElement::SetPosition(self->mElement /* +0xB0 */, &v);   // z passes through
+SetAlignment(self, hAlign /* +0x145 */, vAlign /* +0x146 */, false, false, true);
+```
+
+So the vector is in the units of the group's own `Position(x, y, z, "Viewport")` -
+0..1 viewport fractions for a `"Viewport"` group. It **replaces** the static position
+rather than offsetting it, and nothing is projected here: a world position has to be
+projected by whoever sends the event. The payload pointer only has to outlive `Send`.
+`EventScale` (`0x005FBDE0`) and `EventRotation` (`0x005FBAC0`) are its siblings.
+
+### The stock projection, to copy exactly
+
+`HUD::GameEvents::UpdateWeaponEvents` (`0x00615BC0`) produces `weaponN.lockOnPosition`:
+
+```c
+pt  = locked->GetTargetPoint(out, &ctrl->mTargetInfo.mAimStart, &ctrl->mEyeDir, bodyId);
+pt += smoothedOrInterpolatedMatrix.trans - locked->GetMatrix()->trans;   // follow the RENDERED pose
+cam = D3DXVec3TransformCoord(pt, camera->_MatrixInverse);
+if (cam.z < 0) {                                      // in front of the camera
+    camera->TransformCameraPointToProjectionSpace(&ndc, &cam);
+    ndc.x = ndc.x * 0.5f + 0.5f;  ndc.y = ndc.y * 0.5f + 0.5f;  ndc.z = 0;
+    Send(lockOnPosition, &ndc);
+} else Send(lockOnDisable, true);                     // behind the camera: hide
+```
+
+The offset term uses `GetSmoothedMatrix`, replaced by
+`GameObjectInterpolator::GetMatrix(mNetUniqueId)` when networking is live and
+`netFrameLock` is clear. Without it a marker tracks the simulated position and jitters
+on a multiplayer client.
+
+### Why the stock target bar fades
+
+The same function picks the target as `weapon->mTarget`, falling back to
+`controllable->mReticuleTarget[channel]`, both handle-checked. Buildings pass; anything
+else must be alive (`Damageable+0xB8` bit 3), and an entity-class flag (`+0x36C & 0x20`)
+opts a class out. It compares the result with the cached `WeaponData.target` every tick
+and on any change sends `targetDisable` + `targetDisableShieldName` and resets
+`targetHealth` to -1. Pure aim tracking with no memory: look away and the bar is told
+to disable on the next tick.
+
+### The hit signal is anonymous
+
+`target.hit` / `target.hitCritical` / `target.hitColor` come from three per-affiliation
+timers on the player's `Character`:
+
+```c
+void Character::RegisterHit(int victimTeam, float mult) {          // 0x0049E810, thiscall
+    a = mTeamPtr->mAffiliation[victimTeam];
+    if (mObjectHitTimer[a+1] == 0 || mObjectHitMultiplier[a+1] < mult) {
+        mObjectHitTimer[a+1] = 0.5f;  mObjectHitMultiplier[a+1] = mult;
+    }
+}
+float Character::GetObjectHitValue(int a) { return min(mObjectHitTimer[a+1] * 10.0f, 1.0f); }  // 0x0049DE10
+```
+
+It records that *something* of an affiliation was hit, never *what*. Its only caller is
+`Damageable::ApplyDamageCommon` (`0x004F6200`) at `0x004F6867`, reached only after two
+local "this counted" flags pass and the damage owner has a `Character`. There the
+attacker `Character*` is in `ECX` and the victim is still in `EDI` (its team is read from
+`[EDI+0x234]` for the argument) - but the victim is not passed on. That call site is
+therefore the one place a "who did I just hit" latch can be taken, and taking it there
+makes the latch fire exactly when the stock hit marker does.
+
+### The latched floating target bar (built 2026-09-19, `render/target_bar_latch.cpp`)
+
+An earlier draft published a parallel `player1.focus.*` family of six events. That
+was dropped: five of the six duplicated what `weaponN.target.*` already carries,
+with the engine's own shield handling, name lookup, team colour, change detection
+and dead/stale-handle checks. The agreed design makes the ENGINE's target sticky
+and adds exactly one event.
+
+**One new event:** `player1.weaponN.target.position` (`type_Vector3`, viewport
+fractions). The existing bar keeps all its bindings and gains one line on its parent
+group: `EventPosition("player1.weapon1.target.position")`.
+
+Its anchor intentionally differs from the stock `lockOnPosition` point.
+The first attempt took the top of a *projected* collision rectangle. It had two
+problems: camera-dependent corner switching, and enormous projected extents near
+the camera. The subsequent animated-joint envelope followed poses but made infantry
+bars wobble with their animations. Both approaches were discarded.
+
+**Current positioning (2026-09-21):** follow the healthbar-only derivation supplied
+by the user from SWBFIII: choose the **top centre of a world bounding box first**,
+with zero world-Y offset, then project that single point. No head bones, projected
+silhouette extrema, POI icons or perspective scaling are involved.
+
+- **Units:** retain the non-animated, stance-dependent collision-box size the user
+  preferred. Re-centre it on the live collision centre and add the rendered-root
+  translation delta. Native jump/flail states 4/8 update that centre but leave AABB
+  stale (Steam `0x004E1210`, branch `0x004E1419`); re-centring preserves the prior
+  stance dimensions without freezing the marker at the previous world position.
+- **Vehicles/props:** transform the authored model box with the full smoothed
+  matrix and form its world AABB. Do not use the sphere-derived collision cube
+  (`UpdateAABB`, Steam `0x00463C70`), which exaggerates long vehicles' height.
+- **Projection:** `anchor = ((minX+maxX)/2, maxY, (minZ+maxZ)/2)`. Camera rotation
+  changes its projection, not which point on the box is chosen.
+- **Up close/offscreen:** clamp the projected anchor to a built-in safe area.
+  A small positive depth floor avoids division by zero/flips when the anchor
+  crosses the eye plane but some of the bounds remain in front. Wholly
+  behind-camera bounds and invalid data move the position offscreen.
+- **Pixel alignment:** snap the anchor to framebuffer pixels using live screen
+  dimensions, with the safe-area limits rounded inward. This does not rewrite
+  bitmap sizes/child offsets, so it does not guarantee every child edge is an
+  integer pixel when the HUD author uses fractional dimensions.
+- **Death fade:** `tick_after` only projects a valid, living focus. Death or an
+  expired handle retains that channel's last published screen anchor, including
+  an offscreen anchor if it was already hidden. This avoids death-pose bounds
+  pulling the bar down into the body. A new pointer/handle-ID pair or a
+  mission/listener reset clears the cache; live projection failures still hide.
+  Native enable/disable/alpha and latch duration are unchanged. The cache policy
+  is isolated in `target_bar_fade.hpp` with standalone death/despawn/fade tests.
+
+The bounds reads use these layouts:
+
+| Data | Modtools | Steam / GOG |
+|---|---|---|
+| GameObject live collision centre mirror | `+0x18` | same |
+| GameObject collision AABB, min/max XYZ | `+0x60` | same |
+| GameObject simulation matrix / translation | `+0xF0` / `+0x120` | same |
+| GameObject GameModel pointer | `+0x130` | same |
+| GameModel primary RedModel pointer | `+0x20` | same |
+| RedModel min/max XYZ (six floats) | `+0x98` | `+0x88` |
+
+**HUD ownership:** this revision leaves the existing `.hud` file, bar sizes, scales,
+unit-name/shield-name labels, and manual child offsets unchanged. It publishes
+position only, not a size/scale event. The supplied SWBFIII derivation describes
+rightward/upward artwork from the anchor; that alignment is a HUD-authoring choice,
+not a DLL-imposed shift. There is deliberately no POI implementation.
+
+Screen reservations are built in: left/top/right/bottom `0.10, 0.10, 0.107, 0`,
+in viewport fractions. These retain the tested placement and allow for the
+existing centred BF3 bar and labels; they do not define or resize the bar.
+Label lengths/font metrics are not measured by the DLL.
+
+Support is inherently on for supported builds, still opt-in by the HUD binding.
+The enable toggle and inset INI settings have been removed; old entries are ignored.
+Only `[Features] TargetBarLatchSeconds` remains configurable, with the same default
+of 2.5 seconds and 0 meaning no timeout. Layout stays in the `.hud` file.
+
+Model bounds remain authored, not exact animated-vertex bounds; rotating vehicles
+can change their world AABB, and attachments outside it may need asset-specific
+adjustments. There is no new per-object `poiYOffset` or centre-selection ODF flag:
+the current healthbar path uses top-centre with zero world offset, while the
+user's cosmetic offsets stay in the HUD.
+
+**Lending.** `UpdateWeaponEvents` takes `weapon->mTarget` and falls back to
+`controllable->mReticuleTarget[channel]`. While a latch is live and that slot is
+empty, the DLL writes the latched handle into the slot immediately before
+`HUD::GameEvents::Update` and restores it immediately after. The engine then sees a
+target, never sends `targetDisable`, and keeps every `target.*` event flowing. All
+show/hide decisions are expressed by lending or not lending - there is no disable
+event of ours.
+
+**State, per HUD tick, before the engine update:**
+
+- a registered hit by the LOCAL player on an ENEMY (aim assist's `ApplyDamage` hook
+  already recovers shooter, victim and handle id on all three builds) sets
+  `latch = victim`, `expiry = now + hold`. Hitting someone else transfers it.
+- natural target present and `!= latch` -> **cancel the latch.** Any different unit,
+  friendlies included. The new unit is plain aim-only; nothing ever snaps back to a
+  unit that may be off screen.
+- natural target `== latch` -> `expiry = now + hold`. The hold therefore always
+  measures time since the unit was last hit OR last under the reticle.
+- no natural target -> lend the latch if it has not expired and line of sight holds.
+  Line of sight lost: do not lend, but KEEP the latch, so the bar returns if the unit
+  reappears inside the hold. Expired: clear it.
+- after the engine update, read the engine's cached `WeaponData.target`: if it is
+  neither empty nor the latch, the weapon's own lock picked someone else - cancel.
+  One tick late, which is harmless because the engine showed that unit anyway.
+
+`hold` defaults to 2.5 s, one INI value, 0 = no timeout. It is NOT a fade timer:
+it bounds how long a hit keeps the bar attached. The fade belongs to the `.hud`.
+
+**Position never stops for the last focus unit.** It is sent every tick for the
+current target and, when there is none, for the most recent one while its handle is
+valid; unprojectable/stale targets receive an offscreen position. When lending stops, the engine sends
+`targetDisable` and the author's elements begin their own fade-out; if position
+stopped at the same instant the bar would freeze in place and fade while the unit
+walked away. One projection per tick, no second timer, no knowledge of the fade
+length, and no ray on the tail.
+
+Consequence for authors: bind position ONLY through `EventPosition`, never
+`EventEnable` - the trailing updates would re-enable the bar mid-fade. Enable and
+disable stay on the stock `target.*` events.
+
+Accepted consequence: everything bound to `target.*` becomes sticky for the hold,
+not just the health bar (a reticle tint bound to `target.teamColor`, for instance).
+
+**The user confirmed the revised positioning works better in play.** That is not
+confirmation across every build or an online session. The always-on revision passed
+the standalone positioning tests and a C++ syntax check; no DLL build was run for
+that revision. Every original hook address,
+offset and convention below was derived per build and then independently re-read by
+a second pass told to refute it (42 of 42 items confirmed), and the one write target
+was checked from raw bytes on all three. None of that is a substitute for a match.
+
+Two things the derivation changed from the design above:
+
+- **The latch is taken in `Damageable::ApplyDamage`, not `Character::RegisterHit`.**
+  On a multiplayer client `ApplyDamageCommon` diverts into the cosmetic
+  `ApplyNetClientDamage`, so `RegisterHit` never runs there and the latch would
+  silently never take online. `ApplyDamage` has no client early-out, and
+  `DamageDesc+0x00` is the attacker's `Character*`, compared against
+  `NetGame::GetLocalPlayer(0)`. Aim assist already detours the same function; both
+  chain, and this module's prologue guard reads past a sibling's `JMP` (Detours pads
+  the retail 6-byte prologue with `0xCC`, so it fingerprints bytes 8-11 instead).
+- **No engine projection call.** `RedCamera` is laid out identically on every build
+  (`_Matrix +0x30`, tan-half-FOV `+0x144`/`+0x148`) and `_MatrixInverse` is a rigid
+  inverse, so camera space is three dot products and the projection is done in C.
+
+It is **opt-in by data**: `EventClass+0x08` is a self-linked handler list when nobody
+is bound, so with no `.hud` using `target.position` there is no lending, no sticky
+target and no per-tick work at all.
+
+| | modtools | Steam | GOG |
+|---|---|---|---|
+| `HUD::EventClass::Create` | `0x006AD8A0` | `0x0055DE40` | `0x0055EBC0` |
+| `HUD::EventClass::FindByHashID` | `0x006AD940` | `0x0055DEE0` | `0x0055EC60` |
+| `EventClass::sList` | `0x00AD866C` | `0x007EBA5C` | `0x007ECA2C` |
+| `HUD::GameEvents::Open` | `0x006AEF00` | `0x0055E3A0` | `0x0055F120` |
+| `HUD::GameEvents::Update` | `0x006B50A0` | `0x00562BE0` | `0x00563960` |
+| `gPlayerData[0]` | `0x00BA3EA0` | `0x01EC6290` | `0x01EC7740` |
+| `NetGame::GetLocalPlayer` | `0x006E3D20` | `0x005B7440` | `0x005B83F0` |
+| `CameraManager::sInstance` | `0x00B70BD4` | `0x01E30324` | `0x01E317C4` |
+| `GameObject::IsMyEnemy` | `0x0055F940` | `0x00535B30` | `0x005368A0` |
+| `HUD::GameEvents::UpdateWeaponEvents` (not hooked) | `0x006B2EF0` | `0x00560AB0` | `0x00561830` |
+
+**Conventions that differ by build** - each is part of the contract:
+
+- `GameEvents::Update`: modtools `cdecl(float dt)`, pushed and never read. Steam and
+  GOG: LTCG **dropped the parameter**; `void(void)`, nothing pushed, no `ADD ESP`.
+- `EventClass::FindByHashID`: modtools `cdecl`, hash on the stack. Steam and GOG: hash
+  in **ECX**, no stack arguments.
+- `UpdateWeaponEvents` on Steam/GOG takes the camera in ECX and the `Character*` in
+  EDX with eight stack arguments - the reason it is wrapped from outside via
+  `Update` rather than detoured.
+
+Same on all three: `EventClass::Create` cdecl varargs (it **never** checks for an
+existing name - find first, or the second class is an orphan); `GameEvents::Open`
+`void(void)`, and a hook at its return is still inside the `RunTimeHeap` window;
+`GetLocalPlayer` cdecl(uint); `IsMyEnemy` thiscall `RET 4`; `ApplyDamage` thiscall,
+five stack arguments, `RET 0x14`.
+
+Layout identical on all three shipping builds, and **different from Phantom** where
+marked: `Controllable::mReticuleTarget` **`+0x164`** + channel*8 (Phantom `+0x160`);
+`mEyeDir +0xE8`, `mTargetInfo.mAimStart +0x148` (Phantom `+0xE4` / `+0x144`);
+`Weapon::mTarget` `+0x128` modtools, `+0x104` Steam/GOG; `WeaponData` `0x28` bytes
+with `target` at `+0x14`/`+0x18`; `PlayerData` `0xDC` (Phantom `0xD4`); `WeaponEvents`
+`0x6C` with `reticule.position +0x60`, `lockOnPosition +0x64` (one slot more than
+Phantom, `target.teamColorBright`); `Character` `mUnit +0x148`, `mVehicle +0x14C`,
+`mRemote +0x150`; `GameObject` alive `+0x1FC` bit 3, handle id `+0x204`, `_bActive
++0xDC`, `mMatrix +0xF0`. Virtuals: `Trackable::GetGameObject` vptr at
+`Controllable+0x18` slot `+0x20`; `GetTargetPoint` primary vptr slot `+0x50`, `RET
+0x10`, safe body id `-1`; `GetSmoothedMatrix` slot `+0x110`.
+
+Left for later: `GameObjectInterpolator::GetMatrix`, which the stock lock-on bracket
+also applies when networking is live. Its convention differs (thiscall on modtools;
+on Steam/GOG the instance is folded in and it is effectively `stdcall(id, out)`), and
+`GetSmoothedMatrix` alone already carries the soldier's net smoothing, so it is only
+worth adding if a marker is seen to jitter on a client.
+
+---
+
+## Camera horizon rotation event (2026-09-21)
+
+`player1.reticule.horizonRotation` is a separate `type_Vector3` event containing
+`(0, 0, zDegrees)`. It shares the existing `GameEvents::Open/Update` hooks in
+`render/target_bar_latch.cpp` instead of detouring those guarded entry points
+twice. Registration precedes `.hud` loading; publication follows the stock update
+and is outside all target-bar/player-character gates. A rotation listener does
+not enable the latch. Its event pointer and angle state are discarded on mission
+open/list destruction; a changed/missing camera resets the angle as well.
+
+### Native `ElementGroupBase::EventRotation` contract
+
+Checked directly in the three local executables, not inferred from Phantom:
+
+| Build | Rotation callback | Binding in instance constructor |
+|---|---|---|
+| Modtools | `0x0069A740` (ILT `0x0040215D`) | `0x0069AAA2`, handler at `self+0x144` |
+| Steam | `0x0054F410` | `0x0054E474`, handler at `self+0x144` |
+| GOG | `0x00550160` | `0x0054F1C4`, handler at `self+0x144` |
+
+All three require event type **9**, dereference its vector payload, multiply each
+component by pi/180, then build X/Y/Z rotation matrices with D3DX. Steam's import
+slots `0x0076B564/548/55C` are `D3DXMatrixRotationX/Y/Z`; the degree multiplier at
+`0x007B1EF0` is `0.01745329238474369`. Modtools uses the same multiplier at
+`0x00A2E9E4`; GOG at `0x007B2E68`. No angle interpolation is applied, so equivalent
+angles either side of +/-180 do not cause a full-turn animation.
+
+The callback preserves the translation from the render element's matrix at
+`self->mElement (+0xB0) +0x30` and recovers scale from the current basis lengths,
+then installs `Rx * Ry * Rz * Scale`. Repeatedly doing this on a nonuniformly
+scaled group changes those recovered lengths: the author must use a unit-scale
+rotation pivot and put artwork sizing in a child. It also replaces, rather than
+adds to, the pivot's authored rotation. The Steam `SetPosition` implementation
+at `0x006C0800` copies position directly to matrix translation; HUD coordinates
+are Y-down. A positive D3DX Z rotation sends HUD up `(0,-1)` toward positive X.
+
+### Angle calculation and pole behaviour
+
+Use the active rendered camera already read for target projection (manager
+camera 0, matrix `+0x30`, tangent half-FOV `+0x144/+0x148`). For world-up `(0,1,0)`,
+camera right/up dot products are `matrix[1]` and `matrix[5]`. The Z rotation is:
+
+```text
+atan2(right.y * screenWidth / tanHalfFovW,
+      up.y    * screenHeight / tanHalfFovH) * 180/pi
+```
+
+This follows the projected world-up direction, not vehicle simulation roll and
+not a bone. Translation has no effect. Equal pixel focal scales cancel, giving
+the same bank angle at any normal resolution/FOV. The final result still depends
+on the HUD author's parent transforms: do not put a nonuniformly scaled/rotated
+ancestor above the pivot and expect an undistorted screen-space angle.
+
+The squared length `right.y^2 + up.y^2` gates the undefined vertical case: below
+`0.0001` retain the last valid angle and stay held until at least `0.0004`.
+Starting at a pole uses zero. Invalid orientation/projection data resets to zero.
+Crossing a pole can reverse projected world-up by 180 degrees; this is not a
+continuous-flight-roll instrument. `render/hud_horizon_math.hpp` is independent
+of game memory and tested in `tests/hud_horizon_tests.cpp`, including 20,000
+random world-up segment projections. In-game behaviour still needs testing.
+
 ## Open questions
 
 - Steam and GOG addresses are not derived. Anchors for porting: the strings

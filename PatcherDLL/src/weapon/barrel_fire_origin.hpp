@@ -18,4 +18,22 @@
 extern bool g_useBarrelFireOrigin;   // INI [Fixes] BarrelFireOriginFix
 
 void barrel_fire_origin_install(uintptr_t exe_base);
+
+// CollisionManager::RayHit, shared so other modules do not have to duplicate the
+// LTCG register marshalling this file already owns (see the thunk in the .cpp).
+//
+//   dir        UNIT vector; the engine scales it by maxDist itself.
+//   outHit     receives the CollisionObject* that was hit, or null on a clean miss.
+//              The engine zeroes it on entry, so it must never be null.
+//   exclude    base GameObject* pointers to ignore - the same pointer kind a
+//              PblHandle<GameObject> holds.  CollisionManager::RayCallback compares
+//              each candidate's GetGameObject() against this list.
+//   mask       collision mask; 0x9A is soldiers, vehicles, terrain and statics,
+//              and deliberately excludes water (0x100).
+//
+// Returns hitDistance / maxDist, 1.0 meaning nothing was hit.  Returns 1.0 with
+// *outHit null when the ray API is not resolved on this build, so a caller that
+// treats "no hit" as "clear" degrades to always-clear rather than crashing.
+float engine_ray_hit(const float* start, const float* dir, float maxDist, void** outHit,
+                     void** exclude, int excludeCount, int mask);
 void barrel_fire_origin_uninstall();

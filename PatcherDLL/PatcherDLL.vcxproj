@@ -191,6 +191,10 @@
     <ClInclude Include="src\render\hud_widescreen.hpp" />
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp" />
     <ClInclude Include="src\render\spawn_vehicle_list.hpp" />
+    <ClInclude Include="src\render\target_bar_latch.hpp" />
+    <ClInclude Include="src\render\target_bar_geometry.hpp" />
+    <ClInclude Include="src\render\target_bar_fade.hpp" />
+    <ClInclude Include="src\render\hud_horizon_math.hpp" />
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\light_projected_texture_fix.hpp" />
@@ -290,6 +294,7 @@
     <ClCompile Include="src\render\hud_widescreen.cpp" />
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp" />
     <ClCompile Include="src\render\spawn_vehicle_list.cpp" />
+    <ClCompile Include="src\render\target_bar_latch.cpp" />
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\light_projected_texture_fix.cpp" />

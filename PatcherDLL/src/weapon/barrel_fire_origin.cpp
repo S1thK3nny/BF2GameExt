@@ -539,6 +539,15 @@ static void* patch_vtable_slot(uintptr_t exe_base, uintptr_t slotVA,
 // three targets' own bytes.  The one per-build address is NetComm::sLocalPlayerId,
 // and a build without it degrades cleanly rather than reading the wrong field.
 // ---------------------------------------------------------------------------
+// Shared entry point for the ray cast - see barrel_fire_origin.hpp.
+float engine_ray_hit(const float* start, const float* dir, float maxDist, void** outHit,
+                     void** exclude, int excludeCount, int mask)
+{
+   if (outHit) *outHit = nullptr;
+   if (!s_rayHit || !start || !dir || !outHit || !(maxDist > 0.0f)) return 1.0f;
+   return s_rayHit(start, dir, maxDist, outHit, nullptr, exclude, excludeCount, mask, 1);
+}
+
 void barrel_fire_origin_install(uintptr_t exe_base)
 {
    uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, localIdsVA;
