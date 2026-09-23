@@ -44,6 +44,8 @@ Set on the concrete soldier class.
 | `OverrideTexture3` | texture name | A third runtime texture override slot, on top of the stock `OverrideTexture` and `OverrideTexture2`. | 1.0.0 |
 | `OverrideTexture4` | texture name | Fourth slot. | 1.0.0 |
 | `OverrideTexture5` | texture name | Fifth slot. | 1.0.0 |
+| `DisableProne` | `1` | The unit can never go prone, for the AI as well as the player. A double-tap of crouch just stands the soldier up again, and AI sent to a prone spot crouches there instead. Units with `IsAcklay = 1` behave this way automatically. | 1.1.0 |
+| `DisableCrouch` | `1` | The unit can never crouch, for the AI as well as the player. The crouch key goes straight to prone instead, and pressing it again stands back up. With `DisableProne` also set, the crouch key does nothing. | 1.1.0 |
 
 **Notes on the override texture slots.** The model needs a material named `override_texture3`, `override_texture4` or `override_texture5` for the matching slot to do anything, following the same naming the stock two slots use. `OverrideTexture` must also be set or none of the extra slots apply. They are read off the concrete class only and are not inherited through `ClassParent`.
 

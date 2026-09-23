@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "soldier_prone.hpp"
+#include "soldier_stance_flags.hpp"
 #include "core/resolve.hpp"
 
 #include <cmath>
@@ -29,7 +30,11 @@
 //         mask per hint node, but the engine masks the prone bit off. See
 //         the hint node prone stance block below.
 //
-//   5. Acklay terrain alignment fix: patches the gate condition in
+//   5. Per-class DisableProne / DisableCrouch (entity/soldier_stance_flags.cpp;
+//      IsAcklay implies DisableProne).  Enforced here, at Crouch() and at
+//      do_prone_transition, which between them are every way in.
+//
+//   6. Acklay terrain alignment fix: patches the gate condition in
 //      PostCollisionUpdate (0x0052C0F0) so the prone-specific terrain
 //      alignment block never runs.  That block raycasts front/back of the
 //      soldier to build a surface-aligned orientation matrix, but its yaw
@@ -183,6 +188,8 @@ static void*  g_proneVtableSlotOrig = nullptr;
 static uint8_t* g_proneDispatchStub     = nullptr;
 static uint32_t g_heightJumpTableOrig   = 0;
 static uint32_t* g_heightJumpTableEntry = nullptr;
+static uint32_t  g_heightCrouchJumpOrig  = 0;       // case 1 (crouch)
+static uint32_t* g_heightCrouchJumpEntry = nullptr;
 
 // Acklay terrain alignment gate patch (6 bytes at kAcklayGateJnz)
 static uint8_t* g_acklayGatePtr        = nullptr;
@@ -252,6 +259,24 @@ static bool is_melee_weapon(void* entity)
 }
 
 // ---------------------------------------------------------------------------
+// Per-class stance flags (DisableProne / DisableCrouch / IsAcklay)
+// ---------------------------------------------------------------------------
+static inline const void* soldier_class(void* entity)
+{
+    return *(void**)((char*)entity + g_soldier->classPtr);
+}
+
+static bool prone_disabled_for(void* entity)
+{
+    return soldier_class_prone_disabled(soldier_class(entity));
+}
+
+static bool crouch_disabled_for(void* entity)
+{
+    return soldier_class_crouch_disabled(soldier_class(entity));
+}
+
+// ---------------------------------------------------------------------------
 // do_prone_transition — enters prone state, plays sounds
 //
 // Modeled on Crouch inner (0x00543B60):
@@ -264,6 +289,9 @@ static bool is_melee_weapon(void* entity)
 static bool do_prone_transition(void* entity)
 {
     if (!g_proneEnabled) return false;
+
+    // DisableProne, or IsAcklay
+    if (prone_disabled_for(entity)) return false;
 
     // Melee weapons don't have prone animations — block entry
     if (is_melee_weapon(entity)) return false;
@@ -342,15 +370,28 @@ static bool do_prone_transition(void* entity)
 // vtable[0x9C] (Crouch) which re-enters this hook.  The guard detects the
 // re-entry and lets original_Crouch run — doing SetState(CROUCH), which is
 // the correct fallback (lower headroom requirement than STAND).
+//
+// DisableCrouch: Crouch() is the only way any soldier (player or AI) enters
+// CROUCH -- no other engine site calls SetState with it -- so refusing here is
+// the whole block.  For the player the crouch key becomes the prone key: one
+// tap from STAND goes prone, one tap from PRONE stands up.  The AI's crouch
+// request arrives through the height dispatch (s_aiCrouchCall, see
+// ai_height_crouch) and is simply refused, so an AI unit that wanted to crouch
+// stays standing rather than dropping prone.  Under a low ceiling a prone
+// soldier that cannot stand and cannot crouch stays prone.
 // ---------------------------------------------------------------------------
+static bool s_aiCrouchCall = false;
+
 static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
 {
     int state = *(int*)((char*)ecx + g_soldier->mState);
+    const bool noCrouch = crouch_disabled_for(ecx);
 
     if (state == STATE_PRONE) {
         // PRONE -> STAND (with headroom-blocked fallback to CROUCH)
         static bool s_inStandFromProne = false;
         if (s_inStandFromProne) {
+            if (noCrouch) return false;
             return original_Crouch(ecx, nullptr);
         }
         s_inStandFromProne = true;
@@ -359,8 +400,31 @@ static bool __fastcall hooked_Crouch(void* ecx, void* /*edx*/)
         return result;
     }
 
+    if (noCrouch) {
+        if (state == STATE_STAND && !s_aiCrouchCall)
+            return do_prone_transition(ecx);
+        return false;
+    }
+
     // STAND -> CROUCH (vanilla behavior)
     return original_Crouch(ecx, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// ai_height_crouch — the AI's HEIGHT_CROUCH case of the height dispatch.
+//
+// Reached from the case-1 code cave in the installer instead of the stock
+// `CALL [vtable+0x9C]`.  Makes the same virtual call, flagged so hooked_Crouch
+// can tell an AI crouch request from the player's crouch key.
+// ---------------------------------------------------------------------------
+static bool __fastcall ai_height_crouch(void* entity)
+{
+    typedef bool(__thiscall* fn_VCrouch_t)(void*);
+    fn_VCrouch_t crouch = (fn_VCrouch_t)(*(void***)entity)[0x9C / 4];
+    s_aiCrouchCall = true;
+    bool result = crouch(entity);
+    s_aiCrouchCall = false;
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +533,14 @@ static void __fastcall hooked_SetAction(void* ecx, void* edx, int param_2, void*
 
     if (oldState == STATE_CROUCH && param_2 == STATE_PRONE) {
         *pAction = ACTION_CROUCH_TO_PRONE;
+    } else if (oldState == STATE_STAND && param_2 == STATE_PRONE) {
+        // No stand->prone clip is reachable, so a DisableCrouch soldier (whose
+        // only way into prone is from standing) borrows the crouch getdown
+        // rather than popping.  Other stand->prone entries keep the vanilla
+        // MOVE+IDLE they always had.
+        void* owner = *(void**)((char*)ecx + kSAOwner);
+        if (owner && crouch_disabled_for(owner_to_entity(owner)))
+            *pAction = ACTION_CROUCH_TO_PRONE;
     } else if (oldState == STATE_PRONE && param_2 == STATE_STAND) {
         *pAction = ACTION_PRONE_TO_STAND;
     } else if (oldState == STATE_PRONE && param_2 == STATE_CROUCH) {
@@ -576,9 +648,15 @@ static void __fastcall hooked_HintSetProperty(void* ecx, void* edx, uint32_t has
 // vtable_Prone — replaces the vanilla "return false" stub at vtable+0xA0
 //
 // Called by AI posture system or any code that explicitly invokes Prone().
+//
+// A class that cannot go prone (DisableProne / IsAcklay) crouches instead,
+// which is what the vanilla height dispatch did with every prone request.
+// hooked_Crouch still applies DisableCrouch to that fallback.
 // ---------------------------------------------------------------------------
 static bool __fastcall vtable_Prone(void* ecx, void* /*edx*/)
 {
+    if (ecx && prone_disabled_for(ecx))
+        return hooked_Crouch(ecx, nullptr);
     return do_prone_transition(ecx);
 }
 
@@ -691,13 +769,18 @@ void prone_system_install(uintptr_t exe_base)
     // Our stub does the same but calls [EDX + 0xA0] (Prone).  The `this`
     // register must match the patched build's dispatch site or the stub reads a
     // garbage vtable and crashes.
+    //
+    // Case 1 gets a second stub in the same allocation that routes through
+    // ai_height_crouch, so DisableCrouch can tell the AI's crouch request from
+    // the player's crouch key.  It makes the same virtual call, so behaviour is
+    // unchanged for every class without DisableCrouch.
     // -----------------------------------------------------------------------
     {
         uintptr_t switchEnd = (uintptr_t)resolve(exe_base, g_addr->prone_height_switch_end);
         const uint8_t rm = g_soldier->aiHeightBaseRm; // 6 = ESI (modtools), 7 = EDI (Steam)
 
         g_proneDispatchStub = (uint8_t*)VirtualAlloc(
-            nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (g_proneDispatchStub) {
             uint8_t* p = g_proneDispatchStub;
             // MOV EDX, [<reg>]   (8B /r, reg=EDX=010, mod=00)
@@ -716,6 +799,32 @@ void prone_system_install(uintptr_t exe_base)
             g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, g_addr->prone_height_jump_table + 8);
             g_heightJumpTableOrig = *g_heightJumpTableEntry;
             *g_heightJumpTableEntry = (uint32_t)(uintptr_t)g_proneDispatchStub;
+
+            // Case 1 stub at +16:
+            //   MOV ECX, <reg>; MOV EAX, ai_height_crouch; CALL EAX; JMP end
+            uint8_t* q = g_proneDispatchStub + 16;
+            *q++ = 0x8B; *q++ = (uint8_t)(0xC8 | rm);
+            *q++ = 0xB8;
+            uint32_t fn = (uint32_t)(uintptr_t)&ai_height_crouch;
+            memcpy(q, &fn, 4); q += 4;
+            *q++ = 0xFF; *q++ = 0xD0;
+            *q++ = 0xE9;
+            rel = (int32_t)(switchEnd - ((uintptr_t)q + 4));
+            memcpy(q, &rel, 4);
+
+            // Only take the entry if it still leads to the stock crouch body:
+            // MOV <vt>,[reg] / MOV ECX,reg / CALL [<vt>+0x9C].  The vtable
+            // register differs (EDX on modtools `8B 16 .. FF 92`, EAX on retail
+            // `8B 07 .. FF 90`), so only the invariant bytes are compared.
+            uint32_t* entry = (uint32_t*)resolve(exe_base, g_addr->prone_height_jump_table + 4);
+            const uint8_t* body = (const uint8_t*)(uintptr_t)*entry;
+            if (body[0] == 0x8B && body[2] == 0x8B && body[3] == (uint8_t)(0xC8 | rm) &&
+                body[4] == 0xFF && body[6] == 0x9C && body[7] == 0x00 &&
+                body[8] == 0x00 && body[9] == 0x00) {
+                g_heightCrouchJumpEntry = entry;
+                g_heightCrouchJumpOrig = *entry;
+                *entry = (uint32_t)(uintptr_t)(g_proneDispatchStub + 16);
+            }
         }
     }
 
@@ -868,6 +977,10 @@ void prone_system_uninstall()
     if (g_heightJumpTableEntry && g_heightJumpTableOrig) {
         protected_write(g_heightJumpTableEntry, &g_heightJumpTableOrig,
                         sizeof(g_heightJumpTableOrig));
+    }
+    if (g_heightCrouchJumpEntry && g_heightCrouchJumpOrig) {
+        protected_write(g_heightCrouchJumpEntry, &g_heightCrouchJumpOrig,
+                        sizeof(g_heightCrouchJumpOrig));
     }
 
     // Free AI dispatch stub

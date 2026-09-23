@@ -91,6 +91,8 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
   <sub>*Taken with [Star Wars Battlefront 3 Legacy](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy). Prone applies to vanilla and any mod*</sub>
 
+- **Per-Unit Stance Limits** - `DisableProne = 1` and `DisableCrouch = 1` on a soldier class take that stance away from the unit, for the AI as well as the player. On a unit without crouch the crouch key goes straight to prone; AI sent to a prone spot by a unit without prone crouches there instead. Units with `IsAcklay = 1` never go prone. Off by default and inherited through `ClassParent`. ODF: `DisableProne = 1`, `DisableCrouch = 1`
+
 - **First-Person Fire Animation Fix** - Fixes the first shot after switching into first person playing no weapon animation. The dead spell lasted about a second after entering, and longer the first time a unit's first person model was used, so shots fired in that window looked like nothing happened. Soldiers only; vehicle cockpits were never affected.
 - **Multiple First-Person Animation Banks** - Lets each soldier class use its own first person animation bank instead of sharing one global set. Partial banks work too, with missing animations falling back to the defaults. ODF: `FirstPersonAnimationBank = bankname`
 - **First-Person Sprint Animation** - The engine has no first person sprint state and just plays the run animation faster. This adds the possibility for modders to add a real sprint animation per weapon class. If `<bank>_rifle_sprint` (or `_bazooka_sprint`, `_tool_sprint`) exists in the bank it is used while sprinting. Works with custom banks, and is entirely optional: if the animation is absent, nothing changes.
