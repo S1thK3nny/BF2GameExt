@@ -994,6 +994,33 @@ namespace modtools {
    // by HUD::GameEvents::Open 0x006AEF00.  Index [playerIdx * 0xCA]; the sibling
    // .enable at 0x00BA3CE8 is what SpawnDisplay::Show fires through the same array.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x00BA3CF4;
+
+   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // Derived and adversarially re-read per build, 2026-09-19; write-up in
+   // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
+   // are part of the contract:
+   //   hud_event_class_create   cdecl varargs (int type, const char* fmt, ...) on
+   //                            every build.  NEVER checks for a duplicate name.
+   //   hud_event_class_find     modtools: cdecl, hash on the STACK.
+   //                            Steam/GOG: hash in ECX, no stack args (fastcall).
+   //   hud_game_events_open     void cdecl(void) on every build.
+   //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
+   //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
+   //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
+   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
+   // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
+   // with the cached aim target PblHandle at +0x14/+0x18 on every build.
+   // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
+   // hud_event_class_list is EventClass::sList, self-linked when empty.
+   constexpr uintptr_t hud_event_class_create       = 0x006AD8A0;
+   constexpr uintptr_t hud_event_class_find         = 0x006AD940;
+   constexpr uintptr_t hud_event_class_list         = 0x00AD866C;
+   constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
+   constexpr uintptr_t hud_game_events_update       = 0x006B50A0;
+   constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
+   constexpr uintptr_t net_game_get_local_player    = 0x006E3D20;
+   constexpr uintptr_t camera_manager_instance      = 0x00B70BD4;
+   constexpr uintptr_t game_object_is_my_enemy      = 0x0055F940;
    // sVehicleSpawnList, PblList<VehicleSpawn>: _head at +0, _iCount at +0x10.
    // From the ctor's list link (0x00664C50) and the dtor's count decrement.
    constexpr uintptr_t vehicle_spawn_list            = 0x00AD6004;
@@ -2198,6 +2225,33 @@ namespace steam {
    // Same Open-order derivation as modtools: .enable 0x01E56DC0, .disable ..C4,
    // .message ..C8, .vehicle ..CC, .spawninfo ..D0.  Stride is 0xCA here too.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E56DCC;
+
+   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // Derived and adversarially re-read per build, 2026-09-19; write-up in
+   // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
+   // are part of the contract:
+   //   hud_event_class_create   cdecl varargs (int type, const char* fmt, ...) on
+   //                            every build.  NEVER checks for a duplicate name.
+   //   hud_event_class_find     modtools: cdecl, hash on the STACK.
+   //                            Steam/GOG: hash in ECX, no stack args (fastcall).
+   //   hud_game_events_open     void cdecl(void) on every build.
+   //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
+   //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
+   //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
+   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
+   // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
+   // with the cached aim target PblHandle at +0x14/+0x18 on every build.
+   // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
+   // hud_event_class_list is EventClass::sList, self-linked when empty.
+   constexpr uintptr_t hud_event_class_create       = 0x0055DE40;
+   constexpr uintptr_t hud_event_class_find         = 0x0055DEE0;
+   constexpr uintptr_t hud_event_class_list         = 0x007EBA5C;
+   constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
+   constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
+   constexpr uintptr_t hud_player_data              = 0x01EC6290;
+   constexpr uintptr_t net_game_get_local_player    = 0x005B7440;
+   constexpr uintptr_t camera_manager_instance      = 0x01E30324;
+   constexpr uintptr_t game_object_is_my_enemy      = 0x00535B30;
    // sVehicleSpawnList, from the dtor's `dec [0x007EBECC]` (_iCount) minus 0x10.
    // VehicleSpawn itself is byte-identical to modtools; verified field by field
    // against the ctor 0x0066E820 (mClass +0x70, mCommandPost +0x74, matrix +0x30,
@@ -2709,6 +2763,33 @@ namespace gog {
    // .vehicle event array.  Confirmed twice: Show reads .enable at 0x01E58270 with
    // stride 0xCA, and Open 0x0055F120 stores this Create's result at 0x0055F94E.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E5827C;
+
+   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // Derived and adversarially re-read per build, 2026-09-19; write-up in
+   // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
+   // are part of the contract:
+   //   hud_event_class_create   cdecl varargs (int type, const char* fmt, ...) on
+   //                            every build.  NEVER checks for a duplicate name.
+   //   hud_event_class_find     modtools: cdecl, hash on the STACK.
+   //                            Steam/GOG: hash in ECX, no stack args (fastcall).
+   //   hud_game_events_open     void cdecl(void) on every build.
+   //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
+   //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
+   //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
+   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
+   // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
+   // with the cached aim target PblHandle at +0x14/+0x18 on every build.
+   // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
+   // hud_event_class_list is EventClass::sList, self-linked when empty.
+   constexpr uintptr_t hud_event_class_create       = 0x0055EBC0;
+   constexpr uintptr_t hud_event_class_find         = 0x0055EC60;
+   constexpr uintptr_t hud_event_class_list         = 0x007ECA2C;
+   constexpr uintptr_t hud_game_events_open         = 0x0055F120;
+   constexpr uintptr_t hud_game_events_update       = 0x00563960;
+   constexpr uintptr_t hud_player_data              = 0x01EC7740;
+   constexpr uintptr_t net_game_get_local_player    = 0x005B83F0;
+   constexpr uintptr_t camera_manager_instance      = 0x01E317C4;
+   constexpr uintptr_t game_object_is_my_enemy      = 0x005368A0;
    // sVehicleSpawnList: ~VehicleSpawn 0x0066FAC0 does `dec [0x007ECE9C]` (_iCount).
    constexpr uintptr_t vehicle_spawn_list            = 0x007ECE8C;
    // VehicleSpawn::SetProperty, same hash-cluster derivation as Steam.  Same 538

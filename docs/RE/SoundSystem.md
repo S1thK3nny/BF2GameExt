@@ -565,35 +565,52 @@ chain from `SetFrequency` to the mixer step is now read from source
   anti-aliases when downsampling (`alsoftrc.sample`). Cubic or spline decimation
   of bright content folds the spectrum back into band.
 
-The environment this was measured on, 2026-09-11:
+The environment this was checked on, 2026-09-11 and 2026-09-19:
 
 | | |
 |---|---|
-| wrapper | **Creative ALchemy 2.4.2.18** as `dsound.dll` (Steam "Classic" install); GOG install has no wrapper at all |
-| OpenAL | system `OpenAL32.dll` / `soft_oal.dll` = **OpenAL Soft 1.23.1** (ALchemy forwards into it) |
-| device | Speakers, `WAVE_FORMAT_EXTENSIBLE`, **48000 Hz**, 2ch, 32-bit |
-| `alsoft.ini` | `%APPDATA%`, sets only `hrtf-paths` -- so `frequency` = system 48000, `resampler` = cubic |
+| wrapper | **Creative ALchemy 2.4.2.18** as `dsound.dll` (Steam "Classic" install, patched to run without Creative hardware); GOG install has no wrapper |
+| what ALchemy mixes with | **its own software engine.** `dsoundlog.txt` from the 2026-09-10 03:32 run: `Using Creative Software 3D Library`. The DLL carries `CSensBufferEAX1..5` classes (Sensaura) and is 1.26 MB because the mixer is inside it |
+| OpenAL Soft | 1.23.1 is installed as the system `OpenAL32.dll`, and ALchemy imports `openal32.dll` / `ct_oal.dll` -- but with no Creative card (Realtek + NVIDIA only) it did not take that route. **OpenAL Soft is not in this signal path** |
+| device | Speakers (Realtek), `WAVE_FORMAT_EXTENSIBLE`, **48000 Hz**, 2ch, 32-bit |
 | BF2 mixer | `[SndDiag]`: `mixConfig=1 (Software)` in the shell, **`mixConfig=2 (DirectSoundHardware)` in play**, 119 managed voices, `hwFree3D` 129 -> 127 |
 
-So in play every pitch change travels `Snd::DSBuffer::SetFrequency ->
-IDirectSoundBuffer::SetFrequency -> ALchemy -> AL_PITCH -> OpenAL Soft cubic`,
-and any voice whose `baseRate * pitch` exceeds 48000 is decimated without a
-filter. That is the whole reported symptom -- "sounds that end up around 48 kHz
-under any pitch modifier" -- with the threshold being the device rate. Doppler is
-merely the commonest upward pitch; `PitchSpread` and the like reach it too, which
-is why disabling doppler reduces the bursts without removing them.
+**Correction.** An earlier revision of this section stated that ALchemy forwards
+into OpenAL Soft and that the cubic resampler was therefore the mechanism here.
+That was inferred from OpenAL Soft being present on the system, not observed, and
+ALchemy's own log contradicts it. The DSOAL / OpenAL Soft chain above is accurate
+**for DSOAL users** (the community report came from one); it does not describe
+this machine, and `resampler = bsinc24` in `alsoft.ini` would change nothing here.
+
+What does hold on this machine: in play every pitch change travels
+`Snd::DSBuffer::SetFrequency -> IDirectSoundBuffer::SetFrequency -> ALchemy`, the
+output device runs at 48000 Hz, and the symptom is reported for voices whose
+`baseRate * pitch` reaches about that figure. Whatever mixes a voice above the
+output rate has to decimate it. How Creative's software library does that --
+filtered or not, and whether it mixes at the device rate or a fixed internal one
+-- is **unknown**; it is closed source and nothing here measured it. What ALchemy
+reports as `dwMaxSecondarySampleRate` is likewise unread, so BF2's clamp ceiling
+under ALchemy is unverified.
+
+The same symptom being reported under both DSOAL and ALchemy is worth noting: two
+unrelated software mixers, one trigger. Either both decimate badly or the cause is
+upstream of both. The theory-free PCM watch above still argues against upstream on
+the DirectSound path, but it never covered a session where the burst occurred.
 
 Pitch needed to cross 48 kHz by source rate: 22050 -> 2.18x, 44100 -> 1.089x,
 48000 -> anything above 1.0.
 
-Decisive zero-code test: `resampler = bsinc24` and `frequency = 48000` in
-`%APPDATA%\alsoft.ini`, doppler left on. Gone means the wrapper's filterless
-decimation was the mechanism and no DLL work is needed. Persisting only in BF2's
-*software* mixer mode (mixConfig 1, where BF2 resamples itself through
-`StreamResampler` and DirectSound never sees a pitch) would put it back inside
-BF2 -- on the interpolating path already flagged above as inconsistent and never
-exercised by the earlier measurement. That branch has not been read; the Ghidra
-instance on :8089 had the "SWBF3 Decomp" project open when this was written.
+Wrapper-independent test: raise the Windows output format to 96000 Hz. If the
+mixer follows the device rate the threshold doubles and the bursts should become
+rare; if nothing changes, the library mixes at a fixed rate. Wrapper-independent
+mitigation, not built: cap the value handed to `SetFrequency` at the device rate,
+so the wrapper is never asked to decimate, at the cost of flattening upward pitch
+beyond it.
+
+BF2's *software* mixer mode (mixConfig 1, where BF2 resamples itself through
+`StreamResampler` and DirectSound never sees a pitch) remains unread -- the
+interpolating path flagged above as inconsistent. The Ghidra instance on :8089 had
+the "SWBF3 Decomp" project open on both dates.
 
 ---
 

@@ -6,6 +6,33 @@ release only adds, and a patch release only fixes.
 
 Scripts can check the running version through `GameExt.version`.
 
+## Unreleased
+
+### Added
+
+- **`player1.reticule.horizonRotation`** - A camera-driven HUD rotation event for
+  world-up reticules, including banked and inverted views. Bind `EventRotation`
+  on an unscaled pivot with artwork sizing in a child group; position and native
+  reticule events are unchanged. Holds the last reliable angle near vertical.
+  Always available, independent of target bars, with no INI setting.
+- **`player1.weaponN.target.position`** - A new HUD event carrying the current target's
+  position on screen. Bind it with `EventPosition` on the group that holds the target
+  health bar and the bar floats on the unit. Hitting an enemy also keeps the bar on them
+  for a short hold instead of fading the moment the reticle slips off; aiming at anyone
+  else drops it, and an enemy behind cover hides it until they reappear. It does nothing
+  unless a `.hud` file binds the event, so stock HUDs are unchanged. Support is
+  inherently on; only `[Features] TargetBarLatchSeconds` remains configurable.
+  Placement projects one
+  world-bounds top-centre point (no animated-bone wobble), pins it inside the
+  screen using built-in edge reservations, and snaps the anchor to
+  framebuffer pixels. Bar sizes, scales, labels and offsets stay in the `.hud`.
+
+### Fixed
+
+- Floating target bars keep their last screen position when a target dies or is
+  removed, allowing the existing HUD fade to finish without dropping onto the
+  corpse. Living targets still track normally; new targets reset the cached anchor.
+
 ## 1.1.0
 
 ### Added

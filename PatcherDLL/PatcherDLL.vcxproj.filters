@@ -232,6 +232,18 @@
     <ClInclude Include="src\render\spawn_vehicle_list.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\target_bar_latch.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\target_bar_geometry.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\target_bar_fade.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_horizon_math.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -442,6 +454,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\spawn_vehicle_list.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\target_bar_latch.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">
