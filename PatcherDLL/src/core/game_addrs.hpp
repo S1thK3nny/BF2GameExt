@@ -566,6 +566,9 @@ namespace modtools {
    // keyed by the model material-name hash, to shader int-param 0x891891e9. We add
    // slots 3-5 from a class side table. hash_string (above) = PblHash::_MakeHash.
    constexpr uintptr_t soldier_class_set_property  = 0x0053FA20; // EntitySoldierClass::SetProperty
+   // EntitySoldierClass copy ctor (this, parent, hash), RET 8 - called from
+   // EntitySoldierClass::Derive via thunk 0x4058BC.  entity/soldier_stance_flags.cpp.
+   constexpr uintptr_t soldier_class_copy_ctor     = 0x0053EE20;
    constexpr uintptr_t soldier_render              = 0x00535D90; // EntitySoldier::Render (this->class @ +0x3C4)
    constexpr uintptr_t soldier_element_render_ctx  = 0x00674890; // SoldierElement::RenderUsingContext (this->class @ +0x130)
    constexpr uintptr_t shading_pose_create_state   = 0x0083E4E0; // RedShadingPose::CreateShadingState(pose, matNameHash)
@@ -1706,6 +1709,9 @@ namespace steam {
    // Steam offsets differ from modtools (release vs debug). Class fields the stock
    // render binds are +0x794/+0x798. See entity/soldier_override_texture.cpp.
    constexpr uintptr_t soldier_class_set_property  = 0x004F82E0; // EntitySoldierClass::SetProperty
+   // EntitySoldierClass copy ctor (this, parent, hash), RET 8 - sole caller is
+   // EntitySoldierClass::Derive @0x4FA93D.  entity/soldier_stance_flags.cpp.
+   constexpr uintptr_t soldier_class_copy_ctor     = 0x004F5CC0;
    constexpr uintptr_t soldier_render              = 0x004E23D0; // EntitySoldier::Render (this->class @ +0x3AC)
    constexpr uintptr_t soldier_element_render_ctx  = 0x0048DC90; // SoldierElement::RenderUsingContext (this->class @ +0x130)
    constexpr uintptr_t shading_pose_create_state   = 0x006ED4F0; // RedShadingPose::CreateShadingState
@@ -3015,6 +3021,8 @@ namespace gog {
    // ---- Entity / Soldier override textures (OverrideTexture3..5) ----------------
 
    constexpr uintptr_t soldier_class_set_property     = 0x004f82e0;
+   // port_gog.py deep: 22/22 insns, shift +0x0
+   constexpr uintptr_t soldier_class_copy_ctor        = 0x004f5cc0;
    constexpr uintptr_t soldier_render                 = 0x004e23d0;
    constexpr uintptr_t soldier_element_render_ctx     = 0x0048dc90;
    constexpr uintptr_t shading_pose_create_state      = 0x006ee5a0;

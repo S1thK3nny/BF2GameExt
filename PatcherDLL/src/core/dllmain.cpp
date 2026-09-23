@@ -14,6 +14,7 @@
 #include "weapon/dual_cannon.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/soldier_stance_flags.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/vehicle_view_toggle.hpp"
 #include "ai/ai_fairness.hpp"
@@ -390,6 +391,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // soldier/selection entries; the tentacle preflight verifies original bytes.
    tentacle_limit_install(exe_base);
    soldier_override_texture_install(exe_base);
+   soldier_stance_flags_install(exe_base);
    vehicle_view_toggle_install(exe_base); // vtable-slot patches — needs the RW window
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);

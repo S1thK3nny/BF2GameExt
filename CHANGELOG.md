@@ -10,6 +10,10 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
+  crouch away from a unit, for the AI as well as the player. Off by default and
+  inherited through `ClassParent`.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#soldier-classes).
 - **`player1.reticule.horizonRotation`** - A camera-driven HUD rotation event for
   world-up reticules, including banked and inverted views. Bind `EventRotation`
   on an unscaled pivot with artwork sizing in a child group; position and native
