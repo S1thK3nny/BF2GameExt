@@ -8,8 +8,8 @@
 //   DisableProne  = 1     // this unit can never go prone (player or AI)
 //   DisableCrouch = 1     // this unit can never crouch   (player or AI)
 //
-// Both default to 0 and inherit through ClassParent. IsAcklay = 1 implies
-// DisableProne. The stance code that consumes these is entity/soldier_prone.cpp.
+// Both default to 0 and inherit through ClassParent. The stance code that
+// consumes these is entity/soldier_prone.cpp.
 // =============================================================================
 
 void soldier_stance_flags_install(uintptr_t exe_base);

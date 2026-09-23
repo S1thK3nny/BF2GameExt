@@ -56,11 +56,6 @@ struct SoldierLayout {
    // were read off.  Note inputLockFlags is the same byte as dualWieldFlag.
    int inputLockFlags;   // byte: bits 2-4 = m_uiInputLockMask
    int inputLockTime;    // float, seconds remaining
-
-   // EntitySoldierClass flag word (m_bRecoverFromTumble .. TentacleCollType).
-   // Bit 5 (0x20) = m_bIsAcklay, written by SetProperty(IsAcklay 0xC372B928)
-   // at modtools 0x5418D4 / Steam+GOG 0x4F9F72.
-   int clsFlags;
 };
 
 // Offsets verified against the live binaries (MemExt :8192 / Steam :8193).
@@ -72,7 +67,6 @@ constexpr SoldierLayout kSoldierModtools = {
    /* clsWeaponCount */ 0x984, /* clsWeaponClass */ 0x93C,
    /* clsWeaponAmmo */ 0x95C, /* clsWeaponChannel */ 0x97C,
    /* inputLockFlags */ 0x249, /* inputLockTime */ 0x24C,
-   /* clsFlags */ 0x8BC,
 };
 // Steam foleyProne: release FoleyFXSoldier packs 13 8-byte GameSound slots
 // after a 0x18-byte header (debug uses 20-byte GameSounds from +0x24).  Grid
@@ -98,7 +92,6 @@ constexpr SoldierLayout kSoldierRelease = {
    /* clsWeaponCount */ 0x790, /* clsWeaponClass */ 0x748,
    /* clsWeaponAmmo */ 0x768, /* clsWeaponChannel */ 0x788,
    /* inputLockFlags */ 0x231, /* inputLockTime */ 0x234,
-   /* clsFlags */ 0x6C8,
 };
 
 // Active build's layout; defaults to modtools (set in game_build_select()).

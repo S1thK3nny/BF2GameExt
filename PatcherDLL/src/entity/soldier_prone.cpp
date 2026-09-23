@@ -30,8 +30,8 @@
 //         mask per hint node, but the engine masks the prone bit off. See
 //         the hint node prone stance block below.
 //
-//   5. Per-class DisableProne / DisableCrouch (entity/soldier_stance_flags.cpp;
-//      IsAcklay implies DisableProne).  Enforced here, at Crouch() and at
+//   5. Per-class DisableProne / DisableCrouch (entity/soldier_stance_flags.cpp).
+//      Enforced here, at Crouch() and at
 //      do_prone_transition, which between them are every way in.
 //
 //   6. Acklay terrain alignment fix: patches the gate condition in
@@ -259,7 +259,7 @@ static bool is_melee_weapon(void* entity)
 }
 
 // ---------------------------------------------------------------------------
-// Per-class stance flags (DisableProne / DisableCrouch / IsAcklay)
+// Per-class stance flags (DisableProne / DisableCrouch)
 // ---------------------------------------------------------------------------
 static inline const void* soldier_class(void* entity)
 {
@@ -290,7 +290,7 @@ static bool do_prone_transition(void* entity)
 {
     if (!g_proneEnabled) return false;
 
-    // DisableProne, or IsAcklay
+    // DisableProne
     if (prone_disabled_for(entity)) return false;
 
     // Melee weapons don't have prone animations — block entry
@@ -649,7 +649,7 @@ static void __fastcall hooked_HintSetProperty(void* ecx, void* edx, uint32_t has
 //
 // Called by AI posture system or any code that explicitly invokes Prone().
 //
-// A class that cannot go prone (DisableProne / IsAcklay) crouches instead,
+// A class that cannot go prone (DisableProne) crouches instead,
 // which is what the vanilla height dispatch did with every prone request.
 // hooked_Crouch still applies DisableCrouch to that fallback.
 // ---------------------------------------------------------------------------

@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "soldier_stance_flags.hpp"
-#include "core/entity_layout.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
@@ -24,19 +23,12 @@
 // flags before those lines run, so `DisableProne = 0` in a child still turns it
 // back off. The constructor also clears any entry left at a reused class
 // address, which is why no per-mission reset is needed.
-//
-// IsAcklay (bit 5 of the flag word) implies DisableProne. It is read live from
-// the class rather than captured in SetProperty, so it follows the engine's own
-// inheritance of that bit.
 // =============================================================================
 
 namespace {
 
 constexpr uint8_t kFlagNoProne  = 0x01;
 constexpr uint8_t kFlagNoCrouch = 0x02;
-
-// EntitySoldierClass::m_bIsAcklay, bit 5 of the class flag word.
-constexpr uint32_t kIsAcklayBit = 0x20;
 
 using fn_hash_string_t = uint32_t(__cdecl*)(const char*);
 
@@ -114,8 +106,7 @@ void* __fastcall hooked_CopyCtor(void* ecx, void* /*edx*/, void* parent, unsigne
 bool soldier_class_prone_disabled(const void* cls)
 {
    if (!cls) return false;
-   if (get_flags(cls) & kFlagNoProne) return true;
-   return (*(const uint32_t*)((const char*)cls + g_soldier->clsFlags) & kIsAcklayBit) != 0;
+   return (get_flags(cls) & kFlagNoProne) != 0;
 }
 
 bool soldier_class_crouch_disabled(const void* cls)
