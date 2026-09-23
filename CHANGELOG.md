@@ -33,6 +33,13 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- Carriers (vehicle pads with `SetCarrierClass`):
+  - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
+  - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.
+  - Every carrier after the first from the same pad now descends with its cargo bay closed.
+  - Extra vehicles on multi-cargo carriers now get their team back when dropped.
+  - Carriers no longer look skewed while climbing away.
+  - Carrier turrets keep cooling down and reloading while searching for a target.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.

@@ -1,1228 +1,405 @@
-# EntityCarrier System — Reverse Engineering Notes
+# EntityCarrier System
 
-Reverse-engineered from `BF2_modtools.exe` using Ghidra and static analysis.
-All addresses are **unrelocated** (imagebase = `0x400000`). Resolve at runtime via:
+How the engine runs a carrier (a flyer that brings a vehicle to a `vehiclepad` and drops
+it), and what `PatcherDLL/src/entity/flyer_carrier_fixes.cpp` changes. Addresses are
+unrelocated (imagebase `0x400000`). "modtools" is the MemExt debug build; "release" means
+Steam and GOG, which share one layout and, for this subsystem, the same code VAs.
+
+---
+
+## 1. Overview
+
+```
+VehicleSpawn::UpdateSpawn   spawn cargo + carrier, AttachCargo(0), InitAsFlying, Land
+          │                 → carrier is born in LANDING, behind and above the pad
+          ▼
+EntityFlyer::Update         LANDING → LANDED when the ground check passes
+          ▼
+VehicleSpawn::UpdateLive    LANDED → DetachCargo(0) + TakeOff
+          ▼
+EntityFlyer::Update         TAKEOFF → FLYING when the climb completes
+          ▼
+VehicleSpawn::UpdateLive    FLYING → vtable[3](1): the carrier is DELETED
+```
+
+- The carrier never flies a path to the pad. It is spawned already descending.
+- The pad handles one carrier at a time (`VehicleSpawn::mCarrier`).
+- Only cargo slot 0 is ever dropped by the engine.
+- A finished carrier is deleted through its scalar deleting destructor, not killed.
+  `~EntityCarrier` does not detach cargo.
+
+---
+
+## 2. Pointer layout
+
+EntityCarrier is multiply inherited, so different methods receive different `this`
+pointers into the same object. All instance offsets in this document are from the
+**object base** (`[base]` = EntityCarrier vtable) unless stated otherwise.
+
+| Sub-object      | `this` =       | Methods |
+|-----------------|----------------|---------|
+| object base     | `base`         | `AttachCargo`, `DetachCargo`, `UpdateLandedHeight`, `EntityFlyer::TakeOff`, `EntityFlyer::Land` |
+| RedSceneObject  | `base + 0x94`  | `EntityFlyer::Render` |
+| Damageable      | `base + 0x140` | `EntityCarrier::Kill` (calls `DetachCargo(this - 0x140, slot)`) |
+| Controllable    | `base + 0x240` | `EntityCarrier::Update`, `EntityFlyer::Update` |
+
+Proof: cargo slot 0's object pointer is read at `ECX+0x1DDC` in AttachCargo,
+`ECX+0x1C9C` in Kill and `ECX+0x1B9C` in Update (modtools).
+
+Class hierarchy: `EntityEx` → `EntityFlyer` → `EntityCarrier`. The class side is
+`EntityFlyerClass` → `EntityCarrierClass`.
+
+---
+
+## 3. Functions
+
+| modtools   | Steam      | Function | Notes |
+|------------|------------|----------|-------|
+| `004D7210` | `004976B0` | `EntityCarrierClass::SetProperty` | cargo nodes + sounds, see 6 |
+| `004D81F0` | `00497300` | `EntityCarrier::AttachCargo(int slot, GameObject*)` | `bool`, RET 8. Release copy ignores `slot` (always 0) |
+| `004D8350` | `00497410` | `EntityCarrier::DetachCargo(int slot)` | `bool`, RET 4 |
+| `004D7FE0` | `004971D0` | `EntityCarrier::Update(float)` | `this` = base+0x240, RET 4 |
+| `004D8400` | `00497110` | `EntityCarrier::Kill()` | `this` = base+0x140 |
+| `004D8130` | `004974B0` | `EntityCarrier::UpdateLandedHeight()` | |
+| `004F8B70` | `004B3C60` | `EntityFlyer::TakeOff()` | LANDED/LANDING → TAKEOFF |
+| `004F1380` | `004B3D50` | `EntityFlyer::Land()` | FLYING/TAKEOFF/LANDING → LANDING |
+| `004FC930` | `004AC460` | `EntityFlyer::Update(float)` | flight state machine |
+| `004F6970` | `004AB040` | `EntityFlyer::Render` | `this` = base+0x94 |
+| `00665A50` | `0066F370` | `VehicleSpawn::UpdateSpawn(float)` | release: dt in **XMM1**, bare RET |
+| `00665300` | `0066ECF0` | `VehicleSpawn::UpdateLive(float, VehicleTracker*)` | was mislabelled `EntityFlyer::CalculateDest` |
+| `0046C320` |            | Lua `SetCarrierClass` | |
+
+Vtables: EntityCarrier modtools `0x00A3A670`, Steam `0x0079A34C`, GOG `0x0079B2EC`.
+Slot 3 = scalar deleting destructor, 5 = activate, 36 = SetTeam, 41 = ActivatePhysics
+(identical indices on modtools and Steam).
+
+---
+
+## 4. Layouts
+
+### 4.1 Structs
 
 ```cpp
-uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-void* resolved  = (void*)((unrelocated_addr - 0x400000u) + base);
-```
-
----
-
-## Status
-
-| Finding                                                        | Status       |
-|----------------------------------------------------------------|--------------|
-| EntityCarrier inherits EntityFlyer                             | ✅ Confirmed |
-| `mClass` pointer at `inner+0x66C (= primary+0x8AC)`            | ✅ Confirmed |
-| `mCargoSlots[4]` at `inner+0x1DD0 (= primary+0x2010)`, stride `0x14` | ✅ Confirmed |
-| `CargoSlot` layout (offset + PblHandle ptr+gen)                | ✅ Confirmed |
-| `EntityCarrierClass::mCargoInfo[4]` at `+0x1180`, stride `0x10`| ✅ Confirmed |
-| `EntityCarrierClass::mCargoCount` at `+0x11C0`                 | ✅ Confirmed |
-| `mSoundCargoPickup` descriptor at `+0x11C4`                    | ✅ Confirmed |
-| `mSoundCargoDropoff` descriptor at `+0x11D8`                   | ✅ Confirmed |
-| SetProperty cargo-node overflow (count ≥ 4 → self-corruption)  | ✅ Bug fixed |
-| AttachCargo/DetachCargo missing slotIdx bounds check           | ✅ Bug fixed |
-| AttachCargo null cargo ptr before vtable call                  | ✅ Bug fixed |
-| GetDerivedRtti/GetDerivedRttiName — COMDAT-folded with GetRtti | ✅ Confirmed |
-| `unaff_EBX + 0x340` in Update — decompiler artifact           | ✅ Confirmed |
-| Float cast in AttachCargo offset math — decompiler artifact    | ✅ Confirmed |
-| Altitude-based RayHit NOP prevents terrain wobble at altitude  | ✅ Confirmed |
-| Cargo team save/restore disables spawning while carried        | ✅ Confirmed |
-| Descent animation lock (progress=0 during state 3)            | ✅ Confirmed |
-
----
-
-## Pointer Layout
-
-EntityCarrier / EntityFlyer use **two distinct `this`-pointer bases**:
-
-- **Primary base** — ECX received by `EntityCarrier::Update` (`0x004D7FE0`) and
-  `EntityFlyer::Update` (`0x004fc930`).  The thunk at `0x00412ad0` is a plain
-  `JMP 0x004fc930` with **no ECX adjustment**, so both functions see the same pointer.
-- **Inner base** — ECX received by `AttachCargo` (`0x004D81F0`),
-  `DetachCargo` (`0x004D8350`), `UpdateLandedHeight` (`0x004D8130`), and most
-  other EntityCarrier methods.  Always equals **primary + 0x240**.
-
-The old documentation used a "struct_base" concept where "struct_base + 0x240 = Update's ECX".
-That was incorrect — **Update's ECX is the primary base**; there is no separate struct_base.
-
-Confirmed by disassembly:
-- `EntityCarrier::Update` reads cargo at ECX+0x1b9c, count at ECX+0x1be0 (primary offsets).
-- `EntityCarrier::AttachCargo` reads cargo at ECX+0x1DDC, count at ECX+0x1E20 (inner offsets).
-- All differences are exactly 0x240.
-
----
-
-## Class Hierarchy
-
-```
-EntityEx
- └─ EntityFlyer          (base of all flying entities)
-     └─ EntityCarrier    (adds cargo-slot system on top of EntityFlyer)
-```
-
-`EntityCarrier::EntityCarrier` (004D74F0) takes `EntityFlyerClass*` as the class arg,
-confirming it delegates most of the entity setup to EntityFlyer.  The carrier-specific
-data (mCargoSlots, mClass link) is initialised in the EntityCarrier ctor body.
-
----
-
-## Vtables
-
-### EntityCarrier primary vtable — `0x00A3A670` (72 entries)
-
-```
-0x00A3A670  vtable[0]   = EntityCarrier::EntityCarrier (ctor thunk)
-...
-0x00A3A78C  vtable[71]  = (last entry)
-(followed by nulls, then string "EntityCarrier CargoPickupSound")
-```
-
-RTTI name string `"EntityCarrier\0"` → `0x00A3A2EC`
-RTTI global pointer → `0xB7D4DC`
-
-### EntityCarrierClass vtable — `0x00A3A320` (18 entries)
-
-RTTI name string `"EntityCarrierClass\0"` → `0x00A3A2FC`
-RTTI global pointer → `0xB7D484`
-
-`GetDerivedRtti` and `GetDerivedRttiName` are COMDAT-folded into `GetRtti` /
-`GetRttiName` respectively — the linker merged the identical 6-byte bodies, so
-no separate function symbols exist at distinct addresses.
-
----
-
-## Struct Layouts
-
-### `EntityCarrier::CargoSlot` — 20 bytes (`0x14`)
-
-Defined as a Ghidra struct. Four of these live at `inner+0x1DD0` (accessible from AttachCargo/UpdateLandedHeight's ECX).
-
-```cpp
-struct CargoSlot {          // stride 0x14
-    float  mOffset[3];      // +0x00  PblVector3 — attach offset from carrier origin
-    void*  mObjectPtr;      // +0x0C  PblHandle::ptr — raw cargo entity pointer
-    int    mObjectGen;      // +0x10  PblHandle::generation
+struct CargoSlot {            // EntityCarrier::mCargoArray[4], stride 0x14
+   PblVector3 mOffset;        // +0x00 offset from the carrier origin
+   void*      mObjectPtr;     // +0x0C PblHandle pointer
+   int        mObjectGen;     // +0x10 PblHandle id, valid while == cargo+0x204
+};
+struct CargoInfo {            // EntityCarrierClass::mCargoInfo[4], stride 0x10
+   uint32_t   mHash;          // +0x00 CargoNodeName hash, 0 for CargoNodeOffset
+   PblVector3 mOffset;        // +0x04
 };
 ```
 
-**PblHandle validation**: a slot is considered occupied (and the cargo still alive)
-when both of these hold:
-```cpp
-mObjectPtr != nullptr
-*(int*)((char*)mObjectPtr + 0x204) == mObjectGen
-```
+`EntityCarrierClass::mCargoCount` directly follows `mCargoInfo[3]`, so writing entry 4
+overwrites the count itself (see 9.1). The instance copies the class count in its
+constructor.
 
-### `EntityCarrierClass::CargoInfo` — 16 bytes (`0x10`)
+### 4.2 Per-build offsets
 
-Defined as a Ghidra struct. Four of these live at `EntityCarrierClass + 0x1180`.
+Instance fields of EntityFlyer/EntityCarrier in the 0x5xx..0x1Dxx range sit 0x40 lower on
+release; EntityFlyerClass fields 0xC8 lower; EntityCarrierClass cargo fields 0xE0 lower.
+Fields below ~0x200 are unchanged. Values were read from each build's own disassembly
+unless marked *inferred*; the code keeps them in `CarrierLayout`.
 
-```cpp
-struct CargoInfo {          // stride 0x10
-    unsigned int mHash;     // +0x00  node name hash (from kCargoNodeName ODF property)
-    float        mOffset[3];// +0x04  attach-point offset vector (from kCargoNodeOffset)
-};
-```
+| Field | modtools | release |
+|-------|----------|---------|
+| **EntityCarrierClass** `mCargoInfo[4]` | `0x1180` | `0x10A0` |
+| `mCargoCount` | `0x11C0` | `0x10E0` |
+| `mSoundCargoPickup` / `mSoundCargoDropoff` | `0x11C4` / `0x11D8` | |
+| **EntityFlyerClass** takeoff anim (ZephyrAnim*, nFrames at +8) | `0x87C` | `0x7B4` |
+| `MinSpeed` | `0x88C` | |
+| `TakeoffHeight` / `TakeoffTime` / `TakeoffSpeed` | `0x8E0` / `0x8E4` / `0x8E8` | `0x818` / `0x81C` / `0x820` |
+| `LandingTime` / `LandingSpeed` | `0x8EC` / `0x8F0` | `0x824` / `0x828` *inferred* |
+| `mLandedHeight` (= -model bbox min Y, not an ODF key) | `0x8F4` | `0x82C` |
+| weapon count (aimers) / passenger count | `0xD48` / `0xE14` | `0xC80` / `0xD4C` |
+| **Instance** `mFlightState` | `0x5A4` | `0x564` |
+| takeoff/landing `progress` | `0x5A8` | `0x568` |
+| landed height (incl. cargo) | `0x600` | `0x5C0` |
+| `mClass` | `0x66C` | `0x62C` |
+| passengers / turrets / turret count / aimers | `0x670` / `0x680` / `0x6A0` / `0x6A8` | `0x630` / `0x640` / `0x660` / `0x668` |
+| ground distance | `0x6D0` | `0x690` |
+| anim ref used by the render (nFrames source) | `0x1870` | `0x1830` |
+| net anim delta | `0x1D00` | `0x1CC0` |
+| post-collision sub-object | `0x1D10` | `0x1CD0` |
+| `mCargoArray[4]` | `0x1DD0` | `0x1D90` |
 
-### Relevant `EntityCarrier` offsets
+Build-invariant: matrix at `+0xF0` (rows right, up, forward, position at `+0x120`),
+scene bounding sphere `+0xC4..+0xD0`, PblHandle id `+0x204`, team bits `+0x234`
+(bits 4-7 team, 8-11 perceived team).
 
-"Inner" = ECX in AttachCargo/DetachCargo/UpdateLandedHeight.
-"Primary" = ECX in Update/EntityFlyer::Update. Primary = inner + 0x240.
+### 4.3 VehicleSpawn (build-invariant)
 
-| Offset (inner) | Offset (primary) | Type                  | Field                                          |
-|----------------|-------------------|-----------------------|------------------------------------------------|
-| `+0x66C`       | `+0x8AC`          | `EntityCarrierClass*` | `mClass` — pointer to the class descriptor     |
-| `+0x1DD0`      | `+0x2010`         | `CargoSlot[4]`        | `mCargoSlots` (AttachCargo/DetachCargo array)  |
-| `+0x1DDC`      | `+0x201C`         | `void*`               | `mCargoSlots[0].mObjectPtr` (derived)          |
-| `+0x1DE0`      | `+0x2020`         | `int`                 | `mCargoSlots[0].mObjectGen` (derived)          |
-| —              | `+0x1b90`         | `CargoSlot[4]`        | Cargo slots (Update position array)            |
-| —              | `+0x1b9c`         | `void*`               | Update cargo slot 0 obj ptr                    |
-| —              | `+0x1be0`         | `int`                 | Update cargo count                             |
-
-### Relevant `EntityCarrierClass` offsets
-
-| Offset   | Type           | Field                                              |
-|----------|----------------|----------------------------------------------------|
-| `+0x1180`| `CargoInfo[4]` | `mCargoInfo`                                       |
-| `+0x11C0`| `int`          | `mCargoCount` — number of valid CargoInfo entries  |
-| `+0x11C4`| (descriptor)   | `mSoundCargoPickup` — sound played on cargo attach |
-| `+0x11D8`| (descriptor)   | `mSoundCargoDropoff` — sound played on cargo detach|
-
----
-
-## Function Reference
-
-All functions are **thiscall** unless stated otherwise.
-The 0x004xxxxx addresses are small thunks (JMP → 0x004Dxxxx body).
-
-### EntityCarrier
-
-| Address    | Symbol                              | Notes                                      |
-|------------|-------------------------------------|--------------------------------------------|
-| `004D74F0` | `EntityCarrier::EntityCarrier`      | Constructor; delegates to EntityFlyer ctor |
-| `004D7DA0` | `EntityCarrier::~EntityCarrier`     | Destructor                                 |
-| `004D7090` | `EntityCarrier::ActivatePhysics`    | 20-byte body; enables physics on the carrier|
-| `004D7480` | `EntityCarrier::CargoSlot::CargoSlot` | 11-byte trivial ctor; zeros the slot     |
-| `004D7490` | `EntityCarrier::CargoSlot::~CargoSlot`| 1-byte (`C3`); trivial no-op dtor        |
-| `004D7A80` | `EntityCarrier::GetRtti`            | `A1 DC D4 B7 00 C3` — reads RTTI global  |
-| `004D7A90` | `EntityCarrier::GetRttiName`        | `B8 EC A2 A3 00 C3` — returns `"EntityCarrier"` |
-| `004D7FE0` | `EntityCarrier::Update`             | Per-frame; iterates slots, dispatches cargo vtable[0x12] |
-| `004D8130` | `EntityCarrier::UpdateLandedHeight` | Reads CargoSlot.mOffset.y; computes max hover height |
-| `004D81F0` | `EntityCarrier::AttachCargo`        | `(int slotIdx, void* cargo)` — see detail below |
-| `004D8350` | `EntityCarrier::DetachCargo`        | `(int slotIdx)` — see detail below        |
-| `004D8400` | `EntityCarrier::Kill`               | Calls sub-object Kill then DetachCargo     |
-
-Thunks (same bodies at different addresses, different vtable paths):
-
-| Thunk      | Resolves to             |
-|------------|-------------------------|
-| `004065EB` | `~EntityCarrier`        |
-| `0040B87A` | `EntityCarrier::EntityCarrier` |
-
-### EntityCarrierClass
-
-| Address    | Symbol                                  | Notes                                      |
-|------------|-----------------------------------------|--------------------------------------------|
-| `004D7E10` | `EntityCarrierClass::EntityCarrierClass`| Ctor; zeroes mCargoInfo[4] loop + sound init|
-| `004D71E0` | `EntityCarrierClass::~EntityCarrierClass`| Destructor                                |
-| `004D70B0` | `EntityCarrierClass::CargoInfo::CargoInfo`| 3-byte (`8B C1 C3`); trivial ctor returns `this` |
-| `004D71C0` | `EntityCarrierClass::GetRtti`           | `A1 84 D4 B7 00 C3` — reads RTTI global  |
-| `004D71D0` | `EntityCarrierClass::GetRttiName`       | `B8 FC A2 A3 00 C3` — returns `"EntityCarrierClass"` |
-| `004D7210` | `EntityCarrierClass::SetProperty`       | ODF property dispatcher — see detail below |
-| `004D7F00` | `EntityCarrierClass::Build`             | Sets up spatial/collision from CargoInfo   |
-
-Thunks:
-
-| Thunk      | Resolves to                    |
-|------------|--------------------------------|
-| `004069DD` | `EntityCarrierClass` (ctor)    |
-| `00410816` | `EntityCarrierClass` (ctor)    |
-| `00411EAA` | `~EntityCarrierClass`          |
-
-### EntityFlyer (base class)
-
-| Address    | Symbol                              | Notes                                      |
-|------------|-------------------------------------|--------------------------------------------|
-| `004fc930` | `EntityFlyer::Update`               | Main update; state machine (0–5); thunked from `0x00412ad0` |
-| `004fc730` | `EntityFlyer::SetStateLanded`       | Sets state=0, zeroes velocity, positions on ground |
-| `004fc830` | `EntityFlyer::SetStateTakeOff`      | Sets state=2, initial velocity + flight timer |
-| `004f1380` | `EntityFlyer::InitiateLanding`      | Sets state=3; called from Lua `EntityFlyerLand` |
-| `004f8b70` | (unnamed takeoff)                   | Sets state=1; begins ascent                |
-| `00403198` | `EntityFlyerClass::SetProperty`     | ODF property parser; computes mLandedHeight from geometry |
-
-Lua callbacks:
-
-| Address    | Symbol                              | Notes                                      |
-|------------|-------------------------------------|--------------------------------------------|
-| `00472b00` | `Lua_EntityFlyerSetLanded`          | Forces state=0                             |
-| `00472a90` | `Lua_EntityFlyerTakeOff`            | Forces state=2                             |
-| `00472a20` | `Lua_EntityFlyerLand`               | Triggers state=3 (initiate landing)        |
-
-### VehicleSpawn
-
-| Address    | Symbol                              | Notes                                      |
-|------------|-------------------------------------|--------------------------------------------|
-| `00665300` | `VehicleSpawn::CalculateDest`       | Checks carrier state; state=0 → drop cargo, state=2 → destroy |
-| `00665a50` | `VehicleSpawn::UpdateSpawn`         | Spawn sequence: cargo + carrier + attach + takeoff |
-| `00664c50` | `VehicleSpawn::VehicleSpawn`        | Constructor                                |
-
-### AI Carrier Behavior
-
-| Address    | Symbol                              | Notes                                      |
-|------------|-------------------------------------|--------------------------------------------|
-| `005af000` | AI carrier goal (6-state FSM)       | Controls entire carrier flight lifecycle   |
-| `005aee80` | Get entity from AI goal object      | Returns entity pointer from AI goal param  |
-| `004f8b70` | `EntityFlyer::TakeOff`              | Sets state=1 (ASCENDING); called from AI   |
-| `00408602` | `thunk_EntityFlyer::TakeOff`        | Thunk → `004f8b70`                         |
-
-Standalone:
-
-| Address    | Symbol              | Notes                                   |
-|------------|---------------------|-----------------------------------------|
-| `0046C320` | `SetCarrierClass`   | Assigns an EntityCarrierClass to a carrier |
+| Offset | Field |
+|--------|-------|
+| `+0x30`  | `mMatrix` (pad transform) |
+| `+0x70`  | `mClass` (VehicleSpawnClass*, `mIsPad` at class `+0x80`) |
+| `+0x7C`  | `mSpawnCount` |
+| `+0x80`  | `mSpawnTime` |
+| `+0x90`  | `mSpawnClass[8]` (cargo class per team) |
+| `+0xB0`  | `mFlyerClass[8]` (carrier class per team) |
+| `+0xD0`  | `mUseCarrier[8]` |
+| `+0xD8`  | `mTrackerList` (count at `+0xE8`) |
+| `+0xEC`  | `mCarrier` (PblHandle, id at `+0xF0`) |
+| `+0xF4`  | `mVehicleTeam` |
+| `+0xF8`  | `mSpawnTeam` |
 
 ---
 
-## Function Detail
+## 5. Lifecycle in detail
 
-### `EntityCarrierClass::SetProperty` — `004D7210`
+### 5.1 Setup
 
-Signature: `void __thiscall(EntityCarrierClass* this, uint propHash, const char* propValueStr)`
+- The cargo spawn must use `ClassLabel = "vehiclepad"`. `VehicleSpawn::SetProperty` only
+  sets `mUseCarrier` when `VehicleSpawnClass::mIsPad` is set, so a `"vehiclespawn"`
+  bypasses the carrier system entirely.
+- `SetCarrierClass(team, "com_fly_vtrans")` must run in `ScriptInit()` **before** the
+  `ReadDataFile` that loads the pads, so the class is known when their properties are read.
 
-Dispatches on `propHash`:
+### 5.2 Spawn (`VehicleSpawn::UpdateSpawn`)
 
-| Hash         | Property key          | Behaviour |
-|--------------|-----------------------|-----------|
-| `0x3E2C4DA4` | `kCargoNodeName`      | Hashes the string via `FUN_007E1C10`, writes `mCargoInfo[mCargoCount].mHash`, looks up offset from an external node table (up to 0x80 entries searched), copies matched `float[3]` into `mCargoInfo[mCargoCount].mOffset`, increments `mCargoCount`. |
-| `0x910A89FC` | `kCargoNodeOffset`    | Parses `"%f %f %f"` via `sscanf`, writes `mCargoInfo[mCargoCount]`, increments `mCargoCount`. |
-| `0x8897DB28` | `kSoundCargoPickup`   | Forwards args to `mSoundCargoPickup` descriptor at `this+0x11C4`. |
-| `0x910A89FC`…| `kSoundCargoDropoff`  | Forwards args to `mSoundCargoDropoff` descriptor at `this+0x11D8`. |
-| (fallthrough)| (base class)          | Calls `EntityFlyerClass::SetProperty` at `0x00403198`. |
+1. Returns immediately while `mCarrier` is a live handle (one carrier per pad).
+2. Returns and retries in 1 s if the EntityCarrier memory pool is full.
+3. Spawn matrix = the pad matrix, dropped onto the ground with a 50-unit ray.
+4. `gCalcBeginLandPos` moves it in the **pad's local frame**:
+   `Y += LandingTime * LandingSpeed / 2 + LandedHeight`,
+   `Z -= LandingTime * MinSpeed / 2`.
+   The carrier starts behind the pad and approaches along the pad's +Z, so **the pad's
+   facing direction is the approach corridor**.
+5. Cargo is spawned; the carrier is spawned `Y +=` cargo bbox height higher.
+6. Carrier: SetTeam, team bits, activate, `AttachCargo(0, cargo)`, `InitAsFlying`
+   (FLYING, velocity = MinSpeed forward), then `Land()` immediately (LANDING).
+7. Cargo: team, perceived team unless available to any team, activate, then a
+   `VehicleTracker` is appended for the **cargo**. `mVehicleTeam = mSpawnTeam`.
 
-### `EntityCarrier::AttachCargo` — `004D81F0`
+After spawning, the carrier's Y is clamped to `AIUtil::gMaxFlyHeight` (default 200, Lua
+`SetMaxFlyHeight`), so a spawn height above that is pulled down on the first frame.
 
-Signature: `void __thiscall(EntityCarrier* this, int slotIdx, void* cargo)`
+### 5.3 Descent and landing (`EntityFlyer::Update`, state 3)
 
-1. Multiplies `slotIdx × 5` (stride in DWORDs) to address `mCargoSlots[slotIdx]`.
-2. **Pre-check**: if `mCargoSlots[slotIdx].mObjectPtr` is non-null and its generation
-   still matches, the slot is already occupied — returns immediately without attaching.
-3. Otherwise clears the existing stale handle.
-4. Reads `this->mClass` (`inner+0x66C`) → `mCargoInfo[slotIdx]` → attach-point offset.
-5. Calls `cargo->vtable[0x28](cargo_ptr_arg)` to notify cargo it is being attached
-   (no null check before this call — **bug, guarded by our hook**).
-6. Computes `slot.mOffset = mCargoInfo[slotIdx].mOffset − cargo_world_pos`
-   via FLD/FSUB/FSTP (float bits preserved through integer register copy).
-7. Stores `cargo` and `cargo->field_0x204` (generation) into the slot.
-8. **Redundant second generation check** — dead code; the equality always holds
-   immediately after the store in step 7.
-9. Writes back-reference into `cargo + 0x58`.
+- `progress -= dt / LandingTime` (floor 0).
+- Target velocity: down at `LandingSpeed * (0.125 + 0.875 * scale)`, horizontal speed
+  damped exponentially.
+- A 1024-unit downward RayHit gives the ground distance. LANDING → LANDED when
+  ground distance < instance landed height **and** the surface normal dot up > 0.9375
+  (slope under ~20 degrees) **and** the surface is not water / `DenyFlyerLand`.
+  On a bad surface it goes straight to TAKEOFF (state 1) instead. This write is inside
+  Update and does not go through `TakeOff`.
+- Holding the flyer's land trigger with progress < 0.05 also aborts to TAKEOFF.
 
-### `EntityCarrier::DetachCargo` — `004D8350`
+Instance landed height (`UpdateLandedHeight`): class `mLandedHeight`, raised to
+`-slot.offset.y - cargoBBoxMinY` for every attached cargo, so the carrier lands with the
+cargo touching the ground.
 
-Signature: `void __thiscall(EntityCarrier* this, int slotIdx)`
+### 5.4 Drop and removal (`VehicleSpawn::UpdateLive`)
 
-1. Addresses `mCargoSlots[slotIdx]` via `slotIdx × 5` DWORD stride.
-2. If `mObjectPtr == null` → no-op return.
-3. Validates generation: if `mObjectPtr->field_0x204 != mObjectGen` → stale,
-   clears the handle and returns.
-4. If valid, zeros `mObjectPtr` and `mObjectGen`.
-5. Writes zero to `cargo + 0x58` (clears back-reference).
-6. Carries the same **redundant double-validation** pattern as AttachCargo (dead code).
+`VehicleSpawn::Update` walks the tracker list and calls `UpdateLive` once per **live**
+tracked vehicle, then calls `UpdateSpawn` if fewer trackers than `mSpawnCount` remain.
+Inside UpdateLive, while `mCarrier` is valid:
 
-### `EntityCarrier::Update` — `004D7FE0`
+- LANDED: `DetachCargo(0)` then `TakeOff()`.
+- FLYING: `carrier->vtable[3](1)` (`PUSH 1; CALL [EAX+0xC]` on both builds). Deleted.
+- anything else: fall through to the empty-vehicle expiry logic for the tracked vehicle.
 
-Signature: `bool __thiscall(EntityCarrier* this, float deltaTime)`
+TAKEOFF → FLYING happens in Update when `progress += dt / TakeoffTime` reaches 1 while
+ground distance > `TakeoffHeight + LandedHeight`.
 
-Iterates `mCargoSlots[0..3]`. For each occupied (live) slot:
-- Calls `cargo->vtable[0x12](carrier_this + 0x340)` — notifies cargo of carrier state.
+### 5.5 EntityCarrier methods
 
-The Ghidra decompiler shows `unaff_EBX + 0x340` here, which appears to be an
-uninitialized register bug. **Confirmed not a bug** by disassembly: `[ESP+0x18]`
-holds the carrier's `this` pointer saved in the function prologue; `ADD EAX, 0x340`
-at `004D80AB` produces `carrier_this + 0x340` correctly.
+- **Update**: after `EntityFlyer::Update` returns true, every live cargo is placed:
+  slot offset through the carrier matrix, cargo sub-object `vtable+0xC` (SetMatrix), then
+  cargo `vtable+0x48(&carrier velocity)` (SetVelocity). **Cargo placement happens inside
+  the original Update.** It also counts down the 1.5 s "recently detached cargo" timer.
+- **AttachCargo**: returns false if the slot already holds live cargo. Otherwise
+  `offset = node.offset - cargo->GetCenter()` (`vtable+0xA0`, no null check), stores the
+  handle, sets `cargo+0x58` (`CollisionObject::mParent`) to the carrier, updates the
+  landed height, plays `PickupSound`.
+- **DetachCargo**: clears `cargo->mParent`, remembers the cargo for 1.5 s (collisions with
+  it are ignored meanwhile), clears the slot, updates the landed height, plays
+  `DropoffSound`.
+- **Kill**: drops first person for a local pilot, wakes and detaches every live cargo,
+  then `EntityFlyer::Kill`.
+- **ActivatePhysics**: only activates the Controllable with priority -1. EntityFlyer's
+  version also activates the post-collision sub-object (-15), aimers, turrets and
+  passenger slots, so carrier turrets are built but never activated.
 
-### `EntityCarrier::Kill` — `004D8400`
+### 5.6 Flight states
 
-Calls the Kill method on the sub-object at `this + 0x140`, then calls
-`DetachCargo(this, slotIdx)` with the corrected `this` pointer (subtracts `0x140`
-back to reach the EntityCarrier base).
+| State | Name |
+|-------|------|
+| 0 | LANDED |
+| 1 | TAKEOFF (ascending) |
+| 2 | FLYING |
+| 3 | LANDING |
+| 4 | DYING |
+| 5 | DEAD |
 
-### `EntityCarrierClass::EntityCarrierClass` — `004D7E10`
-
-Zeroes the 64-byte `mCargoInfo[4]` block (4 entries × 16 bytes) via a
-DWORD-stepping write loop. Then initialises the two sound description members
-(`mSoundCargoPickup`, `mSoundCargoDropoff`).
-
----
-
-## Bugs Found and Fixed
-
-All fixes live in `PatcherDLL/src/entity/flyer_carrier_fixes.cpp`, installed via
-Detours in `lua_hooks_install()`.
-
-### Bug 1 — `SetProperty`: `mCargoCount` buffer overflow (critical)
-
-**Location**: `004D7210` — both the `kCargoNodeName` and `kCargoNodeOffset` handlers.
-
-When `mCargoCount == 4`, the write destination becomes:
-
-```
-(4 + 0x118) * 0x10 = 0x11C0  →  exactly &mCargoCount itself
-```
-
-The 5th write self-corrupts `mCargoCount` with a hash value or float bits.  The
-6th write lands at `+0x11C4` = `mSoundCargoPickup`, silently trashing the sound
-descriptor.  A malformed ODF with > 4 cargo nodes triggers this every load.
-
-**Fix**: before calling the original, read `mCargoCount` and return early if `>= 4`.
-
-### Bug 2 — `AttachCargo`: No `slotIdx` bounds check
-
-**Location**: `004D81F0` — `slotIdx` is used directly in `slotIdx * 5 * 4`
-address arithmetic with no validation.  An out-of-range index walks past
-`mCargoSlots[3]` into adjacent struct memory.
-
-**Fix**: `if ((unsigned)slotIdx >= 4) return;`
-
-### Bug 3 — `AttachCargo`: Null `cargo` pointer before vtable call
-
-**Location**: `004D8246` — `CALL dword ptr [EDX + 0xA0]` (vtable[0x28]) is
-executed on `cargo` before any null check, crashing immediately on null input.
-
-**Fix**: `if (!cargo) return;`
-
-### Bug 4 — `DetachCargo`: No `slotIdx` bounds check
-
-**Location**: `004D8350` — same arithmetic as AttachCargo, same OOB hazard.
-
-**Fix**: `if ((unsigned)slotIdx >= 4) return;`
-
-### Non-bug observations
-
-- **`AttachCargo` float cast**: Ghidra decompiler shows `(int)(float - float)`,
-  implying truncation. Disassembly confirms `FLD / FSUB / FSTP` followed by
-  `MOV` of the raw bit pattern — the float value is preserved correctly.
-- **`AttachCargo` redundant generation re-check**: The second generation
-  check after writing ptr+gen is always true (dead code). Harmless, left alone
-  since reimplementing the full function to remove it isn't worth the risk.
+The generic flyer AI goal (`005AF000`, modtools) picks random command posts and calls
+`TakeOff` whenever the flyer isn't FLYING, including mid-descent. Unchecked, the carrier
+oscillates LANDING → TAKEOFF → LANDING and never lands.
 
 ---
 
-## ODF Property Reference
+## 6. ODF reference
 
-Properties parsed by `EntityCarrierClass::SetProperty`:
+`EntityCarrierClass::SetProperty`:
 
-```
-CargoNodeName    = <node_name>          // lookup in node table → mCargoInfo[n].mHash + .mOffset
-CargoNodeOffset  = <x> <y> <z>          // direct vec3 → mCargoInfo[n].mOffset
-SoundCargoPickup  = <sound_file> ...    // sound descriptor args
-SoundCargoDropoff = <sound_file> ...    // sound descriptor args
-```
+| Key | Hash | Effect |
+|-----|------|--------|
+| `CargoNodeName`   | `0x3E2C4DA4` | Looks the bone up in the **already loaded** geometry (up to 0x80 bones) and copies its bind translation into a new cargo node. Bone missing or no geometry yet: no node is created, silently. |
+| `CargoNodeOffset` | `0x910A89FC` | `x y z`, creates a **new** cargo node. Does not adjust a `CargoNodeName` node. |
+| `PickupSound`     | `0x759C8F54` | played on attach |
+| `DropoffSound`    | `0x8897DB28` | played on detach (`DropOffSound` hashes the same) |
 
-Up to **4 cargo nodes** are supported (`mCargoInfo[4]`).  Additional nodes beyond
-the first 4 are silently dropped (enforced by `flyer_carrier_fixes`).
+- `GeometryName` must come before `CargoNodeName`.
+- Maximum 4 cargo nodes (GameExt enforces it, see 9.1).
+- Whether the bone translation is model space or parent-relative has not been checked; a
+  hardpoint nested under other bones may be misplaced.
+
+EntityFlyerClass keys that matter for carriers:
+
+| Key | Effect for a pad carrier |
+|-----|--------------------------|
+| `LandingTime` | descent duration; also sets the spawn distance (5.2) |
+| `LandingSpeed` | descent speed; also sets the spawn height |
+| `MinSpeed` | initial forward speed; sets the spawn distance |
+| `TakeoffTime` | climb duration until FLYING (and deletion) |
+| `TakeoffSpeed` | climb speed; GameExt also uses it as the post-drop forward speed |
+| `TakeoffHeight` | climb must clear `TakeoffHeight + LandedHeight` before FLYING |
+
+Collision: carrier meshes need at least one `p_` collision primitive. With none,
+`EntityFlyerClass::SetProperty` (`004FA310`) builds a `main_body` capsule from the model
+bounding box (radius = average of the X/Z half extents, height = Y extent), which is
+usually far too large.
 
 ---
 
-## VehicleSpawn / vehiclepad Integration
-
-This section covers how the carrier system is driven by the `VehicleSpawn` world entity
-and the `VehicleSpawnClass` ODF class.
-
-### ClassLabel: `"vehiclespawn"` vs `"vehiclepad"`
-
-Both registered in `GameState::CreateBaseEntityClasses` (`0x0044d296`):
-
-```cpp
-VehicleSpawnClass(hash("vehiclespawn"), isPad=0);  // plain vehicle spawn
-VehicleSpawnClass(hash("vehiclepad"),   isPad=1);  // carrier landing pad
-```
-
-`VehicleSpawnClass::mIsPad` sits at `VehicleSpawnClass + 0x80`.
-
-`VehicleSpawn::SetProperty_` (mislabeled by Ghidra — `this` is the **world entity**, not the
-class) checks this flag before ever setting `UseCarrier`:
-
-```asm
-MOV EDX, [EBX + 0x70]    ; VehicleSpawn::mClass (VehicleSpawnClass*)
-MOV AL,  [EDX + 0x80]    ; VehicleSpawnClass::mIsPad
-TEST AL, AL
-JZ   skip_carrier_setup  ; isPad == false → UseCarrier[team] stays false, mFlyerClass[team] = null
-```
-
-**Consequence**: if your cargo-spawn entity uses `ClassLabel = "vehiclespawn"`, the carrier
-system is completely bypassed regardless of `SetCarrierClass`.  You must use
-`ClassLabel = "vehiclepad"`.
-
-### VehicleSpawn world entity struct (from constructor `0x00664c50`)
-
-All offsets from the `VehicleSpawn*` world-entity pointer:
-
-| Offset  | Type              | Field                                      |
-|---------|-------------------|--------------------------------------------|
-| `+0x70` | `VehicleSpawnClass*` | `mClass`                               |
-| `+0x78` | `uint`            | `mSpawnClass hash` (entity class hash)     |
-| `+0x80` | `float`           | `mSpawnTime`                               |
-| `+0x90` | `EntityClass*[8]` | `mSpawnClass[8]` — cargo class per team    |
-| `+0xB0` | `EntityClass*[8]` | `mFlyerClass[8]` — carrier class per team  |
-| `+0xD0` | `bool[8]`         | `mUseCarrier[8]`                           |
-| `+0xDC` | ptr               | linked list head (spawn-exclusion zones)   |
-| `+0xE8` | `int`             | active tracker count                       |
-| `+0xEC` | ptr               | `mCarrier` — PblHandle ptr                 |
-| `+0xF0` | `uint`            | `mCarrier` — PblHandle generation          |
-| `+0xF4` | `int`             | previous spawn team                        |
-| `+0xF8` | `int`             | current vehicle team (0-based)             |
-| `+0xFC` | `bool`            | spawn timer active flag                    |
-| `+0x100`| `float`           | spawn timer countdown                      |
-
-### SetCarrierClass Lua callback (`0x0046C320`)
-
-```lua
-SetCarrierClass(teamNumber, "com_fly_vtrans")
-```
-
-Writes the carrier class to `SpawnManager::sInstance_->mMaxUnitCount[team-6] + 0x5C`.
-`VehicleSpawn::SetProperty_` reads that same `team_entry + 0x5C` to populate
-`mFlyerClass[team]`.
-
-**Timing requirement**: must be called in `ScriptInit()` **before** `ReadDataFile("dc:VTR\\VTR.lvl")`
-(or whichever file loads the vehiclepad entities), so the carrier class is already
-registered when the entity's properties are processed.
-
-### Carrier spawn sequence (`VehicleSpawn::UpdateSpawn`, `0x00665a50`)
-
-When `mUseCarrier[team]` is true and the spawn timer fires:
-
-1. Computes spawn transform (midpoint of vehiclepad's bounding box, using its region).
-2. Checks the spawn exclusion zone — returns early if blocked.
-3. Spawns the **cargo entity** (e.g. AT-TE): `mSpawnClass[team]->vtable[2](transform)`.
-4. Calls `FUN_006646b0(mFlyerClass[team], &spawnTransform)` to **adjust** the carrier spawn
-   position (offsets it based on carrier-class bounding box fields at `+0x88c / +0x8ec`).
-5. Spawns the **carrier entity** (vtrans): `mFlyerClass[team]->vtable[2](adjustedTransform)`.
-6. Calls `EntityCarrier::AttachCargo(carrier, 0, cargo)` — attaches cargo to slot 0.
-7. Calls `FUN_004fc830(carrier)` — sets initial velocity (`speed × forward_dir`) and
-   thruster effects; **carrier will fly straight in the vehiclepad's facing direction**
-   if no AI path takes over.
-8. Calls `FUN_004f1380(carrier)` — plays engine sounds, sets flight state, and activates
-   the flight AI via `(**(entity+0x0c))->vtable[1]()`.
-9. Allocates a `VehicleTracker` for the **cargo** entity (not the carrier) and links it.
-
-### Carrier Spawn Height Calculation
-
-The carrier's initial spawn Y position is computed by `FUN_006646b0`, called in step 4 above.
-This function reads `LandingTime`, `LandingSpeed`, and `LandedHeight` from the `EntityFlyerClass`:
-
-```
-Y_offset = LandingTime * LandingSpeed * 0.5 + LandedHeight
-Z_offset = LandingTime * FlightSpeed * -0.5
-```
-
-Where `FlightSpeed` is the carrier's current forward speed. The carrier spawns this far above
-the VehiclePad's ground position. In practice:
-
-```
-Example: LandingTime = 15, LandingSpeed = 30, LandedHeight = 3
-Y_offset = 15 * 30 * 0.5 + 3 = 228 units above the pad
-```
-
-After spawning, the carrier's Y is **clamped every frame** by `AIUtil::gMaxFlyHeight`
-(global at `0x00b8e9ec`, default `200.0`). The clamp applies as `Y <= gMaxFlyHeight + 0.2`.
-This value can be set from Lua via `SetMaxFlyHeight(height)`.
-
-If the computed spawn offset exceeds `gMaxFlyHeight`, the carrier will immediately be pulled
-down to the fly ceiling on its first update frame. To get a lower spawn without altering
-the landing behaviour, reduce `LandingTime` or `LandingSpeed`, or set `SetMaxFlyHeight`
-to the desired ceiling in your mission Lua.
-
-### EntityFlyer State Machine (`primary+0x364`)
-
-EntityCarrier inherits from EntityFlyer.  The thunk at `0x00412ad0` is a plain
-`JMP 0x004fc930` with no `this`-pointer adjustment, so `EntityFlyer::Update` and
-`EntityCarrier::Update` receive the same ECX value (the **primary base**).
-The flight state is at `primary + 0x364`.
-
-| State | Name       | Description                                              |
-|-------|------------|----------------------------------------------------------|
-| 0     | LANDED     | On the ground; VehicleSpawn::CalculateDest drops cargo   |
-| 1     | ASCENDING  | Taking off; rising toward TakeoffHeight                  |
-| 2     | FLYING     | In-flight; following AI path or straight-line velocity   |
-| 3     | LANDING    | Descending toward the ground; checking landing condition |
-| 4     | DYING      | Crash/death sequence; timer counting down                |
-| 5     | DEAD       | Crash timer expired; entity ready for cleanup            |
-
-#### State transitions
-
-```
-0 (Landed)    → 1 (Ascending)  : FUN_004f8b70 (takeoff button / AI)
-1 (Ascending) → 2 (Flying)     : ascent progress >= 1.0 AND altitude > TakeoffHeight + LandedHeight
-1 (Ascending) → 3 (Landing)    : throttle threshold exceeded during ascent
-2 (Flying)    → 3 (Landing)    : EntityFlyer::InitiateLanding (0x004f1380) or auto-land in Update
-3 (Landing)   → 0 (Landed)     : ground_distance < LandedHeight AND surface_normal_dot > 0.9375
-3 (Landing)   → 1 (Ascending)  : surface is water / DenyFlyerLand / throttle abort
-  any state   → 4 (Dying)      : no passengers, death conditions met
-4 (Dying)     → 1 (Ascending)  : re-activated (entities rejoin formation)
-4 (Dying)     → 5 (Dead)       : crash timer expires
-```
-
-#### State writes in `EntityFlyer::Update` (`0x004fc930`)
-
-| Address      | Value | Context                                                    |
-|--------------|-------|------------------------------------------------------------|
-| `0x004fd1fd` | 4     | No passengers → dying                                     |
-| `0x004fd226` | 1     | Re-activated from dying → ascending                       |
-| `0x004fe0e5` | 4     | No carrier spawned → forced death                         |
-| `0x004fe848` | 3     | Ascending → landing (progress threshold)                  |
-| `0x004fe940` | 2     | Ascending → flying (ascent complete)                      |
-| `0x004fe9b8` | 3     | Flying → landing (boundary/timer trigger)                 |
-| `0x004fea28` | 1     | Landing → ascending (abort: throttle)                     |
-| `0x004febfd` | 1     | Landing → ascending (abort: water/DenyFlyerLand surface)  |
-| `0x004fec0b` | **0** | **Landing → landed** (ground reached, surface valid)      |
-| `0x005004a7` | 5     | Dying → dead (crash timer expired)                        |
-
-Other functions that write `primary+0x364` (flight state):
-
-| Address      | Function                         | Value | Notes                                |
-|--------------|----------------------------------|-------|--------------------------------------|
-| `0x004fc730` | `EntityFlyer::SetStateLanded`    | 0     | Zeroes velocity, positions on ground |
-| `0x004fc830` | `EntityFlyer::SetStateTakeOff`   | 2     | Sets initial velocity, flight timer  |
-| `0x004f1380` | `EntityFlyer::InitiateLanding`   | 3     | Called from Lua `EntityFlyerLand`    |
-| `0x004f8b70` | `EntityFlyer::TakeOff`           | 1     | Takes off; called by AI behavior     |
-
-### AI Carrier Behavior State Machine — `005af000`
-
-The carrier's flight lifecycle is controlled by a 6-state AI goal function at `0x005af000`.
-This function runs independently of `EntityFlyer::Update` and manages path generation,
-destination selection, and flight state transitions. It is called via the AI system between
-entity Update frames.
-
-The AI goal object is passed as `param_1`. Key fields:
-- `param_1[1]` — current AI state (1–6, used as switch case)
-- `param_1[3]` — reference to controller/entity data
-- `param_1[0x13]` — VehicleSpawn/destination reference
-- `param_1[0x15]` — flag byte (toggled during landing sequence)
-- `param_1[0x16]` — timer value
-
-Entity access: `thunk_FUN_005aee80(param_1)` returns the actual entity pointer
-(inner/struct base, where `+0x5A4` = flight state, `+0x66C` = class pointer).
-
-#### AI states
-
-| AI State | Name | Behaviour |
-|----------|------|-----------|
-| 1 | CHECK LANDED | If entity flight state == 0 → clear AI path, return (landing complete). Otherwise → set AI state to 4 (pick destination). |
-| 2 | INITIAL TAKEOFF | Creates a 2-point AIPath: current position → 200 units straight ahead. If entity state ≠ 2 (FLYING) → calls `TakeOff` → entity state = 1. |
-| 3 | AT DESTINATION | If arrived at destination and flag is set, records timer = `now + 10`. Clears AI path. |
-| 4 | PICK NEXT DEST | Picks a **random command post** (`AIUtil::GetRandomInt(0, numCPs-1)`). Loops up to 10 times to find one >100 units away. Sets destination to `CP.position + (0, 20, 0)`. If entity state ≠ 2 → calls `TakeOff` → **entity state = 1 (BUG: interrupts LANDING)**. |
-| 5 | LANDING APPROACH | Reads destination from `param_1[0x13]` (VehicleSpawn ref). Adjusts position via `FUN_006646b0` (carrier bbox adjustment). Computes approach direction with `y = -0.2` (slight descent). Creates 3-point AIPath: current → approach point (2× entity radius back) → destination. |
-| 6 | HANDLE LANDING | Toggles landing flag. If flag was set, registers landing zone and transitions to AI state 3. Otherwise sets flag, transitions AI to state 3. |
-
-#### AI state flow
-
-```
-Spawn → AI state 2 (takeoff) → AI state 4 (pick random CP)
-  → fly to CP → AI state 3 (arrived) → AI state 5 (landing approach)
-  → AI state 6 (landing) → AI state 3 (at destination)
-  → AI state 1 (check landed) → if state==0: cargo drop. else: AI state 4 (cycle)
-```
-
-#### Bug: Case 4 interrupts landing
-
-In AI state 4, the check `if (entity_state != 2)` triggers `TakeOff`, which forces
-entity state = 1 (ASCENDING). This runs even when the entity is in state 3 (LANDING),
-yanking the carrier back up mid-descent. The AI state machine runs between `EntityFlyer::Update`
-frames, so the transition is invisible to hooks inside Update.
-
-**Result**: carrier oscillates LANDING → ASCENDING → LANDING indefinitely, never reaching
-`gndDist < landedHt`, so it never lands (state 0) and VehicleSpawn never drops cargo.
-
-**Fix**: hook `TakeOff` (`0x004f8b70` / thunk `0x00408602`) to suppress the 3→1
-transition. If entity is already in state 3, return early without calling the original.
-The existing landing physics will complete the descent naturally.
-
-#### Path generation (not placed splines)
-
-The carrier does **not** use placed spline paths from Zero Editor. The AI behavior generates
-its own `AIPath` objects on the fly:
-- Case 2: simple 200-unit forward path
-- Case 4: single waypoint at random CP + 20 height
-- Case 5: 3-point approach path with slight descent angle
-
-The ODF `PathFollower*` properties (`PathFollowerClass`, `PathFollowerBranchPaths`, etc.) may
-be consumed by a lower-level path-following system, but the destination selection and path
-construction is entirely controlled by `FUN_005af000`.
-
-### Landing condition (state 3 → 0)
-
-The only place state 0 is written in `EntityFlyer::Update` is at `0x004fec0b`.
-The condition chain (disassembly at `0x004feb17`–`0x004fec0b`):
-
-```
-1. ground_distance + field_0x3c0 < raycast_result   (first proximity check)
-2. raycast_distance < field_0x3c0                     (final proximity check)
-3. surface_normal_dot > 0.9375                        (surface flatness — cos(~20°))
-4. collision node is NULL  OR  NOT (water OR DenyFlyerLand)
-```
-
-**`field_0x3c0`** = `primary + 0x3C0` = the **landed height** (hover floor).
-This is the distance below which the flyer is considered "on the ground."
-
-If `ground_distance >= field_0x3c0`, landing never completes and the carrier
-stays in state 3 (or reverts to 1).  VehicleSpawn::CalculateDest then sees
-state ≠ 0 → destroys the carrier instead of dropping cargo.
-
-### `mLandedHeight` — hover floor / landing threshold
-
-**Instance field**: `primary + 0x3C0` (read by EntityFlyer::Update landing condition)
-
-**Note**: `UpdateLandedHeight` writes to `inner + 0x600` (= `primary + 0x840`).  This appears
-to be a separate copy — the landing condition reads from `primary + 0x3C0` which is the
-EntityFlyer-level field initialized from `EntityFlyerClass + 0x8F4` during construction.
-
-**Class field**: `EntityFlyerClass + 0x8F4`
-
-Computed in `EntityFlyerClass::SetProperty` when `GeometryName` is processed:
-```cpp
-mLandedHeight = -(*(float*)(redModel + 0x9C));  // = -(bounding_box_min.Y)
-```
-
-**NOT an ODF property** — purely derived from the model geometry's bounding box.
-If the model's lowest point is at Y = -2.0 in local space, then mLandedHeight = 2.0.
-
-**Instance override**: `EntityCarrier::UpdateLandedHeight` (`0x004D8130`) adjusts
-the per-instance value (offsets here use UpdateLandedHeight's ECX = inner base):
-```cpp
-inner+0x600 = mClass+0x8F4;   // start with class base height  (= primary+0x840)
-for each cargo slot:
-    cargoHeight = -(cargoOffsetY) - cargoGeometryHeight;
-    inner+0x600 = max(inner+0x600, cargoHeight);
-```
-
-So the effective landing threshold = `max(carrier_bbox_height, cargo_adjusted_heights)`.
-
-### Carrier flight & drop mechanism
-
-After spawn the carrier follows the world's **AI path network** (flyer paths placed in
-Zero Editor).  Without valid AI path nodes, the carrier maintains the straight-line
-velocity set in step 7 above indefinitely.
-
-**Normal drop mechanism** — `VehicleSpawn::CalculateDest` (`0x00665300`):
-- VehicleSpawn stores a carrier handle at `+0xEC`/`+0xF0` when the carrier reaches
-  its destination.
-- On subsequent calls, checks `carrier->state` (`primary+0x364`):
-  - **State 0** (landed): calls `DetachCargo(0)` — cargo drops at current position.
-  - **State 2** (still flying): destroys the carrier (timeout path).
-- The carrier must successfully land (state 3 → 0) for cargo to drop.  If it never
-  completes landing, VehicleSpawn destroys it.
-
-**Kill-based drop** — `EntityCarrier::Kill` (`004D8400`):
-- Kills the sub-object at `this + 0x140`.
-- Calls `DetachCargo(this, slotIdx)` for each occupied slot.
-- The cargo entity falls / lands at the carrier's current world position.
-
-### Why landing may fail
-
-1. **Carrier never enters state 3**: nothing calls `InitiateLanding` / Lua `EntityFlyerLand`.
-   The carrier stays in state 2 forever → VehicleSpawn destroys it.
-2. **Terrain slope > ~20°**: the surface normal dot product check (`> 0.9375`) fails.
-   Landing aborts and carrier re-ascends (state 1).
-3. **Water / DenyFlyerLand surface**: collision model has the deny flag set.
-4. **LandedHeight too small**: if `field_0x3c0` is near zero (model bbox bottom at Y≈0),
-   the carrier must nearly touch the ground to satisfy the distance check.
-5. **External state=1 writes** (confirmed for VehicleSpawn carrier): something outside
-   `EntityFlyer::Update` sets state=1 between frames, interrupting the landing approach
-   before the carrier reaches `gndDist < landedHt`. This creates a 3→1→3 cycle where the
-   carrier oscillates between LANDING (descending ~5-10 units) and ASCENDING (climbing back up),
-   never reaching the ground. The source of the external state=1 write is likely `FUN_004f8b70`
-   called by the VehicleSpawn/AI path system.
-
-### Required world setup for vtrans carrier
-
-1. **`ClassLabel = "vehiclepad"`** on the cargo/AT-TE VehicleSpawn entity.
-2. `SetCarrierClass(team, "com_fly_vtrans")` in `ScriptInit()` before loading the level.
-3. **Flyer AI path nodes** in Zero Editor from the vehiclepad → drop zone.  Without these,
-   the vtrans flies straight in the vehiclepad's facing direction and never drops cargo.
-4. `CargoNodeName = <bone_name>` in `com_fly_vtrans.odf` — names the bone in the vtrans
-   geometry where the AT-TE is suspended.  Without it `mCargoCount = 0` and the AT-TE
-   attaches at the carrier's geometric centre (`mCargoInfo[0].mOffset = 0`).
-
-### Key EntityFlyer / EntityFlyerClass fields
-
-All offsets use the **primary base** (= ECX in Update / EntityFlyer::Update).
-Inner-base equivalents = primary offset − 0x240.
-
-| Primary offset | Type    | Field                                    |
-|----------------|---------|------------------------------------------|
-| `+0x364`       | int     | Flight state (0–5)                       |
-| `+0x368`       | float   | Takeoff/landing progress (0.0–1.0)       |
-| `+0x340`       | Vec3    | Velocity vector                          |
-| `+0x358`       | float   | Speed magnitude                          |
-| `+0x3C0`       | float   | LandedHeight (landing threshold)         |
-| `+0x3C4`       | float   | Flight timer                             |
-| `+0x8AC`       | ptr     | EntityFlyerClass* / EntityCarrierClass*  |
-
-| Offset (class)  | Type    | Field                                          |
-|------------------|---------|-------------------------------------------------|
-| `+0x884`         | float   | Gravity (applied per-frame as velocity change)  |
-| `+0x888`         | float   | Gravity (alternate, used when boosting)         |
-| `+0x88C`         | float   | MinSpeed / FlightSpeed (ODF `MinSpeed`)         |
-| `+0x890`         | float   | MidSpeed / MidFlyerSpeed (ODF `MidSpeed`)       |
-| `+0x894`         | float   | MaxSpeed / MaxFlyerSpeed (ODF `MaxSpeed`)        |
-| `+0x898`         | float   | BoostSpeed (ODF `BoostSpeed`)                   |
-| `+0x8E0`         | float   | TakeoffHeight (ODF property)                   |
-| `+0x8E4`         | float   | TakeoffTime (ODF property)                     |
-| `+0x8E8`         | float   | TakeoffSpeed (ODF property)                    |
-| `+0x8EC`         | float   | LandingTime (ODF property)                     |
-| `+0x8F0`         | float   | LandingSpeed (ODF property)                    |
-| `+0x8F4`         | float   | mLandedHeight = -(model_bbox_Y_min), NOT ODF   |
-| `+0x1118`        | byte    | Flags; bit 0 = is carrier class; bit 1 = auto-land capable |
-
-### `FUN_004fc830` / `SetStateTakeOff` field reference
-
-All offsets use the **primary base** (ECX as received by SetStateTakeOff).
-
-| Offset (primary) | Value set       | Notes                                        |
-|------------------|-----------------|----------------------------------------------|
-| `+0x378..C`      | `gVectorZero`   | clears stored velocity                       |
-| `+0x080`         | `-4.0f`         | initial Y-velocity / hover offset            |
-| `+0x340..8`      | `speed × fwd`   | initial flight velocity vector               |
-| `+0x358`         | `speed`         | flight speed magnitude                       |
-| `+0x35C..0`      | zeros           | clears extra velocity state                  |
-| `+0x364`         | `2`             | flight mode state = FLYING                   |
-| `+0x3C4`         | `15.0f`         | internal timer (`0x41700000`)                |
-| `+0x368`         | `1.0f`          | takeoff progress = complete                  |
-
-Speed source: `FUN_004f0a10(entity)` reads `mClass + 0x88c` (EntityFlyerClass flight speed).
+## 7. Rendering
+
+- `EntityFlyer::Render` shows takeoff anim frame `(nFrames - 1) * progress`, using the
+  anim ref cached on the instance. During LANDING, progress runs 1 → 0, so vanilla plays
+  the takeoff clip backwards on the way down.
+- The render's first argument is the LOD. Far-scene objects render at LOD 3, which may
+  have no skinning, so an animation can run and still be invisible.
+- The render is skipped by a JZ after the frustum test on the scene bounding sphere
+  (modtools `0x004F6999`, release `0x004AB082`).
 
 ---
 
-## ODF Flight Parameters — Detailed Behaviour
+## 8. Team bits and carried cargo
 
-All five flight parameters are set in the carrier's ODF (e.g. `com_fly_vtrans.odf`) and stored
-in the `EntityFlyerClass` struct. `EntityFlyer::Update` reads them from the class pointer at
-`primary+0x42C`.
-
-### `TakeoffHeight` — cls+0x8E0
-
-**ODF**: `TakeoffHeight = 2`
-
-Used in two contexts:
-
-1. **Vertical velocity scaling** (cases 1 and 3, second switch):
-   ```
-   scale = clamp(gndDist / TakeoffHeight, 0.0, 1.0)
-   vertical_speed = (scale * 0.875 + 0.125) * TakeoffSpeed_or_LandingSpeed
-   ```
-   With `TakeoffHeight=2`, the scale maxes out at 1.0 whenever `gndDist > 2`. This means the
-   carrier gets full vertical speed almost immediately. A larger TakeoffHeight would create a
-   gradual ramp-up as the carrier gets further from the ground.
-
-2. **Ascending progress gate** (case 1, first switch):
-   ```
-   if (gndDist > TakeoffHeight + landedHt) {
-       progress += dt / TakeoffTime;
-   }
-   ```
-   Progress only increases while the carrier is above `TakeoffHeight + landedHt`. With
-   `TakeoffHeight=2` and `landedHt≈0.77`, this gate is always open (carrier is at gndDist≈25).
-
-**Player flyer vs carrier**: for a player-controlled flyer, this is the height at which the
-pilot's turn controls ramp up to full authority. For the VehicleSpawn carrier, the value is
-irrelevant because gndDist always far exceeds it.
-
-### `TakeoffTime` — cls+0x8E4
-
-**ODF**: `TakeoffTime = 215`
-
-Used only in case 1 (ASCENDING), first switch:
-```
-progress += dt / TakeoffTime
-if (progress >= 1.0) → state = 2 (FLYING)
-```
-
-Controls how long ASCENDING takes to complete. At 215 seconds, the carrier needs **3.5 minutes**
-of uninterrupted ascending to reach state=2 (FLYING). This is intentionally extreme — the carrier
-is never meant to reach FLYING on its own. VehicleSpawn externally sets state=2 via the
-`EntityFlyerTakeOff` Lua callback.
-
-**Player flyer vs carrier**: a player flyer typically uses a short TakeoffTime (1-3 seconds) so
-the player quickly reaches flight altitude. The carrier uses 215 because VehicleSpawn manages the
-lifecycle externally — TakeoffTime is effectively a "safety timeout."
-
-### `TakeoffSpeed` — cls+0x8E8
-
-**ODF**: `TakeoffSpeed = 12.0`
-
-Used in case 1 (ASCENDING), second switch (velocity computation):
-```
-upward_velocity.y = (scale * 0.875 + 0.125) * TakeoffSpeed
-velocity = Interpolate_(upward_vec, forward_velocity, progress)
-```
-
-Controls the **upward climb rate** during ASCENDING. The carrier rises at up to 12 units/sec.
-The actual rate is blended by `Interpolate_` — at `progress=0.6`, about 40% of the upward
-velocity applies (~4.8 u/s effective climb rate).
-
-**Player flyer vs carrier**: same role for both — the speed at which the vehicle rises after
-leaving the ground.
-
-### `LandingTime` — cls+0x8EC
-
-**ODF**: `LandingTime = 10`
-
-Used in case 3 (LANDING), first switch:
-```
-progress -= dt / LandingTime
-```
-
-Controls how long the landing approach takes. Progress decreases from its current value toward 0
-over `LandingTime` seconds. As progress decreases, the `Interpolate_` in the velocity switch
-shifts more weight toward the downward vector, causing the carrier to descend faster.
-
-**Player flyer vs carrier**: for a player flyer, this controls the graceful descent duration.
-For the carrier, same physics apply, but the carrier gets interrupted by external state changes
-(3→1) before completing the approach.
-
-### `LandingSpeed` — cls+0x8F0
-
-**ODF**: `LandingSpeed = 30.0`
-
-Used in case 3 (LANDING), second switch (velocity computation):
-```
-downward_velocity.y = -((scale * 0.875 + 0.125) * LandingSpeed)
-velocity = Interpolate_(downward_vec, forward_velocity, progress)
-```
-
-Controls the **maximum descent rate** during LANDING. With `LandingSpeed=30`, the carrier can
-descend at up to 30 units/sec. However, the `Interpolate_` blending with `progress` means the
-effective initial descent rate is much lower. At `progress=0.8`, only ~20% of the downward
-velocity applies (~6 u/s effective descent rate). As progress approaches 0, the full 30 u/s
-descent rate is applied.
-
-**Player flyer vs carrier**: same role for both. However, the carrier never reaches the low
-progress values where the full descent rate kicks in, because external code interrupts the
-landing by setting state=1 (ASCENDING).
-
-### Why these parameters behave differently for EntityCarrier
-
-The fundamental difference is that an EntityCarrier is **VehicleSpawn-controlled**, not
-player-controlled:
-
-| Aspect | Player-controlled flyer | VehicleSpawn carrier |
-|--------|------------------------|---------------------|
-| State driver | Player input + physics | VehicleSpawn Lua callbacks |
-| pilot flag | `(field_0x44 & 3) == 3` (YES) | `(field_0x44 & 3) != 3` (NO) |
-| State 1→3 | Auto-transitions when `pilot=YES && progress > 0.75` | Never auto-transitions; only via external `EntityFlyerLand` Lua call |
-| State 2→3 | Player presses brake (`field_0x3bc > 0.99`) | Never auto-transitions with `pilot=NO`; only via external `EntityFlyerLand` |
-| State 3→0 | `gndDist < landedHt && normal > 0.9375` | Same condition, but carrier rarely reaches it |
-| State 3→1 | Only if surface is water/denied, or pilot bails (`progress < 0.05`) | **External code sets state=1 between Update frames** (confirmed: no TRANSITION log from within Update) |
-
-**Critical finding**: the 3→1 state change for the carrier happens **outside** of
-`EntityFlyer::Update`. The diagnostic hook captures state before and after calling
-`original_CarrierUpdate` — no transition is detected within the Update call. This means
-VehicleSpawn or another system (likely `FUN_004f8b70` at address `0x004f8b70`, the unnamed
-takeoff function) directly writes `state=1` between frames. This creates the observed
-LANDING→ASCENDING→LANDING cycle.
+`+0x234`: bits 4-7 team (spawning and entering use it), bits 8-11 perceived team.
+`SetTeam` is vtable slot 36. VehicleSpawn writes the bit fields with XOR masks after
+calling SetTeam.
 
 ---
 
-## ODF Flight Parameter Reference
+## 9. GameExt fixes and additions
 
-These five ODF properties are stored as consecutive floats in `EntityFlyerClass`:
+All in `flyer_carrier_fixes.cpp`, installed from `lua_hooks_install()` on modtools, Steam
+and GOG through one install path. Per-build offsets live in `CarrierLayout`; per-carrier
+state lives in `CarrierTrack`, keyed by object pointer **and** PblHandle id, because the
+next carrier from a pad usually reuses the deleted carrier's pool block.
 
-| ODF Property    | Class Offset | Description                              |
-|-----------------|-------------|------------------------------------------|
-| `TakeoffHeight` | `+0x8E0`   | Altitude threshold for speed scaling and progress gate |
-| `TakeoffTime`   | `+0x8E4`   | Duration of ASCENDING→FLYING transition  |
-| `TakeoffSpeed`  | `+0x8E8`   | Vertical ascent rate                     |
-| `LandingTime`   | `+0x8EC`   | Duration of FLYING→LANDED transition     |
-| `LandingSpeed`  | `+0x8F0`   | Vertical descent rate                    |
-| `LandedHeight`  | `+0x8F4`   | Ground-contact threshold (auto-computed from model bbox if not set) |
+### 9.1 Memory-safety guards
 
-### `TakeoffHeight`
+- `SetProperty`: cargo node ignored once 4 exist (entry 4 would overwrite `mCargoCount`,
+  entry 5 `mSoundCargoPickup`).
+- `AttachCargo`: null cargo rejected; slot >= 4 rejected on modtools (release ignores the
+  argument, see 9.3).
+- `DetachCargo`: slot >= 4 rejected.
 
-Controls two things during ASCENDING (state 1):
+### 9.2 Pad lifecycle gaps
 
-1. **Speed ramp** — vertical speed scales with altitude:
-   ```
-   heightRatio = clamp(groundDistance / TakeoffHeight, 0, 1)
-   speed = (heightRatio * 0.875 + 0.125) * TakeoffSpeed
-   ```
-   Example: `TakeoffHeight = 20`, `TakeoffSpeed = 10`
-   - At ground level: `0.125 * 10 = 1.25 u/s` (slow start)
-   - At 10 units up: `(0.5 * 0.875 + 0.125) * 10 = 5.625 u/s`
-   - At 20+ units up: `1.0 * 10 = 10.0 u/s` (full speed)
+- **Stuck pad.** If the cargo is destroyed while carried, its tracker is freed, UpdateLive
+  never runs for the pad, the carrier sits landed forever and UpdateSpawn keeps bailing on
+  the live `mCarrier`. `padCarrierUpdate` runs UpdateLive's carrier block (LANDED → drop +
+  TakeOff, FLYING → delete) from the UpdateSpawn hook, which the engine calls exactly when
+  the pad is below its tracker count. Repeating it is harmless when UpdateLive already ran.
+- **Failed landing.** A landing aborted by the surface check climbs to FLYING and is deleted
+  with the cargo attached, leaving the cargo with a dangling `mParent` and a parked team.
+  `dropStrandedCargo` drops every slot as soon as a carrier is in TAKEOFF or FLYING with
+  cargo attached, and slots 1-3 when it is LANDED.
+- **TakeOff during LANDING** (flyer AI) is blocked for carriers.
 
-2. **Progress gate** — the ascending timer only ticks while above this height:
-   ```
-   if (groundDistance > TakeoffHeight + LandedHeight)
-       progress += dt / TakeoffTime
-   ```
-   Example: `TakeoffHeight = 20`, `LandedHeight = 3` — progress only advances
-   once the carrier is 23+ units above ground.
+### 9.3 Multi-cargo
 
-Also used as the denominator for the same speed ramp during LANDING (state 3).
+Extra cargo for slots 1..N-1 is spawned after the original UpdateSpawn, within the pad's
+spawn budget, each with its own VehicleTracker. On release `AttachCargo` always writes slot
+0 (LTCG specialised it for its only caller), so `attachCargoToSlot` presents class node N as
+node 0 and an empty slot 0, calls the original, then moves the result into slot N and
+restores what it borrowed (in a `__finally`, since the class is shared).
 
-### `TakeoffTime`
+### 9.4 Cargo team parking
 
-How long the ASCENDING phase lasts after the carrier clears `TakeoffHeight`:
-```
-progress += dt / TakeoffTime
-if (progress >= 1.0) → state = FLYING
-```
+While carried, cargo is set to team 0 so it can't be used as a spawn point or entered in
+the air. The team is saved in the track and restored on every detach. All GameExt-initiated
+detaches go through the hooked DetachCargo so the restore always runs.
 
-Example: `TakeoffTime = 5` — after reaching TakeoffHeight, the carrier stays
-in ASCENDING for 5 more seconds before transitioning to FLYING.
+### 9.5 Flight overrides
 
-For VehicleSpawn carriers, this is typically set very high (e.g. 200+) because
-VehicleSpawn manages the state externally. The carrier never reaches FLYING on its own;
-`TakeoffTime` acts as a safety timeout.
+- **Descent**: on entering LANDING, smoothstep X/Y/Z from the current position onto the pad
+  over `LandingTime`, targeting `padY + instance landed height - 1` so the ground check
+  fires directly over the pad.
+- **Post-drop ascent**: at TakeOff after a drop, snapshot the rotation rows
+  (`+0xF0..+0x11F`) and X/Z; each TAKEOFF frame restore the rotation and move X/Z along the
+  saved heading, ramping to `TakeoffSpeed` over 3 s. Vanilla keeps driving Y. A
+  post-drop carrier can't re-enter LANDING.
+- **Terrain wobble**: the two downward RayHit calls in `EntityFlyer::Update` feed the terrain
+  normal into heading and pitch. While a tracked carrier is more than
+  `max(2 * landedHeight, 10)` above its pad they report "no hit" (ground distance 1024) for
+  the duration of its Update: modtools `FLD1` + NOPs, release a CALL to a stub that sets
+  XMM0 = 1.0. Sites: modtools `0x004FE8CD` / `0x004FEAE2`, release `0x004AE246` /
+  `0x004AE478`.
 
-### `TakeoffSpeed`
+### 9.6 Rendering
 
-Maximum vertical ascent rate in units/second during ASCENDING:
-```
-speed = (heightRatio * 0.875 + 0.125) * TakeoffSpeed
-```
+For tracked carriers the render hook bypasses the frustum-cull JZ, holds progress at 0
+(bay closed) during LANDING, and after the slot-0 drop plays the takeoff clip 0 → 1 over
+`nFrames / 30` seconds (pause-aware, forced LOD 0, anim ref forced to the takeoff clip,
+net delta zeroed). The scene bounding sphere is kept on the pivot with radius at least 80.
 
-Example: `TakeoffSpeed = 15` — the carrier rises at up to 15 u/s. The `heightRatio`
-ramp means it starts slow (1.875 u/s) and reaches full speed at `TakeoffHeight`.
+### 9.7 Turrets
 
-### `LandingTime`
+- **ActivatePhysics**: vtable[41] is replaced with EntityFlyer's version keeping the
+  carrier's -1 priority, so turrets, aimers and passenger slots get activated.
+- **Fire while airborne**: `MountedTurret::Update` blocks turret fire unless the parent
+  flyer is LANDED. A cave skips that test for carriers (modtools `0x565C4C`, 17 bytes;
+  release `0x5A64DF`, 18 bytes).
+- **PILOT_SELF AI**: `MountedTurret::UpdateIndirect` borrows the carrier's UnitController
+  for the call, reads the fire decision it wrote into the carrier's triggers, fires when
+  on target and pumps the turret weapon's `Update_` every frame. Release's trigger state
+  machine takes no dt (RET 4 vs RET 8).
+- **CreateController null check** (modtools only): PlayerController path dereferences
+  `[ESI+0xD0]+0xD4` without a check.
 
-How long the descent approach takes during LANDING (state 3):
-```
-progress -= dt / LandingTime
-```
+### 9.8 Calling-convention traps
 
-Example: `LandingTime = 8` — progress decreases from 1.0 toward 0 over 8 seconds.
-As progress decreases, velocity shifts from forward flight toward pure downward descent.
-
-### `LandingSpeed`
-
-Maximum vertical descent rate in units/second during LANDING:
-```
-speed = -((heightRatio * 0.875 + 0.125) * LandingSpeed)
-```
-
-Example: `LandingSpeed = 25` — the carrier descends at up to 25 u/s. Like
-TakeoffSpeed, the heightRatio ramp reduces speed near the ground.
-
-### Takeoff Animation Override
-
-The DLL hooks the render function (`FUN_004f6970`) via Detour to override the
-animation progress for carriers with an active animation override. The vanilla
-render function uses the **TakeoffAnimation** (`class+0x87c`) — not a separate
-"dropoff" animation. The same TakeoffAnimation is used for both vanilla
-takeoff/landing visuals and our post-drop animation override.
-
-The render function computes the displayed animation frame as:
-```
-frame = (numFrames - 1) * progress
-```
-
-Where `progress` is the flight transition float at `inner+0x5A8` and `numFrames`
-is read from `inner+0x1870` (a cached pointer to the animation, `+8` = frame count).
-The DLL forces `inner+0x1870` to match the TakeoffAnimation (`class+0x87c`) to
-ensure the correct frame count is used.
-
-The DLL overrides the progress float in the render hook with a time-based value
-(`elapsed / duration`, where `duration = numFrames / 30.0`), so the animation always
-plays at 30fps regardless of ascent speed. The animation plays for its full duration
-(~1.4 seconds for 41 frames) even if the carrier has already transitioned to FLYING.
-
-**How ODF parameters affect the animation:**
-
-| Parameter       | Effect on animation                                   |
-|-----------------|-------------------------------------------------------|
-| `TakeoffHeight` | Higher = longer speed ramp = carrier rises slower near ground, giving more time for early animation frames |
-| `TakeoffSpeed`  | Lower = slower ascent = more time for the animation to play during ascending |
-| `TakeoffTime`   | No direct effect on animation speed (only controls ASCENDING→FLYING transition timer, not the progress float used by the render) |
-
-**Tuning example:**
-```ini
-TakeoffSpeed  = 10     ; ascent rate — carrier rises ~10 u/s
-TakeoffHeight = 20     ; speed ramp zone — ~2s to clear at full speed
-```
-With these values, the carrier spends ~2 seconds visibly ascending near the ground,
-during which the takeoff animation (~1.4 seconds) plays completely. The visual
-result: cargo drops, doors/mechanism animate, carrier rises and flies away.
-
-### LOD and Near/Far Scene
-
-The render function receives a **LOD level** as its first argument (`param_2`,
-low byte selects the mesh segment). The geometry render function (`FUN_004b0990`)
-uses this to select from up to 5 mesh segments stored in the geometry object:
-
-| LOD | Geometry offset | Profiler label           |
-|-----|-----------------|--------------------------|
-| 0   | geom+0x24       | `GameModel:Render-lod0`  |
-| 1   | geom+0x28       | `GameModel:Render-lod1`  |
-| 2   | geom+0x2c       | `GameModel:Render-lod2`  |
-| 3   | geom+0x30       | `GameModel:Render-lod3`  |
-| 4   | geom+0x34       | `GameModel:Render-lod4`  |
-
-If the requested LOD mesh is null, fallback tries lod0 → lod1 → lod2 (in that
-order). **Higher LODs may strip bone weights**, making skeletal animation invisible
-even though the animation code runs correctly and bone matrices are computed.
-
-BF2 has two render passes managed by `RedSceneManager::_Render`:
-
-- **Near scene** (`flags & 0x40000 == 0`): normal objects, uses
-  `RedLodManager::Render` for LOD selection based on screen-space size. Typically
-  selects LOD 0 for nearby objects.
-- **Far scene** (`flags & 0x40000 != 0`): distant/large objects, uses
-  `RenderFarObjects()`. `FLRenderer::RenderFarScene` calls `_Render` with flags
-  `0x60000`. Far scene objects typically render at LOD 3.
-
-**Critical**: if the carrier is assigned to the far scene, it renders at LOD 3,
-which likely has no bone weights → animation is invisible. The DLL render hook
-forces LOD 0 when an animation override is active to ensure the full-detail
-skinned mesh is always used.
+- `VehicleSpawn::UpdateSpawn` on release: dt in XMM1, bare RET. Bridged with naked thunks.
+- Release `AttachCargo` ignores its slot argument.
+- Release trigger state machine: `(trigger, fire)`, no dt.
 
 ---
 
-## Collision Primitive Generation
+## 10. Open issues
 
-EntityFlyerClass (and by inheritance EntityCarrierClass) generates collision primitives
-during ODF property processing. The collision model is built from the mesh geometry and
-has a fallback path that creates a bounding-volume approximation when no explicit collision
-shapes are defined in the `.msh` file.
-
-### `EntityFlyerClass::SetProperty` — `004FA310`
-
-When the `GeometryName` property is processed, `SetProperty` loads the referenced model
-and iterates its mesh hierarchy looking for **`p_` prefixed shapes** (collision primitives).
-These are the standard naming convention for collision geometry in BF2 mesh files
-(e.g. `p_hull`, `p_wing`, `p_body`).
-
-### Primitive type system
-
-Collision primitives use a type enum:
-
-| Type | Shape              |
-|------|--------------------|
-| 0    | Sphere             |
-| 2    | Box                |
-| 3    | Capsule / Cylinder |
-| 4    | Cylinder           |
-
-### Auto-generated fallback — "main_body"
-
-If the mesh contains **zero** `p_` primitives after scanning, `SetProperty` creates a
-synthetic fallback collision primitive derived from the model's axis-aligned bounding box:
-
-1. Reads the model AABB: `min` at `model+0x98`, `max` at `model+0xA4`.
-2. Computes half-extents: `half_X = (max.X - min.X) / 2`, `half_Y = (max.Y - min.Y) / 2`,
-   `half_Z = (max.Z - min.Z) / 2`.
-3. Derives capsule dimensions:
-   - `radius = (half_X + half_Z) * 0.5`
-   - `height = half_Y * 2.0`
-4. Creates a **type 3** primitive (capsule/cylinder) named `"main_body"`.
-
-**Important consequence**: removing all `p_` collision shapes from a `.msh` file does
-**not** remove collision from the entity. Instead, the engine falls back to this
-auto-generated capsule, which is often a worse fit than hand-authored collision primitives.
-The fallback capsule is a rough cylinder/capsule that encloses the entire model bounding box,
-so it will be larger and less precise than purpose-built collision shapes.
-
-### ODF-defined collision (alternative to mesh primitives)
-
-Collision can also be specified directly in the ODF via properties such as:
-
-- `VehicleCollision` — vehicle-to-world collision shape
-- `OrdnanceCollision` — projectile hit collision shape
-- `SoldierCollision` — soldier interaction collision shape
-
-These are processed by the base class property handlers and are independent of the
-mesh-based `p_` primitive system.
-
-### Flying collision model — class offset `+0x728`
-
-`EntityFlyerClass` maintains a separate `mFlyingCollisionModel` at class offset `+0x728`.
-This is distinct from the standard collision model and is used specifically during flight.
-The standard collision model (built from `p_` shapes or the `main_body` fallback) and the
-flying collision model may differ, allowing entities to have different collision behavior
-on the ground versus in the air.
-
----
-
-## Altitude-Based RayHit NOP — Terrain Wobble Fix
-
-### Problem
-
-During states 1 (ASCENDING) and 3 (LANDING), `EntityFlyer::Update` fires
-`CollisionManager::RayHit` downward (direction `0,-1,0`, distance `1024.0`) to sample
-the terrain surface normal. This normal feeds into angular velocity calculations that
-drive heading and pitch adjustments each frame:
-
-```
-angular_velocity = -(dot(rotMatrix_row1, terrainNormal) * class+0x8d4)
-heading += (target - current) * response_rate * dt
-pitch   += (target - current) * response_rate * dt
-```
-
-Over uneven terrain, the surface normal changes rapidly between frames, causing the
-carrier to swirl/wobble visibly. This is especially noticeable during the long descent
-from spawn point to pad.
-
-### Solution
-
-The DLL hooks `EntityCarrier::Update` and conditionally NOPs the two RayHit CALL
-instructions based on the carrier's altitude above its pad:
-
-- **High altitude** (`posY - padY > max(2 * landedHt, 10.0)`): both RayHit CALLs are
-  replaced with `FLD1; NOP; NOP; NOP` (`D9 E8 90 90 90`). This pushes `1.0` onto the
-  FPU stack, and the subsequent `FMUL` by `1024.0` produces a ground distance of `1024`,
-  effectively making the terrain invisible to the rotation system.
-- **Near ground**: RayHit calls are left active so the carrier naturally aligns to
-  terrain for landing.
-
-The original bytes are saved before patching and restored immediately after
-`original_CarrierUpdate` returns. The NOP window is only the duration of one Update call.
-
-### Patched addresses
-
-| Context | Address      | Original bytes           | Patch bytes           |
-|---------|--------------|--------------------------|-----------------------|
-| State 1 | `0x004fe8cd` | `E8 AF 8C F0 FF` (CALL)  | `D9 E8 90 90 90` (FLD1) |
-| State 3 | `0x004feae2` | `E8 9A 8A F0 FF` (CALL)  | `D9 E8 90 90 90` (FLD1) |
-
-Both call `CollisionManager::RayHit` at `0x00407581`. The return value (fraction in
-ST(0)) is multiplied by `1024.0` at `[0x00a37e14]` to get ground distance, then stored
-at `primary+0x490`.
-
-### Scope
-
-Only affects EntityCarrier instances (the hook is on `EntityCarrier::Update`). Regular
-EntityFlyers are completely unaffected.
-
----
-
-## Cargo Team Save/Restore — Disable Spawning While Carried
-
-### Problem
-
-Command vehicles (EntityCommandWalker, EntityCommandHover, etc.) allow unit spawning
-based on their team assignment. When carried by a carrier, the command vehicle is airborne
-and unreachable, but players can still spawn on it, leading to undesirable gameplay.
-
-### Solution
-
-The DLL saves each cargo entity's team on attach and sets it to 0 (no team), then
-restores the original team on detach:
-
-- **AttachCargo**: after the original attach, reads `cargo+0x234` bits 4-7 to extract
-  the team number. Saves it in `CarrierFlightOverride::savedCargoTeam[slotIdx]`, then
-  calls `cargo->vtable[36](0)` (SetTeam) and clears team bits 4-11 at `+0x234`.
-- **DetachCargo**: before the original detach clears the slot, saves the cargo pointer.
-  After detach, calls `cargo->vtable[36](savedTeam)` and restores the team bits.
-- **Slot 0 special case**: slot 0 is attached inside `original_UpdateSpawn` before the
-  flight override slot exists. The team save/clear for slot 0 happens in the UpdateSpawn
-  post-hook after the flight override is created.
-
-### Entity team bits layout — `entity+0x234`
-
-```
-bits  0-3:  base team field
-bits  4-7:  team << 4  (used by spawning system)
-bits  8-11: team << 8  (used by spawning system)
-```
-
-SetTeam (`vtable[36]`) sets internal team state. The bit fields at `+0x234` are set
-separately by VehicleSpawn using XOR-mask operations.
-
-### Per-carrier storage
-
-`CarrierFlightOverride::savedCargoTeam[4]` stores one team value per cargo slot.
-Initialized to `-1` (not saved). Cleared back to `-1` after restore.
-
----
-
-## Descent Animation Lock
-
-### Problem
-
-During state 3 (LANDING), vanilla's progress float decreases from `1.0` toward `0.0`.
-The render function computes the animation frame as `(nFrames - 1) * progress`, which
-means the animation plays backwards during descent — the cargo bay visually opens and
-closes before the carrier has even landed.
-
-### Solution
-
-The DLL's render hook (`hooked_FlyerRender`) forces `progress = 0.0` for tracked
-carriers in state 3 that don't have an active animation override. This keeps the
-carrier at frame 0 (closed/folded position) throughout the entire descent.
-
-The animation sequence is:
-
-| Phase | State | Progress | Animation |
-|-------|-------|----------|-----------|
-| Descent | 3 (LANDING) | Forced to 0.0 | Frame 0 — cargo bay closed |
-| Cargo drop | 0 (LANDED) | Anim override 0→1 | Plays opening animation |
-| Post-drop | 1 (ASCENDING) | Anim override holds at 1.0 | Last frame — cargo bay open |
-
-The flight state is read from `structBase + kInner_mFlightState` (`0x5A4` from
-struct_base). The progress override is temporary — the original progress value is
-saved before the render call and restored after.
+- **Cargo trails the carrier by one frame.** The descent and ascent overrides write the
+  transform after the original Update, which already placed the cargo from the physics
+  pose. The cargo also inherits the physics velocity at drop time, which may explain a
+  lurch on release. Fix: re-run the cargo placement after the overrides and set the
+  carrier velocity to match the override.
+- **Raw position writes skip `EntityFlyer::SetPosition`**, which normally recomputes the
+  bounding-sphere centre and notifies the scene and collision systems. That is why the
+  cull bypass and the radius-80 sphere exist. Moving the carrier through SetPosition
+  should make both unnecessary.
+- **Does the stock landing really miss the pad?** The spawn distance assumes horizontal
+  speed falls linearly from MinSpeed to 0 over LandingTime, but LANDING damps horizontal
+  speed exponentially. If that mismatch is the whole miss, correcting the spawn
+  distance could replace the descent override. A cleaner long-term design is a forward
+  velocity term during LANDING and TAKEOFF with the spawn distance computed to match,
+  keeping the flight model in charge instead of overwriting positions. Not verified.
+- **Turrets share the carrier's AI state** during their borrowed UpdateIndirect call, so
+  several turrets don't select targets independently. Needs UnitController RE.
+- **Multiplayer clients**: `dropStrandedCargo` runs on every machine; carriers on clients
+  were not checked.
+- The EntityCarrier memory pool size caps carriers map-wide; GameExt tracks at most 8.

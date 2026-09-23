@@ -8,631 +8,464 @@
 #include <detours.h>
 
 // =============================================================================
-// EntityCarrier / EntityCarrierClass bug fixes
+// EntityCarrier / EntityCarrierClass fixes
+//
+// Full RE notes: docs/RE/EntityCarrierSystem.md.  The short version of the
+// vanilla lifecycle this file builds on:
+//
+//   VehicleSpawn::UpdateSpawn   spawns cargo + carrier, AttachCargo(0), then
+//                               InitAsFlying + Land: the carrier is born in
+//                               LANDING behind the pad (gCalcBeginLandPos).
+//   EntityFlyer::Update         LANDING -> LANDED when the ground check passes.
+//   VehicleSpawn::UpdateLive    LANDED -> DetachCargo(0) + TakeOff;
+//                               FLYING -> vtable[3](1), i.e. the carrier is
+//                               DELETED (scalar deleting destructor), never
+//                               killed.  Runs once per live VehicleTracker.
+//   EntityCarrier::Update       after EntityFlyer::Update, positions every
+//                               attached cargo from the carrier matrix.
+//
+// What this file adds:
+//   - Memory-safety guards: SetProperty cargo-node overflow, AttachCargo /
+//     DetachCargo slot bounds, AttachCargo null cargo.
+//   - Multi-cargo: extra cargo for slots 1..3, detached at touchdown.
+//   - Cargo team save/restore so carried cargo can't be used as a spawn point.
+//   - Custom descent (lerp onto the pad) and post-drop ascent (forward flight).
+//   - Cargo-drop animation override + frustum-cull bypass in the render hook.
+//   - Carrier turrets: ActivatePhysics vtable patch, fire-while-airborne patch,
+//     PILOT_SELF turret AI.
+//   - Terrain-wobble suppression (RayHit neutralised at altitude).
+//   - Pad lifecycle gaps vanilla leaves open (see padCarrierUpdate and
+//     dropStrandedCargo).
+//
+// Per-carrier state is keyed by (object pointer, PblHandle id at +0x204).
+// Vanilla deletes finished carriers from VehicleSpawn, not from their own
+// Update, and EntityCarrier::sMemoryPool hands the freed block straight to the
+// next carrier, so a bare pointer key would let the next carrier inherit the
+// previous one's state.  The handle id changes on every allocation.
 //
 // IMPORTANT: EntityCarrier meshes MUST have at least one collision primitive
-// (p_ shape) in the .msh file.  EntityFlyerClass::SetProperty (0x004FA310)
-// auto-generates a "main_body" capsule/cylinder from the model's bounding box
-// if zero primitives are found.  This fallback collision is usually wrong
-// (oversized cylinder) and causes visual/physics issues during flight.
-//
-// Bugs fixed:
-//   1. EntityCarrierClass::SetProperty — no bounds check on mCargoCount before
-//      writing to mCargoInfo[mCargoCount].  At count==4, the write destination
-//      is exactly &mCargoCount (self-corruption); at count==5 it hits
-//      mSoundCargoPickup.  Fix: early-return for cargo-node properties when
-//      the array is already full.
-//
-//   2. EntityCarrier::AttachCargo — no slotIdx bounds check; an out-of-range
-//      index walks past the end of mCargoSlots[4] into adjacent struct fields.
-//      Fix: early-return when slotIdx >= 4.
-//
-//   3. EntityCarrier::AttachCargo — cargo pointer (param_3) is used for a
-//      vtable call before any null check, causing an immediate crash if null.
-//      Fix: early-return when cargo == null.
-//
-//   4. EntityCarrier::DetachCargo — same missing slotIdx bounds check.
-//      Fix: early-return when slotIdx >= 4.
-//
-// All other original logic is preserved by calling the trampoline installed by
-// Detours.  Addresses are BF2_modtools-specific (Ghidra imagebase 0x400000).
+// (p_ shape).  EntityFlyerClass::SetProperty auto-generates an oversized
+// "main_body" capsule from the bounding box when there are none.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// EntityCarrier / EntityFlyer struct offsets (from struct_base)
+// Per-build layout
+//
+// Steam and GOG share one release layout; modtools is a debug build.  Instance
+// fields of EntityFlyer/EntityCarrier in the 0x5xx..0x1Dxx range sit 0x40 lower
+// on release, EntityFlyerClass fields 0xC8 lower, EntityCarrierClass cargo
+// fields 0xE0 lower.  Every value here was read out of each build's own
+// disassembly (see project memory "carrier-steam-port-status" for the sites).
+// All instance offsets are from the object base (the pointer AttachCargo,
+// DetachCargo and TakeOff receive; Update receives base+0x240).
 // ---------------------------------------------------------------------------
 
-static constexpr int          kMaxCargo              = 4;
+struct CarrierLayout {
+   // EntityCarrierClass
+   uint32_t clsCargoNodes;       // CargoInfo[4]
+   uint32_t clsCargoCount;       // int, directly after entry 3 (so entry 4 == the count)
 
-// EntityCarrierClass::mCargoCount — per build.  The cargo-node array precedes
-// it with stride 0x10, so writing entry kMaxCargo lands exactly on the count
-// itself (modtools 0x1180 + 4*0x10 == 0x11C0; Steam 0x10A0 + 4*0x10 == 0x10E0).
-// That self-corruption is the bug hooked_SetProperty guards, and it is present
-// identically on both builds.
-static uintptr_t s_mCargoCount_offset = 0x11c0;  // Steam: 0x10E0
-// Base of that cargo-node array (mCargoCount sits immediately after entry 3).
-// modtools 0x1180 + 4*0x10 == 0x11C0; Steam 0x10A0 + 4*0x10 == 0x10E0.  Each
-// node is { hash; PblVector3 offset; } so the offset vector is at node+4.
-static uintptr_t s_cargoNodeArrayBase = 0x1180;  // Steam: 0x10A0
-static constexpr uintptr_t kCargoNodeStride = 0x10;
-static constexpr unsigned int kCargoNodeName_Hash    = 0x3e2c4da4u;
-static constexpr unsigned int kCargoNodeOffset_Hash  = 0x910a89fcu;
+   // EntityFlyerClass
+   uint32_t clsTakeoffAnim;      // ZephyrAnim* ("takeoff"), nFrames at +8
+   uint32_t clsTakeoffSpeed;     // TakeoffSpeed
+   uint32_t clsLandingTime;      // LandingTime
+   uint32_t clsLandedHeight;     // -(model bbox min Y)
+   uint32_t clsWeaponCount;      // int, aimer count used by ActivatePhysics
+   uint32_t clsPassengerCount;   // uint8
 
-// EntityCarrier instance offsets from ECX (= this in Update, = struct_base + 0x240).
-static uintptr_t s_State_offset        = 0x364;  // int: 0=landed 1=ascending 2=flying 3=landing 4=dying 5=dead
-static uintptr_t s_Progress_offset     = 0x368;  // float: takeoff/landing progress (0..1)
-static uintptr_t s_LandedHeight_offset = 0x3C0;  // float: hover floor / landing threshold
-static uintptr_t s_GroundDist_offset   = 0x490;  // float: last measured ground distance
-static uintptr_t s_CargoSlots_offset   = 0x1b90; // CargoSlot[4] (stride 0x14)
-static constexpr uintptr_t kCargoSlot_ObjPtr    = 0x0C;   // slot+0xC = object pointer
-static uintptr_t s_Class_offset        = 0x42C;  // EntityCarrierClass*
+   // EntityFlyer / EntityCarrier instance
+   uint32_t flightState;         // int: 0 landed, 1 takeoff, 2 flying, 3 landing
+   uint32_t progress;            // float, takeoff/landing anim progress
+   uint32_t cls;                 // EntityCarrierClass*
+   uint32_t landedHeight;        // float, instance landing threshold (incl. cargo)
+   uint32_t passengers;          // PassengerSlot*[]
+   uint32_t turrets;             // MountedTurret*[8]
+   uint32_t turretCount;         // int8
+   uint32_t aimers;              // Aimer*[]
+   uint32_t postCollision;       // embedded sub-object activated with (-15, 2)
+   uint32_t animRef;             // ZephyrAnim* the render reads nFrames from
+   uint32_t netAnimDelta;        // float, net-interpolated anim delta
+   uint32_t cargoSlots;          // CargoSlot[4]
+
+   // Code sites (unrelocated), identical VAs on Steam and GOG
+   uintptr_t visJz;              // 6-byte JZ that skips the render on a cull miss
+   uintptr_t rayHit1;            // CALL CollisionManager::RayHit, TAKEOFF branch
+   uintptr_t rayHit2;            // CALL CollisionManager::RayHit, LANDING branch
+
+   // Convention differences
+   bool attachSlotIsIndex;       // AttachCargo honours its slot argument
+   bool updateSpawnRegcall;      // UpdateSpawn takes dt in XMM1 + bare RET
+   bool fireStateMachineHasDt;   // trigger state machine takes (dt, fire)
+   bool rayHitSse;               // RayHit returns its fraction in XMM0
+};
+
+static constexpr CarrierLayout kCarrierModtools = {
+   /* clsCargoNodes */ 0x1180, /* clsCargoCount */ 0x11C0,
+   /* clsTakeoffAnim */ 0x87C, /* clsTakeoffSpeed */ 0x8E8, /* clsLandingTime */ 0x8EC,
+   /* clsLandedHeight */ 0x8F4, /* clsWeaponCount */ 0xD48, /* clsPassengerCount */ 0xE14,
+   /* flightState */ 0x5A4, /* progress */ 0x5A8, /* cls */ 0x66C, /* landedHeight */ 0x600,
+   /* passengers */ 0x670, /* turrets */ 0x680, /* turretCount */ 0x6A0, /* aimers */ 0x6A8,
+   /* postCollision */ 0x1D10, /* animRef */ 0x1870, /* netAnimDelta */ 0x1D00,
+   /* cargoSlots */ 0x1DD0,
+   /* visJz */ 0x004F6999, /* rayHit1 */ 0x004FE8CD, /* rayHit2 */ 0x004FEAE2,
+   /* attachSlotIsIndex */ true, /* updateSpawnRegcall */ false,
+   /* fireStateMachineHasDt */ true, /* rayHitSse */ false,
+};
+
+static constexpr CarrierLayout kCarrierRelease = {
+   /* clsCargoNodes */ 0x10A0, /* clsCargoCount */ 0x10E0,
+   /* clsTakeoffAnim */ 0x7B4, /* clsTakeoffSpeed */ 0x820, /* clsLandingTime */ 0x824,
+   /* clsLandedHeight */ 0x82C, /* clsWeaponCount */ 0xC80, /* clsPassengerCount */ 0xD4C,
+   /* flightState */ 0x564, /* progress */ 0x568, /* cls */ 0x62C, /* landedHeight */ 0x5C0,
+   /* passengers */ 0x630, /* turrets */ 0x640, /* turretCount */ 0x660, /* aimers */ 0x668,
+   /* postCollision */ 0x1CD0, /* animRef */ 0x1830, /* netAnimDelta */ 0x1CC0,
+   /* cargoSlots */ 0x1D90,
+   /* visJz */ 0x004AB082, /* rayHit1 */ 0x004AE246, /* rayHit2 */ 0x004AE478,
+   /* attachSlotIsIndex */ false, /* updateSpawnRegcall */ true,
+   /* fireStateMachineHasDt */ false, /* rayHitSse */ true,
+};
+
+static const CarrierLayout* L = nullptr;
+
+// Build-invariant offsets (all verified on both layouts).
+static constexpr uintptr_t kControllableBase = 0x240;  // Update's `this`
+static constexpr uintptr_t kRenderBase       = 0x94;   // EntityFlyer::Render's `this`
+static constexpr uintptr_t kHandleId         = 0x204;  // PblHandled id (GameObject)
+static constexpr uintptr_t kTeamBits         = 0x234;  // bits 4-7 team, 8-11 perceived
+static constexpr uintptr_t kMatrix           = 0xF0;   // PblMatrix: right, up, forward, pos
+static constexpr uintptr_t kPosX             = 0x120;
+static constexpr uintptr_t kPosY             = 0x124;
+static constexpr uintptr_t kPosZ             = 0x128;
+static constexpr uintptr_t kForward          = 0x110;  // matrix row 2
+static constexpr uintptr_t kSphere           = 0xC4;   // scene bounding sphere x,y,z,r
+
+static constexpr int kMaxCargo = 4;
+static constexpr unsigned int kCargoNodeName_Hash   = 0x3e2c4da4u;
+static constexpr unsigned int kCargoNodeOffset_Hash = 0x910a89fcu;
+
+// GameObject vtable slots (verified identical on modtools and Steam).
+static constexpr int kVt_DeletingDtor = 3;   // scalar deleting destructor, arg 1 = free
+static constexpr int kVt_Activate     = 5;
+static constexpr int kVt_SetTeam      = 36;
+
+// VehicleSpawn fields (build-invariant; engine field names in comments).
+static constexpr uintptr_t kVS_PadTransform = 0x30;   // mMatrix
+static constexpr uintptr_t kVS_SpawnCount   = 0x7C;   // mSpawnCount
+static constexpr uintptr_t kVS_SpawnClass   = 0x90;   // mSpawnClass[8] (cargo class)
+static constexpr uintptr_t kVS_UseCarrier   = 0xD0;   // mUseCarrier[8]
+static constexpr uintptr_t kVS_ListSentinel = 0xD8;   // mTrackerList
+static constexpr uintptr_t kVS_TrackerCount = 0xE8;   // mTrackerList._iCount
+static constexpr uintptr_t kVS_CarrierPtr   = 0xEC;   // mCarrier (PblHandle ptr)
+static constexpr uintptr_t kVS_CarrierGen   = 0xF0;   // mCarrier (PblHandle id)
+static constexpr uintptr_t kVS_Team         = 0xF8;   // mSpawnTeam (1-based)
+
+static inline int&   fieldI(char* p, uintptr_t off) { return *(int*)(p + off); }
+static inline float& fieldF(char* p, uintptr_t off) { return *(float*)(p + off); }
+
+static inline CargoSlot* cargoSlots(char* base) { return (CargoSlot*)(base + L->cargoSlots); }
+static inline int  flightState(char* base) { return fieldI(base, L->flightState); }
+static inline char* carrierClass(char* base) { return *(char**)(base + L->cls); }
+
+// Live cargo in a slot, or null.  Mirrors the engine's PblHandle test.
+static void* slotCargo(char* base, int slot)
+{
+   CargoSlot& s = cargoSlots(base)[slot];
+   if (!s.mObjectPtr) return nullptr;
+   if (*(int*)((char*)s.mObjectPtr + kHandleId) != s.mObjectGen) return nullptr;
+   return s.mObjectPtr;
+}
+
+static void setTeam(void* obj, int team)
+{
+   typedef void(__thiscall* SetTeam_t)(void*, int);
+   ((SetTeam_t)(*(void***)obj)[kVt_SetTeam])(obj, team);
+}
+
+static void* g_carrierVtable = nullptr;
+
+// ---------------------------------------------------------------------------
+// Per-carrier tracking
+// ---------------------------------------------------------------------------
 
 static constexpr int kMaxTrackedCarriers = 8;
 
-// AttachCargo's first argument is only a cargo-slot index on modtools.  Steam's
-// EntityCarrier::AttachCargo (0x497300) ignores it entirely and writes the slot
-// at a fixed offset, so bounds-checking it there rejects perfectly valid calls
-// (this is what made carriers stop appearing).  DetachCargo does index by it on
-// both builds, so its guard stays unconditional.
-static bool s_attachSlotIsIndex = false;
+struct CarrierTrack {
+   char*    base;               // nullptr = free
+   int      handleId;           // base+0x204 at registration
 
-// Multi-cargo extra-spawn path (hooked_UpdateSpawn).  Depends on class/entity
-// vtable slot indices that are only verified for modtools.  See the use site.
-static bool s_multiCargoSpawn = false;
+   float    padX, padY, padZ;
+   float    descentDuration;    // LandingTime (clamped)
+   float    forwardSpeed;       // TakeoffSpeed (clamped)
+   float    landedHt;           // class LandedHeight
+   int      savedCargoTeam[kMaxCargo];  // -1 = nothing saved
 
-// True when the render hook is installed, i.e. when something consumes
-// g_animOverride.  Independent of the flight system: on Steam the cargo-drop
-// animation override runs without it.
-static bool s_animOverrideActive = false;
+   int      lastState;
+   bool     cargoDropped;
 
-// ---------------------------------------------------------------------------
-// Custom carrier flight system
-// ---------------------------------------------------------------------------
-//
-// PROBLEM
-//   Vanilla carriers use progress-based interpolation for landing. The
-//   carrier's position is lerped between a flight-path waypoint and the
-//   VehiclePad based on a progress float (1.0 → 0.0). This causes the
-//   carrier to land far from the pad because the interpolation start
-//   point is wherever the carrier happens to be on the flight path —
-//   not aligned with the pad's X/Z coordinates.
-//
-//   After cargo drop, vanilla's ascent (state 1) is purely vertical
-//   progress-based interpolation with no forward movement. The carrier
-//   rises straight up, then snaps to a flight-path position when it
-//   reaches state 2. This looks unnatural.
-//
-// SOLUTION
-//   We override the carrier's position during two phases:
-//
-//   1. DESCENT — quadratic easing toward the pad
-//   2. ASCENT  — forward displacement while vanilla handles altitude
-//
-//   Everything else (AI direction, cargo attach/detach, state machine,
-//   landing condition, flight altitude) stays vanilla.
-//
-// ─── PHASE 1: DESCENT (state 3 — LANDING) ───
-//
-//   When the carrier enters state 3, we capture its world position as
-//   the interpolation start point. Each frame we compute:
-//
-//     t = clamp(elapsed / LandingTime, 0, 1)
-//
-//     X = lerp(startX, padX, t)          — linear horizontal
-//     Z = lerp(startZ, padZ, t)          — linear horizontal
-//     Y = lerp(startY, targetY, t*t)     — ease-in (t^2) vertical
-//
-//   targetY = padY + instanceLandedHt - 1.0
-//
-//   The ease-in on Y delays most of the altitude drop to the end of
-//   the descent. This is critical because vanilla's landing condition
-//   fires when groundDistance < LandedHeight. With ease-in, the carrier
-//   crosses that threshold at t≈0.97, ensuring it's directly above the
-//   pad when it lands. Ease-out (1-(1-t)^2) would cross at t≈0.74,
-//   landing the carrier hundreds of units away.
-//
-//   We use the INSTANCE LandedHeight (ECX+0x3C0), not the class value.
-//   The instance value includes the cargo bounding box and matches what
-//   vanilla's landing condition actually checks.
-//
-// ─── PHASE 2: ASCENT (state 1 — ASCENDING, post-drop only) ───
-//
-//   After cargo drop (state 3 → 0 → TakeOff → state 1), vanilla's
-//   state 1 raises the carrier to flight altitude via progress-based
-//   Y interpolation. This is purely vertical — no forward movement.
-//
-//   We fix this by saving the carrier's heading (rotation row 1) at
-//   TakeOff time and applying forward displacement to X/Z each frame:
-//
-//     if elapsed <= 3s:
-//       displacement = TakeoffSpeed * elapsed^2 / 6    (ramp up)
-//     else:
-//       displacement = TakeoffSpeed * 1.5 + TakeoffSpeed * (elapsed - 3)
-//
-//   The speed ramps from 0 to TakeoffSpeed over ~3 seconds, simulating
-//   the carrier regaining momentum after the stop-and-drop. After the
-//   ramp, it continues at constant TakeoffSpeed.
-//
-//   We also restore the carrier's rotation and X/Z from a snapshot
-//   taken at TakeOff time. This prevents the visual "jump" caused by
-//   vanilla's movement controller teleporting the carrier to a flight-
-//   path start point during state 1.
-//
-//   For the FIRST takeoff (pre-drop, carrier flying to the pad), only
-//   X and rotation are locked from the snapshot. Z is left free so
-//   vanilla's flight path drives forward movement naturally.
-//
-//   For POST-DROP takeoff, both X and Z are set from the snapshot +
-//   our forward displacement. This gives smooth forward flight.
-//
-//   Re-landing prevention: if vanilla tries to set state 3 during
-//   post-drop ascent, we force it back to state 1.
-//
-// ─── CARRIER LIFECYCLE ───
-//
-//   1. VehicleSpawn spawns carrier + cargo → state 3 (LANDING)
-//      - UpdateSpawn assigns a CarrierFlightOverride slot
-//      - Additional cargo spawned for multi-cargo carriers
-//
-//   2. Carrier descends (our PHASE 1) → lands → state 0 (LANDED)
-//      - Vanilla's landing condition (gndDist < landedHt) triggers
-//      - Cargo is detached (slot 0 by vanilla, slots 1-3 by us)
-//
-//   3. CalculateDest calls TakeOff → state 1 (ASCENDING)
-//      - Our hooked TakeOff saves transform snapshot
-//      - Post-drop: captures forward direction, activates PHASE 2
-//
-//   4. Carrier ascends (vanilla Y + our forward displacement)
-//      - Vanilla's progress interpolation raises Y to TakeoffHeight
-//      - Our forward displacement moves X/Z along the saved heading
-//
-//   5. Ascent completes → state 2 (FLYING)
-//      - CalculateDest sees state 2 → destroys the carrier
-//      - Safety despawn timer runs as fallback
-//
-// ─── ODF PROPERTIES ───
-//
-//   Set these in the carrier's ODF (EntityFlyer section):
-//
-//   | Property      | Offset | What it controls                              |
-//   |---------------|--------|-----------------------------------------------|
-//   | LandingTime   | +0x8EC | Descent duration (seconds). How long the      |
-//   |               |        | carrier takes to fly from spawn point to pad. |
-//   | TakeoffTime   | +0x8E4 | Ascent duration (seconds). How long the       |
-//   |               |        | carrier takes to rise to flight altitude.      |
-//   | TakeoffSpeed  | +0x8E8 | Post-drop forward speed (units/sec). How fast |
-//   |               |        | the carrier flies away after dropping cargo.   |
-//   |               |        | Speed ramps from 0 to this value over ~3s.    |
-//   | TakeoffHeight | +0x8E0 | Flight altitude (units above pad Y). The      |
-//   |               |        | carrier ascends to padY + TakeoffHeight.      |
-//   | MinSpeed      | +0x88C | Vanilla flight speed. Controls spawn distance |
-//   |               |        | (MinSpeed * LandingTime = distance from pad). |
-//   |               |        | NOT used by our system for post-drop speed.   |
-//   | LandingSpeed  | +0x8F0 | Not used by our system.                       |
-//   | LandedHeight  | +0x8F4 | Auto-calculated from model bounding box.      |
-//   |               |        | NOT an ODF property. Affects when vanilla's    |
-//   |               |        | landing condition triggers (gndDist < this).   |
-//
-// ─── SLOT TRACKING ───
-//
-//   Three parallel arrays track per-carrier state:
-//
-//   - g_flightOverride[8]: pad position, class params, descent/ascent
-//     state, forward direction, elapsed timers, despawn timer.
-//     Assigned in UpdateSpawn, freed on carrier death.
-//
-//   - g_takeoffPos[8]: transform snapshot (X, Z, rotation rows) saved
-//     at TakeOff time. Restored each frame during state 1 to prevent
-//     visual jumping from the movement controller.
-//
-//   - g_animOverride[8]: animation progress override for the render hook.
-//
-//   All arrays are cleaned of stale entries (dead carriers) via
-//   vtable validation whenever a new carrier spawns. This handles
-//   carriers destroyed outside our Update hook (e.g., by CalculateDest)
-//   and prevents stale data from interfering on match restart.
-// ---------------------------------------------------------------------------
+   // Descent (LANDING)
+   bool     landActive;
+   float    landStartX, landStartY, landStartZ, landTargetY, landElapsed;
 
-// EntityFlyerClass offsets for flight parameters
-static uintptr_t s_ClassTakeoffTime_off   = 0x8E4;  // float: TakeoffTime (ascent duration)
-static uintptr_t s_ClassTakeoffSpeed_off  = 0x8E8;  // float: TakeoffSpeed (post-drop forward speed)
-static uintptr_t s_ClassLandingTime_off   = 0x8EC;  // float: LandingTime (descent duration)
+   // Post-drop ascent (TAKEOFF): transform snapshot + forward displacement
+   bool     ascentActive;
+   float    ascentElapsed;
+   float    fwdDirX, fwdDirZ;
+   float    snapX, snapZ;
+   float    snapRot[12];        // matrix rows 0..2 (+0xF0..+0x11F)
 
-// EntityFlyer::InitiateLanding — thiscall(struct_base), sets state=3
-using fn_InitiateLanding_t = void(__fastcall*)(void* ecx, void* edx);
-static fn_InitiateLanding_t original_InitiateLanding = nullptr;
-
-// EntityCarrier::Kill — thiscall(struct_base), destroys carrier
-using fn_CarrierKill_t = void(__fastcall*)(void* ecx, void* edx);
-static fn_CarrierKill_t g_CarrierKill = nullptr;
-
-static constexpr float kDefaultDespawnDelay = 15.0f;
-static constexpr float kMinDuration         = 2.0f;
-
-struct CarrierFlightOverride {
-   void*  structBase;        // carrier identity (struct_base ptr), nullptr = unused
-
-   // Pad info (from VehicleSpawn at spawn time)
-   float  padX, padY, padZ;
-
-   // Class params (cached at spawn from EntityFlyerClass)
-   float  flightAltitude;    // TakeoffHeight (+0x8E0) — cruise altitude above pad
-   float  ascentDuration;    // TakeoffTime (+0x8E4) — ascent duration (seconds)
-   float  descentDuration;   // LandingTime (+0x8EC) — descent duration (seconds)
-   float  forwardSpeed;      // TakeoffSpeed (+0x8E8) — post-drop forward displacement speed
-   float  landedHt;          // LandedHeight (+0x8F4) — bbox threshold
-
-   // Descent state (state 3)
-   float  landStartX, landStartY, landStartZ;
-   float  landTargetY;       // padY + landedHt - 1.0
-   float  landElapsed;
-   bool   landActive;
-
-   // Cargo team save/restore (disable spawning while carried)
-   int    savedCargoTeam[4]; // team per cargo slot, -1 = not saved
-
-   // Post-drop ascent state (state 1, with forward movement)
-   float  ascentElapsed;
-   float  fwdDirX, fwdDirZ;  // forward direction at takeoff (normalized XZ)
-   bool   ascentActive;
-
-   // Despawn timer (after ascent completes)
-   float  despawnTimer;      // seconds remaining, -1 = inactive
-   bool   despawnActive;
-
-   // State tracking
-   int    lastState;
-   bool   cargoDropped;      // true after first landing cycle completes
+   // Cargo-drop animation override (render hook)
+   bool     animActive;
+   DWORD    animStartTick, animLastMs, animPausedMs;
+   float    animDuration;
 };
-static CarrierFlightOverride g_flightOverride[kMaxTrackedCarriers] = {};
+static CarrierTrack g_tracks[kMaxTrackedCarriers] = {};
 
-// Cargo slot offsets from struct_base (inner base).  CargoSlot is
-// { PblVector3 mOffset; PblHandle<GameObject> mObject; } = 0x14 bytes (Phantom
-// EntityCarrier::mCargoArray is CargoSlot[4]), so mObject sits at slot+0xC.
-// Stride is 0x14 on both builds; only the array base differs.  Steam:
-// DetachCargo 0x497410 computes (idx*5 + 0x767)*4 == idx*0x14 + 0x1D9C, and
-// AttachCargo 0x497300 writes that same 0x1D9C for slot 0.
-static uintptr_t s_inner_mCargoSlot0Obj = 0x1DDC; // Steam: 0x1D9C
-static constexpr uintptr_t kCargoSlotStride      = 0x14;   // stride between cargo slots
+static bool trackAlive(const CarrierTrack& t)
+{
+   if (!t.base) return false;
+   __try {
+      return *(int*)(t.base + kHandleId) == t.handleId;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
 
-// Key struct_base (inner base) offsets used by multiple hooks.  Per build: every
-// field in this range sits 0x40 lower on Steam (six independently verified
-// pairs), but each value below was read out of the disassembly directly rather
-// than inferred from that pattern:
-//   mFlightState  Steam 0x564  — Land 0x4b3d50 / TakeOff 0x4b3c60 (cmp 2/1/3, set 3/1)
-//   mClass        Steam 0x62C  — render `[ESI+0x598]` + AttachCargo `[EBX+0x62c]`
-//   mProgress     Steam 0x568  — render else-branch reads it adjacent to mFlightState
-//   mRef17dc      Steam 0x1830 — render `MOV EAX,[ESI+0x179c]` then `MOVZX [EAX+8]` (nFrames)
-static uintptr_t s_inner_mFlightState = 0x5A4;    // int: flight state
-static uintptr_t s_inner_mClass       = 0x66C;    // EntityCarrierClass*
-static uintptr_t s_inner_mProgress    = 0x5A8;    // float: anim progress
-static uintptr_t s_inner_mRef17dc     = 0x1870;   // ZephyrAnim* (nFrames source)
+// Live track for this carrier, or null.  Frees dead entries it walks past.
+static CarrierTrack* trackFind(char* base)
+{
+   for (CarrierTrack& t : g_tracks) {
+      if (!t.base) continue;
+      if (!trackAlive(t)) { t = {}; continue; }
+      if (t.base == base) return &t;
+   }
+   return nullptr;
+}
 
-// Network animation delta.  Zeroed during an animation override to stop the net
-// layer interpolating the frame we forced.  NOT yet located on Steam, so it is
-// set to 0 there and the write is skipped — the override still works, it just
-// leaves the net delta alone.
-static uintptr_t s_inner_mNetAnimDelta = 0x1D00;
+static CarrierTrack* trackAcquire(char* base)
+{
+   if (CarrierTrack* t = trackFind(base)) return t;
+   for (CarrierTrack& t : g_tracks) {
+      if (t.base) continue;
+      t = {};
+      t.base      = base;
+      t.handleId  = *(int*)(base + kHandleId);
+      t.lastState = -1;
+      for (int& team : t.savedCargoTeam) team = -1;
+      return &t;
+   }
+   static bool s_reported = false;
+   if (!s_reported) {
+      s_reported = true;
+      if (auto fn = get_gamelog())
+         fn("[Carrier] more than %d carriers in flight; extras fly vanilla\n", kMaxTrackedCarriers);
+   }
+   return nullptr;
+}
 
-// EntityFlyerClass takeoff animation (ZephyrAnim*), source of nFrames.
-// Steam 0x7B4 — render reads `[class+0x7b4]` where modtools reads `[class+0x87c]`
-// (and the 0x880 alternate maps to 0x7b8).
-static uintptr_t s_class_takeoffAnim  = 0x87c;
+static void trackRelease(char* base)
+{
+   for (CarrierTrack& t : g_tracks)
+      if (t.base == base) t = {};
+}
 
-// EntityFlyerClass offsets (from class pointer)
-static uintptr_t s_ClassLandedHt_off   = 0x8F4;  // float: -(bbox_Y_min)
-static uintptr_t s_ClassTakeoffHt_off  = 0x8E0;  // float: TakeoffHeight ODF property
+// Take a cargo's team and park it on team 0 while it is carried, so the cargo
+// can't be used as a spawn point / entered mid-air.  Restored on detach.
+static void saveCargoTeam(CarrierTrack& t, int slot, void* cargo)
+{
+   int* bits = (int*)((char*)cargo + kTeamBits);
+   int team  = (*bits >> 4) & 0xF;
+   t.savedCargoTeam[slot] = team;
+   if (team != 0) {
+      setTeam(cargo, 0);
+      *bits &= ~0xFF0;
+   }
+}
 
-// ---------------------------------------------------------------------------
-// VehicleSpawn offsets (from UpdateSpawn's ECX)
-// ---------------------------------------------------------------------------
-static constexpr uintptr_t kVS_SpawnCount   = 0x7C;   // int: max active vehicles from this pad
-static constexpr uintptr_t kVS_SpawnClass   = 0x90;   // EntityClass*[8] — cargo class per team
-static constexpr uintptr_t kVS_UseCarrier   = 0xD0;   // bool[8] — carrier mode per team
-static constexpr uintptr_t kVS_ListSentinel = 0xD8;   // linked list sentinel node
-static constexpr uintptr_t kVS_TrackerCount = 0xE8;   // int: active VehicleTracker count
-static constexpr uintptr_t kVS_CarrierPtr   = 0xEC;   // carrier entity ptr (PblHandle)
-static constexpr uintptr_t kVS_CarrierGen   = 0xF0;   // carrier entity generation
-static constexpr uintptr_t kVS_Team         = 0xF8;    // int: current vehicle team (1-based)
-static constexpr uintptr_t kVS_PadTransform = 0x30;    // PblMatrix (16 floats)
+static void restoreCargoTeam(CarrierTrack& t, int slot, void* cargo)
+{
+   int team = t.savedCargoTeam[slot];
+   t.savedCargoTeam[slot] = -1;
+   if (team <= 0) return;
+   setTeam(cargo, team);
+   int* bits = (int*)((char*)cargo + kTeamBits);
+   *bits ^= ((team << 4) ^ *bits) & 0xF0;
+   *bits ^= ((team << 8) ^ *bits) & 0xF00;
+}
 
-// MemoryPool::Allocate — thiscall(MemoryPool*, uint size) → void*
-typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
-static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
-
-// VehicleTracker::sMemoryPool global
-static void* g_VehicleTrackerPool = nullptr;
-
-// GameLoop::sPauseMode — true when game is ESC-paused
+// GameLoop::sPauseMode, for pause-aware animation timing (null = unmapped).
 static uint8_t* g_pauseMode = nullptr;
-
-// Per-carrier animation progress override (used by render hook)
-struct CarrierAnimOverride {
-   void* structBase;    // carrier struct_base (inner), nullptr = unused
-   DWORD startTick;     // GetTickCount() at activation
-   float duration;      // seconds to play from start → end
-   float startProg;     // progress value at activation
-   float endProg;       // progress value at end
-   bool  active;
-   DWORD lastRenderMs;  // last render frame timestamp (for pause tracking)
-   DWORD pausedAccum;   // accumulated paused time in ms
-};
-static CarrierAnimOverride g_animOverride[kMaxTrackedCarriers] = {};
 
 // ---------------------------------------------------------------------------
 // EntityCarrierClass::SetProperty
-//   __thiscall(EntityCarrierClass* this, unsigned int hash, const char* value)
-//   Ghidra VA: 0x004D7210
+//   __thiscall(EntityCarrierClass* this, uint hash, const char* value)
+//
+// No bounds check on mCargoCount before writing mCargoInfo[mCargoCount].  At
+// count 4 the write lands on mCargoCount itself, at 5 on mSoundCargoPickup.
 // ---------------------------------------------------------------------------
 
-
-using fn_SetProperty_t = void(__fastcall*)(void* ecx, void* edx,
-                                           unsigned int hash, const char* value);
+using fn_SetProperty_t = void(__fastcall*)(void* ecx, void* edx, unsigned int hash, const char* value);
 static fn_SetProperty_t original_SetProperty = nullptr;
 
-static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/,
-                                          unsigned int hash, const char* value)
+static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/, unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
-      int count = *(int*)((char*)ecx + s_mCargoCount_offset);
-      if (count >= kMaxCargo) return; // array full — silently ignore extra nodes
+      if (fieldI((char*)ecx, L->clsCargoCount) >= kMaxCargo) return;
    }
    original_SetProperty(ecx, nullptr, hash, value);
 }
 
 // ---------------------------------------------------------------------------
 // EntityCarrier::AttachCargo
-//   __thiscall(EntityCarrier* this, int slotIdx, void* cargo)
-//   Ghidra VA: 0x004D81F0
+//   __thiscall(EntityCarrier* base, int slot, GameObject* cargo), RET 8
+//
+// No slot bounds check, and the cargo is dereferenced before any null check.
+// Release builds' copy ignores the slot argument entirely (LTCG specialised it
+// for the only caller, which passes 0), so there the argument is garbage and
+// must not be tested; see attachCargoToSlot() for filling other slots.
 // ---------------------------------------------------------------------------
 
-
-using fn_AttachCargo_t = void(__fastcall*)(void* ecx, void* edx,
-                                           int slotIdx, void* cargo);
+using fn_AttachCargo_t = bool(__fastcall*)(void* ecx, void* edx, int slot, void* cargo);
 static fn_AttachCargo_t original_AttachCargo = nullptr;
 
-// Attach `cargo` to an arbitrary cargo slot.
-//
-// On modtools AttachCargo indexes by its slot argument, so this is a plain
-// forward.  Steam's (0x497300) is hardcoded to cargo slot 0 and class cargo
-// node 0 — it never reads the argument at all, and vanilla even passes garbage
-// there (UpdateSpawn 0066fa64 pushes a clobbered ECX).  That is why the slot
-// argument cannot simply be honoured on that build.
-//
-// Instead we let the engine do the work in the only place it knows how to:
-// present node `slot` as node 0 and an empty slot 0, call the original so it
-// runs its own placement math (including the cargo-bbox vtable[40] call), then
-// move the five dwords it wrote (offset xyz + object + generation, verified at
-// 0049737c..0049739e) into the real slot and put back what we borrowed.  The
-// rest of the function — the cargo parent link, UpdateLandedHeight and the
-// pickup sound — is slot-independent and runs exactly once either way.
-static bool attachCargoToSlot(char* structBase, int slot, void* cargo)
+static bool __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/, int slot, void* cargo)
 {
-   if (s_attachSlotIsIndex || slot == 0) {
-      original_AttachCargo(structBase, nullptr, slot, cargo);
-      return true;
-   }
-   if ((unsigned int)slot >= (unsigned int)kMaxCargo) return false;
+   if (L->attachSlotIsIndex && (unsigned)slot >= (unsigned)kMaxCargo) return false;
+   if (!cargo) return false;
+   return original_AttachCargo(ecx, nullptr, slot, cargo);
+}
+
+// Attach `cargo` to any slot, on every build.  Where AttachCargo is pinned to
+// slot 0 we present class node `slot` as node 0 and an empty slot 0, let the
+// engine run its own placement math, then move the slot it wrote into place and
+// put back what we borrowed.  The class is shared by every carrier of this
+// type, so the restore runs on the exception path too.
+static bool attachCargoToSlot(char* base, int slot, void* cargo)
+{
+   if (L->attachSlotIsIndex || slot == 0)
+      return original_AttachCargo(base, nullptr, slot, cargo);
+   if ((unsigned)slot >= (unsigned)kMaxCargo) return false;
 
    bool ok = false;
    __try {
-      char* classPtr = *(char**)(structBase + s_inner_mClass);
-      if (classPtr) {
-         char* node0 = classPtr   + s_cargoNodeArrayBase;
-         char* nodeN = node0      + slot * kCargoNodeStride;
-         // s_inner_mCargoSlot0Obj points at mObject; the slot starts 0xC earlier.
-         char* slot0 = structBase + s_inner_mCargoSlot0Obj - kCargoSlot_ObjPtr;
-         char* slotN = slot0      + slot * kCargoSlotStride;
-
-         unsigned char savedNode[kCargoNodeStride];
-         unsigned char savedSlot[kCargoSlotStride];
-         memcpy(savedNode, node0, kCargoNodeStride);
-         memcpy(savedSlot, slot0, kCargoSlotStride);
-
-         // node0 lives in the CLASS, which every carrier of this type shares,
-         // so the restore has to happen even if the attach throws — otherwise
-         // one bad call would leave cargo node 0 permanently wrong for all of
-         // them.  __finally runs on the exception path too.
+      char* cls = carrierClass(base);
+      if (cls) {
+         CargoInfo* nodes = (CargoInfo*)(cls + L->clsCargoNodes);
+         CargoSlot* slots = cargoSlots(base);
+         CargoInfo savedNode = nodes[0];
+         CargoSlot savedSlot = slots[0];
          __try {
-            memcpy(node0, nodeN, kCargoNodeStride);
-            memset(slot0, 0, kCargoSlotStride);   // make slot 0 look unoccupied
-
-            original_AttachCargo(structBase, nullptr, 0, cargo);
-
-            memcpy(slotN, slot0, kCargoSlotStride);   // harvest
+            nodes[0] = nodes[slot];
+            slots[0] = {};
+            original_AttachCargo(base, nullptr, 0, cargo);
+            slots[slot] = slots[0];
             ok = true;
          } __finally {
-            memcpy(slot0, savedSlot, kCargoSlotStride);
-            memcpy(node0, savedNode, kCargoNodeStride);
+            slots[0] = savedSlot;
+            nodes[0] = savedNode;
          }
       }
-   } __except(EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+   } __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
    return ok;
-}
-
-static void __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/,
-                                          int slotIdx, void* cargo)
-{
-   if (s_attachSlotIsIndex && (unsigned int)slotIdx >= (unsigned int)kMaxCargo)
-      return;          // OOB slot (modtools only — see s_attachSlotIsIndex)
-   if (!cargo) return; // null cargo: dereferenced via vtable+0xA0 on both builds
-   original_AttachCargo(ecx, nullptr, slotIdx, cargo);
-
-   // Save cargo's team and set to 0 to disable spawning while carried.
-   // ECX = struct_base in AttachCargo.
-   __try {
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_flightOverride[i].structBase != ecx) continue;
-
-         int* teamBits = (int*)((char*)cargo + 0x234);
-         int team = (*teamBits >> 4) & 0xF;
-         g_flightOverride[i].savedCargoTeam[slotIdx] = team;
-
-         if (team != 0) {
-            // SetTeam(0) via vtable[36]
-            typedef void (__thiscall* SetTeam_t)(void* entity, int team);
-            void** vtbl = *(void***)cargo;
-            ((SetTeam_t)vtbl[36])(cargo, 0);
-            // Clear team bits
-            *teamBits = *teamBits & ~0xFF0; // clear bits 4-11
-         }
-         break;
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // ---------------------------------------------------------------------------
 // EntityCarrier::DetachCargo
-//   __thiscall(EntityCarrier* this, int slotIdx)
-//   Ghidra VA: 0x004D8350
+//   __thiscall(EntityCarrier* base, int slot), RET 4
+//
+// No slot bounds check.  Also restores the cargo's team and, for slot 0,
+// starts the cargo-drop animation override.
 // ---------------------------------------------------------------------------
 
-
-using fn_DetachCargo_t = void(__fastcall*)(void* ecx, void* edx, int slotIdx);
+using fn_DetachCargo_t = bool(__fastcall*)(void* ecx, void* edx, int slot);
 static fn_DetachCargo_t original_DetachCargo = nullptr;
 
-static void __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slotIdx)
+static bool s_renderHooked = false;
+
+static void startDropAnimation(CarrierTrack& t, char* base)
 {
-   if ((unsigned int)slotIdx >= (unsigned int)kMaxCargo) return; // OOB slot
-
-   // Check if this slot has cargo BEFORE calling original (which clears it).
-   // ECX in DetachCargo = struct_base (inner base).
-   bool hadCargo = false;
-   void* cargoObj = nullptr;
+   float dur = 3.0f;
    __try {
-      cargoObj = *(void**)((char*)ecx + s_inner_mCargoSlot0Obj + slotIdx * kCargoSlotStride);
-      hadCargo = (cargoObj != nullptr);
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   original_DetachCargo(ecx, nullptr, slotIdx);
-
-   // Restore cargo team that was saved at attach time.
-   if (hadCargo && cargoObj) {
-      __try {
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_flightOverride[i].structBase != ecx) continue;
-            int savedTeam = g_flightOverride[i].savedCargoTeam[slotIdx];
-            if (savedTeam > 0) {
-               typedef void (__thiscall* SetTeam_t)(void* entity, int team);
-               void** vtbl = *(void***)cargoObj;
-               ((SetTeam_t)vtbl[36])(cargoObj, savedTeam);
-               int* teamBits = (int*)((char*)cargoObj + 0x234);
-               *teamBits = *teamBits ^ (((savedTeam << 4) ^ *teamBits) & 0xF0);
-               *teamBits = *teamBits ^ (((savedTeam << 8) ^ *teamBits) & 0xF00);
-
-            }
-            g_flightOverride[i].savedCargoTeam[slotIdx] = -1;
-            break;
-         }
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-   }
-
-   // Activate animation override on first cargo slot drop — progress starts at 1.0
-   // (fully deployed) and will be driven down toward 0.0 by the Update hook.
-   // Only meaningful when the render hook is installed to consume it.
-   if (s_animOverrideActive && hadCargo && slotIdx == 0) {
-      int slot = -1;
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_animOverride[i].structBase == ecx || g_animOverride[i].structBase == nullptr) {
-            slot = i; break;
-         }
+      char* cls = carrierClass(base);
+      void* anim = cls ? *(void**)(cls + L->clsTakeoffAnim) : nullptr;
+      if (anim) {
+         unsigned short nFrames = *(unsigned short*)((char*)anim + 8);
+         if (nFrames > 0) dur = (float)nFrames / 30.0f;
       }
-      if (slot < 0) slot = 0;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-      // Read animation duration from the takeoff anim's nFrames (class+0x87c -> +8)
-      float dur = 3.0f; // fallback
-      __try {
-         void* classPtr = *(void**)((char*)ecx + s_inner_mClass);
-         if (classPtr) {
-            void* takeoffAnim = *(void**)((char*)classPtr + s_class_takeoffAnim);
-            if (takeoffAnim) {
-               unsigned short nFrames = *(unsigned short*)((char*)takeoffAnim + 8);
-               if (nFrames > 0) dur = (float)nFrames / 30.0f;
-            }
-         }
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
+   t.animActive    = true;
+   t.animStartTick = GetTickCount();
+   t.animLastMs    = t.animStartTick;
+   t.animPausedMs  = 0;
+   t.animDuration  = dur;
+}
 
-      g_animOverride[slot].structBase = ecx;
-      g_animOverride[slot].startTick = GetTickCount();
-      g_animOverride[slot].duration = dur;
-      g_animOverride[slot].startProg = 0.0f;    // start at first frame
-      g_animOverride[slot].endProg = 1.0f;      // end at last frame
-      g_animOverride[slot].active = true;
-      g_animOverride[slot].lastRenderMs = g_animOverride[slot].startTick;
-      g_animOverride[slot].pausedAccum = 0;
+static bool __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slot)
+{
+   if ((unsigned)slot >= (unsigned)kMaxCargo) return false;
+   char* base = (char*)ecx;
+
+   void* cargo = nullptr;
+   __try { cargo = slotCargo(base, slot); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   bool result = original_DetachCargo(ecx, nullptr, slot);
+   if (!cargo) return result;
+
+   __try {
+      if (CarrierTrack* t = trackFind(base)) {
+         restoreCargoTeam(*t, slot, cargo);
+         if (s_renderHooked && slot == 0) startDropAnimation(*t, base);
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+   return result;
+}
+
+// Detach every live cargo slot through the hooked path (team restore).
+static void detachAllCargo(char* base, int firstSlot = 0)
+{
+   for (int s = firstSlot; s < kMaxCargo; s++) {
+      bool live = false;
+      __try { live = slotCargo(base, s) != nullptr; } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      if (live) hooked_DetachCargo(base, nullptr, s);
    }
 }
 
 // ---------------------------------------------------------------------------
-// EntityFlyer render — FUN_004f6970
-//   __thiscall(void* this, uint param2, float param3, uint param4)
-//   this = struct_base + 0x94
-//
-// Override the progress float for the render call when an animation override
-// is active.  The vanilla render function uses progress to compute the
-// animation frame: frame = (nFrames - 1) * progress.
+// Runtime code patches: render cull bypass + RayHit neutralisation
 // ---------------------------------------------------------------------------
 
-static constexpr uintptr_t kRender_thisToBase = 0x94;
+static unsigned char* codeSite(uintptr_t va)
+{
+   return va ? (unsigned char*)resolve(va) : nullptr;
+}
 
-using fn_FlyerRender_t = void(__fastcall*)(void* ecx, void* edx,
-                                           unsigned int param2, float param3, unsigned int param4);
-static fn_FlyerRender_t original_FlyerRender = nullptr;
-
-// Address of the 6-byte `JZ rel32` (0F 84) that skips the whole render when the
-// bounding sphere fails frustum culling.  Same encoding on both builds, so the
-// NOP patch is identical; only the site differs.
-//   modtools 0x004F6999, Steam 0x004AB082 — in both it is the JZ immediately
-//   after `TEST AL,AL` on the result of the `[this+0x1C4]` vtable+0x30 call.
-static uintptr_t s_visJzVA = 0x004f6999;
-
-// Visibility JZ bypass — NOP/restore the 6-byte JZ at s_visJzVA
-// that skips the entire render when the bounding sphere fails frustum culling.
-static unsigned char* s_visJzAddr = nullptr;
-
-// RayHit call NOP — disable the two downward RayHit calls in EntityFlyer::Update
-// (states 1 and 3) that read terrain surface normals and cause the carrier to
-// swirl/wobble over uneven terrain.  Each is a 5-byte CALL instruction.
-// Only applied when the carrier is above a height threshold so terrain alignment
-// still works near the ground for natural landing.
-static unsigned char* s_rayHitCall1 = nullptr;  // state 1: 0x004fe8cd
-static unsigned char* s_rayHitCall2 = nullptr;  // state 3: 0x004feae2
-
-static void visJzInit() {
-   if (!s_visJzAddr) {
-      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-      s_visJzAddr = (unsigned char*)((s_visJzVA - kUnrelocatedBase) + base);
+static void writeCode(unsigned char* site, const void* bytes, size_t len)
+{
+   DWORD oldProt;
+   if (VirtualProtect(site, len, PAGE_EXECUTE_READWRITE, &oldProt)) {
+      memcpy(site, bytes, len);
+      VirtualProtect(site, len, oldProt, &oldProt);
    }
 }
 
-// RayHit call sites inside EntityFlyer::Update (modtools 0x4fc930, Steam
-// 0x4ac460 — the function EntityCarrier::Update calls at 004971ea).  Both sites
-// are a 5-byte `CALL CollisionManager::RayHit` whose result is scaled by 1024.0
-// and stored to the instance groundDistance field (modtools +0x490, Steam
-// +0x450); a large groundDistance makes the terrain-normal block downstream be
-// skipped, which is what removes the swirl/wobble.
-static uintptr_t s_rayHitVA1 = 0x004fe8cd;  // state 1
-static uintptr_t s_rayHitVA2 = 0x004feae2;  // state 3
+// Visibility JZ (0F 84 rel32) that skips the whole flyer render when the
+// bounding sphere fails the frustum test.  NOP'd for the duration of one
+// carrier render call.
+static unsigned char* s_visJz = nullptr;
+static unsigned char  s_visJzOrig[6];
+static const unsigned char kNop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 
-// How the ray fraction is returned differs by build, so the 5 patch bytes do:
-//   modtools (x87)  : FLD1 + 3 NOP        — push 1.0 onto the FPU stack, the
-//                                            following FMUL 1024.0 then yields
-//                                            groundDistance = 1024.
-//   Steam/GOG (SSE) : CALL <rayHitStub>   — the fraction comes back in XMM0,
-//                                            not ST(0), so FLD1 is meaningless.
-//                                            Redirecting the CALL to our own
-//                                            stub is the same 5 bytes and keeps
-//                                            the stack balanced, because
-//                                            CollisionManager::RayHit is
-//                                            caller-cleans (the site's own
-//                                            `ADD ESP,0x18` still runs).
-static bool s_rayHitSseStub = false;
-
-// Must have real storage for the inline asm below to address it.
+// The two downward RayHit CALLs in EntityFlyer::Update (TAKEOFF / LANDING
+// branches).  Neutralised while a tracked carrier is high above its pad so the
+// terrain normal can't make it swirl: groundDistance comes out as 1024 and the
+// terrain-normal block is skipped.  modtools returns the ray fraction on the
+// x87 stack (FLD1 + 3 NOPs); release returns it in XMM0, so the CALL is
+// redirected to a stub instead (RayHit is caller-cleans, stack stays balanced).
+static unsigned char* s_rayHit[2] = {};
+static unsigned char  s_rayHitOrig[2][5];
+static unsigned char  s_rayHitPatch[2][5];
 static float s_rayHitOne = 1.0f;
 
-// Stands in for CollisionManager::RayHit: report "ray travelled its full
-// length" (fraction 1.0) and return WITHOUT touching the pushed arguments.
 static __declspec(naked) void rayHitStub_sse()
 {
    __asm {
@@ -641,317 +474,248 @@ static __declspec(naked) void rayHitStub_sse()
    }
 }
 
-// Filled in by rayHitInit(); per-site because the Steam form encodes a
-// site-relative CALL displacement.
-static unsigned char s_rayHitPatch1[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
-static unsigned char s_rayHitPatch2[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
+static void codePatchesInit()
+{
+   s_visJz = codeSite(L->visJz);
+   if (s_visJz) memcpy(s_visJzOrig, s_visJz, 6);
 
-static void rayHitInit() {
-   if (!s_rayHitCall1 && s_rayHitVA1 && s_rayHitVA2) {
-      uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-      s_rayHitCall1 = (unsigned char*)((s_rayHitVA1 - kUnrelocatedBase) + base);
-      s_rayHitCall2 = (unsigned char*)((s_rayHitVA2 - kUnrelocatedBase) + base);
-
-      if (s_rayHitSseStub) {
-         auto makeCall = [](unsigned char* out, const unsigned char* site) {
-            const int32_t rel = (int32_t)((uintptr_t)&rayHitStub_sse -
-                                          ((uintptr_t)site + 5));
-            out[0] = 0xE8;
-            memcpy(out + 1, &rel, sizeof(rel));
-         };
-         makeCall(s_rayHitPatch1, s_rayHitCall1);
-         makeCall(s_rayHitPatch2, s_rayHitCall2);
+   const uintptr_t vas[2] = { L->rayHit1, L->rayHit2 };
+   for (int i = 0; i < 2; i++) {
+      s_rayHit[i] = codeSite(vas[i]);
+      if (!s_rayHit[i]) continue;
+      memcpy(s_rayHitOrig[i], s_rayHit[i], 5);
+      if (L->rayHitSse) {
+         const int32_t rel = (int32_t)((uintptr_t)&rayHitStub_sse - ((uintptr_t)s_rayHit[i] + 5));
+         s_rayHitPatch[i][0] = 0xE8;
+         memcpy(s_rayHitPatch[i] + 1, &rel, 4);
+      } else {
+         const unsigned char fld1[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
+         memcpy(s_rayHitPatch[i], fld1, 5);
       }
    }
 }
 
-// Neutralise both 5-byte RayHit CALLs so groundDistance comes out at 1024,
-// which makes EntityFlyer::Update skip the terrain-normal block downstream.
-// See s_rayHitPatch1/2 for the per-build encoding.
-static void rayHitNop(unsigned char saved1[5], unsigned char saved2[5]) {
-   if (!s_rayHitCall1) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_rayHitCall1, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(saved1, s_rayHitCall1, 5);
-      memcpy(s_rayHitCall1, s_rayHitPatch1, 5);
-      VirtualProtect(s_rayHitCall1, 5, oldProt, &oldProt);
-   }
-   if (VirtualProtect(s_rayHitCall2, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(saved2, s_rayHitCall2, 5);
-      memcpy(s_rayHitCall2, s_rayHitPatch2, 5);
-      VirtualProtect(s_rayHitCall2, 5, oldProt, &oldProt);
-   }
+static void rayHitSet(bool neutralise)
+{
+   for (int i = 0; i < 2; i++)
+      if (s_rayHit[i]) writeCode(s_rayHit[i], neutralise ? s_rayHitPatch[i] : s_rayHitOrig[i], 5);
 }
 
-static void rayHitRestore(const unsigned char saved1[5], const unsigned char saved2[5]) {
-   if (!s_rayHitCall1) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_rayHitCall1, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_rayHitCall1, saved1, 5);
-      VirtualProtect(s_rayHitCall1, 5, oldProt, &oldProt);
-   }
-   if (VirtualProtect(s_rayHitCall2, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_rayHitCall2, saved2, 5);
-      VirtualProtect(s_rayHitCall2, 5, oldProt, &oldProt);
-   }
+// ---------------------------------------------------------------------------
+// EntityFlyer::Render (this = base+0x94)
+//
+// For tracked carriers: bypass the frustum cull (the sphere is kept at the
+// pivot, see syncBoundingSphere), hold the takeoff anim at frame 0 during the
+// descent, and after the drop play it 0 -> 1 on a wall clock.  Other flyers go
+// through the boost-animation path.
+// ---------------------------------------------------------------------------
+
+using fn_FlyerRender_t = void(__fastcall*)(void* ecx, void* edx, unsigned int lod, float p3, unsigned int p4);
+static fn_FlyerRender_t original_FlyerRender = nullptr;
+
+static void renderUncalled(void* ecx, unsigned int lod, float p3, unsigned int p4)
+{
+   if (s_visJz) writeCode(s_visJz, kNop6, 6);
+   original_FlyerRender(ecx, nullptr, lod, p3, p4);
+   if (s_visJz) writeCode(s_visJz, s_visJzOrig, 6);
 }
 
-static void visJzNop(unsigned char savedOut[6]) {
-   if (!s_visJzAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_visJzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(savedOut, s_visJzAddr, 6);
-      memset(s_visJzAddr, 0x90, 6);
-      VirtualProtect(s_visJzAddr, 6, oldProt, &oldProt);
-   }
-}
+static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/, unsigned int lod, float p3, unsigned int p4)
+{
+   char* base = (char*)ecx - kRenderBase;
+   CarrierTrack* t = trackFind(base);
 
-static void visJzRestore(const unsigned char saved[6]) {
-   if (!s_visJzAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_visJzAddr, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_visJzAddr, saved, 6);
-      VirtualProtect(s_visJzAddr, 6, oldProt, &oldProt);
+   if (!t) {
+      bool boost = flyer_boost_anim_render_prepare(base);
+      original_FlyerRender(ecx, nullptr, lod, p3, p4);
+      if (boost) flyer_boost_anim_render_restore(base);
+      return;
    }
-}
 
-// EntityCarrier vtable (unrelocated 0x00A3A670), resolved at install time.
-// Declared here (before the turret fire code cave) so inline asm can reference it.
-static void* g_carrierVtable = nullptr;
+   float* progSlot     = &fieldF(base, L->progress);
+   float* netDeltaSlot = &fieldF(base, L->netAnimDelta);
+   void** animRefSlot  = (void**)(base + L->animRef);
+   const float savedProg     = *progSlot;
+   const float savedNetDelta = *netDeltaSlot;
+   void* const savedAnimRef  = *animRefSlot;
+
+   if (t->animActive) {
+      DWORD now = GetTickCount();
+      if (g_pauseMode && *g_pauseMode) t->animPausedMs += now - t->animLastMs;
+      t->animLastMs = now;
+      float elapsed = (float)(now - t->animStartTick - t->animPausedMs) / 1000.0f;
+      float prog = (t->animDuration > 0.0f) ? elapsed / t->animDuration : 1.0f;
+      if (prog > 1.0f) prog = 1.0f;
+
+      *progSlot     = prog;
+      *netDeltaSlot = 0.0f;
+      // The render may be pointed at another clip (e.g. landing): force the
+      // takeoff clip so nFrames matches the progress we drive.
+      char* cls = carrierClass(base);
+      void* takeoff = cls ? *(void**)(cls + L->clsTakeoffAnim) : nullptr;
+      if (takeoff) *animRefSlot = takeoff;
+
+      renderUncalled(ecx, 0, p3, p4);   // LOD 0: the skinned mesh
+   } else {
+      // Vanilla plays the takeoff clip backwards during LANDING; hold frame 0.
+      if (flightState(base) == 3) *progSlot = 0.0f;
+      renderUncalled(ecx, lod, p3, p4);
+   }
+
+   *progSlot     = savedProg;
+   *netDeltaSlot = savedNetDelta;
+   *animRefSlot  = savedAnimRef;
+}
 
 // ---------------------------------------------------------------------------
 // Carrier turret fire patch
 //
-// In MountedTurret::Update (0x00565630), when PilotType is PILOT_VEHICLE (2)
-// or PILOT_VEHICLESELF (4), the code at 0x565c4c reads the parent EntityFlyer's
-// state and blocks the occupant fire command when state != 0 (not landed).
-//
-// This patch replaces those 21 bytes with a JMP to a code cave that first
-// checks whether the parent is an EntityCarrier. If it is, the state check
-// is skipped — allowing carrier turrets to fire in any flight state.
-// Non-carrier EntityFlyers keep the original behavior.
-//
-// Patched bytes (unrelocated 0x565c4c–0x565c5c, 17 bytes):
-//   8B16           MOV EDX,[ESI]
-//   8BCE           MOV ECX,ESI
-//   FF5224         CALL [EDX+0x24]
-//   8B88A4050000   MOV ECX,[EAX+0x5A4]
-//   85C9           TEST ECX,ECX
-//   7526           JNZ short 0x565c83
+// MountedTurret::Update blocks the occupant's fire when the parent EntityFlyer
+// is not LANDED.  The gate is replaced by a JMP to a cave that skips the state
+// test when the parent is an EntityCarrier.
+//   modtools 0x565c4c, 17 bytes: MOV ECX,[EAX+0x5A4] / TEST ECX,ECX / JNZ
+//   Steam    0x5a64df, 18 bytes: CMP [EAX+0x564],0 / JNZ
 // ---------------------------------------------------------------------------
 
-// The gate is encoded differently per build, so both the patched length and
-// the flight-state offset vary:
-//   modtools 0x565c4c, 17 bytes, MOV ECX,[EAX+0x5A4] / TEST ECX,ECX / JNZ
-//   Steam    0x5a64df, 18 bytes, CMP [EAX+0x564],0            / JNZ
-static constexpr size_t    kTurretFirePatch_max  = 18;   // buffer size
-static size_t              s_turretFirePatchLen  = 17;
-static uintptr_t           s_turretFireStateOff  = 0x5A4;  // Steam 0x564
+static constexpr size_t kTurretFirePatch_max = 18;
+static unsigned char* s_turretFireSite  = nullptr;
+static size_t         s_turretFireLen   = 0;
+static uintptr_t      s_turretFireAllow = 0;
+static uintptr_t      s_turretFireBlock = 0;
+static uintptr_t      s_turretFireStateOff = 0;
+static unsigned char  s_turretFireSaved[kTurretFirePatch_max] = {};
 
-static unsigned char* s_turretFirePatchAddr = nullptr;
-static uintptr_t      s_turretFireAllowJmp  = 0;
-static uintptr_t      s_turretFireBlockJmp  = 0;
-static unsigned char   s_turretFireSaved[kTurretFirePatch_max] = {};
-
-// Code cave — entered via JMP from 0x565c4c.
-// At entry: ESI = MountedTurret parent ptr (EBX-0xC). We are inside the
-// "parent IS EntityFlyer" branch (RTTI already confirmed).
+// Entered from the patch site with ESI = the turret's parent-controllable.
 static __declspec(naked) void turretFire_cave()
 {
    __asm {
-      // Replicate original: get parent entity via vtable[0x24]
       mov  edx, [esi]
       mov  ecx, esi
-      call dword ptr [edx + 0x24]     // EAX = parent EntityFlyer (struct_base)
-
-      // Is the parent an EntityCarrier?
-      mov  ecx, [eax]                 // ECX = parent vtable
+      call dword ptr [edx + 0x24]     // EAX = parent EntityFlyer base
+      mov  ecx, [eax]
       cmp  ecx, dword ptr [g_carrierVtable]
-      je   _allow                     // carrier → skip state check
-
-      // Not a carrier — original state check (offset differs per build)
+      je   _allow
       mov  ecx, dword ptr [s_turretFireStateOff]
-      mov  ecx, [eax + ecx]           // ECX = EntityFlyer state
+      mov  ecx, [eax + ecx]
       test ecx, ecx
-      jnz  _block                     // state != 0 → block fire
-
+      jnz  _block
    _allow:
-      jmp  dword ptr [s_turretFireAllowJmp]
-
+      jmp  dword ptr [s_turretFireAllow]
    _block:
-      jmp  dword ptr [s_turretFireBlockJmp]
-   }
-}
-
-static void turretFireInit()
-{
-   if (!g_addr->turret_fire_check || !g_addr->turret_fire_allow ||
-       !g_addr->turret_fire_block)
-      return;                       // unmapped on this build
-
-   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   s_turretFirePatchAddr = (unsigned char*)((g_addr->turret_fire_check - kUnrelocatedBase) + base);
-   s_turretFireAllowJmp  = (g_addr->turret_fire_allow - kUnrelocatedBase) + base;
-   s_turretFireBlockJmp  = (g_addr->turret_fire_block - kUnrelocatedBase) + base;
-
-   // The patched region must end exactly where the "allow" path resumes,
-   // otherwise the NOP fill would eat live instructions.
-   s_turretFirePatchLen = (size_t)(g_addr->turret_fire_allow - g_addr->turret_fire_check);
-   if (s_turretFirePatchLen < 5 || s_turretFirePatchLen > kTurretFirePatch_max) {
-      s_turretFirePatchAddr = nullptr;   // refuse to patch on a bad address pair
-      return;
+      jmp  dword ptr [s_turretFireBlock]
    }
 }
 
 static void turretFireInstall()
 {
-   if (!s_turretFirePatchAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen,
-                      PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_turretFireSaved, s_turretFirePatchAddr, s_turretFirePatchLen);
-      // Write JMP rel32 to code cave
-      s_turretFirePatchAddr[0] = 0xE9;
-      uintptr_t rel = (uintptr_t)&turretFire_cave
-                     - ((uintptr_t)s_turretFirePatchAddr + 5);
-      memcpy(s_turretFirePatchAddr + 1, &rel, 4);
-      // NOP remaining bytes
-      memset(s_turretFirePatchAddr + 5, 0x90, s_turretFirePatchLen - 5);
-      VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen, oldProt, &oldProt);
-   }
-}
+   if (!g_addr->turret_fire_check || !g_addr->turret_fire_allow || !g_addr->turret_fire_block) return;
 
-static void turretFireUninstall()
-{
-   if (!s_turretFirePatchAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen,
-                      PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_turretFirePatchAddr, s_turretFireSaved, s_turretFirePatchLen);
-      VirtualProtect(s_turretFirePatchAddr, s_turretFirePatchLen, oldProt, &oldProt);
-   }
+   // The patch must end exactly where the "allow" path resumes.
+   const size_t len = (size_t)(g_addr->turret_fire_allow - g_addr->turret_fire_check);
+   if (len < 5 || len > kTurretFirePatch_max) return;
+
+   s_turretFireSite     = (unsigned char*)resolve(g_addr->turret_fire_check);
+   s_turretFireLen      = len;
+   s_turretFireAllow    = (uintptr_t)resolve(g_addr->turret_fire_allow);
+   s_turretFireBlock    = (uintptr_t)resolve(g_addr->turret_fire_block);
+   s_turretFireStateOff = L->flightState;
+
+   unsigned char patch[kTurretFirePatch_max];
+   memset(patch, 0x90, sizeof(patch));
+   patch[0] = 0xE9;
+   const int32_t rel = (int32_t)((uintptr_t)&turretFire_cave - ((uintptr_t)s_turretFireSite + 5));
+   memcpy(patch + 1, &rel, 4);
+
+   memcpy(s_turretFireSaved, s_turretFireSite, len);
+   writeCode(s_turretFireSite, patch, len);
 }
 
 // ---------------------------------------------------------------------------
-// Controllable::CreateController null-check fix (vanilla bug)
+// Controllable::CreateController null check (modtools only)
 //
-// FUN_0055b2a0 creates a PlayerController or UnitController when entering a
-// vehicle.  At 0x0055b2e8 (PlayerController path), it reads [ESI+0xD0] (a
-// class pointer) and immediately dereferences [EAX+0xD4] without a null
-// check.  The UnitController path at 0x0055b2ff correctly checks for null.
-//
-// Under a debugger, timing differences can leave ctrl+0xD0 still null when
-// this function runs, causing an access violation at 0x0055b2ee.
-//
-// Fix: replace the 23-byte sequence at 0x0055b2e8..0x0055b2fe with a JMP to
-// a code cave that checks for null.  If null, set EDI=0 (so the subsequent
-// AddController check at 0x0055b359 also skips) and jump past the init.
+// The PlayerController path reads [ESI+0xD0] and dereferences +0xD4 with no
+// null check (the UnitController path has one).  Only observed under a
+// debugger; a 23-byte cave on debug codegen, so it stays modtools-only.
 // ---------------------------------------------------------------------------
 
-static constexpr size_t    kCreateCtrlPatch_len    = 23;         // 0x0055b2e8..0x0055b2fe
+static constexpr size_t kCreateCtrlPatch_len = 23;   // 0x0055b2e8..0x0055b2fe
+static unsigned char* s_createCtrlSite   = nullptr;
+static uintptr_t      s_createCtrlResume = 0;
+static uintptr_t      s_playerCtrlCtor   = 0;
+static unsigned char  s_createCtrlSaved[kCreateCtrlPatch_len] = {};
 
-static unsigned char* s_createCtrlPatchAddr = nullptr;
-static uintptr_t      s_createCtrlResumeJmp = 0;
-static uintptr_t      s_playerCtrlCtorAddr  = 0;
-static unsigned char   s_createCtrlSaved[kCreateCtrlPatch_len] = {};
-
-// Code cave: replicate original PlayerController init with a null guard.
 static __declspec(naked) void createCtrl_cave()
 {
    __asm {
       mov  eax, [esi + 0xD0]
       test eax, eax
       jz   _null
-
-      // Original code: PlayerController::PlayerController_(this=ctrl+0x18, param=*(class+0xD4))
       mov  ecx, [eax + 0xD4]
       push ecx
       lea  ecx, [esi + 0x18]
-      call dword ptr [s_playerCtrlCtorAddr]
-      jmp  dword ptr [s_createCtrlResumeJmp]
-
+      call dword ptr [s_playerCtrlCtor]
+      jmp  dword ptr [s_createCtrlResume]
    _null:
-      xor  edi, edi                          // EDI = 0 → AddController check skips
-      jmp  dword ptr [s_createCtrlResumeJmp]
+      xor  edi, edi                   // EDI = 0 -> AddController check skips
+      jmp  dword ptr [s_createCtrlResume]
    }
 }
 
-static void createCtrlNullCheckInit()
+static void createCtrlInstall()
 {
-   uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
-   s_createCtrlPatchAddr = (unsigned char*)((game_addrs::modtools::create_ctrl_patch - kUnrelocatedBase) + base);
-   s_createCtrlResumeJmp = (game_addrs::modtools::create_ctrl_resume - kUnrelocatedBase) + base;
-   s_playerCtrlCtorAddr  = (game_addrs::modtools::player_ctrl_ctor - kUnrelocatedBase) + base;
-}
+   if (g_build != GameBuild::Modtools || !g_addr->create_ctrl_patch) return;
+   s_createCtrlSite   = (unsigned char*)resolve(g_addr->create_ctrl_patch);
+   s_createCtrlResume = (uintptr_t)resolve(g_addr->create_ctrl_resume);
+   s_playerCtrlCtor   = (uintptr_t)resolve(g_addr->player_ctrl_ctor);
 
-static void createCtrlNullCheckInstall()
-{
-   if (!s_createCtrlPatchAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len,
-                      PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_createCtrlSaved, s_createCtrlPatchAddr, kCreateCtrlPatch_len);
-      // JMP rel32 to code cave
-      s_createCtrlPatchAddr[0] = 0xE9;
-      uintptr_t rel = (uintptr_t)&createCtrl_cave
-                     - ((uintptr_t)s_createCtrlPatchAddr + 5);
-      memcpy(s_createCtrlPatchAddr + 1, &rel, 4);
-      // NOP remaining bytes
-      memset(s_createCtrlPatchAddr + 5, 0x90, kCreateCtrlPatch_len - 5);
-      VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len, oldProt, &oldProt);
-   }
-}
+   unsigned char patch[kCreateCtrlPatch_len];
+   memset(patch, 0x90, sizeof(patch));
+   patch[0] = 0xE9;
+   const int32_t rel = (int32_t)((uintptr_t)&createCtrl_cave - ((uintptr_t)s_createCtrlSite + 5));
+   memcpy(patch + 1, &rel, 4);
 
-static void createCtrlNullCheckUninstall()
-{
-   if (!s_createCtrlPatchAddr) return;
-   DWORD oldProt;
-   if (VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len,
-                      PAGE_EXECUTE_READWRITE, &oldProt)) {
-      memcpy(s_createCtrlPatchAddr, s_createCtrlSaved, kCreateCtrlPatch_len);
-      VirtualProtect(s_createCtrlPatchAddr, kCreateCtrlPatch_len, oldProt, &oldProt);
-   }
+   memcpy(s_createCtrlSaved, s_createCtrlSite, kCreateCtrlPatch_len);
+   writeCode(s_createCtrlSite, patch, kCreateCtrlPatch_len);
 }
 
 // ---------------------------------------------------------------------------
-// Carrier PILOT_SELF turret AI — autonomous aiming and firing
+// PILOT_SELF turret AI (MountedTurret::UpdateIndirect)
 //
-// PILOT_SELF turrets have no UnitController (mCtrl == null at ctrl+0xC8),
-// so MountedTurret::UpdateIndirect does nothing — no AI targeting or aiming.
+// PILOT_SELF turrets get no threat data of their own, so the parent carrier's
+// UnitController is borrowed for the call: the AI aims the turret (heading
+// controls at +0x88/+0x8C) and ProcessFire writes its fire decision into the
+// carrier's triggers, which are read and then restored.  The turret's weapon is
+// not updated by anyone else for PILOT_SELF, so it is pumped here every frame
+// (heat, reload and charge keep ticking while the turret searches).
 //
-// This hook temporarily borrows the parent carrier's UnitController so that
-// AILowLevel::UpdateIndirect finds enemies and CalculateHeadingControls
-// aims the turret.  Fire is determined independently: if the AI set the
-// turret's aim controls (target exists) AND the controls are small (turret
-// is on target), we call the fire state machine on the turret's own trigger.
-//
-// ProcessFire (called inside the original) writes to the PARENT's fire
-// triggers via the AI's linked Controllable, but the parent carrier body has
-// no weapons so those writes are harmless.  We never read them.
+// Known limitation: every turret shares the carrier's AI state for its call,
+// so with several turrets their target selection is not independent.
 // ---------------------------------------------------------------------------
 
+// Controllable-relative, build-invariant.
+static constexpr uintptr_t kCtl_Fire      = 0x38;   // uint32 trigger[2]
+static constexpr uintptr_t kCtl_TurnCtrl  = 0x88;
+static constexpr uintptr_t kCtl_PitchCtrl = 0x8C;
+static constexpr uintptr_t kCtl_AI        = 0xC8;   // UnitController*
+static constexpr uintptr_t kCtl_PilotType = 0x144;  // 1 = PILOT_SELF
+static constexpr uintptr_t kCtl_Weapons   = 0x224;  // Weapon*[2]
+static constexpr uintptr_t kCtl_WeaponIdx = 0x234;
+static constexpr uintptr_t kCtl_Parent    = 0x24C;
 
 using fn_TurretUpdateIndirect_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
+static fn_TurretUpdateIndirect_t original_TurretUpdateIndirect = nullptr;
 
-// The fire state machine's signature is NOT the same on both builds:
+// Trigger fire state machine:
 //   modtools 0x00562dd0 : __thiscall(uint32_t* trigger, float dt, char fire)  RET 8
-//   Steam    0x0043a950 : __thiscall(uint32_t* trigger, char fire)            RET 4
-// The release build has no dt parameter at all (it reads fire straight from
-// [EBP+8]).  Calling it with the modtools shape would push an extra dword and
-// leave the stack 4 bytes off on return — the same failure mode as the
-// UpdateSpawn bug — so the call site picks the shape per build.
+//   release  0x0043a950 : __thiscall(uint32_t* trigger, char fire)            RET 4
 using fn_FireStateMachine_t     = void(__fastcall*)(void* ecx, void* edx, float dt, char fire);
 using fn_FireStateMachineNoDt_t = void(__fastcall*)(void* ecx, void* edx, char fire);
+static void* g_FireStateMachine = nullptr;
 
-static fn_TurretUpdateIndirect_t original_TurretUpdateIndirect = nullptr;
-static fn_FireStateMachine_t g_FireStateMachine = nullptr;
-static bool s_fireStateMachineHasDt = true;   // false on Steam
-
-static inline void fireStateMachine(void* trigger, float dt, char fire)
+static void fireStateMachine(void* trigger, float dt, char fire)
 {
-   if (!g_FireStateMachine) return;
-   if (s_fireStateMachineHasDt)
-      g_FireStateMachine(trigger, nullptr, dt, fire);
+   if (L->fireStateMachineHasDt)
+      ((fn_FireStateMachine_t)g_FireStateMachine)(trigger, nullptr, dt, fire);
    else
       ((fn_FireStateMachineNoDt_t)g_FireStateMachine)(trigger, nullptr, fire);
 }
@@ -959,1099 +723,476 @@ static inline void fireStateMachine(void* trigger, float dt, char fire)
 static bool __fastcall hooked_TurretUpdateIndirect(void* ecx, void* /*edx*/, float dt)
 {
    char* ctrl = (char*)ecx;
-
-   // Only for PILOT_SELF turrets (PilotType == 1)
-   if (*(int*)(ctrl + 0x144) != 1)
+   if (fieldI(ctrl, kCtl_PilotType) != 1)
       return original_TurretUpdateIndirect(ecx, nullptr, dt);
 
-   // Get parent entity via mParent (ctrl + 0x24C)
-   void* parent = *(void**)(ctrl + 0x24C);
-   if (!parent)
-      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+   char* parent = *(char**)(ctrl + kCtl_Parent);
+   bool isCarrier = false;
+   __try { isCarrier = parent && *(void**)parent == g_carrierVtable; }
+   __except (EXCEPTION_EXECUTE_HANDLER) {}
+   if (!isCarrier) return original_TurretUpdateIndirect(ecx, nullptr, dt);
 
-   // Only for carrier parents (vtable check)
-   __try {
-      if (*(void**)parent != g_carrierVtable)
-         return original_TurretUpdateIndirect(ecx, nullptr, dt);
-   } __except(EXCEPTION_EXECUTE_HANDLER) {
-      return original_TurretUpdateIndirect(ecx, nullptr, dt);
-   }
+   char* parentCtrl = parent + kControllableBase;
+   void* parentAI   = *(void**)(parentCtrl + kCtl_AI);
+   if (!parentAI) return original_TurretUpdateIndirect(ecx, nullptr, dt);
 
-   // Get parent's UnitController from its Controllable subobject
-   char* parentCtrl = (char*)parent + 0x240;
-   void* parentAI = *(void**)(parentCtrl + 0xC8);
-   if (!parentAI)
-      return original_TurretUpdateIndirect(ecx, nullptr, dt);
+   uint32_t* parentFire = (uint32_t*)(parentCtrl + kCtl_Fire);
+   const uint32_t savedFire0 = parentFire[0], savedFire1 = parentFire[1];
 
-   // --- Swap turret's AI with parent's for aiming + fire decision ---
-   // The turret has its own UnitController but it receives no VisibleObject
-   // events (no threat data).  The parent carrier's AI has actual targets.
-   void* turretAI = *(void**)(ctrl + 0xC8);
-
-   // Save parent's fire triggers.  ProcessFire (inside UpdateIndirect) uses
-   // the AI's linked Controllable to write its fire decision.  When we swap
-   // in parentAI, ProcessFire writes to parentCtrl's fire triggers instead
-   // of the turret's.  We read those after the call to get the AI's actual
-   // fire decision, then restore them.
-   uint32_t savedParentFire0 = *(uint32_t*)(parentCtrl + 0x38);
-   uint32_t savedParentFire1 = *(uint32_t*)(parentCtrl + 0x3C);
-
-   // Temporarily install parent's AI controller
-   *(void**)(ctrl + 0xC8) = parentAI;
+   void* turretAI = *(void**)(ctrl + kCtl_AI);
+   *(void**)(ctrl + kCtl_AI) = parentAI;
    bool result = original_TurretUpdateIndirect(ecx, nullptr, dt);
-   *(void**)(ctrl + 0xC8) = turretAI; // restore turret's own AI
+   *(void**)(ctrl + kCtl_AI) = turretAI;
 
-   // --- Read AI fire decision from parent's fire trigger ---
-   // ProcessFire wrote the fire decision to parentCtrl+0x38 (weapon idx 0).
-   // Bit 0 = currently wants to fire.  This is the ground truth for whether
-   // the AI sees a valid target, replacing the broken sentinel approach.
-   // (CalculateHeadingControls ALWAYS writes heading values, even without a
-   // target, so sentinel-based detection was always returning hasTarget=true.)
-   uint32_t newParentFire0 = *(uint32_t*)(parentCtrl + 0x38);
-   uint32_t newParentFire1 = *(uint32_t*)(parentCtrl + 0x3C);
-   bool aiWantsToFire = ((newParentFire0 & 1) != 0) || ((newParentFire1 & 1) != 0);
-
-   // Restore parent's fire triggers so we don't affect the carrier itself
-   *(uint32_t*)(parentCtrl + 0x38) = savedParentFire0;
-   *(uint32_t*)(parentCtrl + 0x3C) = savedParentFire1;
-
-   // Check heading controls for on-target precision (small values = aimed)
-   float newTurn  = *(float*)(ctrl + 0x88);
-   float newPitch = *(float*)(ctrl + 0x8C);
+   // ProcessFire's decision landed in the parent's triggers (bit 0 = fire).
+   const bool aiWantsToFire = ((parentFire[0] | parentFire[1]) & 1) != 0;
+   parentFire[0] = savedFire0;
+   parentFire[1] = savedFire1;
 
    static constexpr float kAimThreshold = 0.3f;
-   bool onTarget = aiWantsToFire
-      && (newTurn  > -kAimThreshold && newTurn  < kAimThreshold)
-      && (newPitch > -kAimThreshold && newPitch < kAimThreshold);
+   const float turn  = fieldF(ctrl, kCtl_TurnCtrl);
+   const float pitch = fieldF(ctrl, kCtl_PitchCtrl);
+   const bool onTarget = aiWantsToFire && fabsf(turn) < kAimThreshold && fabsf(pitch) < kAimThreshold;
 
-   // Apply fire decision to turret's own fire trigger AND pump Weapon::Update_
-   //
-   // Nobody calls Weapon::Update_ for PILOT_SELF turret weapons (the engine's
-   // external weapon updater skips them).  So we pump it directly.
-   // Only call Weapon::Update_ when onTarget to prevent constant firing.
-   int weaponIdx = *(int*)(ctrl + 0x234);
-   if (weaponIdx >= 0 && weaponIdx < 2) {
-      uint32_t* turretFire = (uint32_t*)(ctrl + 0x38 + weaponIdx * 4);
-      void* wpnPtr = *(void**)(ctrl + 0x224 + weaponIdx * 4);
+   const int weaponIdx = fieldI(ctrl, kCtl_WeaponIdx);
+   if (weaponIdx < 0 || weaponIdx >= 2) return result;
 
-      if (onTarget) {
-         // Set fire trigger and pump weapon to enter/stay in FIRING state
-         fireStateMachine(turretFire, dt, 1);
+   fireStateMachine(ctrl + kCtl_Fire + weaponIdx * 4, dt, onTarget ? 1 : 0);
 
-         if (wpnPtr) {
-            using fn_WeaponUpdate_t = bool(__thiscall*)(void* thisWeapon, float dt);
-            void** wpnVtable = *(void***)wpnPtr;
-            auto weaponUpdate = (fn_WeaponUpdate_t)wpnVtable[1];
-
-            __try {
-               weaponUpdate(wpnPtr, dt);
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-               static bool s_wpnUpdateFailed = false;
-               if (!s_wpnUpdateFailed) {
-                  s_wpnUpdateFailed = true;
-                  auto fn = get_gamelog();
-                  if (fn) fn("[TurretAI] Weapon::Update_ exception for wpn=%p\n", wpnPtr);
-               }
-            }
-         }
-      } else {
-         // Clear fire trigger and force weapon back to IDLE
-         fireStateMachine(turretFire, dt, 0);
-
-         if (wpnPtr) {
-            uint32_t* wpnState = (uint32_t*)((char*)wpnPtr + 0xB0);
-            if (*wpnState != 0) {
-               *wpnState = 0; // Force IDLE
-            }
+   void* weapon = *(void**)(ctrl + kCtl_Weapons + weaponIdx * 4);
+   if (weapon) {
+      using fn_WeaponUpdate_t = bool(__thiscall*)(void* weapon, float dt);
+      __try {
+         ((fn_WeaponUpdate_t)(*(void***)weapon)[1])(weapon, dt);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         static bool s_reported = false;
+         if (!s_reported) {
+            s_reported = true;
+            if (auto fn = get_gamelog()) fn("[TurretAI] Weapon::Update_ exception for wpn=%p\n", weapon);
          }
       }
    }
-
    return result;
 }
 
-// Render hook — installed via Detour on FUN_004f6970.
-// Intercepts ALL flyer renders but only applies animation override to carriers
-// (identified by matching g_animOverride structBase).
-static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/,
-                                          unsigned int param2, float param3, unsigned int param4)
-{
-   char* structBase = (char*)ecx - kRender_thisToBase;
-
-   // Find active animation override for this carrier
-   int overrideSlot = -1;
-   for (int i = 0; i < kMaxTrackedCarriers; i++) {
-      if (g_animOverride[i].structBase == (void*)structBase && g_animOverride[i].active) {
-         overrideSlot = i;
-         break;
-      }
-   }
-
-   if (overrideSlot >= 0) {
-      CarrierAnimOverride& ov = g_animOverride[overrideSlot];
-      DWORD now = GetTickCount();
-      if (g_pauseMode && *g_pauseMode)
-         ov.pausedAccum += now - ov.lastRenderMs;
-      ov.lastRenderMs = now;
-      float elapsed = (float)(now - ov.startTick - ov.pausedAccum) / 1000.0f;
-      float t = (ov.duration > 0.0f) ? elapsed / ov.duration : 1.0f;
-      if (t > 1.0f) t = 1.0f;
-
-      float animProg = ov.startProg + (ov.endProg - ov.startProg) * t;
-
-      // Override progress, ref17dc (nFrames source), and network delta.
-      float* progSlot = (float*)(structBase + s_inner_mProgress);
-      float* netDeltaSlot = s_inner_mNetAnimDelta
-                              ? (float*)(structBase + s_inner_mNetAnimDelta)
-                              : nullptr;
-      void** ref17dcSlot = (void**)(structBase + s_inner_mRef17dc);
-      float savedProg = 0.0f;
-      float savedNetDelta = 0.0f;
-      void* savedRef17dc = nullptr;
-      bool  didFixRef17dc = false;
-      __try {
-         savedProg = *progSlot;
-         *progSlot = animProg;
-         if (netDeltaSlot) {
-            savedNetDelta = *netDeltaSlot;
-            *netDeltaSlot = 0.0f;
-         }
-         savedRef17dc = *ref17dcSlot;
-         // Always force ref17dc to the takeoff anim — it may point to the
-         // wrong animation (e.g. landing anim) causing incorrect nFrames.
-         {
-            void* classPtr = *(void**)(structBase + s_inner_mClass);
-            if (classPtr) {
-               void* takeoffAnim = *(void**)((char*)classPtr + s_class_takeoffAnim);
-               if (takeoffAnim && *ref17dcSlot != takeoffAnim) {
-                  *ref17dcSlot = takeoffAnim;
-                  didFixRef17dc = true;
-               }
-            }
-         }
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      // Bypass visibility/frustum cull + force LOD 0 (skinned mesh) for animation.
-      unsigned char jzSaved[6];
-      visJzNop(jzSaved);
-      original_FlyerRender(ecx, nullptr, 0, param3, param4);
-      visJzRestore(jzSaved);
-
-      __try {
-         *progSlot = savedProg;
-         if (netDeltaSlot) *netDeltaSlot = savedNetDelta;
-         if (didFixRef17dc) *ref17dcSlot = savedRef17dc;
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      // Keep override active at endProg — don't deactivate.
-      // The override is cleaned up when the carrier is destroyed.
-      return;
-   }
-
-   // For tracked carriers (even without active anim override), bypass the
-   // frustum/visibility cull.  The carrier's bounding sphere is often too small
-   // or offset, causing flicker when viewed from behind or up close.
-   bool isTrackedCarrier = false;
-   for (int i = 0; i < kMaxTrackedCarriers; i++) {
-      if (g_flightOverride[i].structBase == (void*)structBase) {
-         isTrackedCarrier = true;
-         break;
-      }
-   }
-   if (isTrackedCarrier) {
-      // During descent (state 3, before cargo drop), force progress=0 so the
-      // carrier shows frame 0 (closed/folded).  Vanilla's progress goes 1→0
-      // during landing, which plays the animation backwards — we don't want that.
-      float* progSlot = (float*)(structBase + s_inner_mProgress);
-      float savedProg = 0.0f;
-      bool didOverrideProg = false;
-      __try {
-         int flightState = *(int*)(structBase + s_inner_mFlightState);
-         if (flightState == 3) {
-            savedProg = *progSlot;
-            *progSlot = 0.0f;
-            didOverrideProg = true;
-         }
-      } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-      unsigned char jzSaved[6];
-      visJzNop(jzSaved);
-      original_FlyerRender(ecx, nullptr, param2, param3, param4);
-      visJzRestore(jzSaved);
-
-      if (didOverrideProg) {
-         __try { *progSlot = savedProg; } __except(EXCEPTION_EXECUTE_HANDLER) {}
-      }
-      return;
-   }
-
-   // Boost animation: swap class anim + progress if boosting
-   bool boostApplied = flyer_boost_anim_render_prepare(structBase);
-   original_FlyerRender(ecx, nullptr, param2, param3, param4);
-   if (boostApplied) flyer_boost_anim_render_restore(structBase);
-}
-
 // ---------------------------------------------------------------------------
-// EntityFlyer::TakeOff — block landing interruption
-//   __thiscall(EntityFlyer* this_inner)    (this_inner = struct_base)
-//   Ghidra VA: 0x004F8B70      (thunk at 0x00408602)
+// EntityCarrier::ActivatePhysics (vtable[41])
 //
-// Fix: if entity is already in state 3 (LANDING), return early.
+// The carrier's override only activates the main Controllable (priority -1);
+// EntityFlyer's also activates the post-collision sub-object, aimers, turrets
+// and passenger slots, so carrier turrets were built but never activated
+// (invisible, inert).  This is EntityFlyer::ActivatePhysics with the carrier's
+// -1 priority kept.
 // ---------------------------------------------------------------------------
 
-
-// ---------------------------------------------------------------------------
-// EntityCarrier turret fix — ActivatePhysics vtable patch
-//
-// BUG: EntityCarrier::ActivatePhysics (vtable[41]) only activates the main
-//      Controllable physics with priority -1. The EntityFlyer version also
-//      activates: sub-object at +0x1d10, aimers, turrets, and passenger slots.
-//      Without these calls, turrets are created but never activated — they
-//      exist in memory but are invisible and non-functional.
-//
-// FIX: Replace the carrier's vtable[41] with a custom function that does
-//      the carrier's -1 physics call, then the rest from the flyer version.
-// ---------------------------------------------------------------------------
-static constexpr uintptr_t kActivatePhysics_vtableOffset = 41 * 4; // byte offset in vtable
-
-// Turret activation: FUN_00563a90 — __fastcall(MountedTurret* this)
-// Aimer activation: FUN_005ef020 — __fastcall(Aimer* this)  (actually thiscall)
-// PassengerSlot activation: FUN_00568540 — __fastcall(PassengerSlot* this)
-
+static constexpr int kVt_ActivatePhysics = 41;
 using fn_ActivateChild_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_ActivateChild_t g_TurretActivate    = nullptr;
 static fn_ActivateChild_t g_AimerActivate     = nullptr;
 static fn_ActivateChild_t g_PassengerActivate = nullptr;
+static void*              s_origActivatePhysics = nullptr;
 
-// struct_base offsets for turret/aimer/passenger data.  Every value here was
-// read directly out of EntityFlyer::ActivatePhysics — the function this patch
-// mirrors — on each build (modtools 0x00551610, Steam 0x004b5f70).  They follow
-// the usual split: instance fields shift -0x40 on Steam, class fields -0xC8.
-static uintptr_t s_TurretArray_off       = 0x680;  // MountedTurret*[8]      Steam 0x640
-static uintptr_t s_TurretCount_off       = 0x6A0;  // char: turret count     Steam 0x660
-static uintptr_t s_AimerArray_off        = 0x6A8;  // Aimer*[] array         Steam 0x668
-static uintptr_t s_PassengerArray_off    = 0x670;  // PassengerSlot*[] array Steam 0x630
-static uintptr_t s_Class_AimerCount_off  = 0xD48;  // int  aimer count       Steam 0xC80
-static uintptr_t s_Class_PassCount_off   = 0xE14;  // char passenger count   Steam 0xD4C
-static uintptr_t s_SubObj_off            = 0x1D10; // sub-object vtable ptr  Steam 0x1CD0
+static void activateSubObject(char* obj, int priority)
+{
+   typedef void(__thiscall* fn_t)(void*, int, int);
+   ((fn_t)(*(void***)obj)[2])(obj, priority, 2);
+}
 
-// Custom ActivatePhysics for EntityCarrier — replaces vtable[41]
 static void __fastcall carrier_ActivatePhysics(void* ecx, void* /*edx*/)
 {
    char* base = (char*)ecx;
+   activateSubObject(base + kControllableBase, -1);
+   activateSubObject(base + L->postCollision, -15);
 
-   // 1. Activate main Controllable physics with carrier's priority -1
-   //    (**(code**)(*(base+0x240)+8))(-1, 2)
-   {
-      int* vtbl = *(int**)(base + 0x240);
-      typedef void (__thiscall* fn_t)(void*, int, int);
-      ((fn_t)(*(void**)(vtbl + 2)))(base + 0x240, -1, 2);  // vtable[2] at byte offset 8
-   }
-
-   // 2. Activate the embedded sub-object: (**(code**)(*(base+off)+8))(-15, 2)
-   {
-      int* vtbl = *(int**)(base + s_SubObj_off);
-      typedef void (__thiscall* fn_t)(void*, int, int);
-      ((fn_t)(*(void**)(vtbl + 2)))(base + s_SubObj_off, -15, 2);
-   }
-
-   // 3. Activate aimers
-   void* classPtr = *(void**)(base + s_inner_mClass);
-   if (classPtr) {
-      int aimerCount = *(int*)((char*)classPtr + s_Class_AimerCount_off);
-      void** aimers = (void**)(base + s_AimerArray_off);
-      for (int i = 0; i < aimerCount; i++) {
+   char* cls = carrierClass(base);
+   if (cls) {
+      int n = fieldI(cls, L->clsWeaponCount);
+      void** aimers = (void**)(base + L->aimers);
+      for (int i = 0; i < n; i++)
          if (aimers[i]) g_AimerActivate(aimers[i], nullptr);
-      }
    }
 
-   // 4. Activate turrets
-   int turretCount = *(char*)(base + s_TurretCount_off);
-   int** turrets = (int**)(base + s_TurretArray_off);
-   for (int i = 0; i < turretCount; i++) {
+   int turretCount = *(signed char*)(base + L->turretCount);
+   void** turrets = (void**)(base + L->turrets);
+   for (int i = 0; i < turretCount; i++)
       if (turrets[i]) g_TurretActivate(turrets[i], nullptr);
-   }
 
-   // 5. Activate passenger slots
-   if (classPtr) {
-      int passCount = (int)*(unsigned char*)((char*)classPtr + s_Class_PassCount_off);
-      void** passengers = (void**)(base + s_PassengerArray_off);
-      for (int i = 0; i < passCount; i++) {
+   if (cls) {
+      int n = *(unsigned char*)(cls + L->clsPassengerCount);
+      void** passengers = (void**)(base + L->passengers);
+      for (int i = 0; i < n; i++)
          if (passengers[i]) g_PassengerActivate(passengers[i], nullptr);
-      }
    }
 }
 
-// World position offsets from struct_base (inner base).
-static constexpr uintptr_t kInner_mPosX = 0x120;
-static constexpr uintptr_t kInner_mPosY = 0x124;
-static constexpr uintptr_t kInner_mPosZ = 0x128;
+// ---------------------------------------------------------------------------
+// EntityFlyer::TakeOff
+//   __thiscall(EntityFlyer* base)
+//
+// For carriers: blocked while LANDING (the flyer AI calls it mid-descent and
+// yanks the carrier back up).  From LANDED after a drop, snapshot the transform
+// and start the forward ascent.
+// ---------------------------------------------------------------------------
 
 using fn_TakeOff_t = void(__fastcall*)(void* ecx, void* edx);
 static fn_TakeOff_t original_TakeOff = nullptr;
-// g_carrierVtable declared above (before turret fire cave)
-
-// Per-carrier transform snapshot, taken at TakeOff time.
-// The movement controller overwrites the entity's full transform (position +
-// rotation) to a flight-path start point that doesn't match the carrier's
-// current pose.  This causes the carrier to visibly jump and rotate for ~1s
-// until the path converges.  We save the pre-TakeOff transform and restore
-// it each tick during ASCENDING, allowing only Y (altitude) to change.
-//
-// Entity transform layout at struct_base (16 bytes per row):
-//   +0x100: rotation row 0 (right axis)
-//   +0x110: rotation row 1 (forward axis / direction vector)
-//   +0x120: X, Y, Z position  (+0x12C likely padding/W)
-struct CarrierPosSnapshot {
-   void*  ecx;           // inner-base pointer (struct_base), 0 = unused
-   float  savedX;        // X position at TakeOff time
-   float  savedZ;        // Z position at TakeOff time
-   float  rotRow0[4];    // struct_base+0x100..+0x10F
-   float  rotRow1[4];    // struct_base+0x110..+0x11F
-   bool   active;        // true while correction is active
-};
-static CarrierPosSnapshot g_takeoffPos[kMaxTrackedCarriers] = {};
 
 static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
 {
+   char* base = (char*)ecx;
    __try {
-      void* vtable = *(void**)ecx;
-      if (vtable == g_carrierVtable) {
-         int state = *(int*)((char*)ecx + s_inner_mFlightState);
-         if (state == 3) {
-            return; // Block TakeOff during landing
+      if (*(void**)base == g_carrierVtable) {
+         const int state = flightState(base);
+         if (state == 3) return;
+
+         CarrierTrack* t = (state == 0) ? trackFind(base) : nullptr;
+         if (t && t->cargoDropped) {
+            t->snapX = fieldF(base, kPosX);
+            t->snapZ = fieldF(base, kPosZ);
+            memcpy(t->snapRot, base + kMatrix, sizeof(t->snapRot));
+
+            float fx = fieldF(base, kForward), fz = fieldF(base, kForward + 8);
+            float len = sqrtf(fx * fx + fz * fz);
+            if (len > 0.001f) { fx /= len; fz /= len; }
+            t->fwdDirX = fx;
+            t->fwdDirZ = fz;
+            t->ascentElapsed = 0.0f;
+            t->ascentActive  = true;
          }
-
-         if (state == 0) {
-            char* p = (char*)ecx;
-
-            // Save full transform before TakeOff: rotation + position X/Z.
-            int slot = -1;
-            for (int i = 0; i < kMaxTrackedCarriers; i++) {
-               if (g_takeoffPos[i].ecx == ecx || g_takeoffPos[i].ecx == nullptr) {
-                  slot = i; break;
-               }
-            }
-            if (slot < 0) slot = 0;
-            g_takeoffPos[slot].ecx = ecx;
-            g_takeoffPos[slot].savedX = *(float*)(p + kInner_mPosX);
-            g_takeoffPos[slot].savedZ = *(float*)(p + kInner_mPosZ);
-            memcpy(g_takeoffPos[slot].rotRow0, p + 0x100, 16);
-            memcpy(g_takeoffPos[slot].rotRow1, p + 0x110, 16);
-            g_takeoffPos[slot].active = true;
-
-            // Post-drop: also capture forward direction for forward movement during ascent
-            for (int j = 0; j < kMaxTrackedCarriers; j++) {
-               if (g_flightOverride[j].structBase == ecx && g_flightOverride[j].cargoDropped) {
-                  // Forward direction = rotation row 1 (struct_base+0x110)
-                  float fwdX = *(float*)(p + 0x110);
-                  float fwdZ = *(float*)(p + 0x118);
-                  // Normalize XZ
-                  float len = sqrtf(fwdX * fwdX + fwdZ * fwdZ);
-                  if (len > 0.001f) { fwdX /= len; fwdZ /= len; }
-                  g_flightOverride[j].fwdDirX = fwdX;
-                  g_flightOverride[j].fwdDirZ = fwdZ;
-                  g_flightOverride[j].ascentElapsed = 0.0f;
-                  g_flightOverride[j].ascentActive = true;
-                  break;
-               }
-            }
-         }
-
-         original_TakeOff(ecx, nullptr);
-         return;
       }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
    original_TakeOff(ecx, nullptr);
 }
 
 // ---------------------------------------------------------------------------
-// EntityCarrier::Update — diagnostic logging
-//   __thiscall(EntityCarrier* this, float dt)
-//   Ghidra VA: 0x004D7FE0
+// EntityCarrier::Update
+//   __thiscall(base+0x240, float dt), RET 4, returns false when dead
 // ---------------------------------------------------------------------------
-
 
 using fn_CarrierUpdate_t = bool(__fastcall*)(void* ecx, void* edx, float dt);
 static fn_CarrierUpdate_t original_CarrierUpdate = nullptr;
 
-static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
+// During the post-drop ascent the movement controller swings the carrier onto
+// a flight-path start pose.  Hold the rotation from the snapshot and move X/Z
+// along the saved heading, ramping to TakeoffSpeed over 3 s; vanilla keeps
+// driving Y.
+static void applyAscentLock(CarrierTrack& t, char* base)
 {
-   char* inner = (char*)ecx - 0x240;
+   if (!t.ascentActive) return;
+   if (flightState(base) != 1) return;
 
-   // Pre-Update: restore saved transform during ASCENDING (state 1).
-   // The movement controller overwrites the entity's full transform each tick
-   // to a flight-path position.  We restore rotation and lock X to prevent
-   // visual jumping.  Z is left free for vanilla path movement.
-   // Post-drop: also override X/Z with forward displacement from landing position.
-   __try {
-      void* carrierInner = (void*)inner;
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_takeoffPos[i].ecx != carrierInner || !g_takeoffPos[i].active) continue;
-         int state = *(int*)((char*)ecx + s_State_offset);
-         if (state != 1) {
-            g_takeoffPos[i].active = false;
-            g_takeoffPos[i].ecx = nullptr;
-         } else {
-            memcpy(inner + 0x100, g_takeoffPos[i].rotRow0, 16);
-            memcpy(inner + 0x110, g_takeoffPos[i].rotRow1, 16);
-            // Check for post-drop forward displacement
-            bool isPostDrop = false;
-            for (int j = 0; j < kMaxTrackedCarriers; j++) {
-               if (g_flightOverride[j].structBase == carrierInner && g_flightOverride[j].ascentActive) {
-                  // Ramp from 0 to forwardSpeed over ~3s, then hold at full speed
-                  float spd = g_flightOverride[j].forwardSpeed;
-                  float ramp = 3.0f; // seconds to reach full speed
-                  float t   = g_flightOverride[j].ascentElapsed;
-                  float dist;
-                  if (t <= ramp) {
-                     dist = spd * t * t / (2.0f * ramp); // accelerating
-                  } else {
-                     dist = spd * ramp / 2.0f + spd * (t - ramp); // constant
-                  }
-                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + g_flightOverride[j].fwdDirX * dist;
-                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + g_flightOverride[j].fwdDirZ * dist;
-                  isPostDrop = true;
-                  break;
-               }
-            }
-            if (!isPostDrop) {
-               // First takeoff: only lock X, let Z be free for vanilla path
-               *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX;
-            }
-         }
-         break;
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+   memcpy(base + kMatrix, t.snapRot, sizeof(t.snapRot));
 
-   // NOP the downward RayHit calls when the carrier is high above its pad.
-   // This prevents terrain surface normals from causing heading/pitch wobble
-   // at altitude.  Near the ground (within 2× landedHt), leave RayHit active
-   // so the carrier aligns naturally to terrain for landing.
-   bool didNopRayHit = false;
-   unsigned char rhSaved1[5] = {}, rhSaved2[5] = {};
-   __try {
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_flightOverride[i].structBase != (void*)inner) continue;
-         float posY = *(float*)(inner + kInner_mPosY);
-         float padY = g_flightOverride[i].padY;
-         float landedHt = g_flightOverride[i].landedHt;
-         float heightAbovePad = posY - padY;
-         // NOP raycasts when more than 2× landedHt above pad (or at least 10 units)
-         float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
-         if (heightAbovePad > threshold) {
-            rayHitNop(rhSaved1, rhSaved2);
-            didNopRayHit = true;
-         }
-         break;
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+   static constexpr float kRamp = 3.0f;
+   const float spd = t.forwardSpeed, e = t.ascentElapsed;
+   const float dist = (e <= kRamp) ? spd * e * e / (2.0f * kRamp)
+                                   : spd * kRamp / 2.0f + spd * (e - kRamp);
+   fieldF(base, kPosX) = t.snapX + t.fwdDirX * dist;
+   fieldF(base, kPosZ) = t.snapZ + t.fwdDirZ * dist;
+}
 
-   bool alive = original_CarrierUpdate(ecx, nullptr, dt);
+// Descent: from wherever LANDING starts, smoothstep X/Y/Z onto the pad over
+// LandingTime.  Y targets padY + instance LandedHeight - 1 so vanilla's own
+// ground check (groundDistance < LandedHeight) fires directly over the pad.
+static void updateFlight(CarrierTrack& t, char* base, float dt)
+{
+   int state = flightState(base);
+   const int prev = t.lastState;
+   t.lastState = state;
 
-   if (didNopRayHit) {
-      rayHitRestore(rhSaved1, rhSaved2);
+   if (state == 3 && prev != 3 && !t.landActive) {
+      t.landStartX  = fieldF(base, kPosX);
+      t.landStartY  = fieldF(base, kPosY);
+      t.landStartZ  = fieldF(base, kPosZ);
+      t.landElapsed = 0.0f;
+      t.landTargetY = t.padY + fieldF(base, L->landedHeight) - 1.0f;
+      t.landActive  = true;
    }
 
-   if (!alive) {
-      // Clean up animation override for destroyed carriers
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_animOverride[i].structBase == (void*)inner) {
-            g_animOverride[i] = {};
-         }
-         if (g_flightOverride[i].structBase == (void*)inner) {
-            g_flightOverride[i] = {};
+   if (state == 3 && t.landActive) {
+      t.landElapsed += dt;
+      float u = t.landElapsed / t.descentDuration;
+      if (u > 1.0f) u = 1.0f;
+      const float e = u * u * (3.0f - 2.0f * u);
+      fieldF(base, kPosX) = t.landStartX + (t.padX - t.landStartX) * e;
+      fieldF(base, kPosY) = t.landStartY + (t.landTargetY - t.landStartY) * e;
+      fieldF(base, kPosZ) = t.landStartZ + (t.padZ - t.landStartZ) * e;
+   }
+
+   if (state != 3 && t.landActive) {
+      t.landActive = false;
+      if (state == 0) t.cargoDropped = true;
+   }
+
+   if (t.ascentActive) {
+      if (state == 3) {                         // no re-landing after the drop
+         fieldI(base, L->flightState) = 1;
+         state = 1;
+      }
+      if (state == 1) t.ascentElapsed += dt;
+      else            t.ascentActive = false;
+   }
+}
+
+// Cargo that should no longer be on the carrier:
+//  - LANDED: vanilla (UpdateLive) only drops slot 0, so drop slots 1..3 here.
+//  - TAKEOFF/FLYING with cargo still attached: the landing aborted (slope over
+//    ~20 degrees, water, DenyFlyerLand) or something took off without the
+//    drop.  UpdateLive deletes the carrier as soon as it reaches FLYING and the
+//    destructor does not detach, which would leave the cargo with a dangling
+//    CollisionObject::mParent and our team-0 park.  Drop it here, near the
+//    ground, instead.
+static void dropStrandedCargo(char* base)
+{
+   const int state = flightState(base);
+   if (state == 0)                 detachAllCargo(base, 1);
+   else if (state == 1 || state == 2) detachAllCargo(base, 0);
+}
+
+// Our position writes bypass EntityFlyer::SetPosition, which is what normally
+// moves the scene bounding sphere.  Keep it on the pivot with a generous radius
+// so the carrier doesn't get culled.
+static void syncBoundingSphere(char* base)
+{
+   fieldF(base, kSphere + 0) = fieldF(base, kPosX);
+   fieldF(base, kSphere + 4) = fieldF(base, kPosY);
+   fieldF(base, kSphere + 8) = fieldF(base, kPosZ);
+   if (fieldF(base, kSphere + 12) < 80.0f) fieldF(base, kSphere + 12) = 80.0f;
+}
+
+static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
+{
+   char* base = (char*)ecx - kControllableBase;
+   CarrierTrack* t = trackFind(base);
+
+   bool neutralised = false;
+   __try {
+      if (t) {
+         applyAscentLock(*t, base);
+         const float threshold = (t->landedHt * 2.0f > 10.0f) ? t->landedHt * 2.0f : 10.0f;
+         if (fieldF(base, kPosY) - t->padY > threshold) {
+            rayHitSet(true);
+            neutralised = true;
          }
       }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+   const bool alive = original_CarrierUpdate(ecx, nullptr, dt);
+   if (neutralised) rayHitSet(false);
+
+   if (!alive) {
+      if (t) *t = {};
       return false;
    }
 
-   // Post-Update: restore again in case original Update overwrote transform.
    __try {
-      void* carrierInner = (void*)inner;
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_takeoffPos[i].ecx != carrierInner || !g_takeoffPos[i].active) continue;
-         int state = *(int*)((char*)ecx + s_State_offset);
-         if (state != 1) {
-            g_takeoffPos[i].active = false;
-            g_takeoffPos[i].ecx = nullptr;
-         } else {
-            memcpy(inner + 0x100, g_takeoffPos[i].rotRow0, 16);
-            memcpy(inner + 0x110, g_takeoffPos[i].rotRow1, 16);
-            bool isPostDrop = false;
-            for (int j = 0; j < kMaxTrackedCarriers; j++) {
-               if (g_flightOverride[j].structBase == carrierInner && g_flightOverride[j].ascentActive) {
-                  float spd = g_flightOverride[j].forwardSpeed;
-                  float ramp = 3.0f;
-                  float t   = g_flightOverride[j].ascentElapsed;
-                  float dist;
-                  if (t <= ramp) {
-                     dist = spd * t * t / (2.0f * ramp);
-                  } else {
-                     dist = spd * ramp / 2.0f + spd * (t - ramp);
-                  }
-                  *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX + g_flightOverride[j].fwdDirX * dist;
-                  *(float*)(inner + kInner_mPosZ) = g_takeoffPos[i].savedZ + g_flightOverride[j].fwdDirZ * dist;
-                  isPostDrop = true;
-                  break;
-               }
-            }
-            if (!isPostDrop) {
-               *(float*)(inner + kInner_mPosX) = g_takeoffPos[i].savedX;
-            }
-         }
-         break;
+      if (t) {
+         applyAscentLock(*t, base);
+         updateFlight(*t, base, dt);
       }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   // Custom carrier flight system: range trigger, quadratic descent/ascent, despawn
-   __try {
-      int state = *(int*)((char*)ecx + s_State_offset);
-
-      // Diagnostic: detect carriers with no flight override slot
-      bool foundSlot = false;
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_flightOverride[i].structBase == (void*)inner) { foundSlot = true; break; }
-      }
-      if (!foundSlot && state == 3) {
-         // Check if this is actually a carrier (vtable match)
-         void* vtable = *(void**)inner;
-         if (vtable == g_carrierVtable) {
-            static int missLogCount = 0;
-            if (missLogCount++ < 5) {
-               auto fn = get_gamelog();
-               if (fn) {
-                  fn("[Carrier:%p] WARNING: no flight override slot! state=%d slots=[%p,%p,%p,%p]\n",
-                     inner, state,
-                     g_flightOverride[0].structBase, g_flightOverride[1].structBase,
-                     g_flightOverride[2].structBase, g_flightOverride[3].structBase);
-               }
-            }
-         }
-      }
-
-      for (int i = 0; i < kMaxTrackedCarriers; i++) {
-         if (g_flightOverride[i].structBase != (void*)inner) continue;
-
-         CarrierFlightOverride& fo = g_flightOverride[i];
-         int prevState = fo.lastState;
-         fo.lastState = state;
-
-         float posX = *(float*)(inner + kInner_mPosX);
-         float posY = *(float*)(inner + kInner_mPosY);
-         float posZ = *(float*)(inner + kInner_mPosZ);
-
-         // --- Quadratic descent (state 3) ---
-         // On state 3 entry: capture start position
-         if (state == 3 && prevState != 3 && !fo.landActive) {
-            fo.landStartX = posX;
-            fo.landStartY = posY;
-            fo.landStartZ = posZ;
-            fo.landElapsed = 0.0f;
-            fo.landActive = true;
-
-            // Use the INSTANCE landedHt (ECX+0x3C0), not the class value.
-            // The instance value includes the cargo bounding box and is what
-            // vanilla's landing condition (gndDist < landedHt) actually checks.
-            float instanceLandedHt = *(float*)((char*)ecx + s_LandedHeight_offset);
-            fo.landTargetY = fo.padY + instanceLandedHt - 1.0f;
-         }
-
-         // Override position each frame during state 3
-         if (state == 3 && fo.landActive) {
-            fo.landElapsed += dt;
-            float t = fo.landElapsed / fo.descentDuration;
-            if (t > 1.0f) t = 1.0f;
-
-            // Smoothstep ease-in-out on Y (3t²-2t³): slow start AND slow finish.
-            // Keeps the delayed threshold crossing of ease-in (t≈0.97 for landedHt)
-            // while decelerating in the final meters for a gentle landing.
-            float tEased = t * t * (3.0f - 2.0f * t);
-
-            float newX = fo.landStartX + (fo.padX - fo.landStartX) * tEased;
-            float newY = fo.landStartY + (fo.landTargetY - fo.landStartY) * tEased;
-            float newZ = fo.landStartZ + (fo.padZ - fo.landStartZ) * tEased;
-
-            *(float*)(inner + kInner_mPosX) = newX;
-            *(float*)(inner + kInner_mPosY) = newY;
-            *(float*)(inner + kInner_mPosZ) = newZ;
-         }
-
-         // Deactivate descent when leaving state 3
-         if (state != 3 && fo.landActive) {
-            fo.landActive = false;
-            if (state == 0) fo.cargoDropped = true;
-         }
-
-         // --- Post-drop ascent (state 1 with forward movement) ---
-         // Vanilla's state 1 ascending handles Y via progress interpolation.
-         // We add forward displacement to X/Z in the snapshot restore above.
-         // Here we just track elapsed time and prevent re-landing.
-
-         // Increment elapsed time for forward displacement calculation
-         if (fo.ascentActive && state == 1) {
-            fo.ascentElapsed += dt;
-         }
-
-         // Prevent vanilla from re-landing during post-drop ascent
-         if (fo.ascentActive && state == 3) {
-            *(int*)((char*)ecx + s_State_offset) = 1;
-            state = 1;
-         }
-
-         // Deactivate when carrier finishes ascending (state 1→2) or dies.
-         // Start despawn timer as safety fallback (CalculateDest should kill at state 2).
-         if (fo.ascentActive && state != 1 && state != 3) {
-            fo.ascentActive = false;
-            if (!fo.despawnActive) {
-               fo.despawnTimer = kDefaultDespawnDelay;
-               fo.despawnActive = true;
-            }
-         }
-
-         // --- Despawn timer ---
-         if (fo.despawnActive) {
-            fo.despawnTimer -= dt;
-            if (fo.despawnTimer <= 0.0f && g_CarrierKill) {
-               fo.despawnActive = false;
-               g_CarrierKill((void*)inner, nullptr);
-               fo = {};
-               break; // carrier is dead, stop processing
-            }
-         }
-
-         break;
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   // Multi-slot detach: when carrier transitions to LANDED (state 0) from state 3,
-   // CalculateDest only detaches slot 0.  We detach slots 1..3 here.
-   // Checks if slot 1+ still has cargo — naturally runs only once since slots clear.
-   __try {
-      int state = *(int*)((char*)ecx + s_State_offset);
-      if (state == 0) {
-         for (int s = 1; s < kMaxCargo; s++) {
-            void* cargoObj = *(void**)((char*)inner + s_inner_mCargoSlot0Obj + s * kCargoSlotStride);
-            if (cargoObj) {
-               original_DetachCargo(inner, nullptr, s);
-            }
-         }
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   // Sync bounding sphere to FINAL world position (after all position overrides).
-   // The engine does not update the scene-object bounding sphere for carriers,
-   // leaving it at the spawn position.  Even with the correct center, the
-   // default radius (~23 units) is too small, causing frustum-cull flicker.
-   __try {
-      *(float*)(inner + 0xC4) = *(float*)(inner + kInner_mPosX);
-      *(float*)(inner + 0xC8) = *(float*)(inner + kInner_mPosY);
-      *(float*)(inner + 0xCC) = *(float*)(inner + kInner_mPosZ);
-      if (*(float*)(inner + 0xD0) < 80.0f) *(float*)(inner + 0xD0) = 80.0f;
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
-
-   return alive;
+      dropStrandedCargo(base);
+      syncBoundingSphere(base);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+   return true;
 }
 
 // ---------------------------------------------------------------------------
-// EntityCarrier::UpdateLandedHeight — passthrough hook (kept for future use)
-//   __thiscall(EntityCarrier* this_inner)    (this_inner = struct_base, NOT +0x240)
-//   Ghidra VA: 0x004D8130      (thunk at 0x004126DE)
-// ---------------------------------------------------------------------------
-
-
-using fn_UpdateLandedHeight_t = void(__fastcall*)(void* ecx, void* edx);
-static fn_UpdateLandedHeight_t original_UpdateLandedHeight = nullptr;
-
-static void __fastcall hooked_UpdateLandedHeight(void* ecx, void* /*edx*/)
-{
-   original_UpdateLandedHeight(ecx, nullptr);
-}
-
-// ---------------------------------------------------------------------------
-// VehicleSpawn::UpdateSpawn — multi-cargo carrier spawning
-//   __thiscall(void* vehicleSpawn, float dt)
-//   Ghidra VA: 0x00665A50
+// VehicleSpawn::UpdateSpawn
 //
-// After the original spawns carrier + 1 cargo (slot 0), we spawn additional
-// cargo entities and attach them to slots 1..N-1, creating a VehicleTracker
-// for each.  This fills carrier cargo slots based on SpawnCount.
+//   modtools : ECX = this, dt at [EBP+8], RET 4
+//   release  : ECX = this, dt in XMM1,   bare RET
+// The thunks below bridge the release convention so the C hook stays shared.
 // ---------------------------------------------------------------------------
-
 
 using fn_UpdateSpawn_t = void(__fastcall*)(void* ecx, void* edx, float dt);
 static fn_UpdateSpawn_t original_UpdateSpawn = nullptr;
 
-// UpdateSpawn is the one carrier hook whose calling convention is NOT the same
-// on both builds, so it cannot be detoured with a single C signature:
-//
-//   modtools 0x665A50 : ECX = this, dt at [EBP+8],  tail `RET 4`
-//   Steam    0x66F370 : ECX = this, dt in XMM1,     tail `RET`   (0066fcf7)
-//
-// Steam's LTCG build passes dt in a register and pushes nothing, so attaching
-// the modtools-shaped `void __fastcall(void*, void*, float)` hook makes the
-// compiler emit `RET 4` — popping 4 bytes the caller never pushed.  ESP is then
-// 4 too high for the rest of the caller's frame, which returns into garbage.
-// UpdateSpawn runs during the initial vehicle spawn at level load, so this
-// reproduced as a deterministic `EXEC at address 0` under GameLoop::PostLoad ->
-// MissionState::vfunction1 (and no amount of gating *inside* the hook could fix
-// it — the bad RET is in the epilogue, past every early return).
-//
-// The two thunks below bridge the conventions in each direction on Steam; the
-// C hook body itself stays build-agnostic.
-static bool s_updateSpawnRegcall = false;
-
-// Trampoline entry: game -> us.  Materialise XMM1 as the stack argument the C
-// hook expects, then return with NO stack cleanup to match the real function.
-// hooked_UpdateSpawn is __fastcall, so it pops the 4-byte float itself.
 static void __fastcall hooked_UpdateSpawn(void* ecx, void* edx, float dt);
 
 static __declspec(naked) void hooked_UpdateSpawn_regcall()
 {
    __asm {
       sub   esp, 4
-      movss dword ptr [esp], xmm1   // dt -> stack arg (ECX already = this)
-      call  hooked_UpdateSpawn      // __fastcall: callee pops the float
-      ret                           // bare RET, exactly like 0066fcf7
+      movss dword ptr [esp], xmm1     // dt -> stack arg (ECX already = this)
+      call  hooked_UpdateSpawn        // __fastcall: callee pops the float
+      ret
    }
 }
 
-// Reverse direction: us -> trampoline.  Called with the modtools shape and
-// converts back to Steam's (ECX, XMM1) before entering the original.
-static __declspec(naked) void __fastcall call_orig_UpdateSpawn_regcall(
-   void* /*ecx*/, void* /*edx*/, float /*dt*/)
+static __declspec(naked) void __fastcall call_orig_UpdateSpawn_regcall(void*, void*, float)
 {
    __asm {
-      movss xmm1, dword ptr [esp + 4]   // our stack arg -> XMM1
-      call  dword ptr [original_UpdateSpawn]  // ECX passes through untouched
-      ret   4                                 // clean the arg we were handed
+      movss xmm1, dword ptr [esp + 4]
+      call  dword ptr [original_UpdateSpawn]
+      ret   4
    }
 }
 
-// Enter the original with whichever convention this build uses.
-static inline void call_original_UpdateSpawn(void* ecx, float dt)
+static void call_original_UpdateSpawn(void* ecx, float dt)
 {
-   if (s_updateSpawnRegcall) call_orig_UpdateSpawn_regcall(ecx, nullptr, dt);
-   else                      original_UpdateSpawn(ecx, nullptr, dt);
+   if (L->updateSpawnRegcall) call_orig_UpdateSpawn_regcall(ecx, nullptr, dt);
+   else                       original_UpdateSpawn(ecx, nullptr, dt);
 }
 
-// Helper: allocate and link a VehicleTracker for a cargo entity
-static void CreateTracker(char* vs, void* cargoEntity)
+// The pad's carrier is only ever handled from VehicleSpawn::UpdateLive, which
+// runs once per LIVE VehicleTracker.  If the carried cargo was destroyed its
+// tracker is gone, so nothing drops, launches or deletes the carrier: it sits
+// on the pad forever and UpdateSpawn bails at its first line because mCarrier
+// is still valid, so the pad never spawns again.  VehicleSpawn::Update calls
+// UpdateSpawn exactly when trackers < mSpawnCount, i.e. in that case, after
+// UpdateLive has had its turn, so running UpdateLive's carrier block here is
+// safe to repeat and fills the gap.
+static void padCarrierUpdate(char* vs)
 {
-   if (!g_MemPoolAlloc || !g_VehicleTrackerPool || !cargoEntity) return;
+   __try {
+      char* carrier = *(char**)(vs + kVS_CarrierPtr);
+      if (!carrier) return;
+      if (fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;  // original clears it
+      if (*(void**)carrier != g_carrierVtable) return;
 
-   // Allocate 0x1C bytes from VehicleTracker::sMemoryPool
+      const int state = flightState(carrier);
+      if (state == 0) {
+         detachAllCargo(carrier);
+         hooked_TakeOff(carrier, nullptr);
+      } else if (state == 2) {
+         detachAllCargo(carrier);
+         trackRelease(carrier);
+         typedef void(__thiscall* Dtor_t)(void*, int);
+         ((Dtor_t)(*(void***)carrier)[kVt_DeletingDtor])(carrier, 1);
+         fieldI(vs, kVS_CarrierPtr) = 0;
+         fieldI(vs, kVS_CarrierGen) = 0;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// Allocate and link a VehicleTracker for an extra cargo entity.
+typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
+static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
+static void*             g_VehicleTrackerPool = nullptr;
+
+static void createTracker(char* vs, void* cargo)
+{
+   if (!g_MemPoolAlloc || !g_VehicleTrackerPool || !cargo) return;
    int* tracker = (int*)g_MemPoolAlloc(g_VehicleTrackerPool, 0x1C);
    if (!tracker) return;
-
-   // Zero all 7 dwords
-   for (int i = 0; i < 7; i++) tracker[i] = 0;
+   memset(tracker, 0, 0x1C);
 
    char* sentinel = vs + kVS_ListSentinel;
+   int*  sentinelI = (int*)sentinel;
+   tracker[0] = (int)sentinel;
+   tracker[1] = (int)sentinel;
+   tracker[3] = (int)tracker;
+   tracker[4] = (int)cargo;                        // mVehicle ptr
+   tracker[5] = fieldI((char*)cargo, kHandleId);   // mVehicle id
 
-   // Set list pointers
-   tracker[0] = (int)sentinel;        // +0x00: list owner
-   tracker[1] = (int)sentinel;        // +0x04: list owner
-   tracker[3] = (int)tracker;         // +0x0C: self-ptr
+   tracker[2] = sentinelI[2];                      // link at head
+   sentinelI[2] = (int)tracker;
+   *(int*)(tracker[2] + 4) = (int)tracker;
+   fieldI(vs, kVS_TrackerCount) += 1;
+}
 
-   // Set cargo entity reference
-   tracker[4] = (int)cargoEntity;                    // +0x10: entity ptr
-   tracker[5] = *(int*)((char*)cargoEntity + 0x204); // +0x14: entity generation
+// Spawn cargo for slots 1..N-1 of a multi-cargo carrier, within the pad's
+// remaining spawn budget.  Same order as vanilla: attach, team, activate,
+// tracker.
+static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, int countAfter)
+{
+   char* cls = carrierClass(carrier);
+   if (!cls) return;
+   const int cargoCount = fieldI(cls, L->clsCargoCount);
+   if (cargoCount <= 1) return;
 
-   // Link into doubly-linked list at head
-   // sentinel+0x08 = first element ptr
-   int* sentinelI = (int*)sentinel;
-   tracker[2] = sentinelI[2];                     // new->next = old first
-   sentinelI[2] = (int)tracker;                   // sentinel->first = new
-   *(int*)(tracker[2] + 4) = (int)tracker;        // old_first->prev = new
+   int slotsToFill = cargoCount;
+   const int budget = fieldI(vs, kVS_SpawnCount) - countAfter;
+   if (slotsToFill > budget + 1) slotsToFill = budget + 1;
+   if (slotsToFill > kMaxCargo)  slotsToFill = kMaxCargo;
+   if (slotsToFill <= 1) return;
 
-   // Increment tracker count
-   *(int*)(vs + kVS_TrackerCount) = *(int*)(vs + kVS_TrackerCount) + 1;
+   void* spawnClass = *(void**)(vs + kVS_SpawnClass + team * 4);
+   if (!spawnClass) return;
+   auto fn = get_gamelog();
+
+   for (int slot = 1; slot < slotsToFill; slot++) {
+      typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
+      typedef void* (__thiscall* GetEntity_t)(void* obj);
+      void* spawned = ((SpawnEntity_t)(*(void***)spawnClass)[2])(spawnClass, vs + kVS_PadTransform);
+      if (!spawned) continue;
+      void* cargo = ((GetEntity_t)(*(void***)spawned)[9])(spawned);
+      if (!cargo) continue;
+
+      if (!attachCargoToSlot(carrier, slot, cargo)) {
+         if (fn) fn("[Carrier] slot %d: attach failed\n", slot);
+         continue;
+      }
+
+      setTeam(cargo, team);
+      int* bits = (int*)((char*)cargo + kTeamBits);
+      *bits ^= ((team << 4) ^ *bits) & 0xF0;
+      *bits ^= ((team << 8) ^ *bits) & 0xF00;
+      if (t) saveCargoTeam(*t, slot, cargo);
+
+      // The engine's activation path dereferences Controllable::mPilot with no
+      // null check on one branch and carried cargo has no pilot; the guard in
+      // hover_pilot_null_fix.cpp covers it.  Marked expected so the VEH logger
+      // doesn't file a report if that guard declined to install.
+      crash_logger_begin_expected_fault();
+      __try {
+         typedef void(__thiscall* Activate_t)(void*);
+         ((Activate_t)(*(void***)cargo)[kVt_Activate])(cargo);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         static bool s_reported = false;
+         if (fn && !s_reported) {
+            s_reported = true;
+            fn("[Carrier] cargo activation faulted (slot %d); the mPilot guard did not install\n", slot);
+         }
+      }
+      crash_logger_end_expected_fault();
+
+      createTracker(vs, cargo);
+   }
 }
 
 static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 {
    char* vs = (char*)ecx;
+   padCarrierUpdate(vs);
 
-   // Read tracker count BEFORE original call
    int countBefore = 0;
-   __try {
-      countBefore = *(int*)(vs + kVS_TrackerCount);
-   } __except(EXCEPTION_EXECUTE_HANDLER) {}
+   __try { countBefore = fieldI(vs, kVS_TrackerCount); } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-   // Call original — spawns carrier + 1 cargo in slot 0 (if conditions met)
    call_original_UpdateSpawn(ecx, dt);
 
-   // Check if a carrier was just spawned
    __try {
-      int countAfter = *(int*)(vs + kVS_TrackerCount);
-      if (countAfter <= countBefore) return; // nothing spawned
+      const int countAfter = fieldI(vs, kVS_TrackerCount);
+      if (countAfter <= countBefore) return;
 
-      int team = *(int*)(vs + kVS_Team);
-      int spawnCount = *(int*)(vs + kVS_SpawnCount);
-      auto fn = get_gamelog();
+      const int team = fieldI(vs, kVS_Team);
+      if (team < 1 || team > 7 || !*(vs + kVS_UseCarrier + team)) return;
 
-      if (team < 1 || team > 7) return;
+      char* carrier = *(char**)(vs + kVS_CarrierPtr);
+      if (!carrier || fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;
+      if (*(void**)carrier != g_carrierVtable) return;
 
-      // Only apply to carrier spawns — game indexes by team directly (1-based)
-      char useCarrier = *(char*)(vs + kVS_UseCarrier + team);
-      if (!useCarrier) return;
+      CarrierTrack* t = trackAcquire(carrier);
+      if (t) {
+         const float* pad = (const float*)(vs + kVS_PadTransform);
+         t->padX = pad[12];
+         t->padY = pad[13];
+         t->padZ = pad[14];
 
-      // Get the carrier entity
-      void* carrierEntity = *(void**)(vs + kVS_CarrierPtr);
-      if (!carrierEntity) {
-         if (fn) fn("[Carrier] UpdateSpawn: no carrier entity at +0xEC\n");
-         return;
+         char* cls = carrierClass(carrier);
+         const float landingTm = cls ? fieldF(cls, L->clsLandingTime)  : 10.0f;
+         const float speed     = cls ? fieldF(cls, L->clsTakeoffSpeed) : 20.0f;
+         t->descentDuration = (landingTm > 2.0f) ? landingTm : 2.0f;
+         t->forwardSpeed    = (speed > 1.0f) ? speed : 1.0f;
+         t->landedHt        = cls ? fieldF(cls, L->clsLandedHeight) : 5.0f;
+
+         // Slot 0 was attached inside the original, before we tracked it.
+         if (void* cargo0 = slotCargo(carrier, 0)) saveCargoTeam(*t, 0, cargo0);
       }
 
-      int carrierGen = *(int*)(vs + kVS_CarrierGen);
-      if (*(int*)((char*)carrierEntity + 0x204) != carrierGen) {
-         if (fn) fn("[Carrier] UpdateSpawn: carrier gen mismatch\n");
-         return;
-      }
-
-      // Get carrier inner base (for AttachCargo, which expects struct_base as ECX)
-      // Check vtable to determine: EntityCarrier vtable at struct_base[0].
-      void* entityVtbl = *(void**)carrierEntity;
-
-      // The entity from VehicleSpawn might already be the inner base (entity+0x240),
-      // not the struct_base. If vtable doesn't match carrier vtable, try -0x240.
-      char* carrierStructBase = nullptr;
-      if ((uintptr_t)entityVtbl == (uintptr_t)g_carrierVtable) {
-         carrierStructBase = (char*)carrierEntity;
-      } else {
-         char* maybeBase = (char*)carrierEntity - 0x240;
-         void* maybeVtbl = *(void**)maybeBase;
-         if ((uintptr_t)maybeVtbl == (uintptr_t)g_carrierVtable) {
-            carrierStructBase = maybeBase;
-         } else {
-            if (fn) fn("[Carrier] UpdateSpawn: can't identify carrier base\n");
-            return;
-         }
-      }
-
-      // AttachCargo expects struct_base as ECX
-      // Inner for class access = struct_base + 0x240
-
-      // Store pad position and cache class params for flight override
-      // PblMatrix is row-major 4×4; position = floats at indices 12,13,14
-      {
-         float* padMtx = (float*)(vs + kVS_PadTransform);
-         float pX = padMtx[12], pY = padMtx[13], pZ = padMtx[14];
-
-         // Evict stale slots: if the carrier at a slot's structBase is dead
-         // (vtable no longer matches), free the slot for reuse.
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_flightOverride[i].structBase == nullptr) continue;
-            __try {
-               void* vtbl = *(void**)g_flightOverride[i].structBase;
-               if (vtbl != g_carrierVtable) {
-                  g_flightOverride[i] = {};
-               }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-               g_flightOverride[i] = {};
-            }
-         }
-
-         // Also evict stale snapshot entries (same logic: dead carrier = bad vtable)
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_takeoffPos[i].ecx == nullptr) continue;
-            __try {
-               void* vtbl = *(void**)g_takeoffPos[i].ecx;
-               if (vtbl != g_carrierVtable) {
-                  g_takeoffPos[i] = {};
-               }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-               g_takeoffPos[i] = {};
-            }
-         }
-
-         // Also evict stale animation override entries
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_animOverride[i].structBase == nullptr) continue;
-            __try {
-               void* vtbl = *(void**)g_animOverride[i].structBase;
-               if (vtbl != g_carrierVtable) {
-                  g_animOverride[i] = {};
-               }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-               g_animOverride[i] = {};
-            }
-         }
-
-         int loSlot = -1;
-         for (int i = 0; i < kMaxTrackedCarriers; i++) {
-            if (g_flightOverride[i].structBase == (void*)carrierStructBase ||
-                g_flightOverride[i].structBase == nullptr) {
-               loSlot = i; break;
-            }
-         }
-         if (loSlot < 0) loSlot = 0; // overwrite oldest if full
-
-         // Zero-init the slot, then populate
-         g_flightOverride[loSlot] = {};
-         g_flightOverride[loSlot].structBase = (void*)carrierStructBase;
-         g_flightOverride[loSlot].padX = pX;
-         g_flightOverride[loSlot].padY = pY;
-         g_flightOverride[loSlot].padZ = pZ;
-         g_flightOverride[loSlot].lastState = -1;
-         g_flightOverride[loSlot].despawnTimer = -1.0f;
-         for (int c = 0; c < kMaxCargo; c++) g_flightOverride[loSlot].savedCargoTeam[c] = -1;
-
-         // Cache class params from EntityFlyerClass
-         void* classPtr = *(void**)(carrierStructBase + s_inner_mClass);
-         if (classPtr) {
-            float takeoffHt  = *(float*)((char*)classPtr + s_ClassTakeoffHt_off);
-            float takeoffTm  = *(float*)((char*)classPtr + s_ClassTakeoffTime_off);
-            float takeoffSpd = *(float*)((char*)classPtr + s_ClassTakeoffSpeed_off);
-            float landingTm  = *(float*)((char*)classPtr + s_ClassLandingTime_off);
-            float landHt     = *(float*)((char*)classPtr + s_ClassLandedHt_off);
-
-            g_flightOverride[loSlot].flightAltitude  = takeoffHt;
-            g_flightOverride[loSlot].ascentDuration   = (takeoffTm > kMinDuration) ? takeoffTm : kMinDuration;
-            g_flightOverride[loSlot].descentDuration  = (landingTm > kMinDuration) ? landingTm : kMinDuration;
-            g_flightOverride[loSlot].forwardSpeed     = (takeoffSpd > 1.0f) ? takeoffSpd : 1.0f;
-            g_flightOverride[loSlot].landedHt         = landHt;
-         } else {
-            // Fallback defaults
-            g_flightOverride[loSlot].flightAltitude  = 100.0f;
-            g_flightOverride[loSlot].ascentDuration   = 10.0f;
-            g_flightOverride[loSlot].descentDuration  = 10.0f;
-            g_flightOverride[loSlot].forwardSpeed     = 20.0f;
-            g_flightOverride[loSlot].landedHt         = 5.0f;
-            if (fn) fn("[Carrier:%p] Flight init: no class ptr, using defaults\n", carrierStructBase);
-         }
-
-         // Slot 0 cargo was attached inside original_UpdateSpawn, before the
-         // flight override existed.  Save its team and set to 0 now.
-         {
-            void* cargo0 = *(void**)(carrierStructBase + s_inner_mCargoSlot0Obj);
-            if (cargo0) {
-               __try {
-                  int* teamBits = (int*)((char*)cargo0 + 0x234);
-                  int team0 = (*teamBits >> 4) & 0xF;
-                  g_flightOverride[loSlot].savedCargoTeam[0] = team0;
-                  if (team0 != 0) {
-                     typedef void (__thiscall* SetTeam_t)(void* entity, int t);
-                     void** vtbl = *(void***)cargo0;
-                     ((SetTeam_t)vtbl[36])(cargo0, 0);
-                     *teamBits = *teamBits & ~0xFF0;
-                  }
-               } __except(EXCEPTION_EXECUTE_HANDLER) {}
-            }
-         }
-      }
-
-      // Read carrier class → mCargoCount
-      // s_inner_mClass (0x66C) is already from struct_base, NOT from inner
-      void* carrierClass = *(void**)(carrierStructBase + s_inner_mClass);
-      if (!carrierClass) { if (fn) fn("[Carrier] UpdateSpawn: no carrier class\n"); return; }
-      int cargoCount = *(int*)((char*)carrierClass + s_mCargoCount_offset);
-      if (cargoCount <= 1) return; // only 1 slot defined, nothing extra to do
-
-      // Requires the three vtable slots used below (spawnClass[2] = spawn,
-      // spawned[9] = get entity, cargo[5] = activate), a VehicleTracker pool,
-      // and a way to reach cargo slots past 0.  All three now hold on Steam:
-      // the slot indices were read out of its own UpdateSpawn ([ECX+0xb0]
-      // vtable +0x8 / +0x24 / +0x14, identical to modtools), the pool is
-      // 0x01f9a278, and attachCargoToSlot() works around AttachCargo being
-      // pinned to slot 0.  Single-cargo carriers never reach this code.
-      if (!s_multiCargoSpawn) return;
-
-      // How many slots can we fill?
-      int budget = spawnCount - countAfter; // remaining spawn budget
-      int slotsToFill = cargoCount;
-      if (slotsToFill > budget + 1) slotsToFill = budget + 1; // +1 because slot 0 already used 1
-      if (slotsToFill > kMaxCargo) slotsToFill = kMaxCargo;
-
-      if (slotsToFill <= 1) return; // slot 0 already filled, no budget for more
-
-      // Get cargo spawn class
-      void* spawnClass = *(void**)(vs + kVS_SpawnClass + team * 4);
-      if (!spawnClass) return;
-
-      // Get pad transform for spawning cargo at the right position
-      // We use VehicleSpawn+0x30 (the pad's world transform matrix)
-      char* padTransform = vs + kVS_PadTransform;
-
-      for (int slot = 1; slot < slotsToFill; slot++) {
-         // Spawn cargo entity: spawnClass->vtable[2](transform)
-         void** vtbl = *(void***)spawnClass;
-         typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
-         SpawnEntity_t spawnFn = (SpawnEntity_t)vtbl[2];
-         void* spawned = spawnFn(spawnClass, padTransform);
-         if (!spawned) { if (fn) fn("[Carrier]   Slot %d: spawn returned null\n", slot); continue; }
-
-         // Get actual entity: spawned->vtable[9]()
-         void** spawnedVtbl = *(void***)spawned;
-         typedef void* (__thiscall* GetEntity_t)(void* obj);
-         GetEntity_t getEntityFn = (GetEntity_t)spawnedVtbl[9];
-         void* cargoEntity = getEntityFn(spawned);
-         if (!cargoEntity) { if (fn) fn("[Carrier]   Slot %d: entity is null\n", slot); continue; }
-
-         // Match original UpdateSpawn order exactly:
-         // Original: AttachCargo → vtable[36](team) → team bits → vtable[5]
-
-         // 1. Attach cargo to carrier first (original does this before team/activate)
-         if (!attachCargoToSlot(carrierStructBase, slot, cargoEntity)) {
-            if (fn) fn("[Carrier]   Slot %d: attach failed\n", slot);
-            continue;
-         }
-
-         // 2. cargo->vtable[36](team) — SetTeam
-         void** cargoVtbl = *(void***)cargoEntity;
-         typedef void (__thiscall* SetTeam_t)(void* entity, int team);
-         ((SetTeam_t)cargoVtbl[36])(cargoEntity, team);
-
-         // 3. Set team bits 0xF0 and 0xF00
-         int* teamBits = (int*)((char*)cargoEntity + 0x234);
-         *teamBits = *teamBits ^ (((team << 4) ^ *teamBits) & 0xF0);
-         *teamBits = *teamBits ^ (((team << 8) ^ *teamBits) & 0xF00);
-
-         // 3b. Save cargo team and set to 0 (disable spawning while carried)
-         for (int fi = 0; fi < kMaxTrackedCarriers; fi++) {
-            if (g_flightOverride[fi].structBase != (void*)carrierStructBase) continue;
-            g_flightOverride[fi].savedCargoTeam[slot] = team;
-            ((SetTeam_t)cargoVtbl[36])(cargoEntity, 0);
-            *teamBits = *teamBits & ~0xFF0;
-            break;
-         }
-
-         // 4. cargo->vtable[5]() — activation (in own __try so tracker still created)
-         //
-         // This faults by design on the release builds and is expected: the
-         // engine's activation path reads Controllable::mPilot (+0xd0) and
-         // dereferences it at +0xd4 with no null check on that branch, and
-         // carried cargo has no pilot.  Verified byte-identical on Steam and
-         // GOG (same VA, same instructions), so it is engine behaviour, not a
-         // build-specific port error.  Marked expected so the first-chance VEH
-         // doesn't file a crash report for something we already contain.
-         crash_logger_begin_expected_fault();
-         __try {
-            typedef void (__thiscall* Activate_t)(void* entity);
-            ((Activate_t)cargoVtbl[5])(cargoEntity);
-         } __except(EXCEPTION_EXECUTE_HANDLER) {
-            // With the guard in hover_pilot_null_fix.cpp installed this should
-            // never fire.  If it does, that guard declined to patch (byte
-            // mismatch on an unrecognised build), so say so once rather than
-            // once per cargo attach — the activation is then still aborting
-            // partway and the cargo is only partially activated.
-            static bool reported = false;
-            if (fn && !reported) {
-               reported = true;
-               fn("[Carrier] cargo vtable[5] faulted (slot %d) — the mPilot guard did not "
-                  "install on this build, so cargo activation is incomplete\n", slot);
-            }
-         }
-         crash_logger_end_expected_fault();
-
-         // 5. Create VehicleTracker (runs even if activation failed)
-         CreateTracker(vs, cargoEntity);
-      }
-   } __except(EXCEPTION_EXECUTE_HANDLER) {
-      auto fn = get_gamelog();
-      if (fn) fn("[Carrier] Multi-cargo: exception during extra spawn\n");
+      spawnExtraCargo(vs, carrier, t, team, countAfter);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (auto fn = get_gamelog()) fn("[Carrier] exception after UpdateSpawn\n");
    }
 }
 
@@ -2059,312 +1200,128 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// The subset of the carrier feature set that is portable across builds: the
-// three memory-safety guards, plus (where the addresses are mapped) the render
-// override and the custom flight system.
-//
-// All three addresses were confirmed against the Phantom build (release-family,
-// real PDB), whose EntityCarrier::AttachCargo/DetachCargo bodies these match:
-// same UpdateLandedHeight + GameSound::Play tail, same bool return, RET 0x8.
-// The one behavioural difference is that Steam's AttachCargo ignores its slot
-// argument (see s_attachSlotIsIndex).
-//
-// These hooks fix out-of-bounds writes in vanilla and need nothing but the
-// three function addresses plus two struct offsets.
-//
-// Everything else is installed here too where the addresses are mapped: the
-// custom flight system, cargo team save/restore, animation override, the turret
-// fire patch, PILOT_SELF turret AI, the ActivatePhysics vtable patch and the
-// RayHit terrain-swirl suppression.  The one deliberate omission is the
-// CreateController null check (modtools-only by nature — it is a debugger
-// timing bug, and a 23-byte inline cave whose release codegen would differ).
-// ---------------------------------------------------------------------------
-static void carrier_bounds_guards_install(uintptr_t exe_base)
+static bool s_flightHooked     = false;
+static bool s_turretAIHooked   = false;
+static void** s_activatePhysicsSlot = nullptr;
+static void*  s_updateSpawnDetour   = nullptr;
+
+void entity_carrier_fixes_install(uintptr_t exe_base)
 {
+   if (g_build == GameBuild::Modtools)                              L = &kCarrierModtools;
+   else if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) L = &kCarrierRelease;
+   else return;
+
    if (!g_addr->carrier_set_property || !g_addr->carrier_attach_cargo ||
-       !g_addr->carrier_detach_cargo)
+       !g_addr->carrier_detach_cargo || !g_addr->carrier_vtable)
       return;
 
    original_SetProperty = (fn_SetProperty_t)resolve(exe_base, g_addr->carrier_set_property);
    original_AttachCargo = (fn_AttachCargo_t)resolve(exe_base, g_addr->carrier_attach_cargo);
    original_DetachCargo = (fn_DetachCargo_t)resolve(exe_base, g_addr->carrier_detach_cargo);
+   g_carrierVtable      = resolve(exe_base, g_addr->carrier_vtable);
 
-   // Cargo-drop animation override + frustum-cull bypass.
-   const bool wantRender = g_addr->flyer_render && s_visJzVA;
-   if (wantRender) {
+   if (g_addr->gameloop_pause_mode)
+      g_pauseMode = (uint8_t*)resolve(exe_base, g_addr->gameloop_pause_mode);
+
+   s_renderHooked = g_addr->flyer_render != 0;
+   if (s_renderHooked)
       original_FlyerRender = (fn_FlyerRender_t)resolve(exe_base, g_addr->flyer_render);
-      visJzInit();
-   }
 
-   // Custom carrier flight system: descent/ascent overrides, cargo team
-   // save/restore, despawn timer.  UpdateSpawn is what registers a carrier in
-   // g_flightOverride, so without it none of the rest engages.
-   //
-   // The `EXEC at addr 0` (EIP=0) during level load that previously kept this
-   // disabled off-modtools was the UpdateSpawn calling-convention mismatch: on
-   // Steam dt arrives in XMM1 and the function ends in a bare RET, so the
-   // modtools-shaped hook's `RET 4` corrupted ESP on every call.  Fixed by the
-   // regcall thunks (see s_updateSpawnRegcall); the crash stack pointed at
-   // GameLoop::PostLoad because UpdateSpawn first runs at initial vehicle spawn.
-   //
-   // Conventions of the other three were checked against the disassembly and do
-   // match the modtools shape: CarrierUpdate 0x4971D0 is ECX + stack dt + RET 4,
-   // TakeOff 0x4b3c60 and UpdateLandedHeight 0x4974b0 are ECX-only.
-   const bool wantFlight = g_addr->carrier_update_spawn && g_addr->carrier_update &&
-                           g_addr->carrier_update_landed_ht && g_addr->carrier_take_off &&
-                           g_addr->carrier_initiate_landing && g_addr->carrier_kill &&
-                           g_addr->carrier_vtable;
-   if (wantFlight) {
-      original_UpdateSpawn        = (fn_UpdateSpawn_t)      resolve(exe_base, g_addr->carrier_update_spawn);
-      original_CarrierUpdate      = (fn_CarrierUpdate_t)    resolve(exe_base, g_addr->carrier_update);
-      original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, g_addr->carrier_update_landed_ht);
-      original_TakeOff            = (fn_TakeOff_t)          resolve(exe_base, g_addr->carrier_take_off);
-      original_InitiateLanding    = (fn_InitiateLanding_t)  resolve(exe_base, g_addr->carrier_initiate_landing);
-      g_CarrierKill               = (fn_CarrierKill_t)      resolve(exe_base, g_addr->carrier_kill);
-      g_carrierVtable             =                         resolve(exe_base, g_addr->carrier_vtable);
-
-      // Optional extras — each is null-guarded at its use site:
-      //   mem_pool_alloc + vehicle_tracker_pool: registering extra
-      //     VehicleTrackers for multi-cargo carriers (single-cargo unaffected)
-      //   gameloop_pause_mode: pause-aware animation timing
-      //   rayHit VAs: terrain-normal swirl suppression
+   s_flightHooked = g_addr->carrier_update_spawn && g_addr->carrier_update && g_addr->carrier_take_off;
+   if (s_flightHooked) {
+      original_UpdateSpawn   = (fn_UpdateSpawn_t)  resolve(exe_base, g_addr->carrier_update_spawn);
+      original_CarrierUpdate = (fn_CarrierUpdate_t)resolve(exe_base, g_addr->carrier_update);
+      original_TakeOff       = (fn_TakeOff_t)      resolve(exe_base, g_addr->carrier_take_off);
       if (g_addr->mem_pool_alloc)
          g_MemPoolAlloc = (fn_MemPoolAlloc_t)resolve(exe_base, g_addr->mem_pool_alloc);
       if (g_addr->vehicle_tracker_pool)
          g_VehicleTrackerPool = resolve(exe_base, g_addr->vehicle_tracker_pool);
-      if (g_addr->gameloop_pause_mode)
-         g_pauseMode = (uint8_t*)resolve(exe_base, g_addr->gameloop_pause_mode);
-      rayHitInit();
    }
 
-   // ActivatePhysics vtable[41] patch — without it the carrier's turrets are
-   // built but never activated, so they are invisible and inert ("turrets are
-   // just gone").  Needs the three child-activation functions plus the vtable.
-   const bool wantActivatePhysics = g_addr->carrier_vtable &&
-                                    g_addr->turret_activate &&
-                                    g_addr->aimer_activate &&
-                                    g_addr->passenger_activate;
-   if (wantActivatePhysics) {
-      g_carrierVtable     = resolve(exe_base, g_addr->carrier_vtable);
-      g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, g_addr->turret_activate);
-      g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, g_addr->aimer_activate);
-      g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, g_addr->passenger_activate);
-   }
+   codePatchesInit();
 
-   // Carrier turret fire patch — lets carrier turrets fire while airborne.
-   // turretFireInit() no-ops if the site is unmapped on this build.
-   turretFireInit();
-   turretFireInstall();
-
-   // PILOT_SELF turret AI — autonomous aiming + firing for turrets that have
-   // no UnitController of their own.
-   const bool wantTurretAI = g_addr->turret_update_indirect && g_addr->trigger_update &&
-                             g_addr->carrier_vtable;
-   if (wantTurretAI) {
+   s_turretAIHooked = g_addr->turret_update_indirect && g_addr->trigger_update;
+   if (s_turretAIHooked) {
       original_TurretUpdateIndirect =
          (fn_TurretUpdateIndirect_t)resolve(exe_base, g_addr->turret_update_indirect);
-      g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, g_addr->trigger_update);
-      g_carrierVtable    = resolve(exe_base, g_addr->carrier_vtable);
+      g_FireStateMachine = resolve(exe_base, g_addr->trigger_update);
    }
+
+   s_updateSpawnDetour = L->updateSpawnRegcall ? (void*)hooked_UpdateSpawn_regcall
+                                               : (void*)hooked_UpdateSpawn;
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
    DetourAttach(&(PVOID&)original_AttachCargo, hooked_AttachCargo);
    DetourAttach(&(PVOID&)original_DetachCargo, hooked_DetachCargo);
-   if (wantTurretAI)
-      DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
-   if (wantRender)
+   if (s_renderHooked)
       DetourAttach(&(PVOID&)original_FlyerRender, hooked_FlyerRender);
-   if (wantFlight) {
-      // Steam needs the register-convention thunk; modtools takes the C hook
-      // directly (see s_updateSpawnRegcall).
-      DetourAttach(&(PVOID&)original_UpdateSpawn,
-                   s_updateSpawnRegcall ? (PVOID)hooked_UpdateSpawn_regcall
-                                        : (PVOID)hooked_UpdateSpawn);
-      DetourAttach(&(PVOID&)original_CarrierUpdate,      hooked_CarrierUpdate);
-      DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
-      DetourAttach(&(PVOID&)original_TakeOff,            hooked_TakeOff);
+   if (s_flightHooked) {
+      DetourAttach(&(PVOID&)original_UpdateSpawn,   s_updateSpawnDetour);
+      DetourAttach(&(PVOID&)original_CarrierUpdate, hooked_CarrierUpdate);
+      DetourAttach(&(PVOID&)original_TakeOff,       hooked_TakeOff);
    }
+   if (s_turretAIHooked)
+      DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
    DetourTransactionCommit();
 
    // After the Detours commit, to avoid page-protection conflicts.
-   if (wantActivatePhysics) {
-      void** vtableSlot = (void**)((char*)g_carrierVtable + kActivatePhysics_vtableOffset);
+   if (g_addr->turret_activate && g_addr->aimer_activate && g_addr->passenger_activate) {
+      g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, g_addr->turret_activate);
+      g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, g_addr->aimer_activate);
+      g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, g_addr->passenger_activate);
+
+      void** slot = (void**)g_carrierVtable + kVt_ActivatePhysics;
       DWORD oldProt;
-      if (VirtualProtect(vtableSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
-         *vtableSlot = (void*)&carrier_ActivatePhysics;
-         VirtualProtect(vtableSlot, sizeof(void*), oldProt, &oldProt);
+      if (VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
+         s_origActivatePhysics = *slot;
+         *slot = (void*)&carrier_ActivatePhysics;
+         VirtualProtect(slot, sizeof(void*), oldProt, &oldProt);
+         s_activatePhysicsSlot = slot;
       }
    }
 
-   s_animOverrideActive = wantRender;
-}
-
-void entity_carrier_fixes_install(uintptr_t exe_base)
-{
-   // Both retail builds: identical struct layout AND, for this subsystem,
-   // identical code addresses — EntityFlyer::Render and ::Update sit in the
-   // shift-0 range, so the visibility JZ (0f 84 14 07 00 00) and the two RayHit
-   // CALLs (e8 55 01 fb ff / e8 23 ff fa ff) are byte-for-byte at the same VAs
-   // on GOG.  Leaving GOG on the modtools defaults previously pointed visJzInit
-   // at a modtools-only address.
-   if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) {
-      s_mCargoCount_offset    = 0x10E0;  // EntityCarrierClass::mCargoCount
-      s_cargoNodeArrayBase    = 0x10A0;  // cargo-node array (0x10A0 + 4*0x10 == 0x10E0)
-      s_inner_mCargoSlot0Obj  = 0x1D9C;  // EntityCarrier::mCargoArray[0].mObject
-      s_multiCargoSpawn       = true;    // via attachCargoToSlot(); see its comment
-      s_inner_mFlightState    = 0x564;
-      s_inner_mClass          = 0x62C;
-      s_inner_mProgress       = 0x568;
-      s_inner_mRef17dc        = 0x1830;
-      // Located in render 0x4AB040 at `FMUL [ESI+0x1c2c]` (004ab158), the exact
-      // analogue of modtools' `FMUL [EBX+0x1c6c]` (004f6a78) — same FLD1 /
-      // FSUBRP / flightState CMP 3 shape.  +0x94 render base => 0x1CC0.
-      s_inner_mNetAnimDelta   = 0x1CC0;
-      s_class_takeoffAnim     = 0x7B4;
-      s_visJzVA               = 0x004AB082;
-
-      // VehicleSpawn::UpdateSpawn takes dt in XMM1 and cleans no stack here.
-      s_updateSpawnRegcall    = true;
-
-      // ActivatePhysics turret/aimer/passenger fields, all read straight out of
-      // Steam's EntityFlyer::ActivatePhysics 0x004b5f70:
-      //   [ESI+0x1cd0] sub-object, [ESI+0x668] aimers, [ESI+0x660] turret count,
-      //   [ESI+0x640] turrets, [ESI+0x630] passengers,
-      //   [class+0xc80] aimer count, [class+0xd4c] passenger count.
-      s_SubObj_off            = 0x1CD0;  // instance, -0x40
-      s_AimerArray_off        = 0x668;   // instance, -0x40
-      s_TurretCount_off       = 0x660;   // instance, -0x40
-      s_TurretArray_off       = 0x640;   // instance, -0x40
-      s_PassengerArray_off    = 0x630;   // instance, -0x40
-      s_Class_AimerCount_off  = 0xC80;   // class,    -0xC8
-      s_Class_PassCount_off   = 0xD4C;   // class,    -0xC8
-
-      // Carrier turret fire gate: CMP [EAX+0x564],0 (18 bytes) rather than
-      // modtools' MOV [EAX+0x5A4] / TEST (17 bytes).
-      s_turretFireStateOff    = 0x564;
-
-      // The fire state machine here takes no dt parameter (RET 4, not RET 8).
-      s_fireStateMachineHasDt = false;
-
-      // Flight-system instance fields, ECX-relative (ECX == structBase + 0x240
-      // in EntityCarrier::Update on both builds).  Every EntityFlyer/Carrier
-      // instance field in this range sits 0x40 lower on Steam; State, Progress,
-      // Class, LandedHeight and CargoSlots are all verified pairs.
-      s_State_offset          = 0x324;  // base 0x564, verified (Land/TakeOff)
-      s_Progress_offset       = 0x328;  // base 0x568, verified (render)
-      s_LandedHeight_offset   = 0x380;  // base 0x5C0, verified (UpdateLandedHeight)
-      s_GroundDist_offset     = 0x450;  // base 0x690, inferred from the -0x40 rule
-      s_CargoSlots_offset     = 0x1B50; // base 0x1D90, verified (slot+0xC == 0x1D9C)
-      s_Class_offset          = 0x3EC;  // base 0x62C, verified (render/AttachCargo)
-
-      // EntityFlyerClass flight parameters.  CLASS fields do NOT follow the
-      // -0x40 rule: this block shifts by -0xC8, confirmed by two independent
-      // pairs (LandedHeight 0x8F4->0x82C in UpdateLandedHeight, takeoffAnim
-      // 0x87C->0x7B4 in render).
-      s_ClassTakeoffHt_off    = 0x818;  // TakeoffHeight
-      s_ClassTakeoffTime_off  = 0x81C;  // TakeoffTime
-      s_ClassTakeoffSpeed_off = 0x820;  // TakeoffSpeed
-      s_ClassLandingTime_off  = 0x824;  // LandingTime
-      s_ClassLandedHt_off     = 0x82C;  // LandedHeight, verified
-
-      // RayHit call sites in EntityFlyer::Update 0x4ac460, both `CALL
-      // CollisionManager::RayHit` (0x45e3a0) with the result scaled ×1024 into
-      // groundDistance [EDI+0x450].  Release returns the fraction in XMM0, so
-      // these take the CALL-redirect form rather than modtools' FLD1.
-      s_rayHitVA1     = 0x004ae246;
-      s_rayHitVA2     = 0x004ae478;
-      s_rayHitSseStub = true;
-   }
-
-   if (g_build != GameBuild::Modtools) {
-      carrier_bounds_guards_install(exe_base);
-      return;
-   }
-
-   s_attachSlotIsIndex  = true;
-   s_animOverrideActive = true;
-   s_multiCargoSpawn    = true;
-
-
-   original_SetProperty    = (fn_SetProperty_t)  resolve(exe_base, game_addrs::modtools::carrier_set_property);
-   original_AttachCargo    = (fn_AttachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_attach_cargo);
-   original_DetachCargo    = (fn_DetachCargo_t)   resolve(exe_base, game_addrs::modtools::carrier_detach_cargo);
-   original_TakeOff        = (fn_TakeOff_t)       resolve(exe_base, game_addrs::modtools::carrier_take_off);
-   g_carrierVtable         = resolve(exe_base, game_addrs::modtools::carrier_vtable);
-   original_CarrierUpdate  = (fn_CarrierUpdate_t) resolve(exe_base, game_addrs::modtools::carrier_update);
-   original_UpdateLandedHeight = (fn_UpdateLandedHeight_t)resolve(exe_base, game_addrs::modtools::carrier_update_landed_ht);
-   original_FlyerRender    = (fn_FlyerRender_t)   resolve(exe_base, game_addrs::modtools::flyer_render);
-   visJzInit();
-   rayHitInit();
-   original_UpdateSpawn    = (fn_UpdateSpawn_t)   resolve(exe_base, game_addrs::modtools::carrier_update_spawn);
-
-   g_MemPoolAlloc          = (fn_MemPoolAlloc_t)  resolve(exe_base, game_addrs::modtools::mem_pool_alloc);
-   g_VehicleTrackerPool    = resolve(exe_base, game_addrs::modtools::vehicle_tracker_pool);
-   original_InitiateLanding = (fn_InitiateLanding_t)resolve(exe_base, game_addrs::modtools::carrier_initiate_landing);
-   g_CarrierKill           = (fn_CarrierKill_t)   resolve(exe_base, game_addrs::modtools::carrier_kill);
-   g_pauseMode             = (uint8_t*)           resolve(exe_base, game_addrs::modtools::gameloop_pause_mode);
-
-   // Turret/aimer/passenger activation functions
-   g_TurretActivate    = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::turret_activate);
-   g_AimerActivate     = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::aimer_activate);
-   g_PassengerActivate = (fn_ActivateChild_t)resolve(exe_base, game_addrs::modtools::passenger_activate);
-
-   // Carrier turret fire patch — must be after g_carrierVtable is resolved
-   turretFireInit();
    turretFireInstall();
-
-   // Controllable::CreateController null-check fix (vanilla bug)
-   createCtrlNullCheckInit();
-   createCtrlNullCheckInstall();
-
-   // PILOT_SELF turret AI hook
-   original_TurretUpdateIndirect = (fn_TurretUpdateIndirect_t)resolve(exe_base, game_addrs::modtools::turret_update_indirect);
-   g_FireStateMachine = (fn_FireStateMachine_t)resolve(exe_base, game_addrs::modtools::trigger_update);
-
-   DetourTransactionBegin();
-   DetourUpdateThread(GetCurrentThread());
-   DetourAttach(&(PVOID&)original_SetProperty,       hooked_SetProperty);
-   DetourAttach(&(PVOID&)original_AttachCargo,       hooked_AttachCargo);
-   DetourAttach(&(PVOID&)original_DetachCargo,       hooked_DetachCargo);
-   DetourAttach(&(PVOID&)original_TakeOff,           hooked_TakeOff);
-   DetourAttach(&(PVOID&)original_CarrierUpdate,     hooked_CarrierUpdate);
-   DetourAttach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
-   DetourAttach(&(PVOID&)original_UpdateSpawn,       hooked_UpdateSpawn);
-   DetourAttach(&(PVOID&)original_FlyerRender,      hooked_FlyerRender);
-   DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
-   DetourTransactionCommit();
-
-   // Patch EntityCarrier vtable[41] (ActivatePhysics) to our custom version
-   // that also activates turrets, aimers, and passenger slots.
-   // Must be done AFTER DetourTransactionCommit to avoid page protection conflicts.
-   {
-      void** vtableSlot = (void**)((char*)g_carrierVtable + kActivatePhysics_vtableOffset);
-      DWORD oldProt;
-      if (VirtualProtect(vtableSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
-         *vtableSlot = (void*)&carrier_ActivatePhysics;
-         VirtualProtect(vtableSlot, sizeof(void*), oldProt, &oldProt);
-      }
-   }
+   createCtrlInstall();
 }
 
 void entity_carrier_fixes_uninstall()
 {
+   if (!original_SetProperty) return;
+
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
-   if (original_SetProperty)        DetourDetach(&(PVOID&)original_SetProperty,        hooked_SetProperty);
-   if (original_AttachCargo)        DetourDetach(&(PVOID&)original_AttachCargo,        hooked_AttachCargo);
-   if (original_DetachCargo)        DetourDetach(&(PVOID&)original_DetachCargo,        hooked_DetachCargo);
-   if (original_TakeOff)            DetourDetach(&(PVOID&)original_TakeOff,            hooked_TakeOff);
-   if (original_CarrierUpdate)      DetourDetach(&(PVOID&)original_CarrierUpdate,      hooked_CarrierUpdate);
-   if (original_UpdateLandedHeight) DetourDetach(&(PVOID&)original_UpdateLandedHeight, hooked_UpdateLandedHeight);
-   if (original_UpdateSpawn)        DetourDetach(&(PVOID&)original_UpdateSpawn,        hooked_UpdateSpawn);
-   if (original_FlyerRender)        DetourDetach(&(PVOID&)original_FlyerRender,        hooked_FlyerRender);
-   if (original_TurretUpdateIndirect) DetourDetach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
+   DetourDetach(&(PVOID&)original_SetProperty, hooked_SetProperty);
+   DetourDetach(&(PVOID&)original_AttachCargo, hooked_AttachCargo);
+   DetourDetach(&(PVOID&)original_DetachCargo, hooked_DetachCargo);
+   if (s_renderHooked)
+      DetourDetach(&(PVOID&)original_FlyerRender, hooked_FlyerRender);
+   if (s_flightHooked) {
+      DetourDetach(&(PVOID&)original_UpdateSpawn,   s_updateSpawnDetour);
+      DetourDetach(&(PVOID&)original_CarrierUpdate, hooked_CarrierUpdate);
+      DetourDetach(&(PVOID&)original_TakeOff,       hooked_TakeOff);
+   }
+   if (s_turretAIHooked)
+      DetourDetach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
    DetourTransactionCommit();
 
-   turretFireUninstall();
-   createCtrlNullCheckUninstall();
+   if (s_activatePhysicsSlot) {
+      DWORD oldProt;
+      if (VirtualProtect(s_activatePhysicsSlot, sizeof(void*), PAGE_READWRITE, &oldProt)) {
+         *s_activatePhysicsSlot = s_origActivatePhysics;
+         VirtualProtect(s_activatePhysicsSlot, sizeof(void*), oldProt, &oldProt);
+      }
+      s_activatePhysicsSlot = nullptr;
+   }
+   if (s_turretFireSite) {
+      writeCode(s_turretFireSite, s_turretFireSaved, s_turretFireLen);
+      s_turretFireSite = nullptr;
+   }
+   if (s_createCtrlSite) {
+      writeCode(s_createCtrlSite, s_createCtrlSaved, kCreateCtrlPatch_len);
+      s_createCtrlSite = nullptr;
+   }
+   original_SetProperty = nullptr;
+   for (CarrierTrack& t : g_tracks) t = {};
 }
