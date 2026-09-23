@@ -246,7 +246,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       if (identity == exe_identity::retail_2006) {
          FatalAppExitA(0, "This BattlefrontII.exe is the original 2006 version (v1.1), which "
                           "BF2GameExt does not support. It needs the updated 2017 executable "
-                          "from Steam or GOG.\n\nTo play without BF2GameExt, set Enabled=0 under "
+                          "from Steam or GOG Galaxy.\n\nTo play without BF2GameExt, set Enabled=0 under "
                           "[General] in BF2GameExt.ini.");
       }
 
