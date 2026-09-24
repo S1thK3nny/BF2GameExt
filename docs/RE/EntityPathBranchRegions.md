@@ -181,11 +181,15 @@ supported and deliberately so: the feature has never worked for anyone, so there
 is no content in the wild relying on it.
 
 A diagnostic ships alongside: `[Diagnostic] BranchRegionDebug=0`,
-`PatcherDLL/src/entity/branch_region_debug.cpp`, modtools only, off by default.
+`PatcherDLL/src/entity/branch_region_debug.cpp`, all three builds, off by default.
 It changes no behaviour; it narrates `RedRegionFactory::Find`, `CreateRegion`
 and `FindByID` - which factory claims each region, the id each side derives, and
 the live region count on every line - so an id that will not resolve can be
 traced rather than guessed at.
+
+Its live count originally read `0x00AD345C`, which is `sList._head._pObject` and on a list
+HEAD is structurally always null, so every `(live=%u)` it printed was a hardcoded zero. The
+count is `_iCount` at `0x00AD3460`, written by `BranchRegion`'s ctor and dtor.
 
 ## Authoring
 

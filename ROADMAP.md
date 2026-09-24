@@ -5,43 +5,20 @@ is shipped. For what the DLL actually does today, see
 [docs/user/FEATURES.md](docs/user/FEATURES.md).
 
 ## Bugs
-**Tentacle fields are unclamped in stock code** - Both tentacle properties on
-`EntitySoldierClass` are bitfields that accept more than the arrays can hold, and neither is
-clamped on any build. `NumTentacles` is 3 bits (0-7) against arrays dimensioned for 4;
-`BonesPerTentacle` is 4 bits (0-15) against a fixed 4x5 array on the STACK, where an overrun
-reaches the saved return address. modtools warns but does not clamp - the `JBE` only skips
-the warning - and retail compiled both checks out entirely, strings included, so a mod hits
-it with no diagnostic at all. Full site list in
-[docs/RE/TentacleSystem.md](docs/RE/TentacleSystem.md).
+**Tentacle fields are unclamped in stock code** - `NumTentacles` and `BonesPerTentacle` on
+`EntitySoldierClass` accept bigger values than the arrays behind them can hold, and no build clamps
+them. The bones overflow lands on the stack, so a typo in an ODF can corrupt the return address.
+Retail even removed the warning, so it fails with no message at all. `TentacleLimit=1` already
+clamps both, so this only matters with that feature off. The fix is a small edit to the bitfield
+mask at each read site, listed in [docs/RE/TentacleSystem.md](docs/RE/TentacleSystem.md).
 
-Latent, since no stock ODF exceeds either, but reachable from an ODF typo. `TentacleLimit=1`
-already clamps both in its replacement constructor, so this only bites with the feature off.
-The standalone fix is a length-neutral edit to the `AND` mask at the extraction sites.
-
-**Unbounded hash probe - the best candidate for the GUI freeze** - `PblHashTableCode::_Find` is
-an open-addressing probe that walks backwards with wraparound and has NO iteration cap. Its only
-two exits are "key matches" and "slot is zero", so a table that is 100% full plus a lookup for an
-absent key spins forever on the main thread - GUI frozen, audio still playing, which is the
-reported signature. Verified disassembly, modtools `0x007E1A40` (loop `0x007E1A62`-`0x007E1A75`,
-`JNZ` back with no counter); Steam `0x00726E00` (loop `0x00726E28`), GOG `0x00727ED0` (loop
-`0x00727EF8`), Phantom `0x00864330`, `_Store` same shape at `0x008644D0`.
-
-Reachable from `AttachedEffectsClass::SetProperty`, which calls
-`_Find(FLEffect::s_EffectClasses._uiTable, 0x200, effectNameHash)` - 256 key slots. `FLEffect::Read`
-registers through `_Store` and tracks `_iNumEntries` but NEVER compares it to capacity; there is no
-"too many effect classes" guard anywhere in the image. So a mod with 256+ distinct effect classes
-fills the table, and the next lookup of a name that is not in it - exactly what a missing or
-typo'd `AttachEffect` line produces - hangs during level load. Callers: modtools `0x004C2942` /
-`0x004C2AFD`, Steam `0x004477DF` / `0x004478E7`, GOG `0x004477BF` / `0x004478C7`. Tables: modtools
-`0x00CF55B4`, Steam `0x01EBD144`, GOG `0x01EBE5F4`.
-
-**NOT YET LINKED TO THE OBSERVED FREEZE.** The loop is byte-confirmed to exist and to be
-uncapped, but nothing yet proves it is what the user hit - its trigger is a full effect-class
-table, which is a separate condition from the 64-entry attachment overflow fixed in
-`[Fixes] AttachedEffectsOverflowFix`. Next step is to instrument `_iNumEntries` against 256 at
-level load rather than to patch anything. A cap would need a probe counter, which means a hook
-rather than a byte patch, and refusing a lookup changes behaviour for every hash table in the
-game - `_Find` is generic.
+**GUI freeze with too many effect classes** - The engine's hash table lookup has no loop limit.
+Once a table is completely full, looking up a name that is not in it loops forever: the game
+freezes with audio still playing. The effect class table holds 256, and a missing or misspelled
+`AttachEffect` name is exactly that kind of lookup. It fits the reported freeze, but nothing
+proves yet that this is what people hit. Next step is to watch the effect class count with
+`ContentCensus` on a map that freezes, before patching anything. Details in
+[docs/RE/ContentCensus.md](docs/RE/ContentCensus.md).
 
 **LODs break under freecam** - Models pop to the wrong detail level, or drop out entirely,
 while the camera is detached. The LOD selection almost certainly scores against the player
@@ -269,347 +246,44 @@ regions and streams. Current state of the problem:
   existing sound entities to rebuild from it, without regions immediately overwriting the
   result.
 
-**Audio stream queue-item pool** - Raising the audio stream limit from 6 to 12 slots left
-the shared queue-item pool at 24 entries. Each slot queues to a depth of four, so the
-demand ceiling is 48 requests against a pool of 24, and running the pool dry is a null
-dereference rather than a dropped request. It cannot be grown where it sits: 24 entries of
-`0x34` bytes from `0x0233a240` end at `0x0233a720`, which is itself a live global with
-five references, so the pool has to be relocated the way the stream arrays themselves were.
-Exhaustion should also be made to degrade into dropping the request instead of crashing.
+**Audio stream queue pool** - Raising the audio stream limit from 6 to 12 left the shared
+queue pool at 24 entries, while 12 streams can queue up to 48 requests. Running the pool dry
+crashes instead of dropping the request. The pool cannot grow where it is, so it needs moving
+like the stream arrays were, and running out should drop the request instead of crashing.
+Details in [docs/RE/SoundSystem.md](docs/RE/SoundSystem.md).
 
-**The EAX crackle - investigated, not found in BF2** - Recorded here so nobody re-treads
-it. The symptom is a random, loud, distorted burst during matches with EAX enabled. Seven
-hypotheses were tested and all seven were eliminated: five by static analysis, and the two
-that survived that by runtime instrumentation.
-
-- `DSBufferRenderer::UpdateGain` (`0x008997C0`) converts to Q15 with
-  `(int)(gain * 32767.0f) << 16` and no clamp. Refuted: 483,253 calls, every one of them
-  on the unclamped path, and the gain product never exceeded 1.0, with a maximum seen of
-  exactly 1.000. The same measurement showed flags bit `0x10` is never set, which makes
-  the float gain path unreachable dead code.
-- `StreamResampler::GetPacket` publishes `mOutputPacket.mBufferUsed` in samples on the
-  unity-rate path (`0x008A59A8`) but in bytes on the interpolating path (`0x008A5A99`),
-  while consumers read bytes. The unit mismatch is real but harmless: `mOutputPacket` is
-  refcount protected (`0x008A58B8`) and `GetPacket` returns NULL rather than overwrite a
-  held packet, and of 7084 measured unity-rate calls none had a held input packet. The
-  feared `WriteData` runaway went the same way - maximum packet cursor 110,544 against a
-  packet size of 110,592 across 1.88 million writes, so the exact-equality release works.
-
-BF2's own output never approaches full scale either: the loudest sample in a whole session
-was 9,829 of 32,767, about -10.5 dBFS, with no saturation bursts at all. No mechanism
-inside BF2 that could produce a loud burst survives. Because a driver reporting 129
-hardware 3D buffers proves a DirectSound wrapper is in use - native Vista and later report
-zero - the wrapper itself is the remaining suspect. That is a conclusion about where not
-to look rather than a fix, and the next move is measurement outside the engine. The sound
-diagnostic that shipped alongside the investigation watches the PCM leaving the engine for
-runs pinned at full scale, so a burst caught in the act would be logged with a timestamp
-and voice index.
+**Only the first hero per team gets its SndHero VO** - The `SndHeroSelectable`, `SndHeroSpawned`,
+`SndHeroDefeated` and `SndHeroKiller` sounds are stored once per team, not per hero, so whichever
+hero loads first owns them for the whole round. The same root causes hero 2 to show up under
+hero 1's name in the HUD and kill messages: the engine's "which hero is this team's" lookup
+simply returns the first hero class registered. The likely fix is to hook that lookup and return
+the hero that is actually in play.
 
 ## Retail builds
 
-**Voice limit is modtools only** - The patch installs on modtools and no-ops on Steam
-and GOG, so retail players do not get it. This is not an address lookup: the retail
-addresses are known, but six of the sites are encoded differently and the installer
-hardcodes the modtools forms. The clamp is a `CMOVcc` rather than a `C7 05` store and
-the `smVoices` write is split, so both operands sit at +1 instead of +6;
-`SetCentrePeakMode` uses the 6-byte general compare rather than the 5-byte accumulator
-form, moving its operand to +2; the four probe-array references are 6-byte
-`LEA r32,[EBP+disp32]` rather than 7-byte `[ESP+disp32]`, so the replacement needs one
-NOP and not two, and one of them changed target register. Worst, the software-pin site
-is a 3-byte `MOV EAX,[EBP+0x20]` against modtools' 7 bytes AND is a branch target, so
-there is no byte-for-byte replacement at all.
-
-Porting it therefore means restructuring the installer around per-build encoding
-descriptors rather than adding addresses. One further trap: the `smVoices` site's
-expected value is a POINTER, and the retail images are rebased at load, so the
-installer's own verification needs the same treatment `values_are_va` gave the patch
-table.
-
-The concurrent voice raise touches several sites at once - `gMaxVoices`, the hardware
-buffer probe's count and its array, the `Voice` pool and both voice ceilings - and only
-the modtools addresses for those have been derived. The installer verifies every site
-against its expected bytes and disables the whole feature if any one of them fails to
-match, so this is a matter of locating each site on retail, not of teaching the patch to
-tolerate a partial match. Verifying a port needs checking both mixing paths, since the
-hardware and software branches of `Engine::Open` reach the pool through different code and
-only one of them is exercised on any given machine.
-
-**Branch region fix unverified on retail** - The fix carries addresses for all three
-builds. The vtable slot correction has a vtable, a wrong slot and the real `CreateRegion`
-recorded for modtools, Steam and GOG, and the `mHashID` offset at `+0x20` that the id
-re-stamp writes is verified on modtools and on both retail builds. It has only been
-confirmed in play on modtools, though, where all 24 branch region lookups resolve with no
-warnings. Steam and GOG have never been exercised in an actual match.
-
-Retail is also harder to check than modtools was, because it strips the `RedWarning`
-string: a failed lookup produces no `Unable to find branch region` line, or any other
-line. A retail pass has to lean on `[Diagnostic] BranchRegionDebug=1` and on watching units
-actually take the branch, rather than on the absence of warnings.
-
-## Sound
-
-**Only the first hero per team gets its SndHero* VO** - reported in play, mechanism located
-2026-08-21, NOT yet fixed.
-
-The four hero ODF params `SndHeroSelectable`, `SndHeroSpawned`, `SndHeroDefeated` and
-`SndHeroKiller` land in PER-TEAM arrays of three on `HeroMessageDisplay`, not on the hero
-class:
-
-| global | phantom addr |
-|---|---|
-| `mHeroesUnlocked` | `0x00B26BB4` |
-| `mHeroUnlocked` | `0x00B26BB8` |
-| `mHeroSelectable` | `0x00B26BC4` |
-| `mHeroSpawned` | `0x00B26BD0` |
-| `mHeroDefeated` | `0x00B26BDC` |
-
-Every one of them is written ONLY in `HeroMessageDisplay::Create` (writes at `0x005EAC92`,
-`0x005EACBD`, `0x005EACDF`, `0x005EAD01`, `0x005EAD23`) and in `Destroy`. There is one slot per
-team, so whichever hero class populates it first owns those sounds for the whole round. Playback
-then just reads the slot - `PlayHeroSoundUnlock` `0x005EB3F0`, `PlayHeroSoundSelectable`
-`0x005EB170`, `PlayHeroSoundSpawn` `0x005EB1A0`, `PlayHeroSoundDefeat` `0x005EB0D0`.
-`ScriptCB_SetSoundEffect` (`0x00664758` region) can also overwrite them from script.
-
-**Very likely the same root as a second confirmed bug.** `Team::GetHeroClass` (phantom
-`0x00775D50`) is a linear scan that returns the FIRST class in the team's `mClassArray` whose
-`GameObjectClass+0x78` has bit 1 set - it has no idea which hero is actually active:
-
-```c
-for (i = 0; i < mClassCount; i++) {
-   pGVar2 = mClassArray[i];
-   if (pGVar2 && (pGVar2->field_0x78 & 2) && pGVar2->mLabel)
-      return pGVar2;            // first match, always
-}
-```
-
-`Lua_Callbacks::SetHeroClass` (`0x00653680`) just appends via `Team::AddSpecialClass`, so the
-first `SetHeroClass` call in the mission script wins permanently. Its three consumers are all
-wrong with multiple heroes per side: `Character::GetHeroName` (`0x0049DDA0` - takes the name
-from `GetHeroClass(team)` instead of from the character's OWN class, so hero 2 displays under
-hero 1's name), `NetGame::AddKillMessage` (`0x0066E69A`), and `PlayHeroSoundSpawn`
-(`0x005EB24F`).
-
-PROPOSED FIX, not built: hook `Team::GetHeroClass` and, when a hero is currently active for that
-team, return that unit's actual class, falling back to the stock scan. Resolve the active hero
-from `netHeroPlayerID[team]` / `netHeroAIID[team]`, which `PlayHeroSoundSpawn` already uses. That
-one hook fixes the name and the kill message. Whether it also fixes the VO depends on confirming
-that `HeroMessageDisplay::Create` sources those five sounds via `GetHeroClass` - READ `Create`
-(`0x005EAC50` region) FIRST; if it instead reads from a script-set or team-registration path, the
-VO needs its own fix, most likely re-populating the slots when the active hero changes.
-
-NOT the same thing: `ScriptCB_EnableHeroVO` (`0x006656D0`) only sets
-`EntitySoldier::sEnableAnnouncementVO` (`0x00A8EDF3`), read once in `EntitySoldier::Init` at
-`0x0056FA5D`, which gates a VO member on the spawning soldier's OWN class (`mClass+0x1464`).
-That path looks correct and is unrelated to the `SndHero*` slots.
+**Branch region fix untested on retail** - It is set up for all three builds but has only been
+played on modtools. Retail does not print the "Unable to find branch region" warning, so testing
+it there means turning on `[Diagnostic] BranchRegionDebug=1` and watching units actually take the
+branch.
 
 ## Limits
 
-**Attached effects past 64** - Capped at **255 no matter what**, and not recommended.
+**AI reservation pool past 127** - `ReservationPoolSize` stops at 127 because of how the value is
+encoded in the exe. Going higher means rewriting that instruction. Only worth it if 127 turns out
+to still run out in play. Details in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
-WHAT ACTUALLY CONSUMES A SLOT, traced 2026-08-21. `AttachedEffectsClass::SetProperty` has
-exactly ONE caller, `EntityGeometryClass::SetProperty`, and `BuildAttachedEffectsClass` has
-exactly one, `EntityGeometryClass::PostReadSetup` - which drains the table and sets
-`s_uiNumAttached = 0`. So the 64 is **per geometry class**, accumulated across that one ODF's
-property read and flushed at the end of it.
-
-It is a stage-then-commit design; of the five property hashes only two increment:
-
-| Hash | Parses | Count |
-|---|---|---|
-| `0x576b09cd` | `"%s %s"` effect + bone | **+1** |
-| `0x3be7b80a` | `"%s %f %f"` bone + offsets | **+1** |
-| `0x6a6c7e0d` | effect name -> `_Find` in the 256-slot effect table | stages only |
-| `0xa9d0d48b` | odf name, must be an `EntityLight` | stages only |
-| `0x51e2c845` | `atoi` -> dynamic flag | none |
-
-So one attachment is typically TWO ODF lines but ONE slot: the limit is ~64 attached
-effects/lights on a single object, which is why normal content never approaches it.
-
-**CORRECTION.** An earlier note here claimed an inflated count "leaks from a non-geometry ODF
-into the next geometry class". That is WRONG and was never true: the only path into the counter
-is `EntityGeometryClass::SetProperty`, so a non-geometry ODF cannot contribute at all.
-
-Not to be confused with `EntityProp`'s own separate attachment cap, which has its own warning
-("EntityProp '%s' AttachToHardPoint '%s' too many attached odfs (max %d)") and its own array.
-`AttachedEffectsClass::m_uiNumAttached` is a `uint:8`: the count is written with a BYTE store
-(modtools `0x004C1BF6 MOV byte [EBP+4],AL`, Phantom `0x00490376`) and all three consumer loops
-read it back masked `& 0xFF`, so a 300-effect class silently becomes a 44-effect one. Past 255
-means growing the object from 8 bytes and re-laying out the `bDynamic` bit at bit 8.
-(`uiNumParams` is `uint:7`, its own separate ceiling.)
-
-There is also no room after the array - modtools' next byte at `0x00B7A7D8` is `s_bDynamic`,
-Phantom's next dword at `0x00ABC058` is the counter itself - so the table has to be relocated to
-a fresh `20*NEW` allocation, and roughly twenty baked-in absolute displacements rewritten per
-build: the six `CMP ...,0x40` sites (modtools `0x004C27B8`, `0x004C285B`, `0x004C28A5`,
-`0x004C29AC`, `0x004C29E0`, `0x004C2ACF`), the memcpy source constant at `0x004C1C20`
-(`MOV ESI,0xB7A2D8`), and every `0x00B7A2C8/CC/D8/DC/E0` displacement in `SetProperty`.
-Recommendation: leave it at 64 and let it refuse, which is what the shipped fix does.
-
-**AI reservation pool past 127** - `[LimitIncreases] ReservationPoolSize` now raises
-`ReserveManager::sList` from 60 to at most 127, which is a hard encoding ceiling: the count
-reaches the allocator through a `PUSH imm8` on every build and `6A ib` is sign-extended, so 0x80
-and above makes the count negative, the allocation ~4 GB, `new[]` return NULL and the first
-`Reserve` write through NULL. Going higher means re-encoding that push as `PUSH imm32`: a 31-byte
-in-place rewrite on modtools, where the 24 bytes of `0xCC` at `0x005C6228` are confirmed free, and
-three spare bytes on retail, where the push at Steam `0x00630146` is followed immediately by
-`LEA EDI,[EAX+4]`. Only worth doing if 127 is measured to still saturate - and note the warning's
-own number cannot measure that, since `mPeak` counts rejected adds since level load rather than
-live demand. Every query is a linear scan on `mLength`, so the real cost of a large pool is frame
-time, not the 24 bytes per entry.
-
-**Command posts past 16, single player only** - Multiplayer is closed: it is a wire format, not
-an array bound. `REL_CHANGECOMMANDPOSTTEAMS` packs 2 bits per post into a uint32 `mTeamBits`,
-1 bit per post into a uint16 `mAliveBits`, and every net reference to a post is a 4-bit index
-(`WriteBits(pkt, mPostIndex, 4)`). Post 16 writes bit 32 of a 32-bit field; x86 masks the shift
-by `&0x1f` so it silently ALIASES ONTO POST 0. Widening changes packet length and there is no
-version negotiation on that event.
-
-Single player is feasible, and the earlier "HUD::ElementMap is the blocker" framing is
-avoidable. `HUD::ElementMap` embeds `mPost[16]`, `mPostScale[16]`, `mPostText[16]` and
-`mPostSelect[16]` INLINE with displacements baked into the accessors, so growing them is a
-structural rewrite - but it is not necessary. Leave the HUD at 16 and grow only the game-side
-arrays: the HUD iterates its own 16 and indexes `gPost[i]`, so it stays in bounds as long as
-`gPost` has at least 16. Posts 17+ then work but do not appear on map or radar.
-
-Sites involved (NOT byte-verified, scope before building):
-- `sPostArray` client/host, modtools `0x00B93B58` / `0x00B93B98`, retail both `0x01E308A0` /
-  `0x01E308E0`. Base imm32s at modtools `0x0064972F`, `0x00649820`, `0x00649850`;
-  retail `0x0047AA51`, `0x0047AB20`.
-- memset size: modtools `0x00649723` imm32 (any value); retail `0x0047AA40` `6A 40` imm8
-  sign-extended, so max 0x7F = 31 slots without re-encoding.
-- `CommandPostItor::operator_bool` - the funnel ~20 AI/spawn/HUD callers pass through. TWO
-  immediates, both must move: modtools `0x00650035` and `0x0065004E`; Steam/GOG `0x0047F8B5`
-  and `0x0047F8C7`. imm8, max 0x7F.
-- `TargetManager::_gPost[16]` (Phantom `0x00C4DCE8`, 48 B/elem) relocatable via its pointer at
-  `0x00A9A1B4`. **`AddPost` `0x00773F10` uses `0x10` as BOTH a loop bound AND a no-free-slot
-  sentinel across three coordinated occurrences** - a partial patch turns "no slot" into an
-  out-of-bounds write.
-- `PlayerStats::AddKill` `0x007217C0` - two loops, `!= 0x40` (byte count) and `< 0x10` (index).
-
-Fix regardless of any of this: `CommandPost::BuildPost` (modtools `0x0064FDF0`) checks
-`83 FF 10` at `0x0064FF13`, logs "Exceeded %d command posts!" and then **writes out of bounds
-anyway**. Retail stripped the check entirely, so post 17 on a retail host already overwrites the
-`sActivePostCount` pointer today.
-
-THE FOOTGUN: a static byte patch cannot tell single player from multiplayer. Enabled online it
-corrupts post ownership silently. This needs a runtime `netEnabled` check, so it is a hook, not
-a table patch.
+**More than 16 command posts, single player only** - Multiplayer is off the table: the network
+messages have room for exactly 16 posts. Single player is doable by growing only the game-side
+arrays and leaving the HUD at 16, so posts past 16 work but do not show on the map or radar. It
+has to check at runtime that the game is not online, so it is a hook rather than a patch. Site
+list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
 
-**Flyers on maps with no flyer paths** - The circling investigated at length in
-docs/RE/FlyerAI.md turned out to be a map with no flyer paths authored, not an engine
-fault. The `AIUtil::StopDist` / `GonePastDest` threshold analysis there is verified and
-still stands, but it was not the cause and is no longer a priority.
-
-The remaining idea is a feature rather than a fix: `UnitFlyAgent`'s FLY state has no
-failed-path branch, while the engine already has a path-free movement mode in
-`AILowLevel::SetNavigator_GotoDirect` (phantom 0x00481050), used by `DoFlyDirect` for
-combat strafing and by `UnitRandomAgent::PickRandomDest`. Falling back to it when the
-path request fails would make flyers usable on maps that never authored a flyer path
-network. Not costed. Would need the failed-path signal (`AILowLevel` navigator failed
-flag) wired into the FLY state, and modtools offsets only - retail EntityFlyer interior
-offsets differ.
-
-## First person
-
-**SHELVED 2026-08-21, both approaches, by the map author's judgement after testing.**
-Neither `FirstPersonMelee` nor `TrueFirstPersonBody` ships any more - both patch sets and
-both INI keys were removed. The verdict: BF2's first person is built around a floating arms
-model, the camera is a static eye offset with no head tracking, and it reads as janky for a
-saber hero no matter which route you take. Fixing it properly means rewriting the first
-person system, not patching it.
-
-Everything below is preserved so a future attempt does not start from zero. All addresses
-were verified from bytes.
-
-### What worked
-
-Saber heroes CAN be put in first person, and the blade CAN be made to draw:
-- `EntitySoldier::IsForcedThirdPerson` returns true whenever either weapon slot answers
-  `IsMelee`, which is what pins them to third person. modtools `0x0052B670`, Steam and GOG
-  both `0x004DE390`, all four bytes `56 57 8B F9` -> `32 C0 C3 90`. It is `__thiscall` with
-  no stack args, so a bare RET is correct. Global side effect: un-forces third person for
-  every melee unit, Wookiees and Tuskens included.
-- `FirstPersonRenderable::RenderSoldier` ORs only `0x00080001` into the render flags, but
-  `WeaponMelee::Render` tests `0x4000000` before flushing the blade's particle cache.
-  Top byte of that imm32: modtools `0x004AA456`, Steam and GOG `0x005204DD`, `0x00` -> `0x04`.
-  Without it the hilt draws and the blade does not.
-- Needs the cockpit camera enabled in player options, or nothing looks different.
-- A hero also needs a `FirstPerson` ODF line AND its `FPM\<side>\<lvl>.lvl` actually built.
-  Most stock saber heroes have no `FirstPerson` line at all - only the blaster heroes do,
-  plus Luke Jedi. A model present in memory via another req is NOT enough; the FP path loads
-  `FPM\<token>.lvl` specifically.
-
-### Why true first person failed
-
-`TrueFirstPersonBody` neutered the tail call in `EntitySoldier::RenderTrackable`
-(modtools `0x0052A3A6`, 8 bytes -> `MOV AL,1` + NOPs). That call is NOT a pure cull
-predicate: `Trackable::RenderTrackable` consumes `IsFirstPersonView` and participates in
-driving the first person path, so skipping it removed first person rather than un-hiding the
-body. Result was a full third-person body with a third-person camera.
-
-The inverted approach, untried: let the call run and patch the decision INSIDE
-`Trackable::RenderTrackable` - modtools `0x004BAE03` `74 15` -> `EB 15`, Steam `0x006589E4`
-and GOG `0x00659A84` `74 16` -> `EB 16`, Phantom `0x0077C061`. Cost: un-hides vehicle hulls
-in cockpit first person.
-
-### Facts worth keeping
-
-- The FP camera is a static per-stance eye offset, `sEyePointOffset[0] = 0.06, 1.70, 0.00`,
-  transformed by the entity root. Already at eye height, already free of animation shake -
-  and, per testing, this is exactly why it looks wrong: there is no head motion at all.
-- The body is already submitted every frame at alpha 0 rather than skipped, which is why the
-  player's shadow has always been correct.
-- Aim is already the camera ray (`Aimer::SetSoldierInfo(firePos, mEyeDir)`), so shots go
-  where the crosshair is regardless of where the body animation points the weapon.
-- Camera near plane is 0.7 m (`RedCamera::SetPerspective(0.7, 120.0)` from
-  `CameraManager::SetNumCameras`; modtools imm32 `0x004A110B`, Steam `0x0044EC55`, GOG
-  `0x0044EC35`). It hides head and torso for free; pulling it to 0.1 to stop the arms being
-  sliced is what exposes the head. Head-hiding was never resolved on Steam or GOG because
-  `RedModel::Render` could not be located on retail.
-- TRAP: the one-byte alternative on modtools is at `0x00535EAA`, NOT `0x00535EA8`.
-  `0x00535EA8` is `84 C0`; writing `EB` there gives `EB C0`, a backward jump, instant crash.
-
-### First person weapon and sync states, if this is ever revisited
-
-Distinct from the swing-animation work above and not costed. The first person weapon has its
-own state machine that does not track the third person one, so reload, fire, charge, deflect
-and melee read as two separate characters doing two different things. What a fix would need:
-
-- The FP state index comes from `FirstPersonRenderable::UpdateSoldier` and is derived from the
-  weapon's own fire state plus `Weapon+0xAC` bit 1 (the SignalFire latch, consumed and cleared
-  in the same frame). The third person side runs off `SoldierAnimator` with its own timers.
-  Nothing reconciles the two.
-- FPR playback fields are known: `m_pkAnim +0x1534`, `m_fAnimSpeed +0x154C`, `m_fCurT +0x1550`,
-  `m_fLastT +0x1554`, `m_bLoop +0x155E`, `m_bAnimFinished +0x1560`, `mBlendFactor +0x1564`.
-  Third person upper body: `SoldierAnimator +0x1600` `m_fCurT`, `+0x160E` `m_bLoop`,
-  `+0x1610` `m_bAnimFinished`, `+0x15E4` `m_pkAnim`. `SoldierAnimator` is `EntitySoldier+0x760`.
-- So phase sync is expressible as a per-frame float copy, but the two use DIFFERENT skeletons
-  (FP has ~8 joints, the character has ZephyrSkeleton<32>), so the animations are not the same
-  asset and matching phase does not by itself match pose.
-- Do NOT poke `FPR+0x1534` directly - `ZephyrAnimInst<32>::SetAnim` rebuilds the joint index
-  tables. Go through `FirstPersonRenderable::SetAnimation` (modtools `0x004A9B80`, thiscall,
-  `RET 8`).
-
-Shelved with the rest of first person; the engine's FP is built around a floating arms model
-and reconciling it with the body is the same fight documented above.
-
-### Dedicated first person animation, if this is ever revisited
-
-The animation table is NOT the obstacle, contrary to an earlier assessment here. Every saber
-attack routes to one slot, `mAnim[24]` = TOOL(2)*11 + SHOOT1(2), re-read with `force=true` on
-every new attack state. The per-swing key is one byte, `WeaponMelee+0x1AB` (`m_uiAnimIndex`,
-confirmed at `WeaponMelee_data+0x6B` with the `_data` base at `0x140`), written by
-`EnterState` from `Combo::State+0x28` BEFORE `mState=FIRE`. Deflects overwrite the same byte,
-so they come free. The project already has the injection point: `FirstPersonAnimationBank` as
-a custom ODF property, and a per-frame save/overwrite/restore of `mAnim[48]` around
-`FirstPersonRenderable::UpdateSoldier`.
-
-Build-divergence traps for that work: `_GetWeaponClassFromWeapon` is `__fastcall` (weapon in
-ECX) on modtools but `__cdecl` on Phantom; `MELEE_BASE` is `0x86` on modtools and `0x87` on
-Phantom. Never write NULL into an `mAnim[]` slot - `ZephyrPoseDyn<32>::Update` null-derefs
-`anim+8`.
+**Flyers on maps with no flyer paths** - A flyer on a map with no flyer paths just circles. The
+engine already has a movement mode that needs no path, used for strafing runs. The idea is to
+fall back to it when the flyer cannot find a path, so flyers work on maps that never had flyer
+paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
 ## Controller
 
@@ -689,170 +363,6 @@ entries are inferred rather than verified. Needs a pass that actually exercises 
 commands, corrects the inferred descriptions, and marks the ones confirmed to be dead
 no-ops.
 
-## Debugging
-
-**Class registries: DONE 2026-08-22.** All four unknown list globals from the earlier sweep are
-identified, and the census now counts and buckets them.
-
-| modtools global | holds |
-|---|---|
-| `0x00ACD2C4` | `Factory<Entity,EntityClass,EntityDesc>::sList` (was already known) |
-| `0x00AD43BC` | `Factory<Weapon,WeaponClass,WeaponDesc>::sList` |
-| `0x00AD3A60` | `Factory<Ordnance,OrdnanceClass,OrdnanceDesc>::sList` |
-| `0x00AD388C` | `Factory<Ordnance,ExplosionClass,OrdnanceDesc>::sList` |
-| `0x00AC69F0` | `GamePathFactory::sList` - **never walk it**, see below |
-| `0x00AD3450` | EntityPath branch regions (was already known) |
-
-`GamePathFactory` is deliberately reported as a bare count and never traversed. The path-chunk
-parser declares a factory in a **stack local** and links that frame into the global list once per
-`path` record (modtools `FUN_0044B8E0`, `int local_480[6]` = 0x18 bytes = exactly one factory),
-so dereferencing a node there can mean reading another thread's live stack. Its count at
-`0x00AC6A00` sits in `{0, 3, 4}`: 0 before the first load and after teardown, 3 while a state is
-live, 4 transiently during path parsing.
-
-**Bucketing is by parent chain, not by `IsRtti`.** Every `Factory<>` object carries `mParent`
-`+0x14` and `mId` `+0x18`, and both are written *before* the node becomes reachable (entity ctor
-`0x004D0C20` stores them at `0x004D0C43`; the forward link that makes the node findable is not
-written until `0x004D0CBA`). The vptr is written LAST, so those two fields are the only ones
-guaranteed valid for every node a walker can see. Following `mParent` lands on one of the 46
-built-in roots created by `GameState::CreateBaseEntityClasses` (modtools `0x0044CDA0`, Steam
-`0x00539F60` - same names, same order, so the table is build-invariant), all through the
-one-argument ctor, so every root has `mParent == 0` and the chain always terminates.
-
-**`IsRtti` was rejected outright and must stay rejected.** The `Factory<>` base vftable has only
-THREE slots and `IsRtti` sits past the end of it. An object carries that base vftable in two
-windows during which it is fully linked and reachable, and in those windows the slot reads 0 on
-modtools. Calling it from the diagnostic thread would be a call through a null or non-code
-pointer; `__try` catches an access violation but does not contain execution that has already
-wandered. **Never call a virtual on a walked object.**
-
-Two corrections to earlier notes, both now fixed in `game_addrs.hpp`:
-- `mFilename[32]` is at **`+0x20`**, not `+28`. Proven by `EntityClass::Read` (modtools
-  `0x004D0830`): `strlcpy(obj+0x20, buf, 0x20)`. The modtools Ghidra database has the same error,
-  so decompiler output naming `mFilename` at `+0x18` is really reading `mId`.
-- The name offset differs per registry: entity `+0x20`, weapon `+0x30`, ordnance `+0x28`,
-  explosion `+0x20`.
-
-Because `EntityClass::Read` hashes the TYPE-chunk buffer into `mId` and then copies *that same
-buffer* to the name field, `PblHash(name) == mId` is a self-check that can only match. The census
-runs it and reports mismatches separately from truncation (`strlcpy` caps at 31 chars + NUL, so a
-31-character name legitimately will not hash back).
-
-**Names exist on retail only for weapons**, at `+0x30` (Steam `WeaponClass::Read` `0x0067A390`;
-the same 13-byte sequence occurs exactly once in GOG at `0x0067B430`). Retail `EntityClass` is
-0x60 bytes and `+0x20` is `mLabel`, a `wchar_t*` - reading it as `char[32]` yields wide-char soup,
-so entity/ordnance/explosion name offsets are deliberately absent for those builds and the census
-omits the column rather than printing garbage.
-
-**A vehicle registers one EntityClass PER PASSENGER SEAT**, all carrying the vehicle's own name
-and therefore the same `mId`. Confirmed 2026-08-22 from a live map by the project owner, and
-visible in the census listing: `republic_fly_transport` and `cis_fly_transport` each showed seven
-extra registrations, the bombers two and one, `republic_walk_atte` two, `republic_hover_tank` and
-the turrets one each. Only the first of the set is reachable through the class chain; the rest are
-parentless, which is why they read as unknown roots before this was understood.
-
-Two consequences the census now handles:
-- **Equal `mId` means equal ODF name means the same authored thing**, so an unattributed record
-  can adopt the family of any sibling sharing its `mId`. That is the third and strongest
-  attribution route - it cannot be fooled by a shared vtable the way the type route could - and
-  it runs last because it needs something else to have resolved a sibling first.
-- **The raw registration count overstates authored content.** The census reports distinct `mId`
-  count alongside it, so "397 classes" is separated from "N distinct ODF names".
-
-Still open on this thread: whether any entity class is created outside `CreateBaseEntityClasses`
-and `EntityClass::Read`. `CreateClass` is a vtable slot so static xrefs cannot close it. The
-census answers it empirically - a root whose `mId` is not one of the 46 prints as
-`unknown-root`.
-
-**Content budget report ("what did I actually put in this map?")** - requested 2026-08-21. A
-census of the things a MODDER AUTHORS, reported as occupancy against the ceiling, because the
-ceilings are invisible until you hit them. Deliberately NOT a runtime profiler: voices, AI
-reservations and the particle/renderer caches are engine state the author does not control, so
-they are out of scope.
-
-The neat framing: **report against every ceiling BF2GameExt already knows how to raise.**
-Everything in `[LimitIncreases]` is a limit we have already located, so the ceiling half is
-mostly free. Candidate metrics, all author-controlled:
-
-  effect classes (256) - the headline, and it settles the softlock question on its own
-  object count (1024 / 2048)      combo animations (30 / 90)
-  high-res animations             string pool
-  sound layers                    DLC missions
-  GC visual limits                command posts (16)
-  attached effects per class (64) tentacles per class (4)
-
-**Where the work actually is.** Knowing each ceiling is easy - we patch them. Knowing current
-OCCUPANCY is the new reverse engineering, and it differs per subsystem:
-  - Hash tables are trivial and self-verifying: scan the key slots and count non-zero. Use this
-    wherever possible rather than trusting a stored counter, which may be a different field than
-    you think (`_head._pObject` vs `_iCount` already burned us once).
-  - Others need a live counter global located per build, three times over.
-  - `s_uiNumAttached` is drained per class, so a live read is meaningless - it needs a hook to
-    record the PEAK across a level load.
-
-**Triggering.** One census function behind three triggers, in order of importance:
-
-  1. **Periodic, every ~30 s** - the default, works on every build, needs no user action. This is
-     the one that matters on retail, and a 30 s cadence also catches anything that grows during
-     play rather than only the load-time picture.
-  2. **Lua binding** - on demand, and note this works on ALL THREE BUILDS, not just modtools:
-     Lua is the mission scripting engine and is present everywhere. Callable from a mission
-     script, so it covers retail where there is no console.
-  3. **Debug console command** - modtools only (the console is gated in `lua_hooks.cpp`), but
-     free to add since it calls the same function.
-
-The periodic print is what makes this useful for the softlock hunt specifically: it prints the
-effect-class occupancy seconds before the reported freeze, on the build the freeze happens on.
-
-**HASHES ARE READABLE - use `StringDB`.** Scanning a hash table yields keys, not names, which
-would make the report useless for finding WHICH effect is the problem. The engine already solves
-this: `StringDB::Store(hash, str)` (Phantom `0x00773620`) copies the string into the string pool
-and records hash -> pointer in `mMap`, a 4096-slot table. So
-`_Find(StringDB::mMap._uiTable, 0x2000, hash)` gives the original name back for anything that
-was stored. `StringDB::Remove` is at `0x00773600`.
-
-For names that never went through StringDB, the fallback is one hook on
-`PblHash::PblHash(PblHash* out, const char* str)` - every name the game hashes passes through
-it, so we can build a complete reverse map ourselves. Noisy during load, fine for a diagnostic.
-
-**StringDB is itself a metric worth reporting**, and a purely authored one: `mMap._iNumEntries`
-against 4096, plus string pool bytes used against `mPoolSize`. It has its own warning,
-"String pool is full: %i pool is not big enough!", and it is the same limit
-`[LimitIncreases] StringPoolIncrease` already raises.
-
-**Third instance of the uncapped-probe hang.** `StringDB::Store` calls the same
-`PblHashTableCode::_Store`, so a StringDB map at 4096 distinct strings would spin forever
-exactly like the effect table at 256. That is now three tables sharing one defect
-(`s_EffectClasses`, `s_EffectFactories`, `StringDB::mMap`), which argues the real fix is a probe
-counter inside `_Find`/`_Store` rather than per-table capacity guards - though that changes
-behaviour for every hash table in the game and needs care.
-
-**Not mod-addable, do not include:** effect FACTORIES (32 slots, ~26 used by built-in effect
-managers) are engine types registered by `FLEffect::InitAll`, not content. Worth knowing the
-headroom is thin, but an author cannot change it.
-
-
-
-**All diagnostics are now on all three builds.** `AIUpdateDiag`, `SoundDiagnostic` and
-`BranchRegionDebug` were ported 2026-08-21; the VoiceVirtual offsets were verified identical on
-retail rather than assumed, and the full teardown is in `docs/RE/SoundSystem.md`.
-
-Two defects in the shipped modtools diagnostics were found and fixed on the way:
-
-- `BranchRegionDebug`'s live count read `0x00AD345C`, which is `sList._head._pObject` and on a
-  list HEAD is structurally always null. It has no read-write reference in the image. The count
-  is `_iCount` at `0x00AD3460`, written by `BranchRegion`'s ctor and dtor. **Every `(live=%u)`
-  the module ever printed was a hardcoded zero.**
-- `SoundDiagnostic` mapped a renderer back to a voice with `voice = renderer - 0xE8`, believing
-  a `DSBufferRenderer` was embedded at `Voice + 0xE8`. Phantom's PDB says that offset holds a
-  `StreamRenderer` (748 bytes) and `DSBufferRenderer` is a different 416-byte class, so every
-  voice index printed was garbage. It now scans the pool and matches pointers, so a wrong
-  assumption yields "unknown" rather than a confident wrong answer.
-
-Still open, and deliberately not guessed: GOG's `smRendererList` head, GOG `smTimeElapsed`,
-GOG `DSBufferRenderer::SetFormat`, and the GOG voice-count command-line global were never read
-out of the GOG image. None is needed by the shipped diagnostics.
-
 ## Will not do
 
 **Splitscreen.** For anyone reading this: no, splitscreen will not be a thing.
@@ -863,3 +373,13 @@ arrays and corrupts memory rather than producing a second viewport. Making it re
 rebuilding those structures and every consumer of them. Notes on the system are in
 [SplitscreenSystem.md](docs/RE/SplitscreenSystem.md) for the curious, but it is documentation, not
 a plan.
+
+**Saber heroes in first person.** Tried both ways and removed. The saber can be made to show up
+in first person, but BF2's first person is floating arms with a fixed camera and no head
+movement, and it looks janky for a saber hero no matter what. Doing it right means rewriting the
+first person system. Everything learned is in
+[FirstPersonAnimationSystem.md](docs/RE/FirstPersonAnimationSystem.md) in case someone tries again.
+
+**More than 64 attached effects per object.** `AttachedEffectsOverflowFix` refuses past 64, and
+that is where it stays. Going higher means moving the table and rewriting about twenty addresses
+per build, and 255 is a hard ceiling anyway. Normal content never gets close.
