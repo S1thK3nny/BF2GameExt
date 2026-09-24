@@ -28,11 +28,11 @@ source traced before a fix is designed.
 
 ## Vehicles
 
-**9-pose vehicle aiming for AI** - The 9 aim poses are driven directly by the player's
-mouse / joystick deflection, so an AI driven vehicle never advances past the initial frame
-and sits locked in the neutral pose. Needs the pose selection to be fed from the vehicle's
-actual aim delta (turret / aimer angle) rather than raw player input, so AI and players
-drive the same path.
+**FinAnimation for AI** - The 9-pose `FinAnimation` on flyers and hovers never moves when AI is
+flying: the fins sit in the neutral pose. The pose reads the vehicle's turn input for the
+sideways axis and its speed for the other, and AI apparently never fills in the turn input.
+Needs the sideways axis fed from the vehicle's actual turn rate instead, so AI and players
+drive the same pose.
 
 **Walker stomp attack cleanup** - The stomp / attack system is fully wired at runtime but
 rough around the edges:
@@ -47,12 +47,8 @@ rough around the edges:
 **Flyer strafe mode ODF property** - The engine has an abandoned strafing path for flyers.
 Goal is an opt-in `EntityFlyer` ODF property that turns the turn axis into lateral movement,
 which means giving up rolling on any class that enables it, since the same input drives both.
-A prototype exists on an older commit and was
-player-only for exactly this reason: AI keeps rolling so navigation is not broken. The open
-question before this can ship is what AI actually does when a class it flies is in strafe
-mode, and whether the AI flight path can be fed strafing at all rather than simply left on
-the old behaviour. Needs a play test either way, since the visual lean scaling and sign were
-never confirmed in game.
+The open question is what AI does when a class it flies is in strafe mode, and whether the AI
+flight path can be fed strafing at all or should just keep rolling.
 
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
@@ -104,79 +100,28 @@ The fix is to add a new ODF property to the jetpack class that allows you to spe
 The goal is to add directional animations based on the player's movement direction, similarly to how the flying
 or land animations for units have it.
 
-**Real riot shields** - A shield that actually stops shots by geometry rather than by a
-deflect rule. Needs per-unit collision on the shield part, which the soldier collision model
-does not currently provide: soldiers use a single capsule, and the only existing example of
-custom soldier collision is the acklay style units, whose collision also does a ground check
-that a shield must not inherit. So the real work is a soldier collision path that supports
-extra attached collision volumes without dragging the ground handling along with it. Large,
-and gated on that collision work rather than on anything shield specific.
-
-**Improved dual pistols** - Two visible pistols that alternate fire, instead of the current
-one model and one muzzle. The only dual wield support the engine offers today is
-`OffhandGeometryName`, and every stock use of it is on a lightsaber, so a `cannon` class
-weapon that wants a second pistol has nothing to hang it on. Two routes:
-
-- Make `OffhandGeometryName` work outside melee weapons. The smaller change, but it only
-  ever attached a second *model*, so it buys the look and none of the behaviour.
-- Preferred: a new `dualcannon` ClassLabel deriving from `cannon`, owning both the second
-  model and the fire alternation.
-
-Either way the offhand attachment point should be named from the ODF rather than hardcoded,
-something like `OffhandHardPoint = "hp_weapons2"`, with the matching hardpoint added to the
-skeleton and model. The stock soldier skeleton carries only `hp_weapons` (CRC `0x2b960099`).
-
-The `dualcannon` route is cheaper than it sounds: registering a new `ClassLabel` is one
-allocation plus one constructor call, and the whole extension surface is two pure virtuals
-(`Derive` and `Build`) plus `SetProperty`. Extra per-instance state is free because the new
-class owns every allocation of its own type. Full write-up, including what still has to be
-checked before it could ship, in
-[docs/RE/WeaponClassFactory.md](docs/RE/WeaponClassFactory.md). That does not settle the
-open question below, which is the part that actually needs deciding.
-
-Firing model: when weapon 1 finishes its salvo, switch to weapon 2; when weapon 2 finishes,
-switch back. An ODF option should pick the timing:
-
-- continuous - one trigger pull alternates 1, 2, 1, 2 for as long as it is held
-- per shot - one salvo per trigger pull, so fire 1, release, fire 2
-
-What is already mapped, so this does not start from nothing:
-
-- `Weapon` carries an `mIsOffhand` bit (`+0x2B0` bit 7), so the engine already distinguishes
-  an offhand weapon instance.
-- `EntitySoldier` carries a dual wield flag byte (modtools `+0x24A`, release `+0x232`,
-  bit 0), already in `entity_layout.hpp`.
-- That flag already reroutes input: the character weapon path treats channel 1 of a dual
-  wield pair as firing off the *reload* trigger, with no reload of its own. So the engine's
-  existing notion of dual wield is "two channels, the second one on the reload trigger",
-  not "one channel that alternates". Deciding whether to extend that or bypass it comes
-  first, because it settles whether this is a `Weapon` level change or an `EntitySoldier`
-  input change.
-
-Open question: whether the offhand should be a real second `Weapon` instance (two ammo
-pools, two reloads, two muzzle effects) or one weapon that alternates its fire origin
-between two hardpoints. The first is what "dual pistols" implies and is what the alternating
-salvo logic naturally wants; the second is far cheaper and may be enough if the ask turns
-out to be visual plus muzzle alternation.
+**Real riot shields** - A shield that actually stops shots by its shape rather than by a
+deflect rule. The engine already has almost everything this needs: a unit's collision can hold
+up to 64 shapes, each shape can block shots without being targetable, damage multipliers already
+work per shape (a multiplier of 0 blocks without hurting), and there is already a spot that
+copies extra shapes onto the soldier for each stance. It is unused only because soldiers never
+read collision properties from their ODF. The deciding question is whether a collision shape
+can follow an animated bone. If not, the shield would be a fixed box in front of the unit, fine
+while holding a block stance and wrong as soon as the arm moves. Settle that first. Details in
+[docs/RE/SoldierCollisionSystem.md](docs/RE/SoldierCollisionSystem.md).
 
 ## Weapons
 
-**Force pushable grenades** - Force push moves units and ignores thrown ordnance, so a
-grenade sails straight through a push that would have thrown a soldier across the room. Goal
-is to let a push pick up a live grenade and send it back.
+**Dual pistols (`dualcannon`)** - Done on `feature/classlabel-dualcannon`: a new `dualcannon`
+weapon class that draws a second model on its own hardpoint and alternates fire between the
+two guns, per trigger pull or within a salvo. Still needs a multiplayer test and user docs
+before it merges. Design notes in [docs/RE/WeaponClassFactory.md](docs/RE/WeaponClassFactory.md).
 
-Needs tracing first: what the push collects as targets and whether an in flight ordnance can
-join that set at all, and how to move one once found, since the ordnance is already running
-its own trajectory.
-
-Identifying a grenade at the push site is the part that needs care. `ClassLabel = "grenade"`
-sits on the *weapon* ODF; what flies is an ordnance instance from a separate ordnance ODF,
-so nothing at the push site sees that label. Walking back to the spawning weapon to test it
-would work but is blanket, catching any weapon that borrowed the label. Preferred is an opt
-in property on the ordnance class: `OrdnanceGrapplingHookClass::SetProperty` already reads
-`SoldierAnimation` that way, and an `Ordnance` carries its `OrdnanceClass*` at `+0x30`, so
-the lookup is solved. What it must not be is the ordnance ClassLabel, which
-would sweep up rockets, mines and anything else on the same label.
+**Force pushable grenades** - Force push moves units but ignores thrown grenades. Goal is to let
+a push catch a live grenade and send it back. Needs tracing first: what the push picks up as
+targets, and how to redirect ordnance that is already in flight. Grenades should opt in through
+a property on the ordnance ODF, not through a ClassLabel, so rockets and mines are not swept up
+with them.
 
 **`ScopeTextureFull` - a whole texture as the scope, not a mirrored quarter** - The zoomed
 scope overlay is one texture quadrant mirrored into four screen quadrants, so art must be
@@ -200,14 +145,13 @@ per-bone decal skinning and no Ghoul2 equivalent. Ordered plan:
   fill a hardcoded 4-vertex quad, link it into `m_decals` and see if it draws. This answers
   what disassembly cannot: whether a `DecalClass` instantiates end to end, whether the shader
   resolves, and whether the empty `PlatformInit` is fatal. If a quad will not render, stop.
-- **B. Terrain decals.** Transcribe Phantom's `ComputeTerrainDecal` and drive it from A's
-  spawn path. Retail dead-stripped it, so Phantom's body is the original shipping
-  implementation - transcription, not invention. Gives a validated reference decal to check
-  step D against.
+- **B. Terrain decals.** Rebuild `ComputeTerrainDecal` and drive it from A's spawn path.
+  Retail dead-stripped it, but the original body is known, so this is transcription, not
+  invention. Gives a validated reference decal to check step D against.
 - **C. Find a `RayTest` that returns hit position plus normal.** Untraced. Blaster bolts must
   already compute one to place impact effects. Unblocks D and may shrink it considerably.
 - **D. Write `ComputeObjectDecal`.** The real work, and the only piece with no existing body
-  to copy - it is empty in all three builds, Phantom included. Clip the projection quad
+  to copy - it is empty in every build. Clip the projection quad
   against the collision object's triangles. Q3-derived implementations are GPLv2 and this
   repo is MIT, so read for design only.
 - **E. Wire it up.** Hook `WeaponMelee::UpdateFire` after the ray test returns true; the
@@ -239,9 +183,8 @@ regions and streams. Current state of the problem:
   walking their global list and calling their own `SetProperty`. Sound entities fit
   the same shape: add a family in `entity/instance_props.cpp` that walks
   `sEntitySoundList`, matches the instance name, and calls `EntitySound::SetProperty`.
-  Mapped on the Phantom build only so far (ctors link into `sEntitySoundList` through
-  `0x0043E1B0`, `SetProperty` at `0x0058C620`); needs porting to modtools, Steam and
-  GOG, and where the instance name lives on `EntitySound` is not yet known. That
+  Not yet located on modtools, Steam or GOG, and where the instance name lives on
+  `EntitySound` is not yet known. That
   handler does not chain to `Entity::SetProperty` on an unmatched key, so only its own
   keys will work.
 - `SetClassProperty` does work on `SoundAmbienceStatic` and `SoundAmbienceStreaming`, but
@@ -293,37 +236,15 @@ paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
 ## Controller
 
-**Shell and menu navigation** - Gamepad support is gameplay only today. Every binding mode
-(`Unit`, `Vehicle`, `Flyer`, `Hero`, `Turret`) maps to an in game control path, so the pad
-does nothing in the front end: the main menu, the spawn screen, the map and unit selection,
-and the pause menu all still need mouse and keyboard. That makes the controller support a
-half answer for anyone actually playing from the couch.
-
-**Traced 2026-09-07, and most of it already exists.** The shell is a controller UI with a
-mouse bolted on, not the reverse: all 120 `ifs_*` screens implement `Input_Accept`,
-`Input_Back`, `Input_GeneralUp/Down/Left/Right`, `Input_Start`, `Input_L/RTrigger`,
-`Input_Misc`/`Misc2`, and the handlers already take a joystick index
-(`metagame_ai.lua:46`, `ifs_meta_main:Input_Accept(iJoystick,1)`). Only 2 files use
-`fnTestHotSpot` for mouse hit-testing, against 57 with explicit directional handlers and the
-rest inheriting `gShellScreen_fnDefaultInputUp/Down`. So the per-screen navigation logic is
-written and shipping - it is what the arrow keys drive today - and none of this needs shell
-Lua changes, which matters because GameExt ships no shell.
-
-Dispatch is generic and source-agnostic. `GuiManager::HandleEvents` (Steam `0x00528FB0`)
-drains an event queue and builds the Lua method name at runtime,
-`_snprintf(buf, 0x7F, "%s%s", "Input_", name_table[id*2])` then `CallLuaFunctionOfScope`. The
-bare name table (Steam `0x007E66C4`) carries the full console set - `Accept`, `Back`,
-`GeneralUp/Down/Left/Right`, `Start`, `LTrigger`, `RTrigger`, `Misc`, `Misc2`, `KeyDown`,
-`Char` - so nothing is a reduced PC subset. The console controller-management API is intact
-and used by the scripts too (`ScriptCB_ReadAllControllers` and friends, plus
-`ScriptCB_GetVKeyboardCharacter`, an on-screen keyboard that only exists for pad text entry).
-
-So the work is one thing: raise those events from the pad. **The open question is the enqueue
-side** - `HandleEvents` is the consumer; who produces into that queue, and whether there is a
-callable post/push entry point, has not been found yet. Find that before scoping anything.
-Remaining risk after that is blast radius rather than difficulty: menu code runs before
-everything, so a bug locks people out of the game entirely, and verifying it means walking a
-lot of screens rather than one repro.
+**Shell and menu navigation** - The pad does nothing in the menus: main menu, spawn screen, map
+and unit selection and the pause menu all still need mouse and keyboard. The menus themselves
+were built for a controller, but PC ships the table that turns pad buttons into menu inputs
+almost empty, with the first four buttons all set to Accept. A few PC screens also only work
+with the mouse: the profile screen only accepts a mouse click, and the top tab row cannot be
+reached from the buttons at all. A fix for both is written and stashed
+(`Controller Menu Navigation`): it fills in the table and adds a small Lua patch to the shell
+that fixes the profile screen and lets the pad triggers switch tabs. It has not been tested yet.
+Details in [docs/RE/GuiInputSystem.md](docs/RE/GuiInputSystem.md).
 
 ## Lua API
 
