@@ -217,6 +217,12 @@ A and B are confidently estimable. C and D are where the schedule can move. Once
 pipeline exists, blaster impacts and explosion scorch marks are nearly free and will be far
 more visible in normal play than saber marks.
 
+**Restore `FlatInfo()`** - BF1 skies could have a flat, scrolling texture layer at a fixed
+height, separate from the dome, for a sheet of cloud or haze. BF2 cut it completely, both the
+`.sky` parsing and the rendering, so this means building it again, not switching it back on. The
+properties are known from a leftover block in Endor's `.sky` file. What is still missing is how
+BF1 actually drew it. Details in [docs/RE/SkySystem.md](docs/RE/SkySystem.md).
+
 **Unlock framerate above 80 FPS** - The game caps out around 80 and anything above this will
 cause issues with vehicles, especially hovers, due to being tied to the framerate. The fix is to detach the physics and animation updates from the framerate, and instead run them on a fixed timestep. This will allow the game to run at higher framerates without affecting gameplay mechanics.
 
@@ -332,25 +338,6 @@ belongs in Lua rather than in an ODF property: the drain is a game rule, and an 
 would force every hero class to be edited individually and would not let a script turn it off
 for one mode and leave it on for another. Needs the code that applies the drain traced first,
 then a toggle hung off that path.
-
-**Restore `FlatInfo()`** - a `.sky` block BF1 rendered and BF2 does not parse at all. A
-scrolling flat texture layer: a horizontal plane, separate from the dome, for a cloud or haze
-sheet at a fixed world height. The schema survives in a stock BF2 asset,
-`assets/worlds/END/world1/end1.sky`, where a porter left the block in and nothing has read it
-since - `Height(0,0)`, `Texture`, `Color`, `Modulate`, `TextureSpeed` (the UV scroll that makes
-it drift), `TileSize`. Endor's copy is inert, so the file proves the schema, not the visual.
-
-**This is a rebuild, not a revival.** Sky blocks dispatch by PblHash, and
-`PblHash("FlatInfo") = 0x4B936222` occurs nowhere in the modtools exe, as neither constant nor
-string - while every supported block occurs exactly once (`SkyInfo` `0x06C0D3E6`, `DomeInfo`
-`0x185AB6C2`, `DomeModel` `0x82681057`, `SunInfo` `0x3780C8F9`, `LowResTerrain` `0xDDF0C29E`).
-Parser case and renderer were both compiled out, so it needs a new sky config case plus a
-renderable drawing one textured, scrolling, world-height quad.
-
-BF1's reader is `SkyDome::Read(PblConfig&)` at `0x001D10A0`, with `SkyDome::Render` the draw
-side. **Neither read yet** - still open are the two `Height` values, how `Modulate` selects the
-blend, and whether the plane draws before or after the dome. (Ghidra has not applied BF1's
-symbols; resolve names through their Mach-O nlist entries, not by name lookup.)
 
 **AI systems documentation** - Write up the goal layer (`AIGoalManager::AssignUnit`) and the
 combat response layer (`SelectCombatResponse`), how a unit gets from a team level goal to an
