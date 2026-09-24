@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -132,18 +133,12 @@ void ai_squad_order_null_fix_install(uintptr_t exe_base)
    cave[o++] = 0x74; cave[o++] = (uint8_t)(origLen + 5);
    std::memcpy(cave + o, orig, origLen);
    o += (int)origLen;
-   cave[o++] = 0xE9;
-   *(int32_t*)(cave + o) = (int32_t)(resume - (cave + o + 4));
-   o += 4;
-   cave[o++] = 0xE9;
-   *(int32_t*)(cave + o) = (int32_t)(skip - (cave + o + 4));
-   o += 4;
+   o = x86::emit_jmp(cave, o, resume);
+   o = x86::emit_jmp(cave, o, skip);
 
    // JMP cave + NOP padding to fill the site exactly.
    std::memcpy(g_siteOrig, site, origLen);
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = (int32_t)(cave - (site + 5));
-   std::memset(site + 5, 0x90, origLen - 5);
+   x86::write_branch(site, x86::kJmp, cave, origLen);
 
    g_site    = site;
    g_siteLen = origLen;

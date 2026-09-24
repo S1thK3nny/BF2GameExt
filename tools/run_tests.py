@@ -41,6 +41,9 @@ def find_vcvars() -> Path:
 
 
 def main():
+    # Compiler output on a localized VS can hold characters the console code
+    # page cannot print; replace them rather than crash while reporting.
+    sys.stdout.reconfigure(errors="replace")
     vcvars = find_vcvars()
     OUT.mkdir(parents=True, exist_ok=True)
     sources = sorted(TESTS.glob("*.cpp"))

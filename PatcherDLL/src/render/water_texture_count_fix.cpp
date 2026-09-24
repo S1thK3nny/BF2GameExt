@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -281,8 +282,7 @@ void water_texture_count_fix_install(uintptr_t exe_base)
       *sites[i].countSlot = countPtr;
 
       std::memcpy(g_siteOrig[i], site, kSiteLen);
-      site[0] = 0xE8;
-      *(int32_t*)(site + 1) = (int32_t)((uint8_t*)sites[i].stub - (site + kSiteLen));
+      x86::write_branch(site, x86::kCall, sites[i].stub, kSiteLen);
       g_site[i] = site;
    }
 }

@@ -2,6 +2,7 @@
 #include "soldier_prone.hpp"
 #include "soldier_stance_flags.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -734,14 +735,7 @@ void prone_system_install(uintptr_t exe_base)
             g_acklayGatePtr = p;
 
             // JNZ rel32 (6 bytes: 0F 85 xx xx xx xx) -> JMP rel32 (5 bytes) + NOP
-            // JMP next_ip is 1 byte earlier than JNZ, so rel offset += 1
-            int32_t jnzRel;
-            memcpy(&jnzRel, p + 2, 4);
-            int32_t jmpRel = jnzRel + 1;
-
-            p[0] = 0xE9;
-            memcpy(p + 1, &jmpRel, 4);
-            p[5] = 0x90;
+            x86::jcc32_as_jmp(p, p);
         }
     }
 
@@ -791,9 +785,7 @@ void prone_system_install(uintptr_t exe_base)
             *p++ = 0xFF; *p++ = 0x92;
             *p++ = 0xA0; *p++ = 0x00; *p++ = 0x00; *p++ = 0x00;
             // JMP rel32 -> end_of_switch
-            *p++ = 0xE9;
-            int32_t rel = (int32_t)(switchEnd - ((uintptr_t)p + 4));
-            memcpy(p, &rel, 4);
+            x86::write_branch(p, x86::kJmp, (void*)switchEnd);
 
             // Patch jump table entry [2] to point to our stub
             g_heightJumpTableEntry = (uint32_t*)resolve(exe_base, g_addr->prone_height_jump_table + 8);
@@ -808,9 +800,7 @@ void prone_system_install(uintptr_t exe_base)
             uint32_t fn = (uint32_t)(uintptr_t)&ai_height_crouch;
             memcpy(q, &fn, 4); q += 4;
             *q++ = 0xFF; *q++ = 0xD0;
-            *q++ = 0xE9;
-            rel = (int32_t)(switchEnd - ((uintptr_t)q + 4));
-            memcpy(q, &rel, 4);
+            x86::write_branch(q, x86::kJmp, (void*)switchEnd);
 
             // Only take the entry if it still leads to the stock crouch body:
             // MOV <vt>,[reg] / MOV ECX,reg / CALL [<vt>+0x9C].  The vtable

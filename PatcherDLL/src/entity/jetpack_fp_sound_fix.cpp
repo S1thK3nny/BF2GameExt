@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -155,8 +156,7 @@ void jetpack_fp_sound_fix_install(uintptr_t exe_base)
    // .text is RW during install (dllmain re-protects afterwards).
    g_site    = site;
    g_origRel = *(int32_t*)(site + 1);
-   *(int32_t*)(site + 1) =
-      (int32_t)((uintptr_t)&jet_effect_teardown_only - ((uintptr_t)site + 5));
+   x86::write_branch(site, x86::kCall, &jet_effect_teardown_only);
 }
 
 void jetpack_fp_sound_fix_uninstall()

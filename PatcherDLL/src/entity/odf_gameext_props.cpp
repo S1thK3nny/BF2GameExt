@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 #include "util/install_log.hpp"
 
 #include <cstring>
@@ -323,10 +324,7 @@ bool install_site(uintptr_t exe_base, const Site& s)
    ++s_patchCount;
 
    // .text is RW during install; dllmain re-protects afterwards.
-   int32_t rel = (int32_t)((uintptr_t)s.shim - ((uintptr_t)site + 5));
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = rel;
-   site[5] = site[6] = site[7] = site[8] = 0x90;
+   x86::write_branch(site, x86::kJmp, s.shim, 9);
    return true;
 }
 

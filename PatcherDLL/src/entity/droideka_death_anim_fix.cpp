@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <detours.h>
 
@@ -426,10 +427,7 @@ void droideka_death_anim_install(uintptr_t exe_base)
 
    // E8 rel32 (CALL thunk) over bytes 0..4, NOP the 6th.  .text is RW during
    // install (dllmain re-protects afterwards), so no VirtualProtect needed.
-   const int32_t rel = (int32_t)((uintptr_t)&droideka_die_input_guard - ((uintptr_t)site + 5));
-   site[0] = 0xE8;
-   *(int32_t*)(site + 1) = rel;
-   site[5] = 0x90;
+   x86::write_branch(site, x86::kCall, &droideka_die_input_guard, 6);
 
    // Steering lock.  Only worth installing now that state 3 actually holds, so
    // it hangs off the same signature check as the call-site patch above.

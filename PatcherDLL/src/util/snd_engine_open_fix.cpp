@@ -2,6 +2,7 @@
 #include "snd_engine_open_fix.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -243,13 +244,6 @@ void restore(Saved& s)
    s.addr = nullptr;
 }
 
-void write_rel32(uint8_t* site, uint8_t opcode, const void* target)
-{
-   site[0] = opcode;
-   const int32_t rel = (int32_t)((uintptr_t)target - (uintptr_t)(site + 5));
-   memcpy(site + 1, &rel, 4);
-}
-
 } // namespace
 
 void snd_engine_open_fix_install(uintptr_t exe_base)
@@ -295,10 +289,10 @@ void snd_engine_open_fix_install(uintptr_t exe_base)
    s_initSizeOrig   = *g_initSizeImm;
 
    save(s_mallocCall, mallocCall, 5);
-   write_rel32(mallocCall, 0xE8, &sound_heap_alloc);
+   x86::write_branch(mallocCall, x86::kCall, &sound_heap_alloc);
 
    save(s_closeCall, closeCall, 5);
-   write_rel32(closeCall, 0xE8, &enginebase_close_guard);
+   x86::write_branch(closeCall, x86::kCall, &enginebase_close_guard);
 
    if (retail) {
       g_bracket   = (uintptr_t)at(S->bracket);
@@ -306,9 +300,7 @@ void snd_engine_open_fix_install(uintptr_t exe_base)
       g_afterLoop = (uintptr_t)at(S->afterLoop);
 
       save(s_loopGuard, loopGuard, kRetailGuardLen);
-      write_rel32(loopGuard, 0xE9, &dsclose_loop_guard_retail);
-      loopGuard[5] = 0x90;
-      loopGuard[6] = 0x90;
+      x86::write_branch(loopGuard, x86::kJmp, &dsclose_loop_guard_retail, kRetailGuardLen);
    }
    else {
       save(s_loopGuard, loopGuard, kModtoolsGuardLen);

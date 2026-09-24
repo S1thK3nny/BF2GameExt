@@ -2,6 +2,7 @@
 #include "flyer_carrier_fixes.hpp"
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 #include "util/crash_logger.hpp"
 
 #include <cmath>
@@ -485,9 +486,7 @@ static void codePatchesInit()
       if (!s_rayHit[i]) continue;
       memcpy(s_rayHitOrig[i], s_rayHit[i], 5);
       if (L->rayHitSse) {
-         const int32_t rel = (int32_t)((uintptr_t)&rayHitStub_sse - ((uintptr_t)s_rayHit[i] + 5));
-         s_rayHitPatch[i][0] = 0xE8;
-         memcpy(s_rayHitPatch[i] + 1, &rel, 4);
+         x86::encode_branch(s_rayHitPatch[i], s_rayHit[i], x86::kCall, &rayHitStub_sse);
       } else {
          const unsigned char fld1[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
          memcpy(s_rayHitPatch[i], fld1, 5);
@@ -621,10 +620,7 @@ static void turretFireInstall()
    s_turretFireStateOff = L->flightState;
 
    unsigned char patch[kTurretFirePatch_max];
-   memset(patch, 0x90, sizeof(patch));
-   patch[0] = 0xE9;
-   const int32_t rel = (int32_t)((uintptr_t)&turretFire_cave - ((uintptr_t)s_turretFireSite + 5));
-   memcpy(patch + 1, &rel, 4);
+   x86::encode_branch(patch, s_turretFireSite, x86::kJmp, &turretFire_cave, sizeof(patch));
 
    memcpy(s_turretFireSaved, s_turretFireSite, len);
    writeCode(s_turretFireSite, patch, len);
@@ -669,10 +665,7 @@ static void createCtrlInstall()
    s_playerCtrlCtor   = (uintptr_t)resolve(g_addr->player_ctrl_ctor);
 
    unsigned char patch[kCreateCtrlPatch_len];
-   memset(patch, 0x90, sizeof(patch));
-   patch[0] = 0xE9;
-   const int32_t rel = (int32_t)((uintptr_t)&createCtrl_cave - ((uintptr_t)s_createCtrlSite + 5));
-   memcpy(patch + 1, &rel, 4);
+   x86::encode_branch(patch, s_createCtrlSite, x86::kJmp, &createCtrl_cave, sizeof(patch));
 
    memcpy(s_createCtrlSaved, s_createCtrlSite, kCreateCtrlPatch_len);
    writeCode(s_createCtrlSite, patch, kCreateCtrlPatch_len);

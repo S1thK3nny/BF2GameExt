@@ -2,6 +2,7 @@
 #include "scene_tree_depth_guard.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/x86_emit.hpp"
 
 #include <detours.h>
 #include <stdio.h>
@@ -73,13 +74,7 @@ bool build_forced_jump(const uint8_t* jcc)
 {
    if (jcc[0] != 0x0F || jcc[1] != 0x8E) return false; // JLE rel32
 
-   uint32_t rel;
-   memcpy(&rel, jcc + 2, 4);
-
-   s_forcedJmp[0] = 0xE9; // JMP rel32, one byte shorter than the JLE
-   rel += 1;
-   memcpy(s_forcedJmp + 1, &rel, 4);
-   s_forcedJmp[5] = 0x90; // NOP, so the instruction boundary after it is unchanged
+   x86::jcc32_as_jmp(jcc, s_forcedJmp);
 
    memcpy(s_originalJcc, jcc, 6);
    return true;

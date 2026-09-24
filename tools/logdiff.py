@@ -55,7 +55,12 @@ def read(p):
 
 
 def gameext_lines(p):
-    return [norm(l) for l in read(p)]
+    # SndDiag prints a timed report every 600 engine ticks (~10 s), so how many
+    # appear depends on how long the session ran. Drop the report header line
+    # ("[SndDiag] HH:MM:SS.mmm  tick N ...") and its indented detail lines; the
+    # install line and the first/final markers are still compared.
+    report = re.compile(r"\[SndDiag\] (\d{2}:\d{2}:\d{2}|  )")
+    return [norm(l) for l in read(p) if not report.match(l)]
 
 
 def bfront2_lines(p):

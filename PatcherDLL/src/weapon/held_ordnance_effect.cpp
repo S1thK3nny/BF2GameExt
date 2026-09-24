@@ -3,8 +3,10 @@
 #include "core/game_build.hpp"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 #include "held_ordnance_effect.hpp"
 #include "held_ordnance_effect_sites.hpp"
+#include "util/install_log.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -455,20 +457,7 @@ void* const kClassHooks[] = {reinterpret_cast<void*>(set_property), reinterpret_
 
 void log_install(const char* message)
 {
-   FILE* file = nullptr;
-   if (fopen_s(&file, "BF2GameExt.log", "a") == 0 && file) {
-      std::fprintf(file, "[HeldOrdnanceEffect] %s\n", message);
-      std::fclose(file);
-   }
-}
-
-void make_call(uint8_t* bytes, void* address, void* target, unsigned length)
-{
-   std::memset(bytes, 0x90, length);
-   bytes[0] = 0xE8;
-   const uint32_t relative = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target) -
-                                                   reinterpret_cast<uintptr_t>(address) - 5);
-   std::memcpy(bytes + 1, &relative, 4);
+   install_log("[HeldOrdnanceEffect] %s", message);
 }
 
 bool write_patch(bool install)
@@ -500,8 +489,8 @@ bool write_patch(bool install)
    if (install) {
       void* createHook = g_sites->createLength == 7 ? reinterpret_cast<void*>(create_trail_debug)
                                                     : reinterpret_cast<void*>(create_trail_retail);
-      make_call(create, g_createSite, createHook, g_sites->createLength);
-      make_call(fireCall, g_fireSite, reinterpret_cast<void*>(fire), 5);
+      x86::encode_branch(create, g_createSite, x86::kCall, createHook, g_sites->createLength);
+      x86::encode_branch(fireCall, g_fireSite, x86::kCall, &fire);
    }
    std::memcpy(g_createSite, install ? create : g_originalCreate, g_sites->createLength);
    std::memcpy(g_fireSite, install ? fireCall : g_originalFire, 5);

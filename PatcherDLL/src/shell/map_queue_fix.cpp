@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -166,10 +167,7 @@ void map_queue_fix_install(uintptr_t exe_base)
 
    // E9 rel32 to the stub over bytes 0..4, NOP the 5 orphaned bytes of the
    // clipped MOV.  .text is RW during install (dllmain re-protects afterwards).
-   const int32_t rel = (int32_t)((uintptr_t)&updatestats_playlist_tail - ((uintptr_t)site + 5));
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = rel;
-   std::memset(site + 5, 0x90, sizeof(s_orig) - 5);
+   x86::write_branch(site, x86::kJmp, &updatestats_playlist_tail, sizeof(s_orig));
    // No logging here: install runs with the exe's sections non-executable, so
    // calling game code (RedWarning::LogMessage) would fault.
 }
