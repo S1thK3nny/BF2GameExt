@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/pbl_hash.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -268,19 +269,6 @@ static bool g_installed = false;
 // ---------------------------------------------------------------------------
 // Cable texture
 // ---------------------------------------------------------------------------
-
-// PblHash: FNV-1a over the lowercased bytes.  Computed here rather than through
-// the engine's PblHash because grapple_install() runs from dllmain, where the
-// exe's sections are not executable yet.
-static uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 0x811c9dc5u;
-   for (; *s; ++s) {
-      h ^= (uint32_t)(uint8_t)(*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
-}
 
 // The Phantom build's own choice.  Overridable per ODF with CableTexture, which is
 // the better answer than picking for the modder: the shader resolves its texture

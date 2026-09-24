@@ -2,6 +2,7 @@
 #include "branch_region_debug.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -49,19 +50,6 @@ void dbg_log(const char* fmt, ...)
    va_end(ap);
    fputc('\n', f);
    fclose(f);
-}
-
-// FNV-1a with case folded by OR 0x20 -- the engine's PblHash, matching the mod
-// tools' own Hash.exe (verified: it reproduces the three water-property hashes
-// recorded in render/water_texture_count_fix.cpp).
-uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 2166136261u;
-   for (; s && *s; ++s) {
-      h ^= (uint8_t)(*s | 0x20);
-      h *= 16777619u;
-   }
-   return h;
 }
 
 typedef void*(__cdecl* fn_Find_t)(const char* name);

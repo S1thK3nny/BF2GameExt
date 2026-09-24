@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "held_ordnance_effect.hpp"
 #include "held_ordnance_effect_sites.hpp"
@@ -59,14 +60,7 @@ using rtti_method = bool(__thiscall*)(void*, uint32_t);
 using property_method = void(__thiscall*)(void*, uint32_t, const char*);
 using derive_method = void*(__thiscall*)(void*, uint32_t);
 
-constexpr uint32_t property_hash(const char* text)
-{
-   uint32_t hash = 0x811C9DC5;
-   for (; *text; ++text) hash = (hash ^ (static_cast<uint8_t>(*text) | 0x20u)) * 0x01000193u;
-   return hash;
-}
-
-constexpr uint32_t kBoneProperty = property_hash("HeldOrdnanceEffectBone");
+constexpr uint32_t kBoneProperty = pbl_hash("HeldOrdnanceEffectBone");
 
 // Same case-sensitive CRC-32/BZIP2 as PblTEMPHash and tentacle bone names.
 uint32_t bone_hash(const char* text)

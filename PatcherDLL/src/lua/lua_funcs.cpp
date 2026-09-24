@@ -8,6 +8,7 @@
 #include "core/lvl_read.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/instance_props.hpp"
+#include "core/pbl_hash.hpp"
 #include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
@@ -325,18 +326,6 @@ static int lua_GetCharacterWeapon(lua_State* L)
       g_lua.pushnil(L);
       return 1;
    }
-}
-
-// PblHash: FNV-1a over `c | 0x20`.  '_' is 0x5F, so the OR lands it on 0x7F all by
-// itself, which is what the engine's own hash does.
-static uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 0x811c9dc5u;
-   for (; *s; ++s) {
-      h ^= (uint32_t)(uint8_t)(*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
 }
 
 // WeaponClass ODF-name hash, Factory_data+0x14.  Build-invariant - see the walk

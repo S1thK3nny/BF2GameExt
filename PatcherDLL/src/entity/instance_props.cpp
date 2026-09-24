@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/pbl_hash.hpp"
 
 // =============================================================================
 // Family: VehicleSpawn
@@ -43,18 +44,6 @@ static constexpr int kMaxListWalk = 4096;
 // [ESP+0x18] behind five pushes, and Steam/GOG read it at [EBP+8].
 using fn_vs_set_property_t = void(__fastcall*)(void* ecx, void* edx,
                                                uint32_t prop, const char* value);
-
-// PblHash: FNV-1a over `c | 0x20`.  '_' is 0x5F, so the OR lands it on 0x7F all by
-// itself, which is what the engine's own hash does.
-static uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 0x811c9dc5u;
-   for (; *s; ++s) {
-      h ^= (uint32_t)(uint8_t)(*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
-}
 
 // Keys the engine parses but that are not safe to drive at runtime.
 //

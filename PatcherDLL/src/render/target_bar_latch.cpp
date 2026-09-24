@@ -7,6 +7,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
+#include "core/pbl_hash.hpp"
 #include "weapon/barrel_fire_origin.hpp"   // engine_ray_hit
 
 #include <detours.h>
@@ -212,17 +213,6 @@ static bool handle_ok(const Handle& h)
 static bool is_alive(const uint8_t* obj)
 {
    return ((*(const uint32_t*)(obj + kGO_Flags)) >> 3 & 1u) != 0;
-}
-
-// PblHash: FNV-1a over the bytes, each sign-extended and OR'd with 0x20.
-static unsigned pbl_hash(const char* s)
-{
-   unsigned h = 0x811C9DC5u;
-   for (; *s; ++s) {
-      h ^= (unsigned)((int)(signed char)*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
 }
 
 static void* event_find(unsigned hash)

@@ -2,6 +2,7 @@
 #include "content_census.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 
 #include <windows.h>
 #include <stdio.h>
@@ -279,20 +280,6 @@ struct WalkResult {
 // this code does not own.
 ClassRec s_rec[kMaxClasses];
 int32_t  s_idx[kIndexSlots];
-
-// The engine's PblHash: FNV-1a 32, basis 0x811C9DC5, prime 0x01000193, each
-// byte sign-extended then OR'd with 0x20 (modtools 0x007E1B70).  Used only to
-// check a recovered name against the mId the engine already stored -- a match
-// proves both, a mismatch is reported rather than resolved.
-uint32_t pbl_hash(const char* str, uint32_t maxLen)
-{
-   uint32_t h = 0x811C9DC5u;
-   for (uint32_t i = 0; i < maxLen && str[i]; ++i) {
-      const uint32_t b = ((uint32_t)(int32_t)(int8_t)str[i]) | 0x20u;
-      h = (h ^ b) * 0x01000193u;
-   }
-   return h;
-}
 
 const Root* find_root(const Registry& R, uint32_t id)
 {
