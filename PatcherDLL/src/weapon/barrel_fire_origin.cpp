@@ -5,6 +5,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/weapon.hpp"
 
 // =============================================================================
 // Barrel fire origin — OverrideAimer vtable hook.
@@ -457,8 +458,8 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    if (!g_useBarrelFireOrigin) return false;
 
    __try {
-      void* owner = *(void**)((char*)weapon + 0x6C);   // Weapon::mOwner
-      void* aimer = *(void**)((char*)weapon + 0x70);   // Weapon::mAimer
+      void* owner = *(void**)((char*)weapon + layout::Weapon::kOwner);
+      void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
       if (!owner || !aimer) return false;
 
       // Scope texture up: hand the frame back to vanilla entirely -- no origin move,

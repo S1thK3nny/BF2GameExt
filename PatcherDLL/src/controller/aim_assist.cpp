@@ -5,6 +5,7 @@
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 #include "core/layout/character.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -665,7 +666,7 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     float wpnVertThreshold = 0.0f;
 
     if (weapon) {
-        void* wpnClass = *(void**)((char*)weapon + 0x60);
+        void* wpnClass = *(void**)((char*)weapon + layout::Weapon::kStart);
         if (wpnClass) {
             wpnHorizThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassHorizThreshold);
             wpnVertThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassVertThreshold);

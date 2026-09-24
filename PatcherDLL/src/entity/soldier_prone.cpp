@@ -3,6 +3,7 @@
 #include "soldier_stance_flags.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -214,9 +215,6 @@ static uint8_t* g_lowresCrouchIdlePtr     = nullptr;
 static uint8_t  g_lowresCrouchIdleOrig[3] = {};
 static size_t   g_lowresCrouchIdleLen     = 0;
 
-// WeaponClass struct offsets
-static constexpr int kWeaponClassOffset = 0x060;  // Weapon* -> WeaponClass*
-
 // WeaponMeleeClass vtable pointer — resolved at install time.
 // Identifying melee via WeaponClass+0x20 (mSoldierAnimationWeapon) would
 // false-positive on CustomAnimationBank weapons: that property allocates a
@@ -248,7 +246,7 @@ static bool is_melee_weapon(void* entity)
         if (slot >= 8) return false;
         void* weapon = *(void**)(base + g_soldier->weaponArray + slot * 4);
         if (!weapon) return false;
-        void* weaponClass = *(void**)((char*)weapon + kWeaponClassOffset);
+        void* weaponClass = *(void**)((char*)weapon + layout::Weapon::kStart);
         if (!weaponClass) return false;
         // The first dword of any C++ object is its vtable pointer.
         void* vtable = *(void**)weaponClass;

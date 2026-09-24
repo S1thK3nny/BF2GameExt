@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/pbl_hash.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -183,10 +184,6 @@ static constexpr int kOrdClass_Anim   = 0x16C;
 // soldier's collision space.  The constructor fills it in once and Render has used
 // it ever since.
 static constexpr int kOrd_WeaponOffset = 0x14C;
-
-// Weapon::mAimer and Weapon::mTrigger.  Byte 0 bit 0 of a Trigger is "held".
-static constexpr int kWeapon_Aimer    = 0x070;
-static constexpr int kWeapon_Trigger  = 0x074;
 
 // Aimer::mFirePos - the live fire point, and the field BarrelFireOrigin relocates
 // to the barrel hardpoint.
@@ -391,7 +388,7 @@ static uint32_t* fire_trigger(void* ordnance)
    __try {
       void* weapon = *(void**)((char*)ordnance + kOrd_FireWeapon);
       if (!weapon) return nullptr;
-      return *(uint32_t**)((char*)weapon + kWeapon_Trigger);
+      return *(uint32_t**)((char*)weapon + layout::Weapon::kTrigger);
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
       return nullptr;
@@ -526,7 +523,7 @@ static void refresh_cable_anchor(void* ordnance, void* soldier)
 {
    void* weapon = *(void**)((char*)ordnance + kOrd_FireWeapon);
    if (!weapon) return;
-   void* aimer = *(void**)((char*)weapon + kWeapon_Aimer);
+   void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
    if (!aimer) return;
 
    void*  coll   = (char*)soldier + kSol_CollObject;

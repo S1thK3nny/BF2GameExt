@@ -9,21 +9,21 @@
 // Identical on all builds. Offsets are from the start of the Character.
 // Field names from the Phantom PDB; every offset read off the instructions:
 //
-//   field       modtools (MemExt)                     Steam
-//   size 0x1B0  GetCharacterUnit  IMUL EAX,0x1b0      GetCharacterUnit IMUL EAX,0x1b0
-//               @0046ecb0                             @0058fd02; SetVehicle divides
-//                                                     by 0x1B0 (0x4BDA12F7 >> 7) @004522a4
-//   mUnit       GetCharacterUnit  [EAX+0x148]         GetCharacterUnit [EAX+0x148]
-//               @0046ecf9                             @0058fd0c
-//   mVehicle    GetCharacterVehicle [EAX+0x14c]       Character::SetVehicle writes
-//               @0046ede9                             [ESI+0x14c] @004522be
-//   mRemote     GetCharacterRemote [EAX+0x150]        Character ctor zeroes 0x148/
-//               @0046eed9                             0x14c/0x150 in order @00450752
-//   mHeroFlag   ChangeTeam hero test                  same test
-//               MOV AL,[EDI+0x165]                    CMP byte [ESI+0x165],0
+//   field      modtools (MemExt)          Steam                      GOG
+//   size       GetCharacterUnit           GetCharacterUnit           same bytes
+//   0x1B0      IMUL EAX,0x1b0 @0046ecb0   IMUL EAX,0x1b0 @0058fd02   @00590ca2
+//   mUnit      GetCharacterUnit           GetCharacterUnit           same bytes
+//   0x148      [EAX+0x148] @0046ecf9      [EAX+0x148] @0058fd0c      @00590cac
+//   mVehicle   GetCharacterVehicle        Character::SetVehicle      same bytes
+//   0x14C      [EAX+0x14c] @0046ede9      writes [ESI+0x14c] @004522be  @0045229e
+//   mRemote    GetCharacterRemote         Character ctor zeroes 0x148/ same bytes
+//   0x150      [EAX+0x150] @0046eed9      0x14c/0x150 in order @00450752 @00450732
+//   mHeroFlag  ChangeTeam hero test       ChangeTeam hero test       same bytes
+//   0x165      MOV AL,[EDI+0x165]         CMP byte [ESI+0x165],0     @00452318
+//                                         @00452338
 //
-// GOG is the Steam source through the same toolchain; its struct layouts match
-// Steam's.
+// Steam's SetVehicle also divides by 0x1B0 (0x4BDA12F7 >> 7) @004522a4. GOG was
+// checked by searching its exe for the same instruction bytes as Steam.
 // =============================================================================
 
 namespace layout::Character {

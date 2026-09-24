@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "disguise_model_override.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <cstring>
 #include <detours.h>
@@ -134,7 +135,7 @@ static void* findGameModel(uint32_t nameHash)
 static void* getEntityGeometry(void* weaponThis)
 {
     __try {
-        uintptr_t obj = *(uintptr_t*)((uintptr_t)weaponThis + 0x6C);
+        uintptr_t obj = *(uintptr_t*)((uintptr_t)weaponThis + layout::Weapon::kOwner);
         if (!obj) return nullptr;
         uintptr_t vtable = *(uintptr_t*)(obj + 0x18);
         if (!vtable) return nullptr;
@@ -147,7 +148,7 @@ static void* getEntityGeometry(void* weaponThis)
 
 static void* getWeaponClass(void* weaponThis)
 {
-    __try { return *(void**)((uintptr_t)weaponThis + 0x64); }
+    __try { return *(void**)((uintptr_t)weaponThis + layout::Weapon::kClass); }
     __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 }
 

@@ -10,6 +10,7 @@
 #include "entity/instance_props.hpp"
 #include "core/pbl_hash.hpp"
 #include "core/layout/character.hpp"
+#include "core/layout/weapon.hpp"
 #include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
@@ -314,7 +315,7 @@ static int lua_GetCharacterWeapon(lua_State* L)
 
       // Read WeaponClass pointer
       uintptr_t wc = 0;
-      __try { wc = *(uintptr_t*)(wpn + 0x060); }
+      __try { wc = *(uintptr_t*)(wpn + layout::Weapon::kStart); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!wc) { g_lua.pushnil(L); return 1; }
 
@@ -477,7 +478,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       }
 
       uintptr_t startWc = 0;
-      __try { startWc = *(uintptr_t*)(oldWpn + 0x060); }
+      __try { startWc = *(uintptr_t*)(oldWpn + layout::Weapon::kStart); }
       __except (EXCEPTION_EXECUTE_HANDLER) { g_lua.pushnil(L); return 1; }
       if (!startWc || startWc == 0xCDCDCDCDu) {
          fn_GameLog("SetCharacterWeapon: char %d slot %d WeaponClass ptr invalid.\n",
@@ -726,7 +727,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // rebind is safe). The entity slots are still untouched here, so the
       // unit simply keeps its old weapon.
       int32_t newMap = -1;
-      __try { newMap = *(int32_t*)(newWpn + 0x0C8); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      __try { newMap = *(int32_t*)(newWpn + layout::Weapon::kSoldierAnimationMap); } __except(EXCEPTION_EXECUTE_HANDLER) {}
       if (newMap == -1) {
          __try {
             typedef void (__thiscall* WpnDelete_t)(uintptr_t w, uint32_t flags);
@@ -809,7 +810,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
       // just makes the stance change this frame instead of next.
       __try {
          uintptr_t animator = *(uintptr_t*)(entity + lay.animator);
-         int32_t   newMap   = *(int32_t*)(newWpn + 0x0C8);
+         int32_t   newMap   = *(int32_t*)(newWpn + layout::Weapon::kSoldierAnimationMap);
          if (animator && animator != 0xCDCDCDCDu && newMap != -1 && g_addr->set_weapon_anim_map) {
             typedef void (__thiscall* SetWeaponAnimMap_t)(void*, int32_t);
             ((SetWeaponAnimMap_t)res(g_addr->set_weapon_anim_map))((void*)animator, newMap);
@@ -818,7 +819,7 @@ static int lua_SetCharacterWeapon(lua_State* L)
 
       fn_GameLog("SetCharacterWeapon: char %d ch %d slot[%d] rebuilt -> '%s' (wpn=0x%08x map=%d)\n",
                  charIndex, (int)chSlot, (int)slotIdx, targetOdf,
-                 (unsigned)newWpn, *(int32_t*)(newWpn + 0x0C8));
+                 (unsigned)newWpn, *(int32_t*)(newWpn + layout::Weapon::kSoldierAnimationMap));
 
       g_lua.pushnumber(L, 1);
       return 1;
@@ -904,7 +905,7 @@ static int lua_GetWeaponAmmo(lua_State* L)
    if (!wpn) { g_lua.pushnil(L); return 1; }
 
    __try {
-      uintptr_t ac = *(uintptr_t*)(wpn + 0x88);
+      uintptr_t ac = *(uintptr_t*)(wpn + layout::Weapon::kAmmoCounter);
       if (!ac || ac == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
 
       float curClip  = *(float*)(ac + 0x10);
@@ -953,7 +954,7 @@ static int lua_SetWeaponAmmo(lua_State* L)
    if (!wpn) { g_lua.pushnil(L); return 1; }
 
    __try {
-      uintptr_t ac = *(uintptr_t*)(wpn + 0x88);
+      uintptr_t ac = *(uintptr_t*)(wpn + layout::Weapon::kAmmoCounter);
       if (!ac || ac == 0xCDCDCDCDu) { g_lua.pushnil(L); return 1; }
 
       *(float*)(ac + 0x10) = curClip;

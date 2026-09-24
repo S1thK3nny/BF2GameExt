@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 
@@ -146,9 +147,6 @@ static uint32_t s_mStateOff = 0;
 // path looks it up.
 // ---------------------------------------------------------------------------
 
-// Weapon offset, build-invariant (see weapon/shield_channel_fix.cpp).
-static constexpr int kWeapon_mOwner = 0x6C;
-
 static uintptr_t s_rttiHashPtr  = 0;  // -> the EntityDroideka PblHash value
 static uintptr_t s_shieldVtable = 0;  // captured from the first live WeaponShield
 
@@ -189,7 +187,7 @@ static fn_ShieldUpdate_t s_origShieldUpdate = nullptr;
 // does: (mOwner+0x18)->vt[0x20]() yields the entity.
 static uintptr_t shield_owner_entity(uintptr_t wpn)
 {
-   const uintptr_t owner = *(uintptr_t*)(wpn + kWeapon_mOwner);
+   const uintptr_t owner = *(uintptr_t*)(wpn + layout::Weapon::kOwner);
    if (!owner) return 0;
    const uintptr_t sub = owner + 0x18;
    const uintptr_t vt  = *(uintptr_t*)sub;
