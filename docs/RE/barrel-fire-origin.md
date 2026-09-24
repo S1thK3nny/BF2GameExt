@@ -450,10 +450,15 @@ misfired twice in this file already — the `bit 3` test missed SniperScope weap
 and the raw `Tracker+0x14` read ignores the class camera-mode override — so the
 hook reads the engine's own answer instead.
 
+History: `deaea67` added the early-out, `664561c` (crosshair convergence) deleted it by
+accident, and it was re-added on 2026-09-17. Do not revert `664561c` to restore it - that
+commit's move of the convergence ray onto the crosshair line was a separate real fix.
+
 | Build | `ScopeDisplay*` global | Visible flag | Hide |
 |-------|------------------------|--------------|------|
 | modtools | `0x00BA36D8` | instance `+0x4C9` | `0x683CB0` |
 | Steam | `0x01EAF020` | instance `+0x4C9` | `0x633B30` |
+| GOG | `0x01EB04D4` | instance `+0x4C9` | |
 
 The global is a one-element array indexed by camera; PC never allocates past index
 0. The instance is `0x520` bytes on modtools and `0x500` on Steam, but only the

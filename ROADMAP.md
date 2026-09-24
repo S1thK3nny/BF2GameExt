@@ -5,18 +5,6 @@ is shipped. For what the DLL actually does today, see
 [docs/user/FEATURES.md](docs/user/FEATURES.md).
 
 ## Bugs
-**Barrel fire origin still comes from hp_fire while scoped** - Scoping in is supposed to hand
-the frame back to vanilla so the shot leaves the normal origin, and it does not: bolts still come
-out of the barrel hardpoint. The gate was one early-out at the top of the `OverrideAimer` hook,
-`if (scopeTextureVisible()) return false;`. `deaea67` added it, `664561c` ("always fires at the
-crosshair") deleted it - not the merge. `scope_display_instance` is still in `game_addrs.hpp` for
-all three builds, so re-adding that early-out is the whole fix. Do not revert `664561c` to get it
-back; it also moved the convergence ray to the crosshair line, which was a separate real fix.
-
-**Droideka death animation is bound/pointing to the player** - When the droideka dies and plays the animation, 
-you can see the animation rotating the droidekas geometry to face the player. 
-No idea why this happens.
-
 **Tentacle fields are unclamped in stock code** - Both tentacle properties on
 `EntitySoldierClass` are bitfields that accept more than the arrays can hold, and neither is
 clamped on any build. `NumTentacles` is 3 bits (0-7) against arrays dimensioned for 4;

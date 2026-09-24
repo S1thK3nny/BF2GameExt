@@ -134,6 +134,8 @@ Scripts can check the running version through `GameExt.version`.
   crashing until the PC was restarted. It now starts with a slightly smaller sound
   memory pool when the full one does not fit, and says so in the log. If sound
   cannot start at all, the game runs without sound instead of crashing.
+- While looking through a scope, shots left the barrel instead of the centre of the
+  scope, so they visibly angled in towards the target.
 
 ## 1.0.0
 
