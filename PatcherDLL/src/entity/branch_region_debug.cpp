@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
 #include "core/pbl_hash.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -39,18 +40,6 @@
 bool g_branchRegionDebugEnabled = false;
 
 namespace {
-
-void dbg_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 typedef void*(__cdecl* fn_Find_t)(const char* name);
 typedef void*(__stdcall* fn_CreateRegion_t)(void* desc, const char* name);
@@ -141,19 +130,19 @@ void dump_factory_list()
 {
    if (!g_factoryListHead) return;
 
-   dbg_log("[BranchDbg] --- registered region factories (in Find order) ---");
+   install_log("[BranchDbg] --- registered region factories (in Find order) ---");
 
    uint8_t* node = *(uint8_t**)g_factoryListHead;
    for (int i = 0; i < 64 && node && node != g_factoryListHead; ++i) {
       uint8_t*    factory = node - 8;
       const char* prefix  = *(const char**)(node - 4);
-      dbg_log("[BranchDbg]   [%2d] factory=%p vtbl=%p prefix=%p \"%s\" len=%u",
-              i, factory, *(void**)factory, (void*)prefix,
-              prefix ? prefix : "(null)", prefix ? (unsigned)strlen(prefix) : 0u);
+      install_log("[BranchDbg]   [%2d] factory=%p vtbl=%p prefix=%p \"%s\" len=%u",
+                  i, factory, *(void**)factory, (void*)prefix,
+                  prefix ? prefix : "(null)", prefix ? (unsigned)strlen(prefix) : 0u);
       node = *(uint8_t**)node;
    }
-   dbg_log("[BranchDbg] --- end of factory list (default factory = %p) ---",
-           g_defaultFactory);
+   install_log("[BranchDbg] --- end of factory list (default factory = %p) ---",
+               g_defaultFactory);
 }
 
 void* __cdecl hooked_find(const char* name)
@@ -165,9 +154,9 @@ void* __cdecl hooked_find(const char* name)
       if (!dumped) { dumped = true; dump_factory_list(); }
 
       const char* prefix = factory ? *(const char**)((uint8_t*)factory + 4) : nullptr;
-      dbg_log("[BranchDbg] Find(\"%s\") -> factory %p vtbl=%p prefix=\"%s\"  (live=%u)",
-              name, factory, factory ? *(void**)factory : nullptr,
-              prefix ? prefix : "(null)", live_count());
+      install_log("[BranchDbg] Find(\"%s\") -> factory %p vtbl=%p prefix=\"%s\"  (live=%u)",
+                  name, factory, factory ? *(void**)factory : nullptr,
+                  prefix ? prefix : "(null)", live_count());
    }
    return factory;
 }
@@ -179,17 +168,17 @@ void* __stdcall hooked_create_region(void* desc, const char* name)
 
    void* result = g_origCreateRegion(desc, name);
 
-   dbg_log("[BranchDbg] CreateRegion(\"%s\") typeId=%08x (sphere=%08x) idFrom=\"%s\" "
-           "hash=%08x -> %p  (live=%u)",
-           name ? name : "(null)", typeId, pbl_hash("sphere"),
-           space ? space : "(NO SPACE)", space ? pbl_hash(space) : 0, result, live_count());
+   install_log("[BranchDbg] CreateRegion(\"%s\") typeId=%08x (sphere=%08x) idFrom=\"%s\" "
+               "hash=%08x -> %p  (live=%u)",
+               name ? name : "(null)", typeId, pbl_hash("sphere"),
+               space ? space : "(NO SPACE)", space ? pbl_hash(space) : 0, result, live_count());
    return result;
 }
 
 void* __cdecl hooked_find_by_id_cdecl(uint32_t hash)
 {
    void* result = reinterpret_cast<fn_FindByID_cdecl_t>(g_origFindByID)(hash);
-   dbg_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
+   install_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
    return result;
 }
 
@@ -198,7 +187,7 @@ void* __cdecl hooked_find_by_id_cdecl(uint32_t hash)
 void* __fastcall hooked_find_by_id_fastcall(uint32_t hash, uint32_t edx)
 {
    void* result = reinterpret_cast<fn_FindByID_fastcall_t>(g_origFindByID)(hash, edx);
-   dbg_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
+   install_log("[BranchDbg] FindByID(%08x) -> %p  (live=%u)", hash, result, live_count());
    return result;
 }
 
@@ -220,7 +209,7 @@ void branch_region_debug_install(uintptr_t exe_base)
    case GameBuild::Steam:    s_dbg = &kDbgSteam;    break;
    case GameBuild::GOG:      s_dbg = &kDbgGOG;      break;
    default:
-      dbg_log("[BranchDbg] install skipped: unknown build");
+      install_log("[BranchDbg] install skipped: unknown build");
       return;
    }
    const DbgSites& D = *s_dbg;
@@ -230,7 +219,7 @@ void branch_region_debug_install(uintptr_t exe_base)
    // rather than "the feature is not ported here".
    if (!D.listCount || !D.factoryListHead || !D.defaultFactory ||
        !D.find || !D.createRegion || !D.findByID) {
-      dbg_log("[BranchDbg] install skipped: this build is not ported yet");
+      install_log("[BranchDbg] install skipped: this build is not ported yet");
       return;
    }
 
@@ -249,17 +238,17 @@ void branch_region_debug_install(uintptr_t exe_base)
    const LONG a3 = DetourAttach(&g_origFindByID, find_by_id_detour());
    const LONG rc = DetourTransactionCommit();
 
-   dbg_log("[BranchDbg] install: Find=%p CreateRegion=%p FindByID=%p count=%p"
-           " attach=(%ld,%ld,%ld) commit=%ld  liveAtInstall=%u",
-           (void*)g_origFind, (void*)g_origCreateRegion, (void*)g_origFindByID,
-           (void*)g_listCount, a1, a2, a3, rc, live_count());
+   install_log("[BranchDbg] install: Find=%p CreateRegion=%p FindByID=%p count=%p"
+               " attach=(%ld,%ld,%ld) commit=%ld  liveAtInstall=%u",
+               (void*)g_origFind, (void*)g_origCreateRegion, (void*)g_origFindByID,
+               (void*)g_listCount, a1, a2, a3, rc, live_count());
 }
 
 void branch_region_debug_uninstall()
 {
    if (!g_origFind) return;
 
-   dbg_log("[BranchDbg] final live count = %u", live_count());
+   install_log("[BranchDbg] final live count = %u", live_count());
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

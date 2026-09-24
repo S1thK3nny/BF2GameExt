@@ -2,6 +2,7 @@
 #include "ai_update_budget.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <stdio.h>
@@ -97,18 +98,6 @@ uint8_t** g_listSlot = nullptr;
 
 const DiagSites* s_diag = nullptr;
 
-void diag_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 // Walk the queue: how many controllers exist, and how they are spread across LOD
 // tiers.  Tier decides how often each one WANTS service, so the spread is what
 // turns a raw count into a demand figure.
@@ -151,20 +140,20 @@ void report()
    const int budget = (g_aiUpdateBudget > 0) ? g_aiUpdateBudget : 10;
    const LONG per100 = (hl * 100) / turns;
 
-   diag_log("[AIBudget] turns=%ld  highLevelUpdates=%ld  per turn=%ld.%02ld  budget=%d%s",
-            turns, hl, per100 / 100, per100 % 100, budget,
-            (per100 >= (LONG)budget * 100 - 5) ? "   <-- SATURATED" : "");
-   diag_log("[AIBudget]   peak controllers=%d  by LOD tier "
-            "[0]=%d [1]=%d [2]=%d [3]=%d [4]=%d  (4 = nearest a player, fastest)",
-            s_peakControllers, s_peakTierCount[0], s_peakTierCount[1],
-            s_peakTierCount[2], s_peakTierCount[3], s_peakTierCount[4]);
+   install_log("[AIBudget] turns=%ld  highLevelUpdates=%ld  per turn=%ld.%02ld  budget=%d%s",
+               turns, hl, per100 / 100, per100 % 100, budget,
+               (per100 >= (LONG)budget * 100 - 5) ? "   <-- SATURATED" : "");
+   install_log("[AIBudget]   peak controllers=%d  by LOD tier "
+               "[0]=%d [1]=%d [2]=%d [3]=%d [4]=%d  (4 = nearest a player, fastest)",
+               s_peakControllers, s_peakTierCount[0], s_peakTierCount[1],
+               s_peakTierCount[2], s_peakTierCount[3], s_peakTierCount[4]);
 
    if (s_peakControllers > 0) {
       // Round-robin latency: at N controllers and B serviced per turn, a given
       // unit waits N/B turns between decisions.
       const int turnsPerUnit = (s_peakControllers + budget - 1) / budget;
-      diag_log("[AIBudget]   at peak that is one decision per unit every %d turns",
-               turnsPerUnit);
+      install_log("[AIBudget]   at peak that is one decision per unit every %d turns",
+                  turnsPerUnit);
    }
 }
 
@@ -252,7 +241,7 @@ void ai_update_budget_install(uintptr_t exe_base)
       const uint32_t  width = g_addr->ai_update_budget_imm8 ? 1u : 4u;
 
       if (va == 0) {
-         diag_log("[AIBudget] no budget immediate for this build -- left stock");
+         install_log("[AIBudget] no budget immediate for this build -- left stock");
       } else {
          int n = g_aiUpdateBudget;
          if (n < kMinBudget) n = kMinBudget;   // below stock there is nothing to gain
@@ -269,8 +258,8 @@ void ai_update_budget_install(uintptr_t exe_base)
             const uint32_t v = (uint32_t)n;
             memcpy(site, &v, width);
          } else {
-            diag_log("[AIBudget] budget site %08X reads %u, expected 10 -- left stock",
-                     (unsigned)va, cur);
+            install_log("[AIBudget] budget site %08X reads %u, expected 10 -- left stock",
+                        (unsigned)va, cur);
          }
       }
    }
@@ -283,7 +272,7 @@ void ai_update_budget_install(uintptr_t exe_base)
    case GameBuild::Steam:    s_diag = &kDiagSteam;    break;
    case GameBuild::GOG:      s_diag = &kDiagGOG;      break;
    default:
-      diag_log("[AIBudget] diagnostic: unknown build -- not installed");
+      install_log("[AIBudget] diagnostic: unknown build -- not installed");
       return;
    }
    const DiagSites& D = *s_diag;
@@ -304,8 +293,8 @@ void ai_update_budget_install(uintptr_t exe_base)
    const LONG a2 = DetourAttach(reinterpret_cast<PVOID*>(&g_origHighLevel), hooked_high_level);
    const LONG rc = DetourTransactionCommit();
 
-   diag_log("[AIBudget] diagnostic install: Update=%p HighLevel=%p attach=(%ld,%ld) commit=%ld",
-            (void*)g_origMgrUpdate, (void*)g_origHighLevel, a1, a2, rc);
+   install_log("[AIBudget] diagnostic install: Update=%p HighLevel=%p attach=(%ld,%ld) commit=%ld",
+               (void*)g_origMgrUpdate, (void*)g_origHighLevel, a1, a2, rc);
 
    if (rc != NO_ERROR) g_origMgrUpdate = nullptr;
 }
@@ -313,7 +302,7 @@ void ai_update_budget_install(uintptr_t exe_base)
 void ai_update_budget_uninstall()
 {
    if (g_origMgrUpdate) {
-      diag_log("[AIBudget] --- final ---");
+      install_log("[AIBudget] --- final ---");
       report();
 
       DetourTransactionBegin();

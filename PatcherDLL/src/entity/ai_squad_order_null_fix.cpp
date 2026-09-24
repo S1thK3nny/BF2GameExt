@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -115,7 +116,7 @@ void ai_squad_order_null_fix_install(uintptr_t exe_base)
    uint8_t* skip   = (uint8_t*)resolve(exe_base, g_addr->ai_squad_order_guard_skip);
 
    if (std::memcmp(site, orig, origLen) != 0) {
-      get_gamelog()("[AISquadOrderNullFix] unexpected bytes at guard site, skipping\n");
+      install_log("[AISquadOrderNullFix] unexpected bytes at guard site, skipping");
       return;
    }
 

@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -148,7 +149,7 @@ void jetpack_fp_sound_fix_install(uintptr_t exe_base)
    if (site[0] != 0xE8 ||
        site + 5 + *(int32_t*)(site + 1) != expected ||
        std::memcmp(site + 5, tail, tailLen) != 0) {
-      get_gamelog()("[JetpackFPSoundFix] unexpected bytes at SetFirstPersonView call, skipping\n");
+      install_log("[JetpackFPSoundFix] unexpected bytes at SetFirstPersonView call, skipping");
       return;
    }
 

@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -118,7 +119,7 @@ void hero_team_switch_fix_install(uintptr_t exe_base)
    // Bail (no-op) unless both the test and the branch that consumes it match.
    if (std::memcmp(site, orig, origLen) != 0 ||
        std::memcmp(site + origLen, next, nextLen) != 0) {
-      get_gamelog()("[HeroTeamSwitchFix] unexpected bytes at ChangeTeam hero test, skipping\n");
+      install_log("[HeroTeamSwitchFix] unexpected bytes at ChangeTeam hero test, skipping");
       return;
    }
 

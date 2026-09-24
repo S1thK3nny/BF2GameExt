@@ -74,6 +74,7 @@
 #include "util/game_logging.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
+#include "util/install_log.hpp"
 
 static bool g_initialized = false;
 
@@ -119,13 +120,13 @@ static void apply_deadbody_check_patches(uintptr_t exe_base, bool disableAll, bo
 
    if (disableAll) {
       if (!nop_if_matches(exe_base, g_addr->deadbody_check_guard_jge, kGuardJge, sizeof(kGuardJge)))
-         get_gamelog()("[DeadBodyCheck] unexpected bytes at guard JGE, DisableDeadBodyShooting not applied\n");
+         install_log("[DeadBodyCheck] unexpected bytes at guard JGE, DisableDeadBodyShooting not applied");
    }
    else if (allFactions) {
       const uint8_t* orig = retail ? kSideJnzRetail : kSideJnzModtools;
       const size_t   len  = retail ? sizeof(kSideJnzRetail) : sizeof(kSideJnzModtools);
       if (!nop_if_matches(exe_base, g_addr->deadbody_check_side_jnz, orig, len))
-         get_gamelog()("[DeadBodyCheck] unexpected bytes at side JNZ, DeadBodyShootingAllFactions not applied\n");
+         install_log("[DeadBodyCheck] unexpected bytes at side JNZ, DeadBodyShootingAllFactions not applied");
    }
 }
 

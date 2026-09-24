@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -270,8 +271,8 @@ void water_texture_count_fix_install(uintptr_t exe_base)
       if (site[0] != 0xA3 ||
           std::memcmp(site - prefixLen, prefix, prefixLen) != 0 ||
           std::memcmp(site + kSiteLen, suffix, 2) != 0) {
-         get_gamelog()("[WaterTextureCountFix] unexpected bytes at the %s count store, skipping\n",
-                       kPropName[i]);
+         install_log("[WaterTextureCountFix] unexpected bytes at the %s count store, skipping",
+                     kPropName[i]);
          continue;
       }
 

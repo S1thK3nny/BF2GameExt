@@ -3,6 +3,7 @@
 #include "controller_support.hpp"
 #include "util/ini_config.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -933,7 +934,7 @@ void aim_assist_install(uintptr_t exe_base)
     LONG result = DetourTransactionCommit();
 
     if (result != NO_ERROR) {
-        if (s_log) s_log("[AimAssist] ERROR: Detours commit failed (%ld)\n", result);
+        install_log("[AimAssist] ERROR: Detours commit failed (%ld)", result);
         original_PCUpdate = nullptr;
         original_ApplyDamage6 = nullptr;
     }

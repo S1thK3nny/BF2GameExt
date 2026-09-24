@@ -2,6 +2,7 @@
 #include "ai_decision_rate.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -33,20 +34,6 @@ float* s_site[5] = {};
 float  s_orig[5] = {};
 bool   s_patched = false;
 
-// CRT logging, not GameLog: install runs inside the window where every section
-// is mapped PAGE_READWRITE, so calling back into the engine would EXEC-fault.
-void diag_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 } // namespace
 
 void ai_decision_rate_install(uintptr_t exe_base)
@@ -73,8 +60,8 @@ void ai_decision_rate_install(uintptr_t exe_base)
    // would be worse than leaving it stock.
    for (int i = 0; i < 5; ++i) {
       if (*site[i] != kStock[i]) {
-         diag_log("[AIRate] tier %d site %08X reads %f, expected %f -- left stock",
-                  i, (unsigned)va[i], *site[i], kStock[i]);
+         install_log("[AIRate] tier %d site %08X reads %f, expected %f -- left stock",
+                     i, (unsigned)va[i], *site[i], kStock[i]);
          return;
       }
    }
@@ -90,9 +77,9 @@ void ai_decision_rate_install(uintptr_t exe_base)
    }
    s_patched = true;
 
-   diag_log("[AIRate] rate=%.2f  intervals %.2f %.2f %.2f %.2f %.2f s "
-            "(tier 0 furthest .. tier 4 nearest a player)",
-            rate, applied[0], applied[1], applied[2], applied[3], applied[4]);
+   install_log("[AIRate] rate=%.2f  intervals %.2f %.2f %.2f %.2f %.2f s "
+               "(tier 0 furthest .. tier 4 nearest a player)",
+               rate, applied[0], applied[1], applied[2], applied[3], applied[4]);
 }
 
 void ai_decision_rate_uninstall()

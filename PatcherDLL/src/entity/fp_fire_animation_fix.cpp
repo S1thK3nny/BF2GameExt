@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -114,7 +115,7 @@ void fp_fire_animation_fix_install(uintptr_t exe_base)
    // Bail (no-op) unless both the load and the timer store that follows it match.
    if (std::memcmp(site, orig, origLen) != 0 ||
        std::memcmp(site + origLen, next, nextLen) != 0) {
-      get_gamelog()("[FPFireAnimFix] unexpected bytes at the FP transition override, skipping\n");
+      install_log("[FPFireAnimFix] unexpected bytes at the FP transition override, skipping");
       return;
    }
 

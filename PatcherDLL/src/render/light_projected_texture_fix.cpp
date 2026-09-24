@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -102,7 +103,7 @@ void light_projected_texture_fix_install(uintptr_t exe_base)
 
    if (std::memcmp(site, orig, kSiteLen) != 0 ||
        std::memcmp(site + kSiteLen, next, nextLen) != 0) {
-      get_gamelog()("[LightProjectedTextureFix] unexpected bytes at the frame-name site, skipping\n");
+      install_log("[LightProjectedTextureFix] unexpected bytes at the frame-name site, skipping");
       return;
    }
 

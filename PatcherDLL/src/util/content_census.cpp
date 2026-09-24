@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
 #include "core/pbl_hash.hpp"
+#include "util/install_log.hpp"
 
 #include <windows.h>
 #include <stdio.h>
@@ -41,18 +42,6 @@ bool     s_havePrev = false;
 uintptr_t s_exeBase = 0;
 HANDLE    s_thread  = nullptr;
 HANDLE    s_stop    = nullptr;
-
-void census_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // A bar that makes "you are nearly out" obvious at a glance in a wall of log.
 const char* pressure(uint32_t used, uint32_t cap)
@@ -653,7 +642,7 @@ void report_heaps()
    }
    if (!table || count == 0 || count > kMaxHeaps) return;
 
-   census_log("[Census] --- memory ---");
+   install_log("[Census] --- memory ---");
    for (uint32_t i = 0; i < count; ++i) {
       const uint8_t* const heap = table + (uintptr_t)i * kHeapStride;
 
@@ -673,7 +662,7 @@ void report_heaps()
 
       uint32_t freeBytes = 0, largest = 0;
       if (!walk_free_list(heap, &freeBytes, &largest)) {
-         census_log("[Census]   %-14s (free list unreadable this tick)", name);
+         install_log("[Census]   %-14s (free list unreadable this tick)", name);
          continue;
       }
 
@@ -698,9 +687,9 @@ void report_heaps()
       }
       if (i < kMaxHeaps) s_prevUsed[i] = used;
 
-      census_log("[Census]   %-14s %9s / %-9s  largest free %9s%s%s",
-                 name, usedS, sizeS, largeS,
-                 delta, pressure(used, size));
+      install_log("[Census]   %-14s %9s / %-9s  largest free %9s%s%s",
+                  name, usedS, sizeS, largeS,
+                  delta, pressure(used, size));
    }
    s_havePrev = true;
 }
@@ -735,7 +724,7 @@ void count_str(char* out, size_t cap, bool have, const WalkResult& W)
 
 void dump_class_names(const Registry& R, uint32_t n)
 {
-   census_log("[Census]   --- %s classes, one line each ---", R.label);
+   install_log("[Census]   --- %s classes, one line each ---", R.label);
    for (uint32_t i = 0; i < n; ++i) {
       const Root* const root = find_root(R, s_rec[i].rootId);
       char name[kNameMax + 1];
@@ -760,13 +749,13 @@ void dump_class_names(const Registry& R, uint32_t n)
       // root, and printing "(unknown root)" for it would contradict the summary.
       static const char* const kRoute[4] = { "chain", "type", "name", "UNRESOLVED" };
       const uint8_t fam = s_rec[i].family;
-      census_log("[Census]     %-24s %-13s %-11s via %-10s id=0x%08X",
-                 name[0] != 0 ? name : "(no name on this build)",
-                 root != nullptr ? root->name : "-",
-                 (fam < FAM_COUNT) ? kFamilyLabel[fam]
-                                   : (fam == kFamExcluded ? "(excluded)" : "(none)"),
-                 kRoute[s_rec[i].route < 4 ? s_rec[i].route : 3],
-                 s_rec[i].mId);
+      install_log("[Census]     %-24s %-13s %-11s via %-10s id=0x%08X",
+                  name[0] != 0 ? name : "(no name on this build)",
+                  root != nullptr ? root->name : "-",
+                  (fam < FAM_COUNT) ? kFamilyLabel[fam]
+                                    : (fam == kFamExcluded ? "(excluded)" : "(none)"),
+                  kRoute[s_rec[i].route < 4 ? s_rec[i].route : 3],
+                  s_rec[i].mId);
    }
 }
 
@@ -795,13 +784,13 @@ void report_registries()
 
    if (have[0]) {
       if (W[0].err[0] != 0 && W[0].scanned == 0) {
-         census_log("[Census]   entity classes  ? (%s)", W[0].err);
+         install_log("[Census]   entity classes  ? (%s)", W[0].err);
       } else {
-         census_log("[Census]   entity classes  %4u   sol %3u  veh %3u  tur %2u"
-                    "  bld %3u  cp %2u  pup %3u  scn %3u",
-                    W[0].scanned, W[0].fam[FAM_SOLDIER], W[0].fam[FAM_VEHICLE],
-                    W[0].fam[FAM_TURRET], W[0].fam[FAM_BUILDING],
-                    W[0].fam[FAM_CMDPOST], W[0].fam[FAM_PICKUP], W[0].fam[FAM_SCENERY]);
+         install_log("[Census]   entity classes  %4u   sol %3u  veh %3u  tur %2u"
+                     "  bld %3u  cp %2u  pup %3u  scn %3u",
+                     W[0].scanned, W[0].fam[FAM_SOLDIER], W[0].fam[FAM_VEHICLE],
+                     W[0].fam[FAM_TURRET], W[0].fam[FAM_BUILDING],
+                     W[0].fam[FAM_CMDPOST], W[0].fam[FAM_PICKUP], W[0].fam[FAM_SCENERY]);
       }
    }
 
@@ -810,7 +799,7 @@ void report_registries()
       count_str(w, sizeof(w), have[1], W[1]);
       count_str(o, sizeof(o), have[2], W[2]);
       count_str(e, sizeof(e), have[3], W[3]);
-      census_log("[Census]   weapon classes  %4s   ordnance %4s   explosion %4s", w, o, e);
+      install_log("[Census]   weapon classes  %4s   ordnance %4s   explosion %4s", w, o, e);
    }
 
    // Anomalies, subordinate to the counts and printed only when non-zero, so a
@@ -821,60 +810,60 @@ void report_registries()
       const char* const L = kRegs[i].label;
 
       if (R.err[0] != 0 && R.scanned != 0)
-         census_log("[Census]     %s: %s", L, R.err);
+         install_log("[Census]     %s: %s", L, R.err);
 
       if (R.engine < 0) {
-         census_log("[Census]     %s: engine counter is NEGATIVE (%d)"
-                    " -- bad address, not a race", L, R.engine);
+         install_log("[Census]     %s: engine counter is NEGATIVE (%d)"
+                     " -- bad address, not a race", L, R.engine);
       } else if (R.err[0] == 0 && (uint32_t)R.engine != R.scanned) {
          const int d = (int)R.scanned - R.engine;
          // Both mutation paths update _iCount BEFORE the forward chain, so the
          // scan can legitimately lag the counter but can never lead it.
          if (d < 0)
-            census_log("[Census]     %s: engine %d vs scan %u (%+d"
-                       " -- mid-mutation, expected at a state change)", L, R.engine, R.scanned, d);
+            install_log("[Census]     %s: engine %d vs scan %u (%+d"
+                        " -- mid-mutation, expected at a state change)", L, R.engine, R.scanned, d);
          else
-            census_log("[Census]     %s: engine %d vs scan %u (%+d"
-                       " -- IMPOSSIBLE, list or counter corrupt)", L, R.engine, R.scanned, d);
+            install_log("[Census]     %s: engine %d vs scan %u (%+d"
+                        " -- IMPOSSIBLE, list or counter corrupt)", L, R.engine, R.scanned, d);
       }
 
       if (R.constructing || R.unlinking || R.orphan || R.cycle || R.unknownRoot)
-         census_log("[Census]     %s: %u constructing, %u unlinking, %u orphan,"
-                    " %u cycle, %u unknown-root",
-                    L, R.constructing, R.unlinking, R.orphan, R.cycle, R.unknownRoot);
+         install_log("[Census]     %s: %u constructing, %u unlinking, %u orphan,"
+                     " %u cycle, %u unknown-root",
+                     L, R.constructing, R.unlinking, R.orphan, R.cycle, R.unknownRoot);
 
       // Say how the breakdown was reached. A class whose CreateClass never
       // recorded a parent can only be attributed by its C++ type, and the
       // reader deserves to know which figures came from which route.
       if (R.byType != 0 || R.byName != 0)
-         census_log("[Census]     %s: %u attributed by type, %u by an identical"
-                    " ODF name (their CreateClass records no parent)",
-                    L, R.byType, R.byName);
+         install_log("[Census]     %s: %u attributed by type, %u by an identical"
+                     " ODF name (their CreateClass records no parent)",
+                     L, R.byType, R.byName);
 
       // A vehicle with passenger positions registers one class PER SEAT under
       // the vehicle's own name, so the raw registration count overstates how
       // much was actually authored. Both numbers are worth having: the first is
       // what the engine is holding, the second is what you wrote.
       if (R.distinct != 0 && R.distinct != R.scanned)
-         census_log("[Census]     %s: %u distinct ODF names, %u extra registration(s)"
-                    " -- vehicle passenger slots and the like",
-                    L, R.distinct, R.scanned - R.distinct);
+         install_log("[Census]     %s: %u distinct ODF names, %u extra registration(s)"
+                     " -- vehicle passenger slots and the like",
+                     L, R.distinct, R.scanned - R.distinct);
 
       if (R.unnamed || R.truncated || R.mismatch)
-         census_log("[Census]     %s: %u unnamed, %u names longer than 31 chars,"
-                    " %u name/id MISMATCH", L, R.unnamed, R.truncated, R.mismatch);
+         install_log("[Census]     %s: %u unnamed, %u names longer than 31 chars,"
+                     " %u name/id MISMATCH", L, R.unnamed, R.truncated, R.mismatch);
 
       // Name the unknown roots rather than only counting them. Every root the
       // engine ships is in our table, so one that is not means a class was
       // created by a path we have not accounted for -- and the id, plus its
       // name where the build kept one, is what identifies it.
       for (uint32_t k = 0; k < R.unkDistinct; ++k)
-         census_log("[Census]     %s: unknown root id=0x%08X %-24s %u class(es) below it",
-                    L, R.unkId[k],
-                    R.unkName[k][0] != 0 ? R.unkName[k] : "(no name)", R.unkCount[k]);
+         install_log("[Census]     %s: unknown root id=0x%08X %-24s %u class(es) below it",
+                     L, R.unkId[k],
+                     R.unkName[k][0] != 0 ? R.unkName[k] : "(no name)", R.unkCount[k]);
       if (R.unknownRoot != 0 && R.unkDistinct == 8)
-         census_log("[Census]     %s: (more than %u distinct unknown roots -- listing capped)",
-                    L, kMaxUnkListed);
+         install_log("[Census]     %s: (more than %u distinct unknown roots -- listing capped)",
+                     L, kMaxUnkListed);
    }
 
    // Optional per-class listing. Fires when the entity count has changed since
@@ -900,23 +889,23 @@ void content_census_report()
 
    report_heaps();
 
-   census_log("[Census] --- content ---");
+   install_log("[Census] --- content ---");
 
    uint32_t scan = 0, counter = 0;
    if (scan_effect_classes(&scan, &counter)) {
-      census_log("[Census]   effect classes   %3u / %u%s",
-                 scan, kEffectClassSlots, pressure(scan, kEffectClassSlots));
+      install_log("[Census]   effect classes   %3u / %u%s",
+                  scan, kEffectClassSlots, pressure(scan, kEffectClassSlots));
       // The engine's own counter is reported next to the scan rather than
       // instead of it. They should always agree; if they ever do not, the
       // discrepancy IS the finding, so say so instead of quietly preferring one.
       if (counter != scan) {
-         census_log("[Census]   (engine counter says %u, scan says %u -- they disagree,"
-                    " trust the scan)", counter, scan);
+         install_log("[Census]   (engine counter says %u, scan says %u -- they disagree,"
+                     " trust the scan)", counter, scan);
       }
       if (scan >= kEffectClassSlots) {
-         census_log("[Census]   WARNING: the effect table is FULL. Loading one more distinct"
-                    " effect will hang during level load, and any lookup of an effect name"
-                    " that is not registered will hang the game now.");
+         install_log("[Census]   WARNING: the effect table is FULL. Loading one more distinct"
+                     " effect will hang during level load, and any lookup of an effect name"
+                     " that is not registered will hang the game now.");
       }
    }
 
@@ -942,16 +931,16 @@ void content_census_report()
          haveFactories = false;
       }
       if (haveFactories)
-         census_log("[Census]   path regions    %4u   path factories %u", regions, factories);
+         install_log("[Census]   path regions    %4u   path factories %u", regions, factories);
       else
-         census_log("[Census]   path regions    %4u", regions);
+         install_log("[Census]   path regions    %4u", regions);
       // 0 before the first load and after teardown, 3 while a state is live,
       // 4 transiently while path chunks are parsing. Anything else is news.
       if (haveFactories && factories != 0 && factories != 3 && factories != 4)
-         census_log("[Census]     path factories %u -- outside expected {0,3,4}", factories);
+         install_log("[Census]     path factories %u -- outside expected {0,3,4}", factories);
    }
 
-   census_log("[Census] --- end ---");
+   install_log("[Census] --- end ---");
 }
 
 void content_census_install(uintptr_t exe_base)
