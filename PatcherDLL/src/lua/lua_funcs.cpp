@@ -9,6 +9,7 @@
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/instance_props.hpp"
 #include "core/pbl_hash.hpp"
+#include "core/layout/character.hpp"
 #include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")
@@ -290,12 +291,12 @@ static int lua_GetCharacterWeapon(lua_State* L)
    if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
 
    __try {
-      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
+      char* charSlot = (char*)arrayBase + charIndex * layout::Character::kSize;
       // The pointer at slot+0x148 is the soldier's Controllable sub-object
       // (struct+0x240) — the "entity" view all g_soldier offsets are based on.
       // (The historical "+0x18 ctrl view" read the same fields at aliased
       // offsets; direct entity offsets are what the per-build layout stores.)
-      uintptr_t entity = *(uintptr_t*)(charSlot + 0x148);
+      uintptr_t entity = *(uintptr_t*)(charSlot + layout::Character::kUnit);
       if (!entity) { g_lua.pushnil(L); return 1; }
 
       // Read the slot index for the requested channel (mWeaponIndex[channel])
@@ -432,8 +433,8 @@ static int lua_SetCharacterWeapon(lua_State* L)
    }
 
    __try {
-      char* charSlot     = (char*)arrayBase + charIndex * 0x1B0;
-      char* intermediate = *(char**)(charSlot + 0x148);
+      char* charSlot     = (char*)arrayBase + charIndex * layout::Character::kSize;
+      char* intermediate = *(char**)(charSlot + layout::Character::kUnit);
       if (!intermediate) {
          fn_GameLog("SetCharacterWeapon: char %d has no unit (intermediate null).\n", charIndex);
          g_lua.pushnil(L); return 1;
@@ -855,8 +856,8 @@ static uintptr_t resolve_active_weapon(int charIndex, int channel)
    if (!arrayBase) return 0;
 
    __try {
-      char* charSlot = (char*)arrayBase + charIndex * 0x1B0;
-      uintptr_t entity = *(uintptr_t*)(charSlot + 0x148);
+      char* charSlot = (char*)arrayBase + charIndex * layout::Character::kSize;
+      uintptr_t entity = *(uintptr_t*)(charSlot + layout::Character::kUnit);
       if (!entity) return 0;
 
       uint8_t slotIdx = *(uint8_t*)(entity + g_soldier->weaponIndexMap + channel);

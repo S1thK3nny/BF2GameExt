@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "weapon_ranges.hpp"
 #include "command_registry.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -218,8 +219,6 @@ static void __fastcall hooked_SoldierPCU(void* ecx, void* edx, float* outParam, 
 
 static constexpr uintptr_t kCharArrayPtr = 0xB93A08;  // *(uintptr_t*) = charArray base
 static constexpr uintptr_t kMaxCharsPtr  = 0xB939F4;  // *(int*)       = max character count
-static constexpr int kCharStride         = 0x1B0;
-static constexpr int kChar_Intermediate  = 0x148;
 
 static uintptr_t s_exeBase = 0;
 
@@ -239,8 +238,8 @@ static void refresh_cache_from_char_array()
 
    for (int i = 0; i < maxChars && tempCount < kMaxCached; ++i) {
       __try {
-         uintptr_t slot = arrayBase + (uintptr_t)i * kCharStride;
-         void* intermediate = *(void**)(slot + kChar_Intermediate);
+         uintptr_t slot = arrayBase + (uintptr_t)i * layout::Character::kSize;
+         void* intermediate = *(void**)(slot + layout::Character::kUnit);
          if (!intermediate) continue;
 
          char* ctrl = (char*)intermediate + 0x018;

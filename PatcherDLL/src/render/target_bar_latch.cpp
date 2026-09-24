@@ -8,6 +8,7 @@
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 #include "core/pbl_hash.hpp"
+#include "core/layout/character.hpp"
 #include "weapon/barrel_fire_origin.hpp"   // engine_ray_hit
 
 #include <detours.h>
@@ -75,9 +76,6 @@
 float g_targetBarLatchSeconds = 2.5f;
 
 // ---- Layout.  Identical on modtools, Steam and GOG. ------------------------
-static constexpr int kChr_Unit          = 0x148;
-static constexpr int kChr_Vehicle       = 0x14C;
-static constexpr int kChr_Remote        = 0x150;
 
 static constexpr int kCtrl_Trackable    = 0x18;
 static constexpr int kCtrl_EyeDir       = 0xE8;
@@ -492,9 +490,9 @@ static void tick_before()
       if (!chr) { clear_latch(); s_pending = Handle{}; return; }
 
       // Same selection HUD::GameEvents::Update makes: remote, else vehicle, else unit.
-      uint8_t* controlled = *(uint8_t**)(chr + kChr_Remote);
-      if (!controlled) controlled = *(uint8_t**)(chr + kChr_Vehicle);
-      if (!controlled) controlled = *(uint8_t**)(chr + kChr_Unit);
+      uint8_t* controlled = *(uint8_t**)(chr + layout::Character::kRemote);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kVehicle);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kUnit);
       if (!controlled) { clear_latch(); s_pending = Handle{}; return; }
 
       uint8_t* localObj = (uint8_t*)vcall_object(controlled + kCtrl_Trackable);

@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 
@@ -74,11 +75,6 @@ static constexpr int kWeapon_mTrigger = 0x74;  // Trigger*
 // shift by -0x10 on release, so those come from the active SoldierLayout.
 static constexpr int kEntity_mControlFire = 0x38;   // Trigger[2], 4 bytes each
 static constexpr int kEntity_mCharacter   = 0xCC;   // Character*
-
-// Character offsets (struct is 0x1B0 on every build; see docs/RE/game_struct_reference.md).
-static constexpr int kCharacter_mUnit    = 0x148;  // Controllable* -- the soldier
-static constexpr int kCharacter_mVehicle = 0x14C;  // Controllable* -- what it boarded
-static constexpr int kCharacter_mRemote  = 0x150;  // Controllable* -- deployed remote unit
 
 // The shield's up/down state lives on the owner's Damageable, not on the weapon,
 // which is why it survives a weapon switch (and a vehicle) by design.  Reached
@@ -196,8 +192,8 @@ static bool owner_is_riding(uintptr_t owner)
    uintptr_t chr = *(uintptr_t*)(owner + kEntity_mCharacter);
    if (!chr) return false;
 
-   return *(uintptr_t*)(chr + kCharacter_mVehicle) != 0
-       || *(uintptr_t*)(chr + kCharacter_mRemote)  != 0;
+   return *(uintptr_t*)(chr + layout::Character::kVehicle) != 0
+       || *(uintptr_t*)(chr + layout::Character::kRemote)  != 0;
 }
 
 // The shield's OFF path releases the effect with StopAndFinish, which for a

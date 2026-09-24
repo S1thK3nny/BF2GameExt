@@ -4,6 +4,7 @@
 #include "util/ini_config.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -447,7 +448,7 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     {
         uintptr_t character = *(uintptr_t*)(ctrl + 0xCC); // Controllable.mCharacter
         if (character) {
-            uintptr_t charVehicle = *(uintptr_t*)(character + 0x14C); // Character.mVehicle
+            uintptr_t charVehicle = *(uintptr_t*)(character + layout::Character::kVehicle);
             inVehicle = (charVehicle != 0);
         }
     }

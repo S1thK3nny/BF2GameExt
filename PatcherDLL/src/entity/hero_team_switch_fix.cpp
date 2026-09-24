@@ -5,6 +5,7 @@
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
 #include "util/install_log.hpp"
+#include "core/layout/character.hpp"
 
 #include <cstring>
 
@@ -72,10 +73,6 @@ static uint8_t  g_siteOrig[8] = {};
 static size_t   g_siteLen  = 0;
 static uint8_t* g_cave     = nullptr;
 
-// Character field offsets (identical on all three builds).
-static constexpr uint32_t kOffMUnit    = 0x148;
-static constexpr uint32_t kOffHeroFlag = 0x165;
-
 // The displaced hero-flag test, per build.
 static const uint8_t kOrigModtools[] = {0x8A, 0x87, 0x65, 0x01, 0x00, 0x00};       // MOV AL,[EDI+0x165]
 static const uint8_t kOrigRetail[]   = {0x80, 0xBE, 0x65, 0x01, 0x00, 0x00, 0x00}; // CMP byte ptr [ESI+0x165],0
@@ -137,7 +134,7 @@ void hero_team_switch_fix_install(uintptr_t exe_base)
    //  +16+origLen    JMP resume
    int o = 0;
    cave[o++] = 0x83; cave[o++] = modrm;
-   *(uint32_t*)(cave + o) = kOffMUnit; o += 4;
+   *(uint32_t*)(cave + o) = layout::Character::kUnit; o += 4;
    cave[o++] = 0x00;
    cave[o++] = 0x74; cave[o++] = (uint8_t)(origLen + 5); // JZ over the test + its JMP
    std::memcpy(cave + o, orig, origLen);

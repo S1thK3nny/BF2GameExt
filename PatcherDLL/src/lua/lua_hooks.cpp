@@ -51,6 +51,7 @@
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 
@@ -97,10 +98,10 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
       const int       maxChars  = *(int*)      res(g_addr->max_chars);
       if (arrayBase && maxChars > 0) {
          for (int i = 0; i < maxChars; i++) {
-            const uintptr_t slot = arrayBase + (uintptr_t)i * 0x1B0;
-            if (*(void**)(slot + 0x148) == thisPtr) {
+            const uintptr_t slot = arrayBase + (uintptr_t)i * layout::Character::kSize;
+            if (*(void**)(slot + layout::Character::kUnit) == thisPtr) {
                charIndex   = i;
-               vehicleCtrl = *(void**)(slot + 0x14C);
+               vehicleCtrl = *(void**)(slot + layout::Character::kVehicle);
                break;
             }
          }
