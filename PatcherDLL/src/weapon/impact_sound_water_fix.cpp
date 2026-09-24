@@ -2,6 +2,7 @@
 #include "impact_sound_water_fix.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <float.h>
 #include <stdio.h>
@@ -23,20 +24,6 @@ fn_get_water_height_t g_origGetWaterHeight = nullptr;
 
 uint8_t* s_relSite = nullptr;  // the rel32 operand, i.e. CALL opcode + 1
 int32_t  s_relOrig = 0;
-
-void install_log(const char* fmt, ...)
-{
-   // CRT only: install runs while every section is mapped PAGE_READWRITE, so
-   // calling back into the engine's logger would EXEC-fault.
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // Seed the out-param, then defer to the engine.  On a map WITH water the original
 // overwrites our value with the real surface height, so underwater suppression is

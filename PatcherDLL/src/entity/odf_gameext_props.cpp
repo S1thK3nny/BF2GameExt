@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 #include <cstdarg>
@@ -302,23 +303,6 @@ struct Site {
    void    (*shim)();
    void**    cont;        // where the shim returns to (site + 9)
 };
-
-// Install-time logging must NOT go through the engine. dllmain flips every exe
-// section to PAGE_READWRITE (non-executable) for the whole install window, so
-// calling RedWarning::LogMessage here is an EXEC access violation on any build
-// with DEP - i.e. Steam and GOG will not launch at all, while modtools silently
-// tolerates it. Write to our own file with the CRT instead.
-void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 uint8_t* s_patched[4] = {};
 uint8_t  s_orig[4][9] = {};

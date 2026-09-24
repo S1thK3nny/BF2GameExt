@@ -6,6 +6,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 #include "weapon/barrel_fire_origin.hpp"   // engine_ray_hit
 
 #include <detours.h>
@@ -197,21 +198,6 @@ struct Lend {
    bool      active;
 };
 static Lend s_lend[kChannels];
-
-// install_log() is the ONLY logger that may run during install: dllmain holds the
-// exe sections at PAGE_READWRITE then, so calling the engine's own logger is an
-// EXEC access violation on DEP builds.  Same split as spawn_vehicle_list.cpp.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // ---------------------------------------------------------------------------
 // Reading the engine

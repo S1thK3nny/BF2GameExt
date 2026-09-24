@@ -2,6 +2,7 @@
 #include "mp_spawn_delay.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -11,20 +12,6 @@
 // Multiplayer spawn delay ([Features] MPSpawnDelay).  See the header for what
 // the engine does and docs/RE/SpawnDelaySystem.md for the full write-up.
 // =============================================================================
-
-// Install-time logging must not go through the engine's logger: every section is
-// PAGE_READWRITE for the whole installer sequence, so calling into .text raises
-// an EXEC access violation.  Same reason as voice_limit.cpp.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fclose(f);
-}
 
 float g_mpSpawnDelay = 15.0f;
 
@@ -113,7 +100,7 @@ void mp_spawn_delay_install(uintptr_t exe_base)
    if (delay < kMinDelay) delay = kMinDelay;
    if (delay > kMaxDelay) delay = kMaxDelay;
    if (delay != g_mpSpawnDelay)
-      install_log("[MPSpawnDelay] %.2f is out of range (%.1f to %.0f), using %.2f\n",
+      install_log("[MPSpawnDelay] %.2f is out of range (%.1f to %.0f), using %.2f",
                   g_mpSpawnDelay, kMinDelay, kMaxDelay, delay);
 
    // Nothing to do when the host wants what the engine already does. Skipping
@@ -122,7 +109,7 @@ void mp_spawn_delay_install(uintptr_t exe_base)
 
    const BuildSites* build = sites_for_build();
    if (!build) {
-      install_log("[MPSpawnDelay] unidentified build, skipping\n");
+      install_log("[MPSpawnDelay] unidentified build, skipping");
       return;
    }
 
@@ -139,7 +126,7 @@ void mp_spawn_delay_install(uintptr_t exe_base)
       const uint8_t* p = (const uint8_t*)resolve(exe_base, site.va);
       if (memcmp(p, site.opcode, site.opcodeLen) != 0 ||
           memcmp(p + site.opcodeLen, &expect, sizeof(expect)) != 0) {
-         install_log("[MPSpawnDelay] site mismatch at %s (%08X), feature disabled\n",
+         install_log("[MPSpawnDelay] site mismatch at %s (%08X), feature disabled",
                      site.what, (uint32_t)site.va);
          return;
       }
@@ -160,6 +147,6 @@ void mp_spawn_delay_install(uintptr_t exe_base)
       memcpy(p + site.opcodeLen, &replacement, sizeof(replacement));
    }
 
-   install_log("[MPSpawnDelay] multiplayer respawn delay set to %.2fs (stock %.2fs)\n",
+   install_log("[MPSpawnDelay] multiplayer respawn delay set to %.2fs (stock %.2fs)",
                delay, kStockDelay);
 }

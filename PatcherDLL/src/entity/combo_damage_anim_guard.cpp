@@ -3,6 +3,7 @@
 #include "combo_anim_limit.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -53,22 +54,6 @@
 // =============================================================================
 
 namespace {
-
-// Install-time logging goes to BF2GameExt.log through the CRT, never through the
-// engine's logger: dllmain holds every exe section at PAGE_READWRITE (so
-// non-executable) until all the installers have run, and calling engine code
-// from an installer is an immediate EXEC access violation on the DEP-enabled
-// retail builds. Runtime code below uses get_gamelog() instead.
-void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fclose(f);
-}
 
 // Combo::Attack::_ResolveDamageData — __thiscall, five stack args, RET 0x14.
 // Declared __fastcall with a dummy EDX so MSVC emits the same callee-cleanup.
@@ -368,7 +353,7 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
          sprintf_s(got + i * 3, 4, "%02X ", at[i]);
          sprintf_s(want + i * 3, 4, "%02X ", sig[i]);
       }
-      install_log("[ComboAnimGuard] %s NOT hooked at 0x%08X: expected %s... found %s...\n",
+      install_log("[ComboAnimGuard] %s NOT hooked at 0x%08X: expected %s... found %s...",
                   what, (unsigned)va, want, got);
       return false;
    };
@@ -381,7 +366,7 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
 
    if (expanded) {
       install_log("[ComboAnimGuard] using ComboAnimIncrease body getters "
-                  "(indices 0-%d)\n", kComboAnimationEnd - 1);
+                  "(indices 0-%d)", kComboAnimationEnd - 1);
    } else {
       uint8_t* lower = (uint8_t*)resolve(exe_base, a->get_lower_body_anim);
       upperOk = signature_ok(upper, a->get_upper_body_anim, upperSig, upperLen,
@@ -401,10 +386,10 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
             original_GetUpperBodyAnim = nullptr;
             original_GetLowerBodyAnim = nullptr;
             install_log("[ComboAnimGuard] animation index clamp NOT installed: "
-                        "Detours commit failed\n");
+                        "Detours commit failed");
          } else {
             install_log("[ComboAnimGuard] animation index clamp installed "
-                        "(getters 0x%08X / 0x%08X, indices 0-%d, maps 0-%d)\n",
+                        "(getters 0x%08X / 0x%08X, indices 0-%d, maps 0-%d)",
                         (unsigned)a->get_upper_body_anim, (unsigned)a->get_lower_body_anim,
                         kStockAnimIndexEnd - 1, kComboStockMapCount - 1);
          }
@@ -428,7 +413,7 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
    if (idxLoad[0] != 0x8A || (idxLoad[1] & 0xC7) != 0x40 ||
        idxLoad[2] != a->attack_anim_idx_off) {
       install_log("[ComboDamageGuard] NOT installed: Attack::mAnimIndex is not at +0x%02X "
-                  "(site 0x%08X reads %02X %02X %02X)\n",
+                  "(site 0x%08X reads %02X %02X %02X)",
                   a->attack_anim_idx_off, (unsigned)a->anim_idx_load,
                   idxLoad[0], idxLoad[1], idxLoad[2]);
       return;
@@ -454,11 +439,11 @@ void combo_damage_anim_guard_install(uintptr_t exe_base)
       fn_getUpperBodyAnim        = nullptr;
       g_animatorInstance         = nullptr;
       g_attackAnimIdxOff         = 0;
-      install_log("[ComboDamageGuard] NOT installed: Detours commit failed\n");
+      install_log("[ComboDamageGuard] NOT installed: Detours commit failed");
       return;
    }
 
-   install_log("[ComboDamageGuard] installed (resolver 0x%08X, Attack::mAnimIndex +0x%02X)\n",
+   install_log("[ComboDamageGuard] installed (resolver 0x%08X, Attack::mAnimIndex +0x%02X)",
                (unsigned)a->resolve_damage_data, a->attack_anim_idx_off);
 }
 

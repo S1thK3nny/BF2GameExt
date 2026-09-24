@@ -5,6 +5,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -129,24 +130,6 @@ bool g_tentacleLimitEnabled = true;
 
 namespace {
 
-// install_log() is the ONLY logger that may run during install: dllmain holds the
-// exe sections at PAGE_READWRITE (non-executable) until every installer has run,
-// so calling the engine's own logger there executes non-executable .text and is
-// an immediate EXEC access violation on the DEP-enabled retail builds. The fatal
-// runtime context guard also uses this logger so it does not depend on a working
-// engine log callback.
-void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 constexpr int kMaxTentacles    = 9;
 constexpr int kMaxBones        = 5;
 constexpr int kTentStride      = 6;    // tPos/oldPos slots per tentacle (5 bones + tip)
@@ -226,6 +209,8 @@ static_assert(sizeof(batch_pose) == 0x404, "RedPose count and hash storage");
 
 tentacle_timing::network_state g_timingNetwork{};
 
+// Logs through install_log() even at runtime, so the fatal path does not depend
+// on a working engine log callback.
 void fail_pose_context(const char* reason)
 {
    install_log("[Tentacle] invalid pose context: %s", reason);

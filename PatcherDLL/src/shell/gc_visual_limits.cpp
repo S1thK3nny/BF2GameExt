@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/patch_table.hpp"
 #include "render/particle_batch_spill.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <cstring>
@@ -38,18 +39,6 @@ static void log(const char* fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     g_log("%s", buf);
-}
-
-static void install_log(const char* fmt, ...)
-{
-    FILE* f = nullptr;
-    if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
-    va_end(ap);
-    fputc('\n', f);
-    fclose(f);
 }
 
 // ---------------------------------------------------------------------------

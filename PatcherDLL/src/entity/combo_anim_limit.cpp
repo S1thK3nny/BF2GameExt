@@ -2,6 +2,7 @@
 
 #include "combo_anim_limit.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -45,17 +46,6 @@ bool read_crash_field(uintptr_t base, size_t offset, T& value)
    SIZE_T bytes = 0;
    return ReadProcessMemory(GetCurrentProcess(), (void*)(base + offset), &value, sizeof(value), &bytes) &&
           bytes == sizeof(value);
-}
-
-void install_log(const char* fmt, ...)
-{
-   FILE* file = nullptr;
-   if (fopen_s(&file, "BF2GameExt.log", "a") || !file) return;
-   va_list args;
-   va_start(args, fmt);
-   vfprintf(file, fmt, args);
-   va_end(args);
-   fclose(file);
 }
 
 bool current_owner(void* owner)
@@ -176,7 +166,7 @@ COMBO_SHIM(shim_supplied_pointer_get_map, 11, 8)
 bool valid_bank_maps(int banks, int maps)
 {
    if (banks < 1 || banks > kComboBankCount || maps < 0 || maps > kComboMapCount) {
-      install_log("[ComboAnimLimit] invalid registry counts: banks=%d/%d maps=%d/%d\n", banks,
+      install_log("[ComboAnimLimit] invalid registry counts: banks=%d/%d maps=%d/%d", banks,
                   kComboBankCount, maps, kComboMapCount);
       return false;
    }
@@ -184,7 +174,7 @@ bool valid_bank_maps(int banks, int maps)
       const combo_map_key& map = g_mapRegistry[i];
       if (map.bank >= 0 && map.bank < banks && map.weapon >= 0 && map.weapon < kComboWeaponCount)
          continue;
-      install_log("[ComboAnimLimit] invalid registered map: map=%d bank=%d weapon=%d banks=%d/%d\n",
+      install_log("[ComboAnimLimit] invalid registered map: map=%d bank=%d weapon=%d banks=%d/%d",
                   i, map.bank, map.weapon, banks, kComboBankCount);
       return false;
    }
@@ -197,7 +187,7 @@ void begin_initialize(void* owner)
    // before any engine writer can enter it instead of corrupting another map.
    if (g_initializing || !owner || !g_mapCount || !g_bankCount ||
        !valid_bank_maps(*g_bankCount, *g_mapCount)) {
-      install_log("[ComboAnimLimit] invalid initialization context: owner=%p maps=%d reentry=%d\n",
+      install_log("[ComboAnimLimit] invalid initialization context: owner=%p maps=%d reentry=%d",
                   owner, g_mapCount ? *g_mapCount : -1, g_initializing);
       FatalAppExitA(0, "BF2GameExt: invalid combo animation map context. See BF2GameExt.log.");
    }
@@ -206,7 +196,7 @@ void begin_initialize(void* owner)
    memset(g_bankOrder, 0xFF, sizeof(g_bankOrder));
    memset(g_bankWeaponMaps, 0xFF, sizeof(g_bankWeaponMaps));
    install_log("[ComboAnimLimit] initializing: owner=%p names=%d/%d references=%d/%d maps=%d/%d "
-               "banks=%d/%d\n",
+               "banks=%d/%d",
                owner, *g_nameCount, kComboAnimationCount, *g_referenceCount, kComboReferenceCount,
                g_storage.map_count, kComboMapCount, *g_bankCount, kComboBankCount);
 }
@@ -217,7 +207,7 @@ void end_initialize()
    g_storage.cache = nullptr;
    g_initializing = false;
    install_log("[ComboAnimLimit] initialized: names=%d/%d references=%d/%d maps=%d/%d "
-               "banks=%d/%d cache_peak=%u/%d cache_claims=%u cache_failures=%u\n",
+               "banks=%d/%d cache_peak=%u/%d cache_claims=%u cache_failures=%u",
                *g_nameCount, kComboAnimationCount, *g_referenceCount, kComboReferenceCount,
                g_storage.map_count, kComboMapCount, *g_bankCount, kComboBankCount, g_storage.cache_high_water,
                kComboCacheCount, g_storage.cache_claims, g_storage.cache_failures);
@@ -778,7 +768,7 @@ bool combo_anim_limit_install(uintptr_t base)
       if (!functions[i].va) continue;
       void* entry = resolve(base, functions[i].va + delta);
       if (memcmp(entry, functions[i].expected, sizeof(functions[i].expected))) {
-         install_log("[ComboAnimLimit] NOT installed: hook signature mismatch at %08X\n",
+         install_log("[ComboAnimLimit] NOT installed: hook signature mismatch at %08X",
                      (unsigned)(functions[i].va + delta));
          return false;
       }
@@ -788,7 +778,7 @@ bool combo_anim_limit_install(uintptr_t base)
       uint8_t expected[11];
       storage_expected(patch, base, g_build, expected);
       if (memcmp(resolve(base, patch.va), expected, patch.length)) {
-         install_log("[ComboAnimLimit] NOT installed: storage signature mismatch at %08X\n",
+         install_log("[ComboAnimLimit] NOT installed: storage signature mismatch at %08X",
                      (unsigned)patch.va);
          return false;
       }
@@ -805,7 +795,7 @@ bool combo_anim_limit_install(uintptr_t base)
    if (error != NO_ERROR) {
       DetourTransactionAbort();
       memset(g_originals, 0, sizeof(g_originals));
-      install_log("[ComboAnimLimit] NOT installed: Detours preparation failed (%ld)\n", error);
+      install_log("[ComboAnimLimit] NOT installed: Detours preparation failed (%ld)", error);
       return false;
    }
 
@@ -825,7 +815,7 @@ bool combo_anim_limit_install(uintptr_t base)
          memcpy(resolve(base, patch.va), expected, patch.length);
       }
       memset(g_originals, 0, sizeof(g_originals));
-      install_log("[ComboAnimLimit] NOT installed: Detours commit failed (%ld); storage restored\n", error);
+      install_log("[ComboAnimLimit] NOT installed: Detours commit failed (%ld); storage restored", error);
       return false;
    }
 
@@ -847,7 +837,7 @@ bool combo_anim_limit_install(uintptr_t base)
    g_installed = true;
    FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
    install_log("[ComboAnimLimit] storage installed: %d names, indices 0-%d, "
-               "%u-byte maps, %d runtime + %d temporary maps, %d bank names\n",
+               "%u-byte maps, %d runtime + %d temporary maps, %d bank names",
                kComboAnimationCount, kComboAnimationEnd - 1, (unsigned)sizeof(combo_anim_map),
                kComboMapCount, kComboCacheCount, kComboBankCount);
    return true;
