@@ -44,11 +44,16 @@ rough around the edges:
 - Write proper user documentation for enabling it. It is currently gated on
   `HealthType = "animal"` plus an `AttackAnimation` ODF entry.
 
-**Flyer strafe mode ODF property** - The engine has an abandoned strafing path for flyers.
-Goal is an opt-in `EntityFlyer` ODF property that turns the turn axis into lateral movement,
-which means giving up rolling on any class that enables it, since the same input drives both.
-The open question is what AI does when a class it flies is in strafe mode, and whether the AI
-flight path can be fed strafing at all or should just keep rolling.
+**Flyer strafe mode ODF property** - Flyer strafing is fully built into the flight model but
+its input was cut: `StrafeSpeed` and `StrafeRollAngle` are both multiplied by a constant 0, so
+today the only thing that moves a flyer sideways is the side-roll trick
+(`TrickSideRollStrafeSpeed`). The strafe stick axis (left stick X, A/D) drives roll instead.
+Goal is an opt-in `EntityFlyer` ODF property (`EnableStrafe`) that feeds the strafe axis into the dead term, so
+that axis moves the flyer sideways (and leans it by `StrafeRollAngle`) instead of rolling it.
+Roll stays reachable through the alternate control mode, which rolls on the turn axis.
+AI already produces a strafe value from `StrafeSpeed` (stock gunships and the MAF set it), which
+in vanilla ends up as roll; in strafe mode it would strafe as the AI code intended. Whether that
+flies well needs a play test. Patch sites are mapped for modtools, Steam and GOG.
 
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
