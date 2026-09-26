@@ -3,11 +3,15 @@
 
 Each test is a standalone program with its own main() that asserts and exits
 non-zero on failure. They cover the pure-math headers the DLL shares with them
-(HUD horizon, target-bar geometry and fade) and need no game.
+(HUD horizon, target-bar geometry, fade and selection, x86 emit) and the HUD
+NumberMath adapter with its engine calls mocked, and need no game.
 
 Each file is compiled with the 32-bit MSVC toolchain, the same one the DLL
 uses, found through vswhere the way package_release.py finds MSBuild. NDEBUG
 is left undefined so assert() stays live. Output goes to build/tests/.
+PatcherDLL/src/core and PatcherDLL/src are on the include path, so a test can
+compile a DLL source file directly: its unconditional "pch.h" and its "util/"
+and "core/" includes resolve the same way they do in the project.
 
 Usage:
     python tools/run_tests.py
@@ -19,6 +23,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TESTS = REPO / "tests"
 OUT = REPO / "build" / "tests"
+SRC = REPO / "PatcherDLL" / "src"
 
 
 def find_vcvars() -> Path:
@@ -55,6 +60,7 @@ def main():
         exe = OUT / (src.stem + ".exe")
         compile_cmd = (
             f'call "{vcvars}" >nul && cl /nologo /std:c++20 /EHsc /W3 /Od '
+            f'/I"{SRC / "core"}" /I"{SRC}" '
             f'"{src}" /Fe:"{exe}" /Fo:"{OUT}\\\\"'
         )
         build = subprocess.run(compile_cmd, shell=True, cwd=OUT,

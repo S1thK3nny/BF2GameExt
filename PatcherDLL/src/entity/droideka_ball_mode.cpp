@@ -2,6 +2,7 @@
 #include "droideka_ball_mode.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/layout/droideka.hpp"
 #include "core/resolve.hpp"
 
 #include <cstdlib>
@@ -47,31 +48,21 @@
 // previewed as a ball.
 // =============================================================================
 
-// FSM state ids - build-invariant (compile-time constants in the game's own
-// state table; verified identical in modtools and Steam disassembly).
-static constexpr int kStateIdle   = 0x00;
-static constexpr int kStateRollUp = 0x0B;
-static constexpr int kStateBall   = 0x0C;
-static constexpr int kStateUnroll = 0x0D;
+// FSM state ids and the per-build EntityDroideka offsets, with the read sites
+// behind them, live in core/layout/droideka.hpp.
+using layout::Droideka::kStateIdle;
+using layout::Droideka::kStateRollUp;
+using layout::Droideka::kStateBall;
+using layout::Droideka::kStateUnroll;
 
-// ---------------------------------------------------------------------------
-// Per-build EntityDroideka field offsets
-// ---------------------------------------------------------------------------
-// Modtools is a DEBUG build, Steam a RELEASE build, and this struct is laid out
-// differently between them. Each offset below is confirmed at two independent
-// read sites per build:
-//   mClass  modtools 0x450  (UpdateStateRolling 0x4e230c, GetMaxSpeed 0x4e2d90)
-//           Steam    0x438  (UpdateStateRolling 0x4a2bf5, GetMaxSpeed 0x4a6140)
-//   mState  modtools 0x1A74 (UpdatePilot 0x4e826b, NextState 0x4ed611)
-//           Steam    0x1A54 (UpdatePilot 0x4a204c, NextState 0x4a3285)
 struct DroidekaLayout {
    int mClass;
    int mState;
 };
-static constexpr DroidekaLayout kLayoutModtools = {0x450, 0x1A74};
-// Both retail builds share it — UpdatePilot/SetProperty/Derive compare
-// instruction-for-instruction between Steam and GOG, displacements included.
-static constexpr DroidekaLayout kLayoutRelease  = {0x438, 0x1A54};
+static constexpr DroidekaLayout kLayoutModtools = {layout::Droideka::kClassModtools,
+                                                   layout::Droideka::kStateModtools};
+static constexpr DroidekaLayout kLayoutRelease  = {layout::Droideka::kClassRelease,
+                                                   layout::Droideka::kStateRelease};
 
 static DroidekaLayout s_layout = kLayoutModtools;
 

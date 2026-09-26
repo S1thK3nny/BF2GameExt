@@ -10,6 +10,24 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **`FillFrom("Right")` for HUD bars** - A `BarBitmap` can keep its right end and
+  grow or shrink at its left, showing the same part of its texture the full bar shows
+  there, with any `TexCoords`, rotation and the bar flash. Inert unless a `.hud` uses
+  it. See [HUD authoring](docs/user/HUD.md#bars-that-fill-from-the-right).
+- **Weapon icon textures** - `player1.weapon1.iconTexture` and
+  `player1.weapon2.iconTexture` carry the stock `IconTexture` of the weapon in each
+  slot, following the same weapon as the stock weapon events, with Disable twins.
+  Inert unless a `.hud` binds them.
+  See [HUD authoring](docs/user/HUD.md#weapon-icons).
+- **Class, stance and vehicle health icons** - HUD events carrying the health icon of
+  what the local player controls, taken from the class's stock `HealthTexture`:
+  `player1.unit.healthTexture` follows the stance through `<name>_crouch`,
+  `<name>_prone` and `<name>_ball` (prone falls back to crouch, then standing),
+  `player1.unit.stance` carries the stance itself, and `player1.vehicle.healthTexture`
+  carries the entered vehicle or turret's icon. The texture events have Disable twins.
+  Published from the HUD update, so they work on multiplayer clients; inert unless a
+  `.hud` binds them. Modtools, Steam and GOG.
+  See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
@@ -21,15 +39,17 @@ Scripts can check the running version through `GameExt.version`.
   Always available, independent of target bars, with no INI setting.
 - **`player1.weaponN.target.position`** - A new HUD event carrying the current target's
   position on screen. Bind it with `EventPosition` on the group that holds the target
-  health bar and the bar floats on the unit. Hitting an enemy also keeps the bar on them
-  for a short hold instead of fading the moment the reticle slips off; aiming at anyone
-  else drops it, and an enemy behind cover hides it until they reappear. It does nothing
-  unless a `.hud` file binds the event, so stock HUDs are unchanged. Support is
-  inherently on; only `[Features] TargetBarLatchSeconds` remains configurable.
-  Placement projects one
-  world-bounds top-centre point (no animated-bone wobble), pins it inside the
-  screen using built-in edge reservations, and snaps the anchor to
-  framebuffer pixels. Bar sizes, scales, labels and offsets stay in the `.hud`.
+  health bar and the bar floats on the unit. The last target the game selected is held
+  for 0.5 seconds after the selection is lost, instead of fading the moment the reticle
+  slips off; a new selection replaces it at once. A vehicle and its exposed rider no
+  longer flicker between each other: the bar stays on the one selected first until the
+  other holds the selection for 0.3 seconds. It does nothing unless a `.hud` file binds
+  the event, so stock HUDs are unchanged. Support is inherently on; only
+  `[Features] TargetBarLatchSeconds` remains configurable. Placement projects one
+  world-bounds top-centre point (no animated-bone wobble) and snaps it to framebuffer
+  pixels. While selected, the anchor stays inside the screen's safe area, so a big
+  vehicle up close keeps its bar; otherwise the bar leaves the screen with its target.
+  Bar sizes, scales, labels and offsets stay in the `.hud`.
 - **Foley regions** - A `foleyfx <group>` region now changes the footstep, landing
   and impact sounds on the ground inside it to that foley group. In stock BF2 these
   regions did nothing. See [Features](docs/user/FEATURES.md).

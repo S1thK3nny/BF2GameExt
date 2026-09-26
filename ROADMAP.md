@@ -175,6 +175,50 @@ BF1 actually drew it. Details in [docs/RE/SkySystem.md](docs/RE/SkySystem.md).
 **Unlock framerate above 80 FPS** - The game caps out around 80 and anything above this will
 cause issues with vehicles, especially hovers, due to being tied to the framerate. The fix is to detach the physics and animation updates from the framerate, and instead run them on a fixed timestep. This will allow the game to run at higher framerates without affecting gameplay mechanics.
 
+## HUD
+
+Research and addresses for these are in
+[docs/RE/HUDSystem.md](docs/RE/HUDSystem.md#candidate-events-researched-2026-09-25-not-built).
+
+**HUD shake** - The HUD stays still while the camera shakes from explosions and impacts, and
+nothing shakes anything when a soldier is hit or fires. Publish the camera's real shake as a
+position offset, plus added triggers for taking damage and firing.
+
+**Spread-scaled reticle** - The reticle stays one size whatever the weapon's current spread.
+Publish each weapon's live spread as an angle and as an on-screen scale for `EventScale`, so
+the reticle blooms with recoil and tightens with stance.
+
+**Compass, pitch and zoom** - A HUD cannot show a compass, an artificial horizon or a zoom
+readout. Publish camera heading, pitch and zoom, pure camera maths like horizon levelling.
+
+**Speed and altitude** - Nothing tells the HUD a vehicle's speed or height. Publish both
+for speedometers and altimeters.
+
+**Damage direction** - Players cannot tell where damage came from. Publish a rotation that
+points at the last attacker and keeps tracking them, from the damage hook aim assist uses.
+
+**Kill confirm** - There is no kill cue beyond the feed. Check whether the stock kills
+statistic already fires on each kill; otherwise add a pulse from the kill feed.
+
+**Missile and grenade warnings** - The missile warning gives no direction and nothing warns
+about grenades. Publish a bearing and distance for the incoming missile and live grenades.
+
+**Command post markers** - Only the post being captured reaches the HUD. Publish per-post
+slots with owner, contested state and a floating marker, filled from the first slot up.
+
+**Objective waypoints** - Objectives only show on the minimap. Project the minimap's own
+markers onto the screen, so every script that already places markers gets waypoints.
+
+**Friendly name tags** - Teammates are hard to pick out online. Publish a fixed set of slots
+with name, health and position for teammates in view.
+
+**Off-screen arrows** - A floating marker vanishes when its target leaves the screen.
+Publish an edge position and rotation for any marker that is off screen or behind you.
+
+**Script-assigned markers** - A mission script cannot put a marker on an escort target or
+VIP. Add a Lua function that binds an entity to a marker slot; host only, since script
+callbacks never fire on clients.
+
 ## Sound
 
 **Sound region and stream manipulation** - Goal is runtime control over ambient sound

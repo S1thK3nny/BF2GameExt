@@ -32,9 +32,20 @@ constexpr uint32_t pbl_hash(const char* s)
    return pbl_hash(s, UINT32_MAX);
 }
 
+// Continue a hash over more bytes. There is no finalisation step, so for any
+// non-empty a, pbl_hash_append(pbl_hash(a), b) == pbl_hash(a + b): a name the
+// engine stored only as a hash can still be extended with a suffix.
+constexpr uint32_t pbl_hash_append(uint32_t h, const char* s)
+{
+   for (; s && *s; ++s)
+      h = (h ^ ((uint32_t)(int32_t)(signed char)*s | 0x20u)) * 0x01000193u;
+   return h;
+}
+
 // Values from Hash.exe.
 static_assert(pbl_hash("EntityBuilding") == 0x460DE15Eu);
 static_assert(pbl_hash("HeldOrdnanceEffectBone") == 0x1892110Du);
 static_assert(pbl_hash("hp_fire") == 0xFDD110D2u);
 static_assert(pbl_hash("a\xE9" "b") == 0xF4E78CC7u); // non-ASCII: sign extension
 static_assert(pbl_hash("") == 0 && pbl_hash(nullptr) == 0);
+static_assert(pbl_hash_append(pbl_hash("hp_"), "fire") == pbl_hash("hp_fire"));

@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "core/layout/droideka.hpp"
 #include "core/layout/weapon.hpp"
 
 #include <detours.h>
@@ -232,17 +233,17 @@ void droideka_shield_tracker_install(uintptr_t exe_base)
    case GameBuild::Modtools:
       updVA = game_addrs::modtools::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::modtools::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A74;
+      s_mStateOff   = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       updVA = game_addrs::steam::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::steam::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A54;
+      s_mStateOff   = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       updVA = game_addrs::gog::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::gog::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A54; // same release layout as Steam
+      s_mStateOff   = layout::Droideka::kStateRelease; // same release layout as Steam
       break;
    default:
       return; // unknown build
@@ -393,14 +394,14 @@ void droideka_death_anim_install(uintptr_t exe_base)
       updStateVA = game_addrs::modtools::droideka_update_state;
       kSite = kSiteModtools; kPrev = kPrevModtools;
       kUpdState = kUpdStateModtools; kUpdStateLen = sizeof(kUpdStateModtools);
-      s_mStateOff = 0x1A74;
+      s_mStateOff = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       siteVA = game_addrs::steam::droideka_update_nextstate_call;
       updStateVA = game_addrs::steam::droideka_update_state;
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = 0x1A54;
+      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       siteVA = game_addrs::gog::droideka_update_nextstate_call;
@@ -409,7 +410,7 @@ void droideka_death_anim_install(uintptr_t exe_base)
       // (verified against the exe).
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = 0x1A54;
+      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    default:
       return; // unknown build

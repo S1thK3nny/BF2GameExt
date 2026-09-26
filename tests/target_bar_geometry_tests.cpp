@@ -104,6 +104,27 @@ int main()
    assert(!pin_to_screen(out, 1920, 1080, {0.6f, 0, 0.4f, 0}));
    assert(!pin_to_screen(out, 1920, 1080, {-0.1f, 0, 0, 0}));
 
+   // Not aimed at: the same pixel snap, but no safe area. On-screen anchors
+   // match the pinned ones inside the safe area, offscreen ones stay offscreen,
+   // and anything past a viewport beyond an edge is held there.
+   out[0] = 0.5f; out[1] = 0.25f;
+   assert(snap_to_screen(out, 1920, 1080));
+   assert(near(out[0], 0.5f) && near(out[1], 0.25f));
+   out[0] = 1.05f; out[1] = -0.02f;
+   assert(snap_to_screen(out, 1920, 1080));
+   assert(out[0] > 1 && out[1] < 0);
+   out[0] = -1.0e6f; out[1] = 5.0e5f;
+   assert(snap_to_screen(out, 1920, 1080));
+   assert(out[0] == -1 && out[1] == 2);
+   // The near-plane case that pinning held at the top edge now leaves the screen.
+   world = { {-2, 2, -1}, {2, 6, 1} };
+   assert(project_anchor(world, camera, 1, 1, out));
+   assert(snap_to_screen(out, 1920, 1080));
+   assert(out[1] < 0);
+   assert(!snap_to_screen(out, 0, 1080));
+   out[0] = std::numeric_limits<float>::quiet_NaN();
+   assert(!snap_to_screen(out, 1920, 1080));
+
    std::mt19937 rng(20260921);
    std::uniform_real_distribution<float> coordinate(-100, 100);
    for (int trial=0; trial<20000; ++trial) {
@@ -116,5 +137,5 @@ int main()
       assert(std::fabs(x-std::round(x))<0.0005f);
       assert(std::fabs(y-std::round(y))<0.0005f);
    }
-   std::puts("Target-bar positioning tests passed (20,000 randomized pin/snap cases).");
+   std::puts("Target-bar positioning tests passed (20,000 randomized pin/snap cases, unpinned snap).");
 }

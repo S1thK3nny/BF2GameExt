@@ -969,6 +969,24 @@ namespace modtools {
    constexpr uintptr_t hud_event_class_create       = 0x006AD8A0;
    constexpr uintptr_t hud_event_class_find         = 0x006AD940;
    constexpr uintptr_t hud_event_class_list         = 0x00AD866C;
+   // TransformNumberMath native adapter; conventions/evidence in HUDSystem.md.
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006B7770;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x006B6970;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x00A60344;
+   constexpr uintptr_t hud_vector3_vtable           = 0x00A61154;
+   constexpr uintptr_t hud_item_read                = 0x006B6B80;
+   constexpr uintptr_t hud_item_read_event          = 0x006B6360;
+   constexpr uintptr_t hud_filter_event_name        = 0x006B6270;
+   // FillFrom("Right") on a BarBitmap (render/hud_bar_fill_from.cpp). Both
+   // hooks are thiscall: ReadData(PblConfig*, Data*) -> bool, RET 8, and
+   // PostReadSetup(), RET 0. The three RedBitmapElement calls are thiscall too:
+   // GetRect/GetTexCoords(float* x4), RET 0x10; SetTexCoords(u0, v0, u1, v1,
+   // bool), RET 0x14. Offsets, same on every build, are in the module.
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x00695900;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x00696340;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x00838E50;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x008392A0;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x00839220;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
    constexpr uintptr_t hud_game_events_update       = 0x006B50A0;
    constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
@@ -2180,6 +2198,18 @@ namespace steam {
    constexpr uintptr_t hud_event_class_create       = 0x0055DE40;
    constexpr uintptr_t hud_event_class_find         = 0x0055DEE0;
    constexpr uintptr_t hud_event_class_list         = 0x007EBA5C;
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006C3540;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x00564110;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x007A32E4;
+   constexpr uintptr_t hud_vector3_vtable           = 0x007A371C;
+   constexpr uintptr_t hud_item_read                = 0x00564560;
+   constexpr uintptr_t hud_item_read_event          = 0x00564740;
+   constexpr uintptr_t hud_filter_event_name        = 0x00564690;
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054B480;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054B320;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x006E4DB0;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E48F0;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E4B90;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
@@ -2718,6 +2748,18 @@ namespace gog {
    constexpr uintptr_t hud_event_class_create       = 0x0055EBC0;
    constexpr uintptr_t hud_event_class_find         = 0x0055EC60;
    constexpr uintptr_t hud_event_class_list         = 0x007ECA2C;
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006C45D0;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x00564E90;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x007A40AC;
+   constexpr uintptr_t hud_vector3_vtable           = 0x007A455C;
+   constexpr uintptr_t hud_item_read                = 0x005652E0;
+   constexpr uintptr_t hud_item_read_event          = 0x005654C0;
+   constexpr uintptr_t hud_filter_event_name        = 0x00565410;
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054C1D0;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054C070;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x006E5E50;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E5990;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E5C30;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;

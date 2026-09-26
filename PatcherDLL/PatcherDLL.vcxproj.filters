@@ -244,7 +244,28 @@
     <ClInclude Include="src\render\target_bar_fade.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\target_bar_selection.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_horizon_math.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_number_math.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_number_math_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_class_icons.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_class_icons_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_bar_fill_from.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_bar_fill_from_core.hpp">
       <Filter>render</Filter>
     </ClInclude>
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
@@ -463,6 +484,15 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\target_bar_latch.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_number_math.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_class_icons.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_bar_fill_from.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">

@@ -25,5 +25,6 @@ and run the Load munge.
 - [Features](../user/FEATURES.md) - everything the extension adds and fixes
 - [Lua API](../user/LUA_API.md) - functions callable from mission scripts
 - [Loading Screen](../user/LOADING_SCREEN.md) - every loading screen parameter
+- [HUD Authoring](../user/HUD.md) - event bindings, transform parameters, math operations, examples and testing
 - [Configuration](../user/CONFIGURATION.md) - `BF2GameExt.ini`
 - [Troubleshooting](../user/TROUBLESHOOTING.md) - it did not load, or a feature does nothing
