@@ -39,11 +39,31 @@
 //   instead; otherwise the stock terrain group.  Terrain only, by design: water
 //   and objects keep their own sounds, so a region acts as a surface patch.
 //   SetupFoleyFX already ignores an unchanged group, so walking in and out of a
-//   region switches cleanly both ways.
+//   region switches cleanly both ways.  A region whose group has no sound for
+//   the unit's class counts as absent, so the unit gets the ground sound rather
+//   than keeping whatever it had last (possibly an object it stepped off).
 //
 //   The region walk is our own, not FindRegion, because retail stripped
 //   FindRegion.  All three builds; the position sits in ESI on modtools and in
 //   EDI on Steam/GOG, so each gets its own register-transparent stub.
+//
+// SAME-NAME GROUPS
+//   Every world sound lvl defines its own terrain_foley, metal_foley, ... and the
+//   loader never merges them: each FoleyFXGroup() chunk is a new group, so a
+//   mission loading five world sound lvls holds five of each.  The engine then
+//   picks copies two different ways: FoleyFXGroup::Read overwrites smTerrain/smWater, so
+//   the LAST copy wins there, while FoleyFXGroup::FindByID (regions, object
+//   ODFs) returns the FIRST.  And a copy only lists that world's soldiers, so any
+//   other class finds no entry, and SetupFoleyFX then keeps whatever sound the
+//   unit had before - silence, or a stale one from the last object it touched.
+//
+//   Two changes, both by retargeting a single CALL:
+//   - A region uses the latest copy of its group, the same rule as terrain.
+//   - SetupFoleyFX's FindFoleyFX fills gaps: whatever the group itself answers
+//     (its exact entry or its class-0 fallback) stands; only when it has nothing
+//     does the most recently loaded same-name copy with that class supply it.
+//     Nothing that already had a sound changes, and a mission with one world
+//     sound lvl (every stock one) has no duplicates to fill from.
 // =============================================================================
 
 void foleyfx_region_install(uintptr_t exe_base);

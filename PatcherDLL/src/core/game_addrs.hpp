@@ -424,6 +424,16 @@ namespace modtools {
    // Name and body verified against Phantom 0x00868C40.
    constexpr uintptr_t pbl_region_is_point_inside  = 0x007E7820;
 
+   // ---- FoleyFXGroup same-name fill-in ------------------------------------------
+   // Every world sound lvl defines its own copy of terrain_foley, metal_foley, ...
+   // and the loader never merges them.  FoleyFXGroup::smList holds every copy in
+   // load order (node at group+8).  SetupFoleyFX's only per-class lookup is the
+   // CALL FoleyFXGroup::FindFoleyFX (via thunk 0x0040378D) at the address below;
+   // FindFoleyFX is thiscall(classId), RET 4.
+   constexpr uintptr_t foleyfx_group_list          = 0x00ADDBA8;
+   constexpr uintptr_t foleyfx_setup_find_call     = 0x00760EC8;
+   constexpr uintptr_t foleyfx_group_find_foleyfx  = 0x00761240;
+
    // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
    // The squad-order branch nulls its target pointer for two states then virtual
    // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
@@ -1587,6 +1597,10 @@ namespace steam {
    constexpr uintptr_t foleyfx_get_terrain_fx     = 0x0052C9D0;
    // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
    constexpr uintptr_t pbl_region_is_point_inside = 0x00729A40;
+   // FoleyFXGroup same-name fill-in (see modtools). Direct call, no thunk.
+   constexpr uintptr_t foleyfx_group_list         = 0x007EB8CC;
+   constexpr uintptr_t foleyfx_setup_find_call    = 0x0052C52A;
+   constexpr uintptr_t foleyfx_group_find_foleyfx = 0x0052C8F0;
    constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
@@ -2878,6 +2892,10 @@ namespace gog {
    constexpr uintptr_t foleyfx_get_terrain_fx         = 0x0052C9D0;
    // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
    constexpr uintptr_t pbl_region_is_point_inside     = 0x0072AB20;
+   // FoleyFXGroup same-name fill-in (see modtools). Same layout as Steam.
+   constexpr uintptr_t foleyfx_group_list             = 0x007EC8CC;
+   constexpr uintptr_t foleyfx_setup_find_call        = 0x0052C52A;
+   constexpr uintptr_t foleyfx_group_find_foleyfx     = 0x0052C8F0;
    constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
    constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;

@@ -33,6 +33,9 @@ Scripts can check the running version through `GameExt.version`.
 - **Foley regions** - A `foleyfx <group>` region now changes the footstep, landing
   and impact sounds on the ground inside it to that foley group. In stock BF2 these
   regions did nothing. See [Features](docs/user/FEATURES.md).
+- **Foley sounds from several sound files** - Soldiers no longer lose their footstep
+  and impact sounds when a mission script loads world sound files from more than one
+  map. Missions that load a single one are unchanged.
 
 ### Fixed
 
