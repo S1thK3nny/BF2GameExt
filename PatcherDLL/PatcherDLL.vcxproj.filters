@@ -58,6 +58,9 @@
     <ClInclude Include="src\entity\flyer_carrier_fixes.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\foleyfx_region_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -293,6 +296,9 @@
     </ClCompile>
     <ClCompile Include="src\core\patch_table.cpp">
       <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\foleyfx_region_fix.cpp">
+      <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp">
       <Filter>entity</Filter>

@@ -43,6 +43,8 @@ Scripts can check the running version through `GameExt.version`.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.
+- A map rotation no longer crashes when a map with `foleyfx` regions follows another
+  map that has them.
 
 ## 1.1.0
 

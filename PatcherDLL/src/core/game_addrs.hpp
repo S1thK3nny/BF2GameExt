@@ -404,6 +404,13 @@ namespace modtools {
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
    constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
 
+   // ---- FoleyFXRegion stale list ----------------------------------------------
+   // FoleyFXRegion::smList, a PblListSingle head whose terminator is its own
+   // address.  PostStateCleanup never resets it (FoleyFXRegion::RemoveAll at
+   // 0x00761590 does exactly that and has no callers), so the next mission's
+   // first FoleyFXRegion ctor walks nodes in the dropped mission heap.
+   constexpr uintptr_t foleyfx_region_list         = 0x00ADDC50;
+
    // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
    // The squad-order branch nulls its target pointer for two states then virtual
    // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
@@ -1554,6 +1561,10 @@ namespace steam {
    constexpr uintptr_t prone_anim_accessor       = 0x0063c2d0;
    constexpr uintptr_t SoldierAnimator_SetAction = 0x0063ed60;
    constexpr uintptr_t prone_guard_jnz           = 0x004e8968;
+
+   // FoleyFXRegion::smList (see modtools).  RemoveAll was stripped by the
+   // linker; the only references left are the ctor 0x0052CAE0 and the atexit.
+   constexpr uintptr_t foleyfx_region_list       = 0x007EB8E8;
    constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
@@ -2836,6 +2847,10 @@ namespace gog {
    constexpr uintptr_t prone_anim_accessor            = 0x0063d370;
    constexpr uintptr_t SoldierAnimator_SetAction      = 0x0063fe00;
    constexpr uintptr_t prone_guard_jnz                = 0x004e8968;
+
+   // FoleyFXRegion::smList (see modtools).  Same code layout as Steam; the only
+   // references are the ctor 0x0052CAE0 and the atexit.
+   constexpr uintptr_t foleyfx_region_list            = 0x007EC8E8;
    constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
    constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;

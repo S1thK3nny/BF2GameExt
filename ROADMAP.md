@@ -208,6 +208,11 @@ hero 1's name in the HUD and kill messages: the engine's "which hero is this tea
 simply returns the first hero class registered. The likely fix is to hook that lookup and return
 the hero that is actually in play.
 
+**Make foley regions work** - A `foleyfx <group>` region is supposed to change the
+footstep and impact sounds used inside it, but the game never checks which region a
+sound happens in, so the regions do nothing. The regions themselves load fine, so the
+work is making the sound lookup use them.
+
 ## Retail builds
 
 **Branch region fix untested on retail** - It is set up for all three builds but has only been

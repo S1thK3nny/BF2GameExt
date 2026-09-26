@@ -46,6 +46,7 @@
 #include "weapon/shield_channel_fix.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "entity/foleyfx_region_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "controller/controller_support.hpp"
@@ -159,6 +160,7 @@ static void __cdecl hooked_init_state()
    soldier_override_texture_reset();
    held_ordnance_effect_reset(); // old level's effect/weapon pointers are no longer valid
    freecam_light_reset(); // its pool block did not survive the level change
+   foleyfx_region_reset(); // the old map's regions went with its heap
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).
