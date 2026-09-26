@@ -30,6 +30,9 @@ Scripts can check the running version through `GameExt.version`.
   world-bounds top-centre point (no animated-bone wobble), pins it inside the
   screen using built-in edge reservations, and snaps the anchor to
   framebuffer pixels. Bar sizes, scales, labels and offsets stay in the `.hud`.
+- **Foley regions** - A `foleyfx <group>` region now changes the footstep, landing
+  and impact sounds on the ground inside it to that foley group. In stock BF2 these
+  regions did nothing. See [Features](docs/user/FEATURES.md).
 
 ### Fixed
 

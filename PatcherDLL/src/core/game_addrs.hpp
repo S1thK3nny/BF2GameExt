@@ -411,6 +411,19 @@ namespace modtools {
    // first FoleyFXRegion ctor walks nodes in the dropped mission heap.
    constexpr uintptr_t foleyfx_region_list         = 0x00ADDC50;
 
+   // ---- FoleyFXRegion lookup ----------------------------------------------------
+   // FoleyFXCollider::CollisionCallback (0x00760EF0) picks the terrain group with
+   // `CALL FoleyFXGroup::GetTerrainFX` (via thunk 0x0040355D) and hands the result
+   // straight to SetupFoleyFX.  The collision position is in ESI at that point
+   // (`MOV ESI,[ESP+0x10]` = 3rd arg, never reassigned).  Address is of the CALL
+   // OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t foleyfx_terrain_group_call  = 0x00760F40;
+   // FoleyFXGroup* __cdecl FoleyFXGroup::GetTerrainFX() - `MOV EAX,[smTerrain]; RET`.
+   constexpr uintptr_t foleyfx_get_terrain_fx      = 0x007610A0;
+   // bool __thiscall PblRegion::IsPointInside(PblVector3*) - RET 4, result in AL.
+   // Name and body verified against Phantom 0x00868C40.
+   constexpr uintptr_t pbl_region_is_point_inside  = 0x007E7820;
+
    // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
    // The squad-order branch nulls its target pointer for two states then virtual
    // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
@@ -1565,6 +1578,15 @@ namespace steam {
    // FoleyFXRegion::smList (see modtools).  RemoveAll was stripped by the
    // linker; the only references left are the ctor 0x0052CAE0 and the atexit.
    constexpr uintptr_t foleyfx_region_list       = 0x007EB8E8;
+   // FoleyFXRegion lookup (see modtools). CollisionCallback 0x0052C540; its
+   // terrain branch `CALL FoleyFXGroup::GetTerrainFX` (0x0052C9D0, direct, no
+   // thunk). Unlike modtools the collision position is in EDI here
+   // (`MOV EDI,[EBP+0x10]`) and the collider in ESI. The other GetTerrainFX call,
+   // 0x0052C4A9, is the FoleyFXCollider ctor and is left alone.
+   constexpr uintptr_t foleyfx_terrain_group_call = 0x0052C591;
+   constexpr uintptr_t foleyfx_get_terrain_fx     = 0x0052C9D0;
+   // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
+   constexpr uintptr_t pbl_region_is_point_inside = 0x00729A40;
    constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
@@ -2851,6 +2873,11 @@ namespace gog {
    // FoleyFXRegion::smList (see modtools).  Same code layout as Steam; the only
    // references are the ctor 0x0052CAE0 and the atexit.
    constexpr uintptr_t foleyfx_region_list            = 0x007EC8E8;
+   // FoleyFXRegion lookup: same code layout as Steam, position in EDI.
+   constexpr uintptr_t foleyfx_terrain_group_call     = 0x0052C591;
+   constexpr uintptr_t foleyfx_get_terrain_fx         = 0x0052C9D0;
+   // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
+   constexpr uintptr_t pbl_region_is_point_inside     = 0x0072AB20;
    constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
    constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;

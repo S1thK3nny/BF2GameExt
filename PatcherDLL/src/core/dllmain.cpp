@@ -45,6 +45,7 @@
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "entity/foleyfx_region_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -393,6 +394,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
+   foleyfx_region_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread

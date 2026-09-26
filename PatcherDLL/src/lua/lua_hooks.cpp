@@ -346,6 +346,7 @@ void lua_hooks_uninstall()
    voice_limit_uninstall();
    snd_engine_open_fix_uninstall();
    impact_sound_water_fix_uninstall();
+   foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
    content_census_uninstall();
