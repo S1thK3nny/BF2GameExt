@@ -494,6 +494,10 @@ namespace modtools {
    constexpr uintptr_t flyer_strafe_lean_landing  = 0x0050002F;
    constexpr uintptr_t flyer_strafe_lean_crashing = 0x0050044C;
    constexpr uintptr_t flyer_strafe_integrate     = 0x0050056B;
+   // FLYING `v *= mSetSpeed / d`: block start `FLD [ebx+0x358]` and the first
+   // instruction after it (skipped for EnableStrafe classes).
+   constexpr uintptr_t flyer_strafe_rescale       = 0x004FFC57;
+   constexpr uintptr_t flyer_strafe_rescale_end   = 0x004FFC75;
 
    // ---- Entity / Droideka DisableBallMode --------------------------------------
    // EntityDroideka::UpdatePilot is the sole roll/unroll request site (player and
@@ -1685,6 +1689,10 @@ namespace steam {
    constexpr uintptr_t flyer_strafe_lean_landing  = 0x004AFAFF;
    constexpr uintptr_t flyer_strafe_lean_crashing = 0x004B011C;
    constexpr uintptr_t flyer_strafe_integrate     = 0x004B0239;
+   // FLYING `v *= mSetSpeed / d`: block start `DIVSS xmm1,xmm2 ; MOVSS xmm0,[ecx]`
+   // and the first instruction after it (skipped for EnableStrafe classes).
+   constexpr uintptr_t flyer_strafe_rescale       = 0x004AF5AC;
+   constexpr uintptr_t flyer_strafe_rescale_end   = 0x004AF5D8;
 
    // ---- Entity / Droideka DisableBallMode ------------------------------------
    // Release layout differs from modtools (mState +0x1A54 not 0x1A74, mClass
@@ -3026,6 +3034,8 @@ namespace gog {
    constexpr uintptr_t flyer_strafe_lean_landing  = 0x004afaff;
    constexpr uintptr_t flyer_strafe_lean_crashing = 0x004b011c;
    constexpr uintptr_t flyer_strafe_integrate     = 0x004b0239;
+   constexpr uintptr_t flyer_strafe_rescale       = 0x004af5ac;
+   constexpr uintptr_t flyer_strafe_rescale_end   = 0x004af5d8;
 
    // ---- Entity / Droideka DisableBallMode ---------------------------------------
 

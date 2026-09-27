@@ -109,16 +109,26 @@ struct FlyerLayout {
    int mSideRollX;    // float, mSideRoll.x (y follows)
    // EntityFlyerClass
    int clsAcceleration;
+   int clsMaxSpeed;
+   int clsBoostSpeed;
    int clsStrafeSpeed;
+   int clsTrickSideRollStrafeSpeed;
    // Integration site, `LEA EAX,[ESP+disp32]`
    uint8_t leaOrig[7];
+   // FLYING rescale site: the first instruction(s) of `v *= mSetSpeed / d`
+   uint8_t rescaleLen;
+   uint8_t rescaleOrig[8];
 };
 static constexpr FlyerLayout kLayoutModtools = {
-   0x42C, 0x340, 0x358, 0x35C, 0x364, 0x368, 0x36C, 0x374, 0x398, 0x884, 0x89C,
-   {0x8D, 0x84, 0x24, 0x90, 0x00, 0x00, 0x00} };
+   0x42C, 0x340, 0x358, 0x35C, 0x364, 0x368, 0x36C, 0x374, 0x398,
+   0x884, 0x894, 0x898, 0x89C, 0xDA4,
+   {0x8D, 0x84, 0x24, 0x90, 0x00, 0x00, 0x00},
+   6, {0xD9, 0x83, 0x58, 0x03, 0x00, 0x00} };              // FLD [ebx+0x358]
 static constexpr FlyerLayout kLayoutRelease = {
-   0x3EC, 0x300, 0x318, 0x31C, 0x324, 0x328, 0x32C, 0x334, 0x358, 0x7BC, 0x7D4,
-   {0x8D, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00} };
+   0x3EC, 0x300, 0x318, 0x31C, 0x324, 0x328, 0x32C, 0x334, 0x358,
+   0x7BC, 0x7CC, 0x7D0, 0x7D4, 0xCDC,
+   {0x8D, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00},
+   8, {0xF3, 0x0F, 0x5E, 0xCA, 0xF3, 0x0F, 0x10, 0x01} };  // DIVSS xmm1,xmm2 ; MOVSS xmm0,[ecx]
 
 static constexpr int kControlStrafe = 0x84;   // mControlStrafe, every build
 static constexpr int kWorldRight    = -0x150; // object +0xF0
@@ -142,7 +152,14 @@ struct StrafeInputs {
    float   lat[3];      // added into mVelocity before integration
    uint8_t latActive;   // integrate_hook adds lat only when set
    uint8_t latApplied;  // integrate_hook sets it once it has added lat
-   uint8_t fwdLock;     // integrate_hook pins the forward speed to mSetSpeed
+   uint8_t fwdLock;     // pin the forward speed, and skip the FLYING rescale
+   // Diagnostics for integrate_hook's anomaly report
+   struct LatRecord* rec;
+   float   dt;
+   float   input;
+   float   strafe;
+   float   adopted;     // strafe adopted this frame, or 0
+   uint8_t adopt;       // 1 when this frame adopted instead of subtracting
 };
 static StrafeInputs s_in = {};
 
@@ -222,6 +239,8 @@ struct LatRecord {
    float    strafe;
    uint32_t stamp;
    bool     applied;
+   bool     hasPrevV;
+   float    prevV[3];   // mVelocity after last frame's integrate_hook
 };
 
 static LatRecord g_lat[kMaxFlyers] = {};
@@ -352,23 +371,43 @@ static bool update_flagged(void* ecx, float dt, uintptr_t cls, float axis)
    float      right[3];
    flight_right(ecx, right);
 
+   const float strafeSpeed = field<float>((void*)cls, s_layout.clsStrafeSpeed);
+   const float strafeLimit = std::fabs(strafeSpeed) +
+                             std::fabs(field<float>((void*)cls, s_layout.clsTrickSideRollStrafeSpeed));
+
    float prev = fieldStrafe;
+   s_in.adopt   = 0;
+   s_in.adopted = 0.0f;
    if (state == kStateFlying) {
       if (rec->applied && same_bits(rec->strafe, prev)) {
          // Take last frame's strafe back out so the engine blends only its own
-         // velocity.
-         for (int i = 0; i < 3; i++) v[i] -= rec->lat[i];
+         // velocity.  Only take out what is still there: if a collision since
+         // then stopped or reversed that motion, subtracting the full vector
+         // would leave the engine a phantom velocity the other way.
+         const float mag = std::sqrt(rec->lat[0] * rec->lat[0] + rec->lat[1] * rec->lat[1] +
+                                     rec->lat[2] * rec->lat[2]);
+         if (mag > 1e-4f) {
+            const float inv  = 1.0f / mag;
+            const float cur  = (v[0] * rec->lat[0] + v[1] * rec->lat[1] + v[2] * rec->lat[2]) * inv;
+            const float take = cur < 0.0f ? 0.0f : (cur > mag ? mag : cur);
+            for (int i = 0; i < 3; i++) v[i] -= rec->lat[i] * inv * take;
+         }
       }
       else {
          // First frame, or coming back from a trick: adopt the sideways motion
-         // already there as the starting strafe, so nothing jumps.
+         // already there as the starting strafe, so nothing jumps.  Clamped to
+         // what a strafe can reach; anything beyond stays the engine's own.
          const float lat = v[0] * right[0] + v[1] * right[1] + v[2] * right[2];
-         for (int i = 0; i < 3; i++) v[i] -= right[i] * lat;
-         prev = -lat;
+         float adopted = -lat;
+         if (adopted >  strafeLimit) adopted =  strafeLimit;
+         if (adopted < -strafeLimit) adopted = -strafeLimit;
+         for (int i = 0; i < 3; i++) v[i] += right[i] * adopted; // v -= right * (-adopted)
+         prev = adopted;
+         s_in.adopt   = 1;
+         s_in.adopted = adopted;
       }
    }
 
-   const float strafeSpeed = field<float>((void*)cls, s_layout.clsStrafeSpeed);
    const float accel       = field<float>((void*)cls, s_layout.clsAcceleration);
    const float strafe      = move_toward(prev, input * strafeSpeed, accel * dt);
    const float scale       = (state == kStateFlying)
@@ -380,6 +419,10 @@ static bool update_flagged(void* ecx, float dt, uintptr_t cls, float axis)
    s_in.lean       = input; // ...but the bank still leans into it
    s_in.latActive  = 1;
    s_in.latApplied = 0;
+   s_in.rec        = rec;
+   s_in.dt         = dt;
+   s_in.input      = input;
+   s_in.strafe     = strafe;
    fieldStrafe     = 0.0f;
 
    const bool alive = original_Update(ecx, nullptr, dt);
@@ -439,7 +482,7 @@ static void __cdecl hooked_init_state()
 // Site patching
 // ---------------------------------------------------------------------------
 
-static constexpr int kMaxSites = 8;
+static constexpr int kMaxSites = 9;
 
 struct PatchedSite {
    uint8_t* at;
@@ -493,6 +536,45 @@ static bool integrate_site_ok(uintptr_t exe_base)
    return std::memcmp(site, s_layout.leaOrig, sizeof(s_layout.leaOrig)) == 0;
 }
 
+// Rare-event report: if a flagged flyer's velocity goes far past anything its
+// class can reach, or jumps by an absurd amount in one frame, log what this
+// frame looked like.  Rate-limited; costs nothing while flight is sane.
+static void report_anomaly(void* f, const float* v, float S, float d)
+{
+   LatRecord* rec = s_in.rec;
+   if (!rec || !s_in.latActive || !(s_in.dt > 0.0f)) return;
+
+   const uintptr_t cls = field<uintptr_t>(f, s_layout.mClass);
+   const float maxSpeed  = std::fmax(field<float>((void*)cls, s_layout.clsMaxSpeed),
+                                     field<float>((void*)cls, s_layout.clsBoostSpeed));
+   const float strafeCap = std::fabs(field<float>((void*)cls, s_layout.clsStrafeSpeed)) +
+                           std::fabs(field<float>((void*)cls, s_layout.clsTrickSideRollStrafeSpeed));
+   const float cap = (std::fabs(maxSpeed) + strafeCap + 5.0f) * 1.25f;
+
+   const float speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+   float jump = 0.0f;
+   if (rec->hasPrevV) {
+      const float dx = v[0] - rec->prevV[0], dy = v[1] - rec->prevV[1], dz = v[2] - rec->prevV[2];
+      jump = std::sqrt(dx * dx + dy * dy + dz * dz);
+   }
+   for (int i = 0; i < 3; i++) rec->prevV[i] = v[i];
+   rec->hasPrevV = true;
+
+   // A change bigger than half the cap within one frame is not flight.
+   if (speed <= cap && jump <= cap * 0.5f) return;
+
+   static DWORD s_lastLog = 0;
+   const DWORD now = GetTickCount();
+   if (now - s_lastLog < 1000) return;
+   s_lastLog = now;
+
+   get_gamelog()("[EnableStrafe] anomaly: speed %.1f (cap %.1f) jump %.1f | state %d dt %.4f "
+                 "S %.2f d %.2f | input %.2f strafe %.2f lat %.2f %.2f %.2f | %s %.2f\n",
+                 speed, cap, jump, field<int>(f, s_layout.mState), s_in.dt, S, d,
+                 s_in.input, s_in.strafe, s_in.lat[0], s_in.lat[1], s_in.lat[2],
+                 s_in.adopt ? "adopted" : "subtracted", s_in.adopted);
+}
+
 // Runs at the head of the position integration, after the state's velocity
 // code (and FLYING's rescale) and before `position += dt * mVelocity`.
 static void __cdecl integrate_hook()
@@ -511,12 +593,56 @@ static void __cdecl integrate_hook()
    // rescale already ran it is already there; this only acts when braking out
    // of reverse.  The strafe above lies along the flight frame's right axis,
    // which is perpendicular to World.fwd, so it does not change d.
+   const float S = field<float>(f, s_layout.mSetSpeed);
+   float d = 0.0f;
    if (s_in.fwdLock && field<int>(f, s_layout.mState) == kStateFlying) {
       const float* fwd = &field<float>(f, kWorldFwd);
-      const float  d   = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
-      const float  dS  = field<float>(f, s_layout.mSetSpeed) - d;
+      d = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
+      const float dS = S - d;
       for (int i = 0; i < 3; i++) v[i] += fwd[i] * dS;
    }
+
+   report_anomaly(f, v, S, d);
+}
+
+// FLYING's `if (d > S || (S > d && d > 0)) v *= S / d` scales the whole velocity
+// by S/d.  Near a hover d is tiny, so pulling away multiplies any drift the ship
+// has several times over for a few frames.  integrate_hook already pins the
+// forward component, which is all the rescale is for, so for a flagged class
+// the scale is skipped:
+//      CMP  byte [s_in.fwdLock], 0
+//      JNE  end_of_scale_block
+//      <displaced instruction(s)>
+//      JMP  back
+// Flags are dead at the site on every build, and the skipped block only writes
+// registers that are rewritten before their next read (x87 empty on modtools;
+// xmm0/xmm1 on Steam/GOG).
+static bool rescale_site_ok(uintptr_t exe_base)
+{
+   const uint8_t* site = (const uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale);
+   return std::memcmp(site, s_layout.rescaleOrig, s_layout.rescaleLen) == 0;
+}
+
+static bool patch_rescale(uintptr_t exe_base)
+{
+   uint8_t*  site = (uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale);
+   uint8_t*  end  = (uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale_end);
+   const int len  = s_layout.rescaleLen;
+   uint8_t*  c    = cave_alloc(32);
+   if (!c) return false;
+
+   int o = 0;
+   c[o++] = 0x80; c[o++] = 0x3D;                      // CMP byte [abs32], 0
+   *(uint32_t*)(c + o) = abs32(&s_in.fwdLock); o += 4;
+   c[o++] = 0x00;
+   c[o++] = 0x0F; c[o++] = 0x85;                      // JNE rel32
+   *(int32_t*)(c + o) = x86::rel32(c + o + 4, end); o += 4;
+   std::memcpy(c + o, site, len); o += len;
+   x86::emit_jmp(c, o, site + len);
+
+   remember(site, len);
+   x86::write_branch(site, x86::kJmp, c, len);
+   return true;
 }
 
 // At the head of the position integration, `LEA EAX,[ESP+disp32]` becomes a JMP
@@ -562,7 +688,7 @@ static bool patch_modtools(uintptr_t exe_base)
    for (uintptr_t a : lean) {
       if (!isFmulZero((const uint8_t*)resolve(exe_base, a))) return false;
    }
-   if (!integrate_site_ok(exe_base)) return false;
+   if (!integrate_site_ok(exe_base) || !rescale_site_ok(exe_base)) return false;
 
    remember(ramp, 6);
    *(uint32_t*)(ramp + 2) = abs32(&s_in.ramp);
@@ -574,7 +700,7 @@ static bool patch_modtools(uintptr_t exe_base)
    remember(roll, 6);
    roll[1] = 0x05; // FLD dword [disp32]
    *(uint32_t*)(roll + 2) = abs32(&s_in.roll);
-   return patch_integrate(exe_base);
+   return patch_integrate(exe_base) && patch_rescale(exe_base);
 }
 
 // Steam/GOG: 5 x `F3 0F 59 (C0|A<<3|7) F3 0F 59 xx` and 1 x `F3 0F 10 97 84000000`.
@@ -600,7 +726,7 @@ static bool patch_release(uintptr_t exe_base)
                                   (p[7] & 0xC0) == 0xC0;             // mod=11
       if (!firstIsMulXmm7 || !secondIsRegMul) return false;
    }
-   if (!integrate_site_ok(exe_base)) return false;
+   if (!integrate_site_ok(exe_base) || !rescale_site_ok(exe_base)) return false;
 
    for (const Site& s : mul) {
       uint8_t* p = (uint8_t*)resolve(exe_base, s.addr);
@@ -622,7 +748,7 @@ static bool patch_release(uintptr_t exe_base)
    remember(roll, 8);
    roll[3] = 0x15; // MOVSS xmm2, dword [disp32]
    *(uint32_t*)(roll + 4) = abs32(&s_in.roll);
-   return patch_integrate(exe_base);
+   return patch_integrate(exe_base) && patch_rescale(exe_base);
 }
 
 // ---------------------------------------------------------------------------
@@ -643,7 +769,8 @@ void flyer_enable_strafe_install(uintptr_t exe_base)
        g_addr->flyer_strafe_roll_read == 0 || g_addr->flyer_strafe_ramp_mul == 0 ||
        g_addr->flyer_strafe_lean_takeoff == 0 || g_addr->flyer_strafe_lean_flying == 0 ||
        g_addr->flyer_strafe_lean_landing == 0 || g_addr->flyer_strafe_lean_crashing == 0 ||
-       g_addr->flyer_strafe_integrate == 0)
+       g_addr->flyer_strafe_integrate == 0 || g_addr->flyer_strafe_rescale == 0 ||
+       g_addr->flyer_strafe_rescale_end == 0)
       return;
    if (g_build == GameBuild::Modtools && g_addr->flyer_strafe_zero_const == 0)
       return;
