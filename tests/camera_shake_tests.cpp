@@ -173,7 +173,7 @@ int main()
    // A swinging kick stays inside its peak and actually swings.
    {
       Rng rng(11u);
-      Kick k = make_kick(defaults::kRollSoldier, 1.0f, rng);
+      Kick k = make_kick(defaults::kRollFlyer, 1.0f, rng);
       bool positive = false, negative = false;
       for (int i = 0; i < 400; ++i) {
          k.age = i * 0.001f;
@@ -470,6 +470,19 @@ int main()
    assert(defaults::kSprintSoldier.pitch.hi == 0.16f && defaults::kSprintSoldier.yaw.hi == 0.06f);
    assert(defaults::kBlast.pitch.hi == 0.0f && defaults::kBlast.yaw.hi == 0.0f && defaults::kBlast.rate == 3.0f);
    assert(defaults::kFire.limit == 1.0f && defaults::kHit.limit == 1.0f && defaults::kBlast.limit == 2.5f);
+
+   // A soldier's roll is one move over a second: back and looking down, then settling.
+   {
+      Rng rng(1u);
+      Kick k = make_kick(defaults::kRollSoldier, 1.0f, rng);
+      assert(k.rate == 0.0f && k.length == 1.0f && k.peak.pitch < 0.0f && k.peak.back > 0.0f);
+      assert(k.peak.yaw == 0.0f && k.peak.roll == 0.0f);
+      k.age = k.length * k.rise;
+      const Offset top = k.value(0.0);
+      assert(near(top.pitch, -5.0f * kDegToRad) && near(top.back, 0.1f));
+      k.age = 0.999f;
+      assert(std::fabs(k.value(0.0).back) < 1e-4f);
+   }
 
    std::puts("Camera shake tests passed (noise, envelope, ODF values, kicks, restarts and limits, "
              "holds, sway, railed sprint judder, blast cap, hits, landings, 2,000 rotation cases, "

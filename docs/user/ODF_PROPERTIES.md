@@ -48,7 +48,7 @@ Set on the concrete soldier class.
 | `DisableCrouch` | `1` | The unit can never crouch, for the AI as well as the player. The crouch key goes straight to prone instead, and pressing it again stands back up. With `DisableProne` also set, the crouch key does nothing. | 1.1.0 |
 | `HitShake` | scale | Kicks your view when the unit takes damage, harder for a bigger hit. See [Camera shake](#camera-shake). | 1.2.0 |
 | `LandShake` | scale | Dips your view when the unit lands a jump or fall. | 1.2.0 |
-| `RollShake` | scale | Shakes your view as the unit starts a combat roll. Third person only. | 1.2.0 |
+| `RollShake` | scale | Eases your view back and down through a combat roll, then settles. Third person only. | 1.2.0 |
 | `SprintShake` | scale | A light judder in step with the stride while the unit sprints. Third person only. | 1.2.0 |
 | `BlastShake` | scale | How explosions shake your view while you play the unit. On without it; `0` turns it off. | 1.2.0 |
 
@@ -140,7 +140,7 @@ Defaults, for anything a class leaves out (degrees, metres, seconds):
 | Hit | `2 4` | `-2 2` | `0` | `0` | `0.25` | `0.3` | `0` | `1` |
 | Land, soldier | `-2.25` | `0.92` | `0.44` | `0` | `0.67` | `0.15` | `0` | `1` |
 | Land, flyer | `-1.5` | `0` | `-0.5 0.5` | `0` | `0.5` | `0.12` | `0` | `1` |
-| Roll, soldier | `1` | `1` | `1.5` | `0` | `0.4` | `0.1` | `5` | `1` |
+| Roll, soldier | `-5` | `0` | `0` | `0.1` | `1` | `0.5` | `0` | `1` |
 | Roll, flyer | `1` | `1` | `2` | `0` | `0.6` | `0.1` | `5` | `1` |
 | Sprint, soldier | `0.16` | `0.06` | `0` | `0` | | | `4` | |
 | Sprint, flyer | `0.3` | `0.3` | `0.2` | `0` | | | `16` | |

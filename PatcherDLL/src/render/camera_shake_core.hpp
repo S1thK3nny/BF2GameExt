@@ -170,7 +170,9 @@ constexpr Shape kFire         = { { 0.25f, 0.4f }, { -0.12f, 0.12f }, { 0.0f, 0.
 constexpr Shape kHit          = { { 2.0f, 4.0f }, { -2.0f, 2.0f }, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.25f, 0.3f, 0.0f, 1.0f };
 constexpr Shape kLandSoldier  = { { -2.25f, -2.25f }, { 0.92f, 0.92f }, { 0.44f, 0.44f }, { 0.0f, 0.0f }, 0.67f, 0.15f, 0.0f, 1.0f };
 constexpr Shape kLandFlyer    = { { -1.5f, -1.5f }, { 0.0f, 0.0f }, { -0.5f, 0.5f }, { 0.0f, 0.0f }, 0.5f, 0.12f, 0.0f, 1.0f };
-constexpr Shape kRollSoldier  = { { 1.0f, 1.0f }, { 1.0f, 1.0f }, { 1.5f, 1.5f }, { 0.0f, 0.0f }, 0.4f, 0.1f, 5.0f, 1.0f };
+// A combat roll eases the camera back and tips the view toward the feet, the
+// direction of the spec's roll sweep, then settles. Tuned in play by the user.
+constexpr Shape kRollSoldier  = { { -5.0f, -5.0f }, { 0.0f, 0.0f }, { 0.0f, 0.0f }, { 0.1f, 0.1f }, 1.0f, 0.5f, 0.0f, 1.0f };
 constexpr Shape kRollFlyer    = { { 1.0f, 1.0f }, { 1.0f, 1.0f }, { 2.0f, 2.0f }, { 0.0f, 0.0f }, 0.6f, 0.1f, 5.0f, 1.0f };
 constexpr Shape kSprintSoldier = { { 0.16f, 0.16f }, { 0.06f, 0.06f }, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.0f, 0.0f, 4.0f, 0.0f };
 constexpr Shape kSprintFlyer  = { { 0.3f, 0.3f }, { 0.3f, 0.3f }, { 0.2f, 0.2f }, { 0.0f, 0.0f }, 0.0f, 0.0f, 16.0f, 0.0f };

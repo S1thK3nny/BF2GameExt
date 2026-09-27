@@ -233,9 +233,10 @@ link, on all three executables; `tests/camera_shake_tests.cpp` checks the maths.
 
 ## Open
 
-- Not played since the rework. `FireShake` was confirmed in play as a sway before it
-  became a kick. The defaults outside the spec (rolls, flyer shakes) and the blast's size
-  per unit of `Shake` are first guesses, to settle in play.
+- Confirmed in play on modtools and Steam (2026-09-27): every shake, the limit and the
+  still reticule. GOG has the same addresses verified but has not been played. The soldier
+  roll's default (back and down over a second) was the user's call; the flyer defaults and
+  the blast's size per unit of `Shake` can still be tuned.
 - The spec's roll and jump sweep is not built yet: the camera trailing behind and looking
   toward the feet through rolls and jumps. `RollShake` is a plain shake until then.
 - The blast's shape is set by the unit being viewed, not by the explosion, because the
