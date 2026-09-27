@@ -21,7 +21,7 @@ Scripts can check the running version through `GameExt.version`.
   `"Top"`), showing the same part of its texture the full bar shows there, so an
   upright icon fills without being rotated. `"Right"` keeps the bar flash; the vertical
   modes have none. Inert unless a `.hud` uses it.
-  See [HUD authoring](docs/user/HUD.md#bars-that-fill-from-the-right).
+  See [HUD authoring](docs/user/HUD.md#fillfrom).
 - **Weapon icon textures** - `player1.weapon1.iconTexture` and
   `player1.weapon2.iconTexture` carry the stock `IconTexture` of the weapon in each
   slot, following the same weapon as the stock weapon events, with Disable twins.

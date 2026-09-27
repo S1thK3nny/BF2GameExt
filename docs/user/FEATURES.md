@@ -61,15 +61,6 @@ General engine bug fixes, several of them ported from PrismaticFlower's upstream
 - **Screenshot Fix** - Print Screen crashes the retail builds. Replaces the broken screenshot routine with a clean capture written to `ScreenShots\screenshot_NNNN.tga`. No effect on Modtools. INI: `[Fixes] ScreenshotFix=1`
 - **Error Dialog Fix** - The retail builds are missing the dialog resource the engine uses for fatal error messages, so those dialogs silently fail and the game just exits with no explanation. This supplies a replacement dialog from BF2GameExt so the error is actually shown. No effect on Modtools. INI: `[Fixes] ErrorDialogFix=1`
 - **DLC Mission List Initialization Fix** *(experimental, off by default)* - Launching straight into a mod map from the command line fails, because the addon mission list is only built when the shell menu runs. This enters and immediately exits the shell first, giving addon scripts their normal context. Ported from upstream but not yet confirmed working on retail builds, where command line addon launches still fail. INI: `[Fixes] DLCMissionInitFix=0`
-- **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
-- **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`
-- **HUD Editor Removal** - Steam and GOG still respond to a leftover development key combination that pauses the game and puts an unusable layout editor on screen. The key does nothing now. No effect on Modtools, where the HUD editor is a working tool and is left alone.
-- **Reticule Horizon Levelling** - Bind `EventRotation("player1.reticule.horizonRotation")` on an unscaled reticule pivot to align it with projected world-up as the camera banks. Position and artwork sizing stay in the `.hud`; keep scaling in a child group. Holds the last reliable angle when looking almost straight up/down. No INI setting, and independent of floating target bars. See [HUD authoring](HUD.md#reticule-horizon-levelling) for the layout example and limitations.
-- **Floating Target Bar** - The target health bar vanished the instant your aim slipped off a unit, and a HUD had no way to place anything on one. A `.hud` can now float the bar over its target, and it stays for a moment after you lose aim. INI: `[Features] TargetBarLatchSeconds=0.5` (0 never times out). See [HUD authoring](HUD.md#floating-target-bars).
-- **Command Post Strip** - Only the post you were capturing ever reached the HUD. A `.hud` can now show a row of every command post with its owner and capture progress, and it works on multiplayer clients. See [HUD authoring](HUD.md#command-post-strip).
-- **Bar Fill Direction** - HUD bars could only fill from the left. A `BarBitmap` can now fill from the right, the bottom or the top without breaking its texture. See [HUD authoring](HUD.md#bars-that-fill-from-the-right).
-- **Weapon Icon Textures** - The `IconTexture` a weapon ODF names never appeared on the HUD. A `.hud` can now show it for both weapon slots, on foot, in vehicles and in turrets. See [HUD authoring](HUD.md#weapon-icons).
-- **Class and Vehicle Health Icons** - Health icons that follow your class, stance or vehicle could only be swapped from Lua, which never runs on multiplayer clients. A `.hud` can now take them straight from the class's `HealthTexture`, including crouch, prone and droideka ball variants. See [HUD authoring](HUD.md#class-stance-and-vehicle-icons).
 - **Map Queue Next Mission Fix** - Finishing a match on Modtools always dropped you back to the main menu, even when the mission playlist still had maps queued. This was due to the branch simply not being present due to the modtools simply being older than the retail builds. The branch is restored and the queue now rolls straight into the next map the way it does on retail.
 - **Jetpack First Person Sound Fix** - Switching to first person while the jetpack was running played the jetpack's shutdown sound and left the rest of the flight silent. The jetpack now keeps its sound when you change view, and still shuts down normally when you stop flying.
 - **Hero Team Switch Fix** - Dying as a hero left you unable to change teams. The team switch would silently do nothing, and stayed that way until you respawned as a regular unit. Team switching now works normally after a hero dies. Playing as a hero still blocks it, the same as it always has.
@@ -87,6 +78,22 @@ Adds new loading screen parameters that **allow modders to fully restore bf1 sty
 These work alongside the vanilla ones by redirect the whole loading screen configuration to a custom `load.cfg` from Lua.
 
 See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
+
+## HUD
+
+New HUD events and properties for `.hud` files, plus fixes to the stock HUD. The new events do nothing until a `.hud` binds them.
+
+See **[HUD System](HUD.md)** for the full event and parameter reference.
+
+- **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
+- **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`
+- **HUD Editor Removal** - Steam and GOG still respond to a leftover development key combination that pauses the game and puts an unusable layout editor on screen. The key does nothing now. No effect on Modtools, where the HUD editor is a working tool and is left alone.
+- **Reticule Horizon Levelling** - The reticule tilts with the camera when a flyer banks. A `.hud` can now keep it level with the horizon in first and third person. Aim is unchanged.
+- **Floating Target Bar** - The target health bar vanished the instant your aim slipped off a unit, and a HUD had no way to place anything on one. A `.hud` can now float the bar over its target, and it stays for a moment after you lose aim. INI: `[Features] TargetBarLatchSeconds=0.5` (0 never times out).
+- **Command Post Strip** - Only the post you were capturing ever reached the HUD. A `.hud` can now show a row of every command post with its owner and capture progress, and it works on multiplayer clients.
+- **Bar Fill Direction** - HUD bars could only fill from the left. A `BarBitmap` can now fill from the right, the bottom or the top without breaking its texture.
+- **Weapon Icon Textures** - The `IconTexture` a weapon ODF names never appeared on the HUD. A `.hud` can now show it for both weapon slots, on foot, in vehicles and in turrets.
+- **Class and Vehicle Health Icons** - Health icons that follow your class, stance or vehicle could only be swapped from Lua, which never runs on multiplayer clients. A `.hud` can now take them straight from the class's `HealthTexture`, including crouch, prone and droideka ball variants.
 
 ## Soldier Systems
 
@@ -163,6 +170,12 @@ retail builds have no command console to add them to.
 - `ShowWeaponRanges` - Draw weapon AI range circles (MinRange, OptimalRange, MaxRange) around soldiers
 - `memwatch` - Reverse-engineering aid. Arms a CPU hardware data breakpoint on an address and reports every distinct piece of code that reads or writes it, with a register snapshot and a best-effort call stack per accessor. Up to four addresses at once, since that is how many debug registers x86 has. `memwatch [u]<hexaddr> [len] [r|w|rw]` to arm, bare `memwatch` to report and disarm, `memwatch clear` to drop all watches. A plain address is a runtime one; the `u` prefix takes an unrelocated address straight out of Ghidra and rebases it for you. Reported accessor and caller addresses are unrelocated, so they paste back into Ghidra as is. See [MemWatchRE.md](../RE/MemWatchRE.md)
 
+## Controller Support
+
+- **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
+- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
+- **Rumble** - Controller vibration on weapon fire, weapon charge and taking damage. Damage rumble works on every unit. Fire and charge rumble read the weapon's own ODF rumble values, and most stock weapons never set them, so a weapon that stays silent while firing needs those values added rather than fixing. ODF (weapon): `RecoilStrengthLight`/`Heavy`, `RecoilLengthLight`/`Heavy`, `RecoilDelayLight`/`Heavy`, `RecoilDecayLight`/`Heavy`, `ChargeRateLight`/`Heavy`, `MaxChargeStrengthLight`/`Heavy`, `ChargeDelayLight`/`Heavy`, `TimeAtMaxCharge`. INI: `[Controller] Rumble=1`
+
 ## Diagnostics
 
 Developer reporting, all off by default and all under `[Diagnostic]` in the INI. They only log; none of them change how the game plays.
@@ -175,9 +188,3 @@ Developer reporting, all off by default and all under `[Diagnostic]` in the INI.
 | `AIUpdateDiag` | How many AI are getting a decision each turn against how many want one. This is what says whether `AIUpdateBudget` is worth raising. |
 | `PoolGrowthDiag` | Every memory pool growth, with the pool name and the heaps involved. |
 | `BranchRegionDebug` | Every step of EntityPath branch region resolution, for tracing a `BranchRegion` that will not resolve. |
-
-## Controller Support
-
-- **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
-- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
-- **Rumble** - Controller vibration on weapon fire, weapon charge and taking damage. Damage rumble works on every unit. Fire and charge rumble read the weapon's own ODF rumble values, and most stock weapons never set them, so a weapon that stays silent while firing needs those values added rather than fixing. ODF (weapon): `RecoilStrengthLight`/`Heavy`, `RecoilLengthLight`/`Heavy`, `RecoilDelayLight`/`Heavy`, `RecoilDecayLight`/`Heavy`, `ChargeRateLight`/`Heavy`, `MaxChargeStrengthLight`/`Heavy`, `ChargeDelayLight`/`Heavy`, `TimeAtMaxCharge`. INI: `[Controller] Rumble=1`

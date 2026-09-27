@@ -1499,7 +1499,7 @@ callbacks mocked for both ABIs, exercises malformed configuration, allocation
 failure, chains and repeated teardown. `tests/hud_number_math_abi_tests.py` reads
 the production installer guards and address table and compares them with all
 three PEs (including Modtools vtable JMP thunks). Actual game execution is still
-required to validate loading/rendering; see the [HUD testing checklist](../user/HUD.md#testing-and-verification).
+required to validate loading/rendering; see the [HUD testing checklist](HUDAuthoring.md#testing-and-verification).
 
 ## Bitmap sizing: `BitmapRect` (read on Phantom, 2026-09-26)
 
