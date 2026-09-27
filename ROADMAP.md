@@ -49,17 +49,6 @@ rough around the edges:
 - Write proper user documentation for enabling it. It is currently gated on
   `HealthType = "animal"` plus an `AttackAnimation` ODF entry.
 
-**Flyer strafe mode ODF property** - Flyer strafing is fully built into the flight model but
-its input was cut: `StrafeSpeed` and `StrafeRollAngle` are both multiplied by a constant 0, so
-today the only thing that moves a flyer sideways is the side-roll trick
-(`TrickSideRollStrafeSpeed`). The strafe stick axis (left stick X, A/D) drives roll instead.
-Goal is an opt-in `EntityFlyer` ODF property (`EnableStrafe`) that feeds the strafe axis into the dead term, so
-that axis moves the flyer sideways (and leans it by `StrafeRollAngle`) instead of rolling it.
-Roll stays reachable through the alternate control mode, which rolls on the turn axis.
-AI already produces a strafe value from `StrafeSpeed` (stock gunships and the MAF set it), which
-in vanilla ends up as roll; in strafe mode it would strafe as the AI code intended. Whether that
-flies well needs a play test. Patch sites are mapped for modtools, Steam and GOG.
-
 **Flyer reverse recovery for all flyers** - A stock flyer takes several times longer to come out
 of reverse than to brake into it. The engine only snaps the forward speed to the throttle while
 the flyer is not still moving backwards, so braking out of reverse is left to the momentum
