@@ -13,7 +13,7 @@
 // centre; vehicles/props use model bounds transformed into a world AABB.
 // Dimensions, artwork alignment, child offsets and labels belong to the .hud.
 //
-// SELECTION RETENTION (replaces the previous enemy-hit latch):
+// SELECTION RETENTION:
 //   * sample weapon->mTarget, else the native reticule handle, before lending;
 //   * acquire/refresh only when the engine's filtered HUD target agrees;
 //   * hold the most recently selected target for 0.5s after selection loss;
@@ -21,7 +21,7 @@
 //     except the other half of a vehicle and its exposed rider: that must
 //     hold the engine's pick for 0.3s, since the two trade it back and forth;
 //   * a lent/cached target cannot refresh its own hold;
-//   * no damage hook, affiliation check or fresh LOS/range/frustum gate;
+//   * no affiliation check or fresh LOS/range/frustum gate;
 //   * keep separate state for weapon1/2; clear on death/stale handles, weapon or
 //     controlled-object changes, mission reset or removal of that listener.
 //
@@ -51,8 +51,8 @@
 // Supported builds: modtools, Steam and GOG. See docs/RE/HUDSystem.md.
 extern float g_targetBarLatchSeconds;
 
-// The same Open/Update hooks also register horizonRotation, NumberMath and the
-// class icons (hud_class_icons.hpp). Independent HUD bindings opt into those
-// features; no damage-hook dependency.
+// The same Open/Update hooks also drive horizonRotation, NumberMath, the class
+// icons (hud_class_icons.hpp), the command post strip (hud_command_posts.hpp)
+// and FillFrom's Open step. Independent HUD bindings opt into those features.
 void target_bar_latch_install(uintptr_t exe_base);
 void target_bar_latch_uninstall();

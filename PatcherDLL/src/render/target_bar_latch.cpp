@@ -82,9 +82,9 @@
 // same name makes an orphan no element can ever bind to, because FindByHashID
 // returns the first match.  Always find first.
 //
-// Selection retention replaces the hit latch. Capture the natural weapon/reticle
-// input before lending, then require the engine's filtered HUD result to agree.
-// Retained results never refresh themselves. No damage hook or extra LOS ray.
+// Selection retention: capture the natural weapon/reticle input before lending,
+// then require the engine's filtered HUD result to agree. Retained results never
+// refresh themselves.
 // =============================================================================
 
 float g_targetBarLatchSeconds = 0.5f;

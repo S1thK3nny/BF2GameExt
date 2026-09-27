@@ -949,7 +949,7 @@ namespace modtools {
    // .enable at 0x00BA3CE8 is what SpawnDisplay::Show fires through the same array.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x00BA3CF4;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -961,7 +961,6 @@ namespace modtools {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -999,7 +998,6 @@ namespace modtools {
    constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
    constexpr uintptr_t net_game_get_local_player    = 0x006E3D20;
    constexpr uintptr_t camera_manager_instance      = 0x00B70BD4;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x0055F940;
    // sVehicleSpawnList, PblList<VehicleSpawn>: _head at +0, _iCount at +0x10.
    // From the ctor's list link (0x00664C50) and the dtor's count decrement.
    constexpr uintptr_t vehicle_spawn_list            = 0x00AD6004;
@@ -2185,7 +2183,7 @@ namespace steam {
    // .message ..C8, .vehicle ..CC, .spawninfo ..D0.  Stride is 0xCA here too.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E56DCC;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -2197,7 +2195,6 @@ namespace steam {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -2229,7 +2226,6 @@ namespace steam {
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
    constexpr uintptr_t net_game_get_local_player    = 0x005B7440;
    constexpr uintptr_t camera_manager_instance      = 0x01E30324;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x00535B30;
    // sVehicleSpawnList, from the dtor's `dec [0x007EBECC]` (_iCount) minus 0x10.
    // VehicleSpawn itself is byte-identical to modtools; verified field by field
    // against the ctor 0x0066E820 (mClass +0x70, mCommandPost +0x74, matrix +0x30,
@@ -2742,7 +2738,7 @@ namespace gog {
    // stride 0xCA, and Open 0x0055F120 stores this Create's result at 0x0055F94E.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E5827C;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -2754,7 +2750,6 @@ namespace gog {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -2786,7 +2781,6 @@ namespace gog {
    constexpr uintptr_t hud_player_data              = 0x01EC7740;
    constexpr uintptr_t net_game_get_local_player    = 0x005B83F0;
    constexpr uintptr_t camera_manager_instance      = 0x01E317C4;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x005368A0;
    // sVehicleSpawnList: ~VehicleSpawn 0x0066FAC0 does `dec [0x007ECE9C]` (_iCount).
    constexpr uintptr_t vehicle_spawn_list            = 0x007ECE8C;
    // VehicleSpawn::SetProperty, same hash-cluster derivation as Steam.  Same 538

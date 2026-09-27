@@ -357,7 +357,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    hud_weapon_icon_fix_install(exe_base);
    spawn_vehicle_list_install(exe_base);
-   // HUD selection retention, floating positions, horizon rotation and number math.
+   // HUD selection retention, floating positions, horizon rotation, number math,
+   // class icons and the command post strip.
    target_bar_latch_install(exe_base);
    hud_bar_fill_from_install(exe_base);
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
