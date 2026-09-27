@@ -53,4 +53,38 @@ constexpr Bar fill(const Bar& b, float value)
    return out;
 }
 
+// FillFrom("Bottom") and FillFrom("Top"). The stock fill can only move the
+// right edge, so a vertical bar has its ScaleTexture and rectangle-scaling
+// flags cleared (the stock fill then leaves it alone) and is laid out from the
+// full rectangle and coordinates it had after setup: the anchored edge stays,
+// the other one moves with the value, and V is cropped to match so each point
+// keeps the full bar's pixel. With ScaleTexture off the whole texture is
+// squeezed into the moving quad instead, as the stock fill does.
+struct Vertical {
+   Rect      full;
+   TexCoords fullUV;
+   bool      fromTop;   // anchor the top edge; otherwise the bottom
+   bool      crop;      // ScaleTexture as authored
+};
+
+constexpr float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+// The rectangle and coordinates for a value: the full ones with only the
+// moving edge and its V changed.
+constexpr Bar fill_vertical(const Vertical& b, float value)
+{
+   const float v = clamp01(value);
+   const Rect& r = b.full;
+   const TexCoords& t = b.fullUV;
+   Bar out = { r, t, 0, 0 };
+   if (b.fromTop) {
+      out.rect.bottom = r.top + v * (r.bottom - r.top);
+      if (b.crop) out.uv.v1 = t.v0 + v * (t.v1 - t.v0);
+   } else {
+      out.rect.top = r.bottom + v * (r.top - r.bottom);
+      if (b.crop) out.uv.v0 = t.v1 + v * (t.v0 - t.v1);
+   }
+   return out;
+}
+
 } // namespace hud_bar_fill_from

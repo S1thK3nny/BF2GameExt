@@ -3,6 +3,8 @@
 #include "target_bar_selection.hpp"
 #include "hud_number_math.hpp"
 #include "hud_class_icons.hpp"
+#include "hud_command_posts.hpp"
+#include "hud_bar_fill_from.hpp"
 #include "target_bar_geometry.hpp"
 #include "target_bar_fade.hpp"
 #include "hud_horizon_math.hpp"
@@ -641,6 +643,7 @@ static void __cdecl hooked_UpdateFloat(float dt)   // modtools
    tick_horizon();
    hud_number_math_update();
    hud_class_icons_update();
+   hud_command_posts_update();
 }
 
 static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was dropped
@@ -651,6 +654,7 @@ static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was 
    tick_horizon();
    hud_number_math_update();
    hud_class_icons_update();
+   hud_command_posts_update();
 }
 
 // HUD::Manager::Open switches to GameMemory::RunTimeHeap before calling
@@ -663,6 +667,8 @@ static void __cdecl hooked_Open()
    original_Open();
    hud_number_math_open();
    hud_class_icons_open();
+   hud_command_posts_open();
+   hud_bar_fill_from_open();
 
    // A new mission.  Every GameObject pointer from the last one is dead memory.
    clear_all_objects();
@@ -813,6 +819,7 @@ void target_bar_latch_install(uintptr_t exe_base)
       install_log("[HudHorizon] available: EventRotation(\"%s\"); inert without a binding", kHorizonEvent);
    if (s_installed) hud_number_math_resolve(exe_base);
    if (s_installed) hud_class_icons_resolve(exe_base);
+   if (s_installed) hud_command_posts_resolve(exe_base);
 }
 
 void target_bar_latch_uninstall()

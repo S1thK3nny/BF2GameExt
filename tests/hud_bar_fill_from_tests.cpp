@@ -70,5 +70,57 @@ int main()
    assert(near(fill(stock(r, offset), 1.0f).uv.u1, 1.0f));
    assert(near(fill(stock(r, t), 1.0f).uv.u1, 1.0f));
 
-   std::puts("Bar FillFrom tests passed (right anchor, texture alignment, complementary pair, U offsets and flips).");
+   // FillFrom("Bottom") and ("Top"): the anchored edge stays, the other moves
+   // with the value, left/right and U never change, and every point shows the
+   // pixel the full bar shows there, flipped V included.
+   const TexCoords vuvs[] = { {0, 0, 1, 1}, {0, 0.25f, 1, 0.75f}, {0, 1, 1, 0}, {0.1f, 0.2f, 0.9f, 0.6f} };
+   for (const Rect& full : rects)
+      for (const TexCoords& uv : vuvs)
+         for (int top = 0; top <= 1; ++top)
+            for (int step = 0; step <= 20; ++step) {
+               const float value = step / 20.0f;
+               const Vertical layout = { full, uv, top == 1, true };
+               const Bar b = fill_vertical(layout, value);
+               assert(b.rect.left == full.left && b.rect.right == full.right);
+               assert(b.uv.u0 == uv.u0 && b.uv.u1 == uv.u1);
+               const float height = full.bottom - full.top;
+               if (top) {
+                  assert(b.rect.top == full.top && near(b.rect.bottom, full.top + value * height));
+                  assert(b.uv.v0 == uv.v0);
+               } else {
+                  assert(b.rect.bottom == full.bottom && near(b.rect.top, full.bottom - value * height));
+                  assert(b.uv.v1 == uv.v1);
+               }
+               if (value > 0)
+                  for (int k = 0; k <= 8; ++k) {
+                     const float y = b.rect.top + (b.rect.bottom - b.rect.top) * k / 8.0f;
+                     const float shown = b.uv.v0 + (y - b.rect.top) / (b.rect.bottom - b.rect.top)
+                                                   * (b.uv.v1 - b.uv.v0);
+                     const float wanted = uv.v0 + (y - full.top) / height * (uv.v1 - uv.v0);
+                     assert(near(shown, wanted));
+                  }
+            }
+
+   // Values outside 0..1 clamp, as the stock bar's do.
+   const Vertical up = { r, t, false, true };
+   assert(near(fill_vertical(up, 1.5f).rect.top, r.top));
+   assert(near(fill_vertical(up, -0.5f).rect.top, r.bottom));
+
+   // ScaleTexture off squeezes the whole texture into the moving quad.
+   const Vertical squeeze = { r, t, false, false };
+   const Bar half = fill_vertical(squeeze, 0.5f);
+   assert(near(half.rect.top, 0) && half.uv.v0 == t.v0 && half.uv.v1 == t.v1);
+
+   // A Bottom bar at the health and a Top bar at the rest meet at one edge,
+   // on the same pixel.
+   for (int step = 0; step <= 20; ++step) {
+      const float health = step / 20.0f;
+      const Bar lower = fill_vertical({ r, t, false, true }, health);
+      const Bar upper = fill_vertical({ r, t, true, true }, 1.0f - health);
+      assert(near(lower.rect.top, upper.rect.bottom));
+      assert(near(lower.uv.v0, upper.uv.v1));
+   }
+
+   std::puts("Bar FillFrom tests passed (right anchor, bottom and top, texture alignment, complementary "
+             "pairs, U offsets and flips).");
 }

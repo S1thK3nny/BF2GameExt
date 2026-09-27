@@ -977,16 +977,23 @@ namespace modtools {
    constexpr uintptr_t hud_item_read                = 0x006B6B80;
    constexpr uintptr_t hud_item_read_event          = 0x006B6360;
    constexpr uintptr_t hud_filter_event_name        = 0x006B6270;
-   // FillFrom("Right") on a BarBitmap (render/hud_bar_fill_from.cpp). Both
-   // hooks are thiscall: ReadData(PblConfig*, Data*) -> bool, RET 8, and
-   // PostReadSetup(), RET 0. The three RedBitmapElement calls are thiscall too:
+   // FillFrom on a BarBitmap (render/hud_bar_fill_from.cpp). The hooks are
+   // thiscall: ReadData(PblConfig*, Data*) -> bool, RET 8; PostReadSetup(),
+   // RET 0; SetValue(float) -> float in ST0, RET 4, with `this` the bar's
+   // ElementBar base (+0x220). The three RedBitmapElement calls are thiscall too:
    // GetRect/GetTexCoords(float* x4), RET 0x10; SetTexCoords(u0, v0, u1, v1,
    // bool), RET 0x14. Offsets, same on every build, are in the module.
    constexpr uintptr_t hud_bar_bitmap_read_data     = 0x00695900;
    constexpr uintptr_t hud_bar_bitmap_post_read     = 0x00696340;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x00696090;
    constexpr uintptr_t red_bitmap_get_rect          = 0x00838E50;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x008392A0;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x00839220;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x006E3DD0;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
    constexpr uintptr_t hud_game_events_update       = 0x006B50A0;
    constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
@@ -2207,9 +2214,16 @@ namespace steam {
    constexpr uintptr_t hud_filter_event_name        = 0x00564690;
    constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054B480;
    constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054B320;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x0054B070;
    constexpr uintptr_t red_bitmap_get_rect          = 0x006E4DB0;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E48F0;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E4B90;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x005B7470;
+   constexpr uintptr_t net_on_client                = 0x01E62EAB;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
@@ -2757,9 +2771,16 @@ namespace gog {
    constexpr uintptr_t hud_filter_event_name        = 0x00565410;
    constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054C1D0;
    constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054C070;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x0054BDC0;
    constexpr uintptr_t red_bitmap_get_rect          = 0x006E5E50;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E5990;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E5C30;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x005B8420;
+   constexpr uintptr_t net_on_client                = 0x01E6435B;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;

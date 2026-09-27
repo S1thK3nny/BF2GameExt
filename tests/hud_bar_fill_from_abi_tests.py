@@ -30,11 +30,15 @@ assert const("kBarU1") == 0x480
 assert const("kIncFade") == 0x474
 assert const("kDecFade") == 0x478
 assert const("kVt_SetRect") == 0x4C
+assert const("kFlags") == 0x484
+assert const("kBarBase") == 0x220
+assert const("kFlagScaleTexture") == 0x01
+assert const("kFlagScaleRect") == 0x02
 
 guards = re.findall(r'guard\(base, g_addr->(\w+), "[^"]*",\s*'
                     r'modtools \? "([^"]*)"\s*: "([^"]*)",\s*'
                     r'modtools \? "([^"]*)"\s*: "([^"]*)"\)', source)
-assert len(guards) == 5, "Update the audit if the install guards change shape"
+assert len(guards) == 6, "Update the audit if the install guards change shape"
 
 
 def b(text):
@@ -42,7 +46,10 @@ def b(text):
 
 
 # Each site was disassembled before recording: the bitmap pointer read and the
-# width/U stores in PostReadSetup, SetValue's SetRect call, ReadData's fade stores.
+# width/U stores in PostReadSetup, SetValue's SetRect call, ReadData's fade stores,
+# and SetValue's contract: its bitmap read through the ElementBar base
+# ([this-0x170], so the base is bar + 0x220), mValue at [this+0x1C], the two flag
+# bits at [this+0x264] (bar + 0x484) and RET 4.
 sites = {
     "modtools": [
         (0x00696357, "8B BE B0 00 00 00"),          # MOV EDI,[ESI+0xB0]
@@ -51,6 +58,11 @@ sites = {
         (0x0069618E, "FF 52 4C"),                   # CALL [EDX+0x4C]      SetRect
         (0x0069594A, "D9 9F 74 04 00 00"),          # FSTP [EDI+0x474]     Inc fade
         (0x00695933, "D9 9F 78 04 00 00"),          # FSTP [EDI+0x478]     Dec fade
+        (0x0069609B, "8B 46 1C"),                   # MOV EAX,[ESI+0x1C]   mValue
+        (0x0069609F, "8B BE 90 FE FF FF"),          # MOV EDI,[ESI-0x170]  bitmap
+        (0x006960EB, "F6 86 64 02 00 00 01"),       # TEST [ESI+0x264],1   ScaleTexture
+        (0x0069612D, "F6 86 64 02 00 00 02"),       # TEST [ESI+0x264],2   edge moves
+        (0x006962AC, "C2 04 00"),                   # RET 4
     ],
     "steam": [
         (0x0054B33A, "8B B7 B0 00 00 00"),
@@ -59,6 +71,11 @@ sites = {
         (0x0054B1C3, "FF 50 4C"),
         (0x0054B4B7, "89 86 74 04 00 00"),
         (0x0054B4A6, "89 86 78 04 00 00"),
+        (0x0054B07E, "F3 0F 10 47 1C"),
+        (0x0054B083, "8B B7 90 FE FF FF"),
+        (0x0054B0E9, "F6 87 64 02 00 00 01"),
+        (0x0054B147, "F6 87 64 02 00 00 02"),
+        (0x0054B316, "C2 04 00"),
     ],
     "gog": [
         (0x0054C08A, "8B B7 B0 00 00 00"),
@@ -67,6 +84,11 @@ sites = {
         (0x0054BF13, "FF 50 4C"),
         (0x0054C207, "89 86 74 04 00 00"),
         (0x0054C1F6, "89 86 78 04 00 00"),
+        (0x0054BDCE, "F3 0F 10 47 1C"),
+        (0x0054BDD3, "8B B7 90 FE FF FF"),
+        (0x0054BE39, "F6 87 64 02 00 00 01"),
+        (0x0054BE97, "F6 87 64 02 00 00 02"),
+        (0x0054C066, "C2 04 00"),
     ],
 }
 

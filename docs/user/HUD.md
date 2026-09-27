@@ -28,6 +28,7 @@ out explicitly rather than assumed to be fixes supplied by GameExt.
 - [Reticule horizon levelling](#reticule-horizon-levelling)
 - [Floating target bars](#floating-target-bars)
 - [Class, stance and vehicle icons](#class-stance-and-vehicle-icons)
+- [Command post strip](#command-post-strip)
 - [Bars that fill from the right](#bars-that-fill-from-the-right)
 - [Testing and verification](#testing-and-verification)
 - [Troubleshooting and limits](#troubleshooting-and-limits)
@@ -950,6 +951,117 @@ Disable twin is sent otherwise, and for an empty slot.
   `type(GameExt) == "table"` first; the check is on the type because `GameExt` can
   fall back to a plain `true`.
 
+## Command post strip
+
+A row of command post icons, each showing who owns the post and how far a capture
+has got, as in Battlefront III. GameExt publishes one set of events per slot; the
+`.hud` lays the slots out. Slot N runs 1 to 16:
+
+| Event | Type | Carries |
+|---|---|---|
+| `player1.commandPosts.count` | Uint | How many slots are in use |
+| `player1.commandPostN.icon` | Uint | The owning team's icon, the texture its `SetTeamIcon` gave it |
+| `player1.commandPostN.iconDisable` | Bool | Sent instead when that team has no loaded icon |
+| `player1.commandPostN.color` | Color | The owner in your palette: friendly, enemy or neutral, as on the minimap |
+| `player1.commandPostN.capture` | Float | How much of the post its side holds, 0 to 1 |
+| `player1.commandPostN.captureColor` | Color | The team gaining or holding it |
+| `player1.commandPostN.disable` | Bool | The slot is not in use |
+
+`capture` is 1 for a post a team holds, and drains while another team neutralises
+it. A neutral post sits at 0 and fills as a team captures it, in that team's
+`captureColor`. So one bar, coloured by `captureColor`, shows the whole fight.
+
+Slots follow each post's `HUDIndex`, lowest first, then posts without one in map
+order. Posts with `HUDIndexDisplay = 0` are left out: in the stock ODFs that is the
+invisible spawn posts and the command vehicles. A post whose object has been
+destroyed drops out and the rest move up.
+
+### The neutral icon
+
+A neutral post belongs to team 0, so it shows team 0's icon. Give team 0 one where
+the mission sets the other teams' icons:
+
+```lua
+SetTeamIcon(0, "bf3_neutral_icon")
+```
+
+Without it, neutral posts send `iconDisable`, so an icon element bound as below hides
+while its post is neutral.
+
+### Laying out the strip
+
+One group per slot, at a fixed spacing inside a row group. The icon enables on
+`icon` and hides on `disable`; the capture bar is a `BarBitmap` over or under it:
+
+```text
+Group("cp_strip")
+{
+    EventPosition("player1.example.cpStripPosition")
+    Group("cp_slot1")
+    {
+        Position(0.000, 0.000, 0.000, "Viewport")
+        Bitmap("cp_slot1_icon")
+        {
+            Bitmap("bf3_neutral_icon")
+            BitmapRect(0.030, 0.030, "Center", "Center", "Viewport")
+            EventBitmap("player1.commandPost1.icon")
+            EventColor("player1.commandPost1.color")
+            EventEnable("player1.commandPost1.icon")
+            EventDisable("player1.commandPost1.disable")
+        }
+        BarBitmap("cp_slot1_capture")
+        {
+            Bitmap("hud_cp_capture_bar")
+            BitmapRect(0.030, 0.004, "Left", "Center", "Viewport")
+            Position(-0.015, 0.022, 0.000, "Viewport")
+            EventValue("player1.commandPost1.capture")
+            EventColor("player1.commandPost1.captureColor")
+            EventEnable("player1.commandPost1.icon")
+            EventDisable("player1.commandPost1.disable")
+        }
+    }
+    // cp_slot2 at Position(0.040, 0, 0), cp_slot3 at 0.080, and so on to 16.
+}
+```
+
+To keep the used slots centred, move the row by the count. For a 0.040 spacing and
+a centre at 0.5, the row starts at `0.5 - 0.02 * (count - 1)`:
+
+```text
+TransformNumberVector3("player1example_cpstripposition")
+{
+    NumberVector3(1.00, 0.50, 0.05, 0.00)
+    NumberVector3(16.00, 0.20, 0.05, 0.00)
+    EventInput("player1.commandPosts.count")
+    EventOutput("player1.example.cpStripPosition")
+}
+```
+
+Put the transform above the strip, as with any transform.
+
+A `Scale` on the row group scales the slot spacing too. It pulls every slot toward
+the group's origin, which is slot 1, so a smaller scale shrinks the row to the left;
+`"Center"` alignment on the icons does not change that. Scale the second row with it:
+its x is `centre - 7.5 * spacing * scale`, 0.32 for the 0.5 centre and 0.040 spacing
+above at a 0.6 scale. Or put the `Scale` on each slot group instead, which leaves the
+spacing alone.
+
+To fill each emblem from the bottom rather than left to right, add `FillFrom("Bottom")`
+to its capture bar; see [Filling upward or downward](#filling-upward-or-downward).
+
+### Online
+
+The events come from the HUD update, so they work on multiplayer clients too. Who
+owns each post is always right there. The capture progress is only as good as the
+client's own copy: a client works out a post's capture only while the post is near
+its player, as the game itself does, so there the bar moves as normal. Elsewhere a
+client sees each post at rest, full for its owner or empty when neutral, and the
+change in owner when it happens. On the host and in single player every post's
+progress is live.
+
+- Only the first local viewport (`player1`) has these events.
+- Inert unless a `.hud` binds one of them; there is no INI setting.
+
 ## Bars that fill from the right
 
 `FillFrom("Right")` on a `BarBitmap` makes the bar keep its right end and move its
@@ -1003,6 +1115,29 @@ stance icons drive both bars.
   fade still plays when the bar grows and the decrease fade when it shrinks.
 - `BarBitmap` only, set in the `.hud` file; there is no INI setting.
 
+### Filling upward or downward
+
+`FillFrom("Bottom")` keeps the bar's bottom edge and grows it upward; `FillFrom("Top")`
+keeps the top and grows it downward. As with `"Right"`, each point shows the pixel the
+full bar shows there, so an upright picture stays upright: no `Rotation` and no rotated
+texture are needed. That is what lets a team emblem or class icon fill from the bottom,
+where rotating the bar would turn the picture on its side.
+
+```text
+BarBitmap("player1cpstrip_slot1_fill")
+{
+    EventValue("player1.commandPost1.capture")
+    FillFrom("Bottom")
+    Bitmap("bf3_neutral_icon")
+    EventBitmap("player1.commandPost1.icon")
+    // Same BitmapRect and position as the emblem underneath.
+}
+```
+
+- `ScaleTexture(0)` squeezes the whole texture into the moving bar, as on a stock bar.
+- A vertical bar has no flash: `FlashyScale` and the fade times do nothing on it.
+- `Rotation` still applies on top, like any bar.
+
 ## Testing and verification
 
 ### Selection retention checks
@@ -1025,6 +1160,30 @@ self-refresh and the rider pair. `tests/target_bar_selection_abi_tests.py
 "path\to\GameData"` checks native input instructions read-only on all three
 supported executables; it requires Python, `pefile` and `capstone`. These checks
 do not replace an in-game test.
+
+### Command post strip checks
+
+Load a conquest map with the strip bound and check that every capturable post has a
+slot, in `HUDIndex` order, and that invisible posts and command vehicles do not.
+Capture a neutral post: its bar should fill in your colour, then the icon and colour
+should flip to your team. Neutralise an enemy post: its bar should drain in its
+owner's colour, and the icon should turn neutral when it empties. Watch an AI capture
+elsewhere on the map in single player; the bar should move there too.
+
+`tests/hud_command_posts_tests.cpp` covers the slot order, the capture value and
+colour, and change detection. `tests/hud_command_posts_abi_tests.py
+"path\to\GameData"` checks every offset, address and guard against all three
+executables, read-only.
+
+### Bar fill checks
+
+Bind a bar with `FillFrom("Right")` and one with `FillFrom("Bottom")` to something you
+can change, such as health. The first should shrink toward its right end and the second
+toward its bottom edge, both with the picture upright and each point showing the same
+part of it as the full bar. `tests/hud_bar_fill_from_tests.cpp` covers the geometry and
+texture alignment of all three modes, and `tests/hud_bar_fill_from_abi_tests.py
+"path\to\GameData"` checks the hooks' prologues and offsets on all three executables,
+read-only.
 
 ### Class icon checks
 

@@ -10,10 +10,18 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
-- **`FillFrom("Right")` for HUD bars** - A `BarBitmap` can keep its right end and
-  grow or shrink at its left, showing the same part of its texture the full bar shows
-  there, with any `TexCoords`, rotation and the bar flash. Inert unless a `.hud` uses
-  it. See [HUD authoring](docs/user/HUD.md#bars-that-fill-from-the-right).
+- **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
+  `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
+  so a `.hud` can show every command post's owner and capture progress in a row.
+  Slots follow `HUDIndex`; neutral posts use team 0's `SetTeamIcon`. Works on
+  multiplayer clients; inert unless a `.hud` binds it.
+  See [HUD authoring](docs/user/HUD.md#command-post-strip).
+- **`FillFrom` for HUD bars** - A `BarBitmap` can keep its right end and grow or
+  shrink at its left (`"Right"`), or fill vertically from its bottom or top (`"Bottom"`,
+  `"Top"`), showing the same part of its texture the full bar shows there, so an
+  upright icon fills without being rotated. `"Right"` keeps the bar flash; the vertical
+  modes have none. Inert unless a `.hud` uses it.
+  See [HUD authoring](docs/user/HUD.md#bars-that-fill-from-the-right).
 - **Weapon icon textures** - `player1.weapon1.iconTexture` and
   `player1.weapon2.iconTexture` carry the stock `IconTexture` of the weapon in each
   slot, following the same weapon as the stock weapon events, with Disable twins.

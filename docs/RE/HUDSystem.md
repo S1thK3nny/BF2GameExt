@@ -736,28 +736,76 @@ data, because only `ElementMap` knows how to walk `TargetManager::gPost`.
 Lua already has the state: `GetCommandPostTeam`, `GetCommandPostCaptureRegion`,
 `GetCommandPostBleedValue`. It has no channel to push it at the HUD.
 
-### Building a custom command-post strip
+### The command post strip (built 2026-09-27, `render/hud_command_posts.cpp`)
 
-Tier 2 work, and small. Do **not** try to mimic the index-carrying pattern - a generic
-`Element` cannot demultiplex an index. Register one event per post per field instead:
+The strip does not mimic the index-carrying pattern above: a generic `Element`
+cannot demultiplex an index. It registers one event per
+slot per field, `player1.commandPostN.{icon, iconDisable, color, capture,
+captureColor, disable}` for N = 1..16 plus `player1.commandPosts.count`, and pumps
+them from the `GameEvents::Update` detour, sending only on change. User-facing
+details are in [HUD.md](../user/HUD.md#command-post-strip).
 
-```cpp
-// from a GameEvents::Open detour, after calling the original
-for (int i = 1; i <= 16; ++i) {
-    gCP[i].color    = EventClass::Create(type_Color,  "commandpost%d.teamColor", i);
-    gCP[i].present  = EventClass::Create(type_Bool,   "commandpost%d.present",   i);
-    gCP[i].disputed = EventClass::Create(type_Bool,   "commandpost%d.disputed",  i);
-    gCP[i].name     = EventClass::Create(type_String, "commandpost%d.name",      i);
-}
-```
+**The posts.** `CommandPost::sPostArray` (a `CommandPost*` array) and its count, both
+behind static pointers (game_addrs `command_post_array_ptr`, `command_post_count_ptr`;
+`ReadCommandPost` indexes the same array with a 4-bit net index). A `CommandPost` is
+not a `GameObject`: its `mObject` handle (`+0x2C`) is the post's object, and the post's
+team is that object's 4-bit team at `+0x234`, as Lua's `GetCommandPostTeam` and the
+minimap's `ElementMap::UpdatePostIcons` (Phantom `0x00603470`) read it. The minimap
+also hides a post whose object is dead (`+0x1FC` bit 3); so does the strip.
 
-then pump them from a `GameEvents::Update` detour by walking `TargetManager::gPost`,
-sending only on change (the engine's own `GameEvents` helpers all do change-detection
-against a cached `gPlayerData` copy; copy that discipline or every element re-renders
-every frame). 64 extra `EventClass` objects is 2 KB plus names.
+**`HUDIndex` and `HUDIndexDisplay`.** `HUDIndex` is `atoi`'d into `mHUDPostIndex`
+(`+0x1C`), so blank is 0; it is the number `UpdatePostIcons` prints beside a post.
+`HUDIndexDisplay` sets bit 1 of the post's flag byte (`+0x1A58` modtools, `+0xB40`
+retail) and bit 0 of its class's (`+0x26C` / `+0x190`); the class default is on
+(`CommandPostClass` ctor, Phantom `0x004DF95B`) and the post copies it. In the stock
+ODFs it is 0 only for the invisible control zone and command vehicles (AT-TE,
+gunships), so the strip uses it as its filter. Slots run numbered posts by number,
+then the rest in map order.
 
-A `.hud` file can then lay out sixteen groups with `EventEnable("commandpost3.present")`
-and `EventColor("commandpost3.teamColor")` and get a real capture-status strip.
+**Capture.** `CommandPost::Update` (Phantom `0x004E48A0`) keeps two timers per post:
+`mNeutralizeTimer` (`+0xA0`) runs up while another team holds an owned post, and
+`mCaptureTimer` (`+0xA4`) runs for `mBiasTeam` (`+0x78`) on a neutral one, each against
+the class's `NeutralizeTime` (`+0x04`) or `CaptureTime` (`+0x08`); `GetCaptureRatio`
+and `GetNeutralizeRatio` divide them. The strip's `capture` is `1 - neutralize ratio`
+for an owned post and the capture ratio for a neutral one, coloured by the owner or,
+once a capture has started, by `mBiasTeam`. The timers only change while someone
+holds the post, so a half-taken post stays half taken. At neutralisation the code
+sets `mNeutralizeTimer` to the full time and nothing seen resets it at capture; the
+new owners holding the post count it back down (`MSG_SAVED` at 0). So a post fresh
+from neutral may show low until its owners secure it: read from the code, not yet
+seen in play.
+
+**Online.** Team changes are host-only and reach clients as `ChangeCommandPostTeams`
+events, so ownership is right everywhere. The timers are not sent. A client runs
+`CommandPost::Update` too, but only scans a post's capture region when `netOnClient`
+is clear or `NetGame::IsNearLocalPlayer` says the post is within 100 units on X and Z
+of `netLocalPos` (Phantom `0x00696FB0`; Steam `0x005B7470`, GOG `0x005B8420`,
+modtools `0x006E3DD0`). The per-player capture bar is sent separately
+(`WriteCaptureDisplay`, a 6-bit ratio), which is why the stock HUD's
+`commandPost.charge` works on clients. The strip makes the same test and shows a post
+at rest (1 owned, 0 neutral) where a client does not simulate it.
+
+**Icons and colours.** `SetTeamIcon(team, icon, conquestIcon, ctfIcon)` hashes into
+`Team::mIcon` (`+0x1C`), `mConquestIcon` and `mCTFIcon`, with no bounds check;
+`Team::sTeams` (game_addrs `team_array_base`, a pointer to the array) has a neutral
+team at 0 that the engine dereferences for neutral posts, so `SetTeamIcon(0, ...)` is
+safe. The strip sends `mIcon` after checking the texture table. Colours are the
+viewer's `Team::mColor[team]` (`+0x68`, `RedColor[8]`), the minimap's palette, with
+the viewer from the local `Character::mTeamNumber` (`+0x134`). A Color event (type 7)
+carries a pointer to the 4 bytes: HUD::Event's `RedColor` constructor stores the
+pointer and every `EventColor` handler dereferences it (modtools `0x00692B80`, Steam
+`0x0054A080`, GOG `0x0054ADD0`).
+
+| | modtools | Steam | GOG |
+|---|---|---|---|
+| `CommandPost::sPostArray` pointer / count pointer | `0x00AD5498` / `0x00AD549C` | `0x007E6314` / `0x007E631C` | `0x007E7314` / `0x007E731C` |
+| `CommandPost::mClass` | `+0x1A54` | `+0xB3C` | `+0xB3C` |
+| `Team::sTeams` pointer | `0x00AD5D64` | `0x007E9AA0` | `0x007EAAA0` |
+| `netOnClient` | `0x00BE14FD` | `0x01E62EAB` | `0x01E6435B` |
+| `NetGame::IsNearLocalPlayer`, cdecl(`PblVector3*`) -> bool | `0x006E3DD0` | `0x005B7470` | `0x005B8420` |
+
+Every read site is listed in `core/layout/command_post.hpp` and checked on all three
+executables by `tests/hud_command_posts_abi_tests.py`.
 
 ---
 
@@ -1542,7 +1590,7 @@ the line.
 |---|---|---|---|
 | `ElementBarBitmap::ReadData`, thiscall `(PblConfig*, Data*)`, RET 8 | `0x00695900` | `0x0054B480` | `0x0054C1D0` |
 | `ElementBarBitmap::PostReadSetup`, thiscall, RET 0 | `0x00696340` | `0x0054B320` | `0x0054C070` |
-| `ElementBarBitmap::SetValue` (not hooked) | `0x00696090` | `0x0054B070` | |
+| `ElementBarBitmap::SetValue`, thiscall(float) -> float, RET 4 (hooked for the vertical modes) | `0x00696090` | `0x0054B070` | `0x0054BDC0` |
 | `RedBitmapElement::GetRect`, RET 0x10 | `0x00838E50` | `0x006E4DB0` | `0x006E5E50` |
 | `RedBitmapElement::GetTexCoords`, RET 0x10 | `0x008392A0` | `0x006E48F0` | `0x006E5990` |
 | `RedBitmapElement::SetTexCoords(u0, v0, u1, v1, bool)`, RET 0x14 | `0x00839220` | `0x006E4B90` | `0x006E5C30` |
@@ -1553,6 +1601,28 @@ flag byte `+0x484`, `FlashyScale +0x470`, `FlashyIncFadeOutTime +0x474`,
 the bitmap's vtable `+0x4C` (Phantom `+0x48`). `SetTexCoords`' bool rotates the
 coordinates; stock code always passes false. Checked on all three executables by
 `tests/hud_bar_fill_from_abi_tests.py`.
+
+### `FillFrom("Bottom")` and `FillFrom("Top")` (built 2026-09-27)
+
+The stock fill cannot go vertical: `ElementBarBitmap::SetValue` only ever moves the
+right edge and crops U. Rotating the bar turns its picture too, and the one thing that
+could counter-rotate the texture, `SetTexCoords`' rotate bool, is reset to false by
+every `SetValue`. So a vertical bar is laid out by GameExt instead. At the end of
+`PostReadSetup` its full rectangle and coordinates are recorded and flag bits 0
+(`ScaleTexture`) and 1 (edge movement) are cleared. With both clear, `SetValue` still
+stores the value but changes nothing visible: it rewrites the coordinates it just read,
+never touches the rectangle, and never starts the flash, which is gated on bit 1. A
+detour on `SetValue` then runs it and lays the bar out for the value it returned: the
+anchored edge stays, the other moves, and V is cropped to match (or not, if
+`ScaleTexture` was authored off).
+
+`SetValue` is `thiscall(float) -> float` in ST0, `RET 4`, and is reached with the bar's
+`ElementBar` base, bar `+0x220`, as `this`: its bitmap read is `[this-0x170]` (bar
+`+0xB0`), its flags `[this+0x264]` (bar `+0x484`) and `mValue` `[this+0x1C]`. Modtools
+`0x00696090`, Steam `0x0054B070`, GOG `0x0054BDC0`, prologues and sites checked by the
+same audit. The recorded bars are forgotten when `GameEvents::Open` runs for a new HUD;
+a record left by a freed bar is inert, because only a bar with both flag bits clear is
+laid out and a stock bar keeps bit 1 on by default.
 
 ## Candidate events (researched 2026-09-25, not built)
 
@@ -1784,7 +1854,7 @@ Open: the unit of the angle (the ODF values suggest degrees); the slots per buil
 | Kill confirm | stock `player1.statistic.kills` first; else the damage hook on the host, or the kill feed on clients | untested |
 | Missile direction | whatever computes `missileLockDistance` | not traced |
 | Grenade warning | the live ordnance list | not traced |
-| Command post strip and markers | `TargetManager::gPost[16]`; CommandPost `HUDIndex` and `HUDIndexDisplay` properties | Phantom only |
+| Command post markers | the strip's post list and each post object's position | strip built 2026-09-27; markers not |
 | Objective waypoints | the minimap marker storage behind `map.refreshMarker`; 79 Lua files under `BF2_ModTools` call `MapAddEntityMarker` | not traced |
 | Friendly name tags | `Character::sCharacters` | addressed on all three builds |
 | Off-screen arrows | the screen pinning in `target_bar_geometry.hpp` | building block exists |

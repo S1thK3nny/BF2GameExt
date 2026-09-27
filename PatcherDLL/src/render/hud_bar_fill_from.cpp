@@ -13,19 +13,22 @@
 #include <utility>
 
 // =============================================================================
-// Read on each build, names from the Phantom PDB. Hooked: ReadData and
-// PostReadSetup. The stock fill, ElementBarBitmap::SetValue (modtools
-// 0x00696090, Steam 0x0054B070), is left alone.
+// Read on each build, names from the Phantom PDB. Hooked: ReadData,
+// PostReadSetup and, for the vertical modes, SetValue.
 //
 //                                     modtools    Steam       GOG
 //   ElementBarBitmap::ReadData        0x00695900  0x0054B480  0x0054C1D0
 //   ElementBarBitmap::PostReadSetup   0x00696340  0x0054B320  0x0054C070
+//   ElementBarBitmap::SetValue        0x00696090  0x0054B070  0x0054BDC0
 //   RedBitmapElement::GetRect         0x00838E50  0x006E4DB0  0x006E5E50
 //   RedBitmapElement::GetTexCoords    0x008392A0  0x006E48F0  0x006E5990
 //   RedBitmapElement::SetTexCoords    0x00839220  0x006E4B90  0x006E5C30
 //
 // ReadData is thiscall(PblConfig*, Data*) -> bool, RET 8; PostReadSetup is
-// thiscall(), RET 0. GetRect(&left, &top, &right, &bottom) and
+// thiscall(), RET 0. SetValue is thiscall(float) -> float in ST0, RET 4, with
+// `this` the ElementBar base at bar + 0x220 (its bitmap read is [this-0x170]).
+// It only moves the right edge and U with flag bit 1 set, and crops U with
+// bit 0 (ScaleTexture); bit 1 also gates its flash strip. GetRect(&left, &top, &right, &bottom) and
 // GetTexCoords(&u0, &v0, &u1, &v1) are thiscall RET 0x10; SetTexCoords(u0, v0,
 // u1, v1, bool) is thiscall RET 0x14, and the bool (which rotates the
 // coordinates) is always false in stock code. SetRect(left, top, right, bottom)
@@ -37,6 +40,8 @@
 //   +0x47C  mBarWidth, stored as right - left
 //   +0x480  mBarU1, stored as u1 (the span only while u0 is 0)
 //   +0x474  FlashyIncFadeOutTime    +0x478  FlashyDecFadeOutTime
+//   +0x484  flags: bit 0 ScaleTexture, bit 1 edge moves (both on by default)
+//   +0x220  the ElementBar base, whose mValue is at +0x1C
 //
 // Storing the bar end for end draws its quad right to left. The interface
 // shader draws with culling off: pcInterfaceShader::Begin passes
@@ -53,8 +58,15 @@ constexpr uint32_t kBarWidth      = 0x47C;
 constexpr uint32_t kBarU1         = 0x480;
 constexpr uint32_t kIncFade       = 0x474;
 constexpr uint32_t kDecFade       = 0x478;
+constexpr uint32_t kFlags         = 0x484;
+constexpr uint8_t  kFlagScaleTexture = 0x01;
+constexpr uint8_t  kFlagScaleRect    = 0x02;  // SetValue moves the edge (and flashes) only with this
+constexpr uint32_t kBarBase       = 0x220;    // the ElementBar base: SetValue's `this`
 constexpr uint32_t kVt_SetRect    = 0x4C;
 constexpr int      kMaxPending    = 64;
+constexpr int      kMaxVertical   = 64;
+
+enum Mode { kRight, kBottom, kTop };
 
 // PblConfig::Data: the property hash, the argument count, then 128 DWORD
 // arguments. A string argument is an offset from the start of the arguments.
@@ -66,6 +78,7 @@ struct ConfigData {
 
 using ReadDataFn = bool(__fastcall*)(void* self, void* edx, void* config, const ConfigData* data);
 using PostReadFn = void(__fastcall*)(void* self, void* edx);
+using SetValueFn = float(__fastcall*)(void* self, void* edx, float value);
 using GetFn      = void(__fastcall*)(void* self, void* edx, float* a, float* b, float* c, float* d);
 using SetUVFn    = void(__fastcall*)(void* self, void* edx, float u0, float v0, float u1, float v1,
                                      bool rotate);
@@ -73,43 +86,103 @@ using SetRectFn  = void(__fastcall*)(void* self, void* edx, float l, float t, fl
 
 ReadDataFn s_readData   = nullptr;
 PostReadFn s_postRead   = nullptr;
+SetValueFn s_setValue   = nullptr;
 GetFn      s_getRect    = nullptr;
 GetFn      s_getUV      = nullptr;
 SetUVFn    s_setUV      = nullptr;
 
-// Bars whose FillFrom("Right") has been read but whose setup has not run yet.
-// Each entry is taken back out by PostReadSetup, so the table only ever holds
-// the bars of the .hud being read.
-void* s_pending[kMaxPending];
-int   s_pendingCount = 0;
-bool  s_warnedFull = false;
-bool  s_warnedValue = false;
+// Bars whose FillFrom has been read but whose setup has not run yet. Each
+// entry is taken back out by PostReadSetup, so the table only ever holds the
+// bars of the .hud being read.
+struct Pending {
+   void* bar;
+   Mode  mode;
+};
+Pending s_pending[kMaxPending];
+int     s_pendingCount = 0;
+bool    s_warnedFull = false;
+bool    s_warnedValue = false;
+
+// Vertical bars and their full layout. Cleared when the HUD opens; an entry
+// left by a freed bar is inert, since SetValue only lays out a bar whose two
+// fill flags setup cleared, and a stock bar keeps at least the edge flag.
+struct VerticalBar {
+   void*    bar;
+   Vertical layout;
+};
+VerticalBar s_vertical[kMaxVertical];
+int         s_verticalCount = 0;
+bool        s_warnedVerticalFull = false;
 
 int find_pending(void* bar)
 {
    for (int i = 0; i < s_pendingCount; ++i)
-      if (s_pending[i] == bar) return i;
+      if (s_pending[i].bar == bar) return i;
    return -1;
 }
 
-void remember(void* bar)
+void remember(void* bar, Mode mode)
 {
-   if (find_pending(bar) >= 0) return;
+   const int i = find_pending(bar);
+   if (i >= 0) { s_pending[i].mode = mode; return; }
    if (s_pendingCount == kMaxPending) {
       if (!s_warnedFull) install_log("[BarFillFrom] over %d bars pending; the rest fill from the left",
                                      kMaxPending);
       s_warnedFull = true;
       return;
    }
-   s_pending[s_pendingCount++] = bar;
+   s_pending[s_pendingCount++] = { bar, mode };
 }
 
-bool take(void* bar)
+bool take(void* bar, Mode& mode)
 {
    const int i = find_pending(bar);
    if (i < 0) return false;
+   mode = s_pending[i].mode;
    s_pending[i] = s_pending[--s_pendingCount];
    return true;
+}
+
+void forget(void* bar)
+{
+   Mode unused;
+   take(bar, unused);
+}
+
+const VerticalBar* find_vertical(const void* bar)
+{
+   for (int i = 0; i < s_verticalCount; ++i)
+      if (s_vertical[i].bar == bar) return &s_vertical[i];
+   return nullptr;
+}
+
+bool register_vertical(void* bar, const Vertical& layout)
+{
+   for (int i = 0; i < s_verticalCount; ++i)
+      if (s_vertical[i].bar == bar) { s_vertical[i].layout = layout; return true; }
+   if (s_verticalCount == kMaxVertical) {
+      if (!s_warnedVerticalFull) install_log("[BarFillFrom] over %d vertical bars; the rest fill "
+                                             "from the left", kMaxVertical);
+      s_warnedVerticalFull = true;
+      return false;
+   }
+   s_vertical[s_verticalCount++] = { bar, layout };
+   return true;
+}
+
+void set_rect(void* bitmap, const Rect& r)
+{
+   const auto setRect = reinterpret_cast<SetRectFn>((*reinterpret_cast<void***>(bitmap))[kVt_SetRect / 4]);
+   setRect(bitmap, nullptr, r.left, r.top, r.right, r.bottom);
+}
+
+void lay_out_vertical(uint8_t* bar, const Vertical& layout, float value)
+{
+   void* bitmap = *reinterpret_cast<void**>(bar + kBitmap);
+   if (!bitmap) return;
+   const Bar b = fill_vertical(layout, value);
+   set_rect(bitmap, b.rect);
+   s_setUV(bitmap, nullptr, b.uv.u0, b.uv.v0, b.uv.u1, b.uv.v1, false);
 }
 
 const char* string_arg(const ConfigData* d, uint32_t i)
@@ -130,12 +203,14 @@ bool __fastcall hooked_ReadData(void* self, void* edx, void* config, const Confi
       if (data && data->id == kFillFrom) {
          handled = true;
          const char* value = string_arg(data, 0);
-         if (value && _stricmp(value, "Right") == 0) {
-            remember(self);
-         } else {
-            take(self);
+         if (value && _stricmp(value, "Right") == 0)       remember(self, kRight);
+         else if (value && _stricmp(value, "Bottom") == 0) remember(self, kBottom);
+         else if (value && _stricmp(value, "Top") == 0)    remember(self, kTop);
+         else {
+            forget(self);
             if ((!value || _stricmp(value, "Left") != 0) && !s_warnedValue) {
-               install_log("[BarFillFrom] FillFrom takes \"Left\" or \"Right\"; that bar fills from the left");
+               install_log("[BarFillFrom] FillFrom takes \"Left\", \"Right\", \"Bottom\" or \"Top\"; "
+                           "that bar fills from the left");
                s_warnedValue = true;
             }
          }
@@ -151,7 +226,8 @@ bool __fastcall hooked_ReadData(void* self, void* edx, void* config, const Confi
 void __fastcall hooked_PostRead(void* self, void* edx)
 {
    s_postRead(self, edx);
-   if (!take(self)) return;
+   Mode mode;
+   if (!take(self, mode)) return;
    __try {
       uint8_t* bar = static_cast<uint8_t*>(self);
       void* bitmap = *reinterpret_cast<void**>(bar + kBitmap);
@@ -160,18 +236,45 @@ void __fastcall hooked_PostRead(void* self, void* edx)
       TexCoords t;
       s_getRect(bitmap, nullptr, &r.left, &r.top, &r.right, &r.bottom);
       s_getUV(bitmap, nullptr, &t.u0, &t.v0, &t.u1, &t.v1);
-      const Bar b = anchor_right(r, t);
-      const auto setRect = reinterpret_cast<SetRectFn>((*reinterpret_cast<void***>(bitmap))[kVt_SetRect / 4]);
-      setRect(bitmap, nullptr, b.rect.left, b.rect.top, b.rect.right, b.rect.bottom);
-      s_setUV(bitmap, nullptr, b.uv.u0, b.uv.v0, b.uv.u1, b.uv.v1, false);
-      *reinterpret_cast<float*>(bar + kBarWidth) = b.width;
-      *reinterpret_cast<float*>(bar + kBarU1)    = b.spanU;
-      // The fill judges growth by which way the moving edge went, which is now
-      // reversed: trade the two fade times so each still goes with its change.
-      std::swap(*reinterpret_cast<float*>(bar + kIncFade), *reinterpret_cast<float*>(bar + kDecFade));
+      if (mode == kRight) {
+         const Bar b = anchor_right(r, t);
+         set_rect(bitmap, b.rect);
+         s_setUV(bitmap, nullptr, b.uv.u0, b.uv.v0, b.uv.u1, b.uv.v1, false);
+         *reinterpret_cast<float*>(bar + kBarWidth) = b.width;
+         *reinterpret_cast<float*>(bar + kBarU1)    = b.spanU;
+         // The fill judges growth by which way the moving edge went, which is now
+         // reversed: trade the two fade times so each still goes with its change.
+         std::swap(*reinterpret_cast<float*>(bar + kIncFade), *reinterpret_cast<float*>(bar + kDecFade));
+         return;
+      }
+      // Vertical: take the stock fill (and its flash) off this bar; the
+      // SetValue hook lays it out from the full rectangle instead.
+      uint8_t& flags = bar[kFlags];
+      const Vertical layout = { r, t, mode == kTop, (flags & kFlagScaleTexture) != 0 };
+      if (register_vertical(bar, layout))
+         flags &= static_cast<uint8_t>(~(kFlagScaleTexture | kFlagScaleRect));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // A bar that cannot be read stays as the stock setup left it.
    }
+}
+
+// ElementBarBitmap::SetValue, reached with its ElementBar base (bar + 0x220).
+// The stock fill runs first and does nothing visible on a vertical bar, then
+// the bar is laid out for the value it stored.
+float __fastcall hooked_SetValue(void* self, void* edx, float value)
+{
+   const float stored = s_setValue(self, edx, value);
+   if (s_verticalCount) {
+      __try {
+         uint8_t* bar = static_cast<uint8_t*>(self) - kBarBase;
+         const VerticalBar* vertical = find_vertical(bar);
+         if (vertical && !(bar[kFlags] & (kFlagScaleTexture | kFlagScaleRect)))
+            lay_out_vertical(bar, vertical->layout, stored);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         // A bar that cannot be read keeps the stock result.
+      }
+   }
+   return stored;
 }
 
 bool guard(uintptr_t base, uintptr_t va, const char* what, const char* bytes, const char* mask)
@@ -193,6 +296,7 @@ void hud_bar_fill_from_install(uintptr_t base)
    const bool modtools = g_build == GameBuild::Modtools;
    if (!modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
    if (!g_addr->hud_bar_bitmap_read_data || !g_addr->hud_bar_bitmap_post_read ||
+       !g_addr->hud_bar_bitmap_set_value ||
        !g_addr->red_bitmap_get_rect || !g_addr->red_bitmap_get_tex_coords ||
        !g_addr->red_bitmap_set_tex_coords) {
       install_log("[BarFillFrom] NOT installed: no address set for this build");
@@ -208,6 +312,10 @@ void hud_bar_fill_from_install(uintptr_t base)
               modtools ? "\x83\xEC\x10\x56\x57\x8B\xF1\xE8\x00\x00\x00\x00\x8D\x8E\x20\x02\x00\x00"
                        : "\x55\x8B\xEC\x83\xEC\x10\x56\x57\x8B\xF9\xE8\x00\x00\x00\x00\x8D\x8F\x20\x02\x00\x00",
               modtools ? "xxxxxxxx????xxxxxx" : "xxxxxxxxxxx????xxxxxx") ||
+       !guard(base, g_addr->hud_bar_bitmap_set_value, "ElementBarBitmap::SetValue",
+              modtools ? "\x83\xEC\x30\x53\x56\x8B\xF1\x8B\x4C\x24\x3C\x8B\x46\x1C"
+                       : "\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x38\x56\x57\x8B\xF9\x51\xF3\x0F\x10\x47\x1C",
+              modtools ? "xxxxxxxxxxxxxx" : "xxxxxxxxxxxxxxxxxxx") ||
        !guard(base, g_addr->red_bitmap_get_rect, "RedBitmapElement::GetRect",
               modtools ? "\x8B\x41\x78\x8B\x54\x24\x04\x89\x02\x8B\x81\x80\x00\x00\x00"
                        : "\x55\x8B\xEC\x8B\x51\x78\x8B\x45\x08\x89\x10\x8B\x45\x0C\x8B\x91\x80\x00\x00\x00",
@@ -224,6 +332,7 @@ void hud_bar_fill_from_install(uintptr_t base)
 
    s_readData = reinterpret_cast<ReadDataFn>(resolve(base, g_addr->hud_bar_bitmap_read_data));
    s_postRead = reinterpret_cast<PostReadFn>(resolve(base, g_addr->hud_bar_bitmap_post_read));
+   s_setValue = reinterpret_cast<SetValueFn>(resolve(base, g_addr->hud_bar_bitmap_set_value));
    s_getRect  = reinterpret_cast<GetFn>(resolve(base, g_addr->red_bitmap_get_rect));
    s_getUV    = reinterpret_cast<GetFn>(resolve(base, g_addr->red_bitmap_get_tex_coords));
    s_setUV    = reinterpret_cast<SetUVFn>(resolve(base, g_addr->red_bitmap_set_tex_coords));
@@ -232,13 +341,22 @@ void hud_bar_fill_from_install(uintptr_t base)
    DetourUpdateThread(GetCurrentThread());
    LONG r = DetourAttach(&(PVOID&)s_readData, hooked_ReadData);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_postRead, hooked_PostRead);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_setValue, hooked_SetValue);
    if (r != NO_ERROR) {
       DetourTransactionAbort();
       install_log("[BarFillFrom] NOT installed: DetourAttach failed (%ld)", (long)r);
       return;
    }
    const bool ok = DetourTransactionCommit() == NO_ERROR;
-   install_log("[BarFillFrom] %s (ReadData 0x%08X, PostReadSetup 0x%08X); inert unless a .hud "
-               "uses FillFrom", ok ? "installed" : "commit failed",
-               (unsigned)g_addr->hud_bar_bitmap_read_data, (unsigned)g_addr->hud_bar_bitmap_post_read);
+   install_log("[BarFillFrom] %s (ReadData 0x%08X, PostReadSetup 0x%08X, SetValue 0x%08X); inert "
+               "unless a .hud uses FillFrom", ok ? "installed" : "commit failed",
+               (unsigned)g_addr->hud_bar_bitmap_read_data, (unsigned)g_addr->hud_bar_bitmap_post_read,
+               (unsigned)g_addr->hud_bar_bitmap_set_value);
+}
+
+void hud_bar_fill_from_open()
+{
+   // A new HUD: every bar from the last one is gone.
+   s_verticalCount = 0;
+   s_pendingCount = 0;
 }

@@ -262,6 +262,12 @@
     <ClInclude Include="src\render\hud_class_icons_core.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\hud_command_posts.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_command_posts_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_bar_fill_from.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -490,6 +496,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_class_icons.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_command_posts.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_bar_fill_from.cpp">
