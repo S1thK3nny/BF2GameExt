@@ -13,6 +13,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/flyer_enable_strafe.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/tentacle_limit.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
@@ -157,6 +158,7 @@ static void __cdecl hooked_init_state()
    flyer_boost_anim_reset();
    disguise_ext_reset();
    droideka_ball_mode_reset();
+   flyer_enable_strafe_reset();
    soldier_override_texture_reset();
    held_ordnance_effect_reset(); // old level's effect/weapon pointers are no longer valid
    freecam_light_reset(); // its pool block did not survive the level change
@@ -328,6 +330,7 @@ void lua_hooks_uninstall()
    land_on_arrival_uninstall();
    flyer_sound_uninstall();
    droideka_ball_mode_uninstall();
+   flyer_enable_strafe_uninstall();
    droideka_death_anim_uninstall();
    ingame_movie_path_uninstall();
    lua_events_uninstall();

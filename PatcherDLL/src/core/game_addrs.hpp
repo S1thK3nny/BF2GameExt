@@ -473,6 +473,28 @@ namespace modtools {
    constexpr uintptr_t pbl_hash_table_store        = 0x007E1A90; // PblHashTableCode::_Store(table, size, hash, value)
    constexpr uintptr_t pbl_temp_hash               = 0x007E1C10; // PblTEMPHash
 
+   // ---- Entity / Flyer EnableStrafe ------------------------------------------
+   // EntityFlyerClass vtable 0xa3cfa0: slot 1 Derive (thunk 0x40c964), slot 6
+   // SetProperty (thunk 0x403198).  EntityFlyer::Update runs on the Controllable
+   // subobject (object +0x240); mClass is at +0x42C from there.  The cut strafe
+   // input is the shared global 0.0f below, loaded by FMUL at the ramp and at
+   // the four per-state lean sites; the roll input is the one FLD [ebx+0x84].
+   // flyer_strafe_integrate is the first instruction of the common tail that
+   // integrates position from mVelocity, `LEA EAX,[ESP+0x90]` (7 bytes).
+   // Full note in entity/flyer_enable_strafe.cpp.
+
+   constexpr uintptr_t flyer_class_set_property   = 0x004FA310;
+   constexpr uintptr_t flyer_class_derive         = 0x004F6520;
+   constexpr uintptr_t flyer_update               = 0x004FC930;
+   constexpr uintptr_t flyer_strafe_zero_const    = 0x00A2A06C; // shared 0.0f, never write it
+   constexpr uintptr_t flyer_strafe_roll_read     = 0x004FD39D; // FLD [ebx+0x84]
+   constexpr uintptr_t flyer_strafe_ramp_mul      = 0x004FEEBB; // StrafeSpeed * 0
+   constexpr uintptr_t flyer_strafe_lean_takeoff  = 0x004FF37C; // StrafeRollAngle * 0
+   constexpr uintptr_t flyer_strafe_lean_flying   = 0x004FFD13;
+   constexpr uintptr_t flyer_strafe_lean_landing  = 0x0050002F;
+   constexpr uintptr_t flyer_strafe_lean_crashing = 0x0050044C;
+   constexpr uintptr_t flyer_strafe_integrate     = 0x0050056B;
+
    // ---- Entity / Droideka DisableBallMode --------------------------------------
    // EntityDroideka::UpdatePilot is the sole roll/unroll request site (player and
    // AI both).  Struct offsets (mClass +0x450, mState +0x1A74) live with the
@@ -1643,6 +1665,26 @@ namespace steam {
    constexpr uintptr_t lowres_postload           = 0x00647D40;
    constexpr uintptr_t pbl_hash_table_store      = 0x00726F60;  // returns bool here
    constexpr uintptr_t pbl_temp_hash             = 0x00726D80;
+
+   // ---- Entity / Flyer EnableStrafe ------------------------------------------
+   // EntityFlyerClass vtable 0x79b278: slot 1 Derive, slot 6 SetProperty.
+   // Update runs on the Controllable subobject; mClass is at +0x3EC from there.
+   // The cut strafe input is a zeroed xmm7: each *_mul / *_lean_* site is
+   // `MULSS xmmA,xmm7 ; MULSS xmmB,xmmC` (8 bytes, no relative operands).  The
+   // roll input is the one MOVSS xmm2,[edi+0x84].  flyer_strafe_integrate is
+   // `LEA EAX,[ESP+0xA0]` (7 bytes) at the head of the position integration.
+   // See entity/flyer_enable_strafe.cpp.
+
+   constexpr uintptr_t flyer_class_set_property   = 0x004B7A60;
+   constexpr uintptr_t flyer_class_derive         = 0x004B9520;
+   constexpr uintptr_t flyer_update               = 0x004AC460;
+   constexpr uintptr_t flyer_strafe_roll_read     = 0x004ACDB6;
+   constexpr uintptr_t flyer_strafe_ramp_mul      = 0x004AE7E2;
+   constexpr uintptr_t flyer_strafe_lean_takeoff  = 0x004AECB7;
+   constexpr uintptr_t flyer_strafe_lean_flying   = 0x004AF6E0;
+   constexpr uintptr_t flyer_strafe_lean_landing  = 0x004AFAFF;
+   constexpr uintptr_t flyer_strafe_lean_crashing = 0x004B011C;
+   constexpr uintptr_t flyer_strafe_integrate     = 0x004B0239;
 
    // ---- Entity / Droideka DisableBallMode ------------------------------------
    // Release layout differs from modtools (mState +0x1A54 not 0x1A74, mClass
@@ -2969,6 +3011,21 @@ namespace gog {
    constexpr uintptr_t lowres_postload                = 0x00648de0;
    constexpr uintptr_t pbl_hash_table_store           = 0x00728030;
    constexpr uintptr_t pbl_temp_hash                  = 0x00727e50;
+
+   // ---- Entity / Flyer EnableStrafe ------------------------------------------
+   // port_gog.py: every address below ports at score 1.00, shift +0x0, and the
+   // patch bytes at each site are identical to Steam in the on-disk image.
+
+   constexpr uintptr_t flyer_class_set_property   = 0x004b7a60;
+   constexpr uintptr_t flyer_class_derive         = 0x004b9520;
+   constexpr uintptr_t flyer_update               = 0x004ac460;
+   constexpr uintptr_t flyer_strafe_roll_read     = 0x004acdb6;
+   constexpr uintptr_t flyer_strafe_ramp_mul      = 0x004ae7e2;
+   constexpr uintptr_t flyer_strafe_lean_takeoff  = 0x004aecb7;
+   constexpr uintptr_t flyer_strafe_lean_flying   = 0x004af6e0;
+   constexpr uintptr_t flyer_strafe_lean_landing  = 0x004afaff;
+   constexpr uintptr_t flyer_strafe_lean_crashing = 0x004b011c;
+   constexpr uintptr_t flyer_strafe_integrate     = 0x004b0239;
 
    // ---- Entity / Droideka DisableBallMode ---------------------------------------
 

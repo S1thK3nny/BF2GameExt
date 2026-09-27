@@ -162,6 +162,7 @@
     <ClInclude Include="src\entity\anim_bank_append.hpp" />
     <ClInclude Include="src\entity\land_on_arrival_fix.hpp" />
     <ClInclude Include="src\entity\droideka_ball_mode.hpp" />
+    <ClInclude Include="src\entity\flyer_enable_strafe.hpp" />
     <ClInclude Include="src\entity\soldier_stance_flags.hpp" />
     <ClInclude Include="src\entity\soldier_override_texture.hpp" />
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp" />
@@ -246,6 +247,7 @@
     <ClCompile Include="src\entity\anim_bank_append.cpp" />
     <ClCompile Include="src\entity\land_on_arrival_fix.cpp" />
     <ClCompile Include="src\entity\droideka_ball_mode.cpp" />
+    <ClCompile Include="src\entity\flyer_enable_strafe.cpp" />
     <ClCompile Include="src\entity\soldier_stance_flags.cpp" />
     <ClCompile Include="src\entity\soldier_override_texture.cpp" />
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp" />

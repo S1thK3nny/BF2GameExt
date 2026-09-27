@@ -13,6 +13,7 @@
 #include "weapon/held_ordnance_effect.hpp"
 #include "entity/land_on_arrival_fix.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/flyer_enable_strafe.hpp"
 #include "entity/soldier_stance_flags.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/vehicle_view_toggle.hpp"
@@ -385,6 +386,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    mp_spawn_delay_install(exe_base);  // byte-patches .text - needs the RW window
    sound_diag_install(exe_base);
    droideka_ball_mode_install(exe_base);
+   flyer_enable_strafe_install(exe_base); // byte-patches .text - needs the RW window
    droideka_death_anim_install(exe_base); // byte-patches .text — needs the RW window
    award_disable_install(exe_base);
    // Own the complete render frames before texture overrides wrap the same
