@@ -24,7 +24,9 @@ and run the Load munge.
 
 - [Features](../user/FEATURES.md) - everything the extension adds and fixes
 - [Lua API](../user/LUA_API.md) - functions callable from mission scripts
+- [ODF Properties](../user/ODF_PROPERTIES.md) - custom properties for soldier, weapon, ordnance and vehicle classes
 - [Loading Screen](../user/LOADING_SCREEN.md) - every loading screen parameter
 - [HUD System](../user/HUD.md) - new HUD events, `TransformNumberMath` and `FillFrom`
+- [HUD Properties](../user/HUD_PROPERTIES.md) - every `.hud` event, property and transform parameter
 - [Configuration](../user/CONFIGURATION.md) - `BF2GameExt.ini`
 - [Troubleshooting](../user/TROUBLESHOOTING.md) - it did not load, or a feature does nothing

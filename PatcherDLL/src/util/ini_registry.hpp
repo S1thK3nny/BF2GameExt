@@ -127,7 +127,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_PATCH("LimitIncreases", "SoundLimit",          "1", "Raise global sound limit",                            "Sound Limit Extension"),
    INI_PATCH("LimitIncreases", "ObjectLimitIncrease", "1", "Raise entity / object pool limit",                    "Object Limit Increase"),
    INI_PATCH("LimitIncreases", "HighResAnimLimit",    "1", "Raise high-resolution animation limit",               "High-Res Animation Limit"),
-   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched)", "Network Timer Increase"),
+   INI_PATCH("LimitIncreases", "NetworkTimerIncrease","1", "Raise the tick that reads the keyboard, runs voice chat and takes in network packets from 30 Hz to 120 Hz (the simulation tick, send rate and packet count are untouched)", "Network Timer Increase"),
    INI_PATCH("LimitIncreases", "MatrixPoolIncrease",  "1", "Extend matrix / item pool size",                      "Matrix/Item Pool Limit Extension"),
    INI_PATCH("LimitIncreases", "StringPoolIncrease", "1", "Increase string pool size",                           "String Pool Increase"),
    INI_PATCH("LimitIncreases", "AudioStreamLimit",   "1", "Raise how many sounds can stream at the same time from 6 to 12. Uses more memory",                    "Audio Stream Limit Increase"),

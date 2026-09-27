@@ -72,7 +72,7 @@ Labels answer one question: **what happens if only some machines have it.**
 |---|---|---|
 | Object Limit Increase | **MATCH REQUIRED** | Hardest case in the set: `mIdMap` is 1024 unguarded hash slots; an unpatched client **hangs at level load** on a >1024-named-instance map (Steam `_Store` `0x00726F60`, `mIdMap` `0x01EB9874`). Does not touch the wire — the net `objMap` is a separate 256-bucket table (modtools `0x00BE2484`). |
 | String Pool Increase | **MATCH REQUIRED** *(and non-functional on retail)* | Retail `StringDB::Add` (Steam `0x00651F60`) has no bounds check at all — `mPoolSize` (`0x01EAFB98`) has exactly one xref, the write in `Init`. Over 32 KB of localise strings is a straight heap overflow. **Our Steam/GOG entries are mis-aimed**: they patch VA `0x0053B143`/`0x0053BE93` (`PUSH 0x1770` → `InitPool` `0x006DB770`, the glyph cache), not `StringDB::Init` (Steam `0x00651ED0`, GOG `0x00652F70`). Only the modtools entry works. |
-| SkyObjectClass Limit Extension | **MATCH REQUIRED** | `FUN_00638D50` (Steam) stores into `&DAT_01EAF06C + count*4` with no bound, on both the success **and** the `operator new` failure path. Our patch only neutralises the success-path increment (`0x00638D9E`), leaving `0x00638DC9` live. Sky data is map content each peer loads itself. |
+| SkyObjectClass Limit Extension | **MATCH REQUIRED** | `FUN_00638D50` (Steam) stores into `&DAT_01EAF06C + count*4` with no bound, on both the success **and** the `operator new` failure path. Our patch NOPs the count increment on both paths (Steam `0x00638D9E` and `0x00638DC8`, GOG `0x00639E3E` and `0x00639E68`; modtools shares one increment at `0x006C23AE`), so the count never advances and the store stays in bounds. Sky data is map content each peer loads itself. |
 | RedMemory Heap Extensions | **MATCH REQUIRED** | Heap sizing for map content; an unpatched peer exhausts on exactly the content the host chose. |
 | LOD Limit Extension | **MATCH REQUIRED** | Map-driven model capacity; unpatched peer overruns on the host's map. |
 | Matrix/Item Pool Limit Extension | **MATCH REQUIRED** | Map-driven pool. **Also carries our own arithmetic bug**: Steam/GOG `0x006B028A` (`CMP ECX,0xBF6`) and `0x00407597` (`MOV EDI,0xBF5`) compare **element indices**, but the table writes a byte size — 64× too permissive. Correct values are `0xBF600` and `0xBF5FF`. |
@@ -196,11 +196,13 @@ Labels answer one question: **what happens if only some machines have it.**
 There is no way to enforce this: the protocol has no attestation and no content hash. It is a documentation and community problem, not a technical one.
 
 ### Fix in the DLL before the next release
-1. **AimAssist local-player gate** — `aim_assist.cpp:416` and `checkAutoLock`. Highest priority; it is a live defect that degrades other people's play.
+1. **AimAssist local-player gate** — `hooked_PCUpdate` and `checkAutoLock` in `aim_assist.cpp`. Highest priority; it is a live defect that degrades other people's play.
 2. **Matrix/Item Pool arithmetic** — three sites write a byte size into an element-index compare (`0x006B028A`, `0x00407597`; correct `0xBF600` / `0xBF5FF`).
-3. **SkyObjectClass** — the alloc-failure increment at Steam `0x00638DC9` is still live with the patch on.
-4. **Documentation tiering** — Soldier Height Ceiling Removal and Chunk Push Fix are simulation changes filed under "fixes" in `docs/user/FEATURES.md`; they belong in a tier with an explicit "everyone should match" note. SoundParameterized's stated crash symptom is unsupported.
-5. **Network Timer Increase's comment and description** are wrong in three places — see below.
+3. **Documentation tiering** — Soldier Height Ceiling Removal and Chunk Push Fix are simulation changes filed under "fixes" in `docs/user/FEATURES.md`; they belong in a tier with an explicit "everyone should match" note. SoundParameterized's stated crash symptom is unsupported.
+
+No longer on the list: the Network Timer Increase comments and descriptions were corrected
+(§5), and the SkyObjectClass entry was wrong, since the failure-path increment is patched
+on every build (see its row in §3).
 
 ---
 
@@ -237,7 +239,7 @@ Both prior readings of that third callee were wrong: it is **not** force feedbac
 
 **Verdict: SAFE. Host and client do not need to match. Recommended on, especially on the host.**
 
-Doc text to correct: `PatcherDLL/src/core/patch_table.cpp:593`, `:1328`, `:1991` (names a mislabelled function, hides that this is `NetGame::Update`); `PatcherDLL/src/util/ini_registry.hpp:50` (says "input/voice-chat" — input is right, but the patch's main job is the network pump); `docs/user/FEATURES.md:30` and `docs/user/CONFIGURATION.md:35` (claim "nothing about netcode changes" — the *simulation* tick genuinely is untouched, but this timer **is** the network I/O tick). Suggested replacement: *"Raises `FrameUpdate::Update`'s inner tick from 30 Hz to 120 Hz. That tick gates `NetGame::Update` (UDP `recvfrom` drain, 80+64 datagrams per call with the remainder discarded), `GameVoiceChat::Update`, and the DirectInput keyboard poll and auto-repeat. It does not change send rate, packet count, turn rate, or the simulation."*
+The source comments in `patch_table.cpp`, the INI description and the FEATURES entry used to call this an input and voice-chat tick that left netcode alone. All three now name the packet pump and the keyboard poll, and say that send rate, packet count and the simulation are unchanged.
 
 ---
 

@@ -36,6 +36,11 @@ Scripts can check the running version through `GameExt.version`.
   Published from the HUD update, so they work on multiplayer clients; inert unless a
   `.hud` binds them. Modtools, Steam and GOG.
   See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
+- **`TransformNumberMath`** - A HUD transform that adds, subtracts, multiplies,
+  divides or takes the minimum or maximum of two events or constants, optionally
+  clamped, and publishes the result as a new event, for values the stock transforms
+  cannot make, such as missing health or a ticket lead. Inert unless a `.hud`
+  declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
 - **`EnableStrafe`** - Flyer ODF property that makes the strafe controls slide the
   flyer sideways at `StrafeSpeed` instead of rolling it, leaning by `StrafeRollAngle`,
   and lets it come out of reverse as quickly as it brakes into it.
@@ -69,6 +74,9 @@ Scripts can check the running version through `GameExt.version`.
 - **Foley sounds from several sound files** - Soldiers no longer lose their footstep
   and impact sounds when a mission script loads world sound files from more than one
   map. Missions that load a single one are unchanged.
+- A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
+  property and transform parameter BF2GameExt adds to `.hud` files, with the version
+  each first appeared in.
 
 ### Fixed
 

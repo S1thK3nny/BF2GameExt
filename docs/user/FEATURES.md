@@ -2,7 +2,7 @@
 
 See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
-Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference.
+Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference, and every `.hud` event and property in **[HUD Properties](HUD_PROPERTIES.md)**.
 
 ## Engine Limit Extensions
 
@@ -30,7 +30,7 @@ Automatic binary patches applied on load:
 - **String Pool** - Increases the string pool from 32 KB to 128 KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
-- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one gates keyboard, joystick and voice chat updates, and was fixed at 30 Hz, so input was only sampled 30 times a second no matter how high the framerate ran. This raises it to 120 Hz. The simulation timer is untouched, so nothing about game speed or netcode changes, input just stops being the slowest thing in the loop. INI: `[LimitIncreases] NetworkTimerIncrease=1`
+- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one reads the keyboard, runs voice chat and takes in network packets, and was fixed at 30 Hz, so key presses were only picked up 30 times a second however high the framerate ran, and a busy host could read only so many packets per tick, throwing the rest away. This raises it to 120 Hz. The simulation tick, send rate and packet count are untouched, so game speed and what goes over the network do not change. INI: `[LimitIncreases] NetworkTimerIncrease=1`
 - **Sky Object Limit** - Removes the cap on how many objects a sky dome or backdrop can contain. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
 - **Tentacle Limit** - Raises how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn. On by default. INI: `[LimitIncreases] TentacleLimit=1`
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
@@ -83,7 +83,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 New HUD events and properties for `.hud` files, plus fixes to the stock HUD. The new events do nothing until a `.hud` binds them.
 
-See **[HUD System](HUD.md)** for the full event and parameter reference.
+See **[HUD System](HUD.md)** for how to use them and **[HUD Properties](HUD_PROPERTIES.md)** for the full list of events and parameters.
 
 - **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
 - **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`
@@ -94,6 +94,7 @@ See **[HUD System](HUD.md)** for the full event and parameter reference.
 - **Bar Fill Direction** - HUD bars could only fill from the left. A `BarBitmap` can now fill from the right, the bottom or the top without breaking its texture.
 - **Weapon Icon Textures** - The `IconTexture` a weapon ODF names never appeared on the HUD. A `.hud` can now show it for both weapon slots, on foot, in vehicles and in turrets.
 - **Class and Vehicle Health Icons** - Health icons that follow your class, stance or vehicle could only be swapped from Lua, which never runs on multiplayer clients. A `.hud` can now take them straight from the class's `HealthTexture`, including crouch, prone and droideka ball variants.
+- **Math Transform** - A `.hud` could only map a value onto a colour, a position or a mesh, never do arithmetic with it. `TransformNumberMath` now adds, subtracts, multiplies or divides two values, or takes the smaller or larger, for things like missing health or a ticket lead.
 
 ## Soldier Systems
 

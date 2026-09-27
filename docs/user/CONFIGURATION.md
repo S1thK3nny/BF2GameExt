@@ -142,7 +142,7 @@ Engine limit patches. Most only raise a ceiling and do not change behaviour belo
 | `SoundLimit` | `1` | Raise global sound limit |
 | `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
 | `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
-| `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
+| `NetworkTimerIncrease` | `1` | Raise the tick that reads the keyboard, runs voice chat and takes in network packets from 30 Hz to 120 Hz (the simulation tick, send rate and packet count are untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
 | `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |

@@ -587,7 +587,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x00449b5b (VA)
                      patch{0x00449b5b, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },
@@ -1390,7 +1392,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as Steam
                      patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },
@@ -2089,7 +2093,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as GOG
                      patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },

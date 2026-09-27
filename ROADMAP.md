@@ -26,6 +26,11 @@ entity or the game camera rather than the active render camera, so once freecam 
 from the player everything is graded at the wrong distance. Needs the actual LOD distance
 source traced before a fix is designed.
 
+**AI spinning at sniper nodes** - AI stationed at a sniper hint node can start spinning on the
+spot extremely fast. The cause is unknown. A facing target that flips every update, or a heading
+the turn code cannot resolve, would both look like this. Next step is to catch a spinning unit
+with `memwatch` on its heading and see what keeps writing it.
+
 ## Vehicles
 
 **FinAnimation for AI** - The 9-pose `FinAnimation` on flyers and hovers never moves when AI is
@@ -285,6 +290,14 @@ has to check at runtime that the game is not online, so it is a hook rather than
 list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
+
+**New AI behaviours** - AI never sprint (nothing in the AI controllers or agents touches the
+sprint control), melee units trade blows with little blocking or spacing, and general behaviour
+has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its 14
+behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
+be added there, starting with sprinting to distant goals out of combat and blocking and backing
+off in melee duels. Needs the goal and combat layers mapped first (AI systems documentation,
+below). Details in [docs/RE/AISystem.md](docs/RE/AISystem.md).
 
 **Flyers on maps with no flyer paths** - A flyer on a map with no flyer paths just circles. The
 engine already has a movement mode that needs no path, used for strafing runs. The idea is to
