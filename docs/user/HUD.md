@@ -12,8 +12,10 @@ binding and carries on, so one `.hud` serves both.
 
 To check for what builds these are available on, see the [compatibility table](../../README.md#compatibility).
 
-Every parameter and edge case, the four native transforms, math recipes, test
-procedures and troubleshooting are in the [full reference](../RE/HUDAuthoring.md).
+[HUD Properties](HUD_PROPERTIES.md) lists every event, property and parameter on one
+page, with the version each arrived in. Every parameter and edge case, the four native
+transforms, math recipes, test procedures and troubleshooting are in the
+[full reference](../RE/HUDAuthoring.md).
 
 ## TransformNumberMath
 

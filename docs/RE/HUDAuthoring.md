@@ -1,7 +1,8 @@
 # HUD authoring: full reference
 
-The long form of [HUD.md](../user/HUD.md). The user doc covers what GameExt adds;
-this file keeps the detail behind it, every parameter and edge case, in four parts:
+The long form of [HUD.md](../user/HUD.md). The user doc covers what GameExt adds and
+[HUD_PROPERTIES.md](../user/HUD_PROPERTIES.md) lists it on one page; this file keeps
+the detail behind it, every parameter and edge case, in four parts:
 
 - **How events are wired**: file structure, names, load order and which element
   property takes which type of event.

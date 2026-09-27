@@ -1,6 +1,6 @@
 # BF2GameExt
 
-A DLL extension for Star Wars Battlefront II (2005) that exposes new modding capabilities by hooking into the game engine at runtime. It adds custom Lua functions, ODF properties, loading screen parameters, bug fixes, and engine limit extensions, on the Modtools build and increasingly on the retail Steam and GOG builds.
+A DLL extension for Star Wars Battlefront II (2005) that exposes new modding capabilities by hooking into the game engine at runtime. It adds custom Lua functions, ODF properties, HUD events, loading screen parameters, bug fixes, and engine limit extensions, on the Modtools, Steam and GOG builds.
 
 <img width="800" height="450" alt="Prone" src="docs/images/Prone.webp" />
 
@@ -20,6 +20,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[ODF Properties](docs/user/ODF_PROPERTIES.md)** - custom properties for soldier, weapon, ordnance and vehicle classes
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
 - **[HUD System](docs/user/HUD.md)** - new HUD events, `TransformNumberMath` and `FillFrom` for `.hud` files
+- **[HUD Properties](docs/user/HUD_PROPERTIES.md)** - every event, property and transform parameter added to `.hud` files
 
 
 ## Installation
@@ -51,7 +52,7 @@ Three builds are supported:
 - **[Steam](https://store.steampowered.com/app/6060)**
 - **[GOG](https://www.gog.com/en/game/star_wars_battlefront_ii)**
 
-Steam and GOG here mean the 2017 update. The original 2006 executable (v1.1), which some GOG installs and the SWBFSpy exe still use, is not supported; see [Troubleshooting](docs/user/TROUBLESHOOTING.md#the-game-closes-saying-the-exe-is-the-original-2006-version).
+Steam and GOG here mean the 2017 update. The original 2006 executable (v1.1), which some GOG installs and the SWBFSpy exe still use, is not supported; see [Troubleshooting](docs/user/TROUBLESHOOTING.md#i-have-the-gog-version-and-it-says-it-cannot-identify-the-executable).
 
 A runtime build-dispatch layer resolves per-build addresses, so features light up per executable as their addresses are derived. Binary patches apply everywhere; hook-based features are ported build by build.
 

@@ -2,7 +2,7 @@
 
 See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
-Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference.
+Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference, and every `.hud` event and property in **[HUD Properties](HUD_PROPERTIES.md)**.
 
 ## Engine Limit Extensions
 
@@ -83,7 +83,7 @@ See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
 
 New HUD events and properties for `.hud` files, plus fixes to the stock HUD. The new events do nothing until a `.hud` binds them.
 
-See **[HUD System](HUD.md)** for the full event and parameter reference.
+See **[HUD System](HUD.md)** for how to use them and **[HUD Properties](HUD_PROPERTIES.md)** for the full list of events and parameters.
 
 - **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
 - **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`

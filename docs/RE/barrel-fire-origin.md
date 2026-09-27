@@ -22,7 +22,7 @@ more.
   direction — a ray parallel to the vanilla one, displaced by the whole
   barrel-to-eyepoint vector. That is invisible on a carbine and plainly visible on a
   long weapon, which shot low at hipfire and came good the moment you zoomed.
-  See [Convergence, two paths](#convergence-two-paths).
+  See [Two paths, by who is shooting](#two-paths-by-who-is-shooting).
 - Reflection regions — the mirrored duplicate draw no longer contaminates
   `mFirePointMatrix`; see [Reflection regions](#reflection-regions)
 - First-person zoom still reverts to the vanilla aimer (`mFirePointMatrix` goes stale)
