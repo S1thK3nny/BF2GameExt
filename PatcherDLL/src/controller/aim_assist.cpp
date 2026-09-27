@@ -3,6 +3,9 @@
 #include "controller_support.hpp"
 #include "util/ini_config.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
+#include "core/layout/character.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -446,7 +449,7 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     {
         uintptr_t character = *(uintptr_t*)(ctrl + 0xCC); // Controllable.mCharacter
         if (character) {
-            uintptr_t charVehicle = *(uintptr_t*)(character + 0x14C); // Character.mVehicle
+            uintptr_t charVehicle = *(uintptr_t*)(character + layout::Character::kVehicle);
             inVehicle = (charVehicle != 0);
         }
     }
@@ -663,7 +666,7 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     float wpnVertThreshold = 0.0f;
 
     if (weapon) {
-        void* wpnClass = *(void**)((char*)weapon + 0x60);
+        void* wpnClass = *(void**)((char*)weapon + layout::Weapon::kStart);
         if (wpnClass) {
             wpnHorizThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassHorizThreshold);
             wpnVertThreshold = *(float*)((uintptr_t)wpnClass + s_wpnClassVertThreshold);
@@ -933,7 +936,7 @@ void aim_assist_install(uintptr_t exe_base)
     LONG result = DetourTransactionCommit();
 
     if (result != NO_ERROR) {
-        if (s_log) s_log("[AimAssist] ERROR: Detours commit failed (%ld)\n", result);
+        install_log("[AimAssist] ERROR: Detours commit failed (%ld)", result);
         original_PCUpdate = nullptr;
         original_ApplyDamage6 = nullptr;
     }

@@ -3,6 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/character.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 
@@ -63,22 +65,11 @@
 //      toggle variant.
 // =============================================================================
 
-// Weapon struct offsets -- build-invariant.  Verified in the Phantom
-// (0x7D0190), modtools (0x63F360) and Steam (0x691A80) WeaponShield::Update
-// disassembly: [ECX+0x6c] owner, [ECX+0x74] trigger.
-static constexpr int kWeapon_mOwner   = 0x6C;  // Controllable* (= entity ptr)
-static constexpr int kWeapon_mTrigger = 0x74;  // Trigger*
-
 // Entity offsets -- relative to mOwner (= entity = struct_base+0x240).
 // mControlFire is invariant across builds; the weapon array / channel->slot map
 // shift by -0x10 on release, so those come from the active SoldierLayout.
 static constexpr int kEntity_mControlFire = 0x38;   // Trigger[2], 4 bytes each
 static constexpr int kEntity_mCharacter   = 0xCC;   // Character*
-
-// Character offsets (struct is 0x1B0 on every build; see docs/RE/game_struct_reference.md).
-static constexpr int kCharacter_mUnit    = 0x148;  // Controllable* -- the soldier
-static constexpr int kCharacter_mVehicle = 0x14C;  // Controllable* -- what it boarded
-static constexpr int kCharacter_mRemote  = 0x150;  // Controllable* -- deployed remote unit
 
 // The shield's up/down state lives on the owner's Damageable, not on the weapon,
 // which is why it survives a weapon switch (and a vehicle) by design.  Reached
@@ -141,8 +132,8 @@ static uint32_t s_nullTrigger = 0;
 static bool is_active_for_channel(void* weapon)
 {
    uintptr_t wpn     = (uintptr_t)weapon;
-   uintptr_t owner   = *(uintptr_t*)(wpn + kWeapon_mOwner);
-   uintptr_t trigger = *(uintptr_t*)(wpn + kWeapon_mTrigger);
+   uintptr_t owner   = *(uintptr_t*)(wpn + layout::Weapon::kOwner);
+   uintptr_t trigger = *(uintptr_t*)(wpn + layout::Weapon::kTrigger);
 
    if (!owner || !trigger) return true;  // safety: allow
 
@@ -196,8 +187,8 @@ static bool owner_is_riding(uintptr_t owner)
    uintptr_t chr = *(uintptr_t*)(owner + kEntity_mCharacter);
    if (!chr) return false;
 
-   return *(uintptr_t*)(chr + kCharacter_mVehicle) != 0
-       || *(uintptr_t*)(chr + kCharacter_mRemote)  != 0;
+   return *(uintptr_t*)(chr + layout::Character::kVehicle) != 0
+       || *(uintptr_t*)(chr + layout::Character::kRemote)  != 0;
 }
 
 // The shield's OFF path releases the effect with StopAndFinish, which for a
@@ -234,7 +225,7 @@ static bool shield_update_masked(uintptr_t wpn, float dt, bool instantEffect)
    void** effectSlot = s_shieldEffectOff ? (void**)(wpn + s_shieldEffectOff) : nullptr;
    void*  effect     = effectSlot ? *effectSlot : nullptr;
 
-   void** trigger = (void**)(wpn + kWeapon_mTrigger);
+   void** trigger = (void**)(wpn + layout::Weapon::kTrigger);
    void*  saved   = *trigger;
    *trigger    = &s_nullTrigger;
    bool result = original_ShieldUpdate((void*)wpn, dt);
@@ -253,7 +244,7 @@ static bool shield_update_masked(uintptr_t wpn, float dt, bool instantEffect)
 // the shield body out of the collision manager.
 static void drive_shield_off(uintptr_t wpn, float dt)
 {
-   uintptr_t owner = *(uintptr_t*)(wpn + kWeapon_mOwner);
+   uintptr_t owner = *(uintptr_t*)(wpn + layout::Weapon::kOwner);
    if (!owner) return;
 
    uint32_t* flags = shield_state_flags(owner);
@@ -269,8 +260,8 @@ static void drive_shield_off(uintptr_t wpn, float dt)
 static bool __fastcall hooked_ShieldUpdate(void* ecx, void* /*edx*/, float dt)
 {
    uintptr_t wpn     = (uintptr_t)ecx;
-   uintptr_t owner   = *(uintptr_t*)(wpn + kWeapon_mOwner);
-   void**    trigger = (void**)(wpn + kWeapon_mTrigger);
+   uintptr_t owner   = *(uintptr_t*)(wpn + layout::Weapon::kOwner);
+   void**    trigger = (void**)(wpn + layout::Weapon::kTrigger);
 
    if (!*trigger || !owner)
       return original_ShieldUpdate(ecx, dt);
@@ -315,7 +306,7 @@ static bool __fastcall hooked_EnterControllable(void* ecx, void* /*edx*/, void* 
       void** vtbl = *(void***)w;
       if (!vtbl || vtbl[1] != (void*)s_shieldUpdateAddr) continue;
 
-      if (*(uintptr_t*)(w + kWeapon_mOwner) == entity)
+      if (*(uintptr_t*)(w + layout::Weapon::kOwner) == entity)
          drive_shield_off(w, 0.0f);
    }
    return entered;

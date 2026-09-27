@@ -469,6 +469,22 @@ one. `mGain` is `+0x2C` and the Q15 gain pair `+0x190`/`+0x198` on all builds.
 
 ---
 
+## The audio stream queue-item pool
+
+Raising the audio stream limit from 6 to 12 slots (`audio_stream_limit.cpp`) left the shared
+queue-item pool at 24 entries. Each slot queues to a depth of four, so the demand ceiling is 48
+requests against a pool of 24, and running the pool dry is a null dereference rather than a
+dropped request. It cannot be grown where it sits: on modtools 24 entries of `0x34` bytes from
+`0x0233a240` end at `0x0233a720`, which is itself a live global with five references, so the pool
+has to be relocated the way the stream arrays were. Exhaustion should also degrade into dropping
+the request instead of crashing.
+
+Also never read out of the GOG image, and not needed by the shipped diagnostics: GOG's
+`smRendererList` head, `smTimeElapsed`, `DSBufferRenderer::SetFormat`, and the voice-count
+command-line global.
+
+---
+
 ## The EAX crackle - investigated, not found in BF2
 
 Symptom: a random, loud, distorted burst during matches with EAX enabled. Seven

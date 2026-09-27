@@ -5,6 +5,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/weapon.hpp"
 
 // =============================================================================
 // Barrel fire origin — OverrideAimer vtable hook.
@@ -496,8 +497,8 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    if (!g_useBarrelFireOrigin) return false;
 
    __try {
-      void* owner = *(void**)((char*)weapon + 0x6C);   // Weapon::mOwner
-      void* aimer = *(void**)((char*)weapon + 0x70);   // Weapon::mAimer
+      void* owner = *(void**)((char*)weapon + layout::Weapon::kOwner);
+      void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
       if (!owner || !aimer) return false;
 
       if (aim_target* cached = targetSlot(aimer, false)) cached->valid = false;
@@ -564,8 +565,8 @@ bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outD
 {
    if (!g_useBarrelFireOrigin || !weapon || !muzzle || !outDir) return false;
 
-   void* owner = *(void**)((char*)weapon + 0x6C);   // Weapon::mOwner
-   void* aimer = *(void**)((char*)weapon + 0x70);   // Weapon::mAimer
+   void* owner = *(void**)((char*)weapon + layout::Weapon::kOwner);
+   void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
    if (!owner || !aimer) return false;
 
    const aim_target* cached = targetSlot(aimer, false);

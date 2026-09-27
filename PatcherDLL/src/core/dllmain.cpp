@@ -46,6 +46,7 @@
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "entity/foleyfx_region_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -55,6 +56,7 @@
 #include "render/hud_weapon_icon_fix.hpp"
 #include "render/spawn_vehicle_list.hpp"
 #include "render/target_bar_latch.hpp"
+#include "render/hud_bar_fill_from.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
@@ -75,6 +77,7 @@
 #include "util/game_logging.hpp"
 #include "util/ini_config.hpp"
 #include "util/slim_vector.hpp"
+#include "util/install_log.hpp"
 
 static bool g_initialized = false;
 
@@ -120,13 +123,13 @@ static void apply_deadbody_check_patches(uintptr_t exe_base, bool disableAll, bo
 
    if (disableAll) {
       if (!nop_if_matches(exe_base, g_addr->deadbody_check_guard_jge, kGuardJge, sizeof(kGuardJge)))
-         get_gamelog()("[DeadBodyCheck] unexpected bytes at guard JGE, DisableDeadBodyShooting not applied\n");
+         install_log("[DeadBodyCheck] unexpected bytes at guard JGE, DisableDeadBodyShooting not applied");
    }
    else if (allFactions) {
       const uint8_t* orig = retail ? kSideJnzRetail : kSideJnzModtools;
       const size_t   len  = retail ? sizeof(kSideJnzRetail) : sizeof(kSideJnzModtools);
       if (!nop_if_matches(exe_base, g_addr->deadbody_check_side_jnz, orig, len))
-         get_gamelog()("[DeadBodyCheck] unexpected bytes at side JNZ, DeadBodyShootingAllFactions not applied\n");
+         install_log("[DeadBodyCheck] unexpected bytes at side JNZ, DeadBodyShootingAllFactions not applied");
    }
 }
 
@@ -247,7 +250,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       if (identity == exe_identity::retail_2006) {
          FatalAppExitA(0, "This BattlefrontII.exe is the original 2006 version (v1.1), which "
                           "BF2GameExt does not support. It needs the updated 2017 executable "
-                          "from Steam or GOG.\n\nTo play without BF2GameExt, set Enabled=0 under "
+                          "from Steam or GOG Galaxy.\n\nTo play without BF2GameExt, set Enabled=0 under "
                           "[General] in BF2GameExt.ini.");
       }
 
@@ -302,7 +305,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_reticleCorrection = cfg.get_float("Fixes", "ReticleCorrection", -1.0f);
       g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
-      g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 2.5f);
+      g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -358,9 +361,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    hud_weapon_icon_fix_install(exe_base);
    spawn_vehicle_list_install(exe_base);
-   // After aim_assist_install: both detour Damageable::ApplyDamage, and this one's
-   // prologue guard knows how to read past a JMP a sibling has already written.
+   // HUD selection retention, floating positions, horizon rotation, number math,
+   // class icons and the command post strip.
    target_bar_latch_install(exe_base);
+   hud_bar_fill_from_install(exe_base);
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
@@ -396,6 +400,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
+   foleyfx_region_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread

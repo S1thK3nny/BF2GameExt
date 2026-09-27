@@ -38,6 +38,9 @@ jobs:
           fi
           echo "Generated files are current."
 
+      - name: Run unit tests
+        run: python tools/run_tests.py
+
       - name: Build and package
         run: python tools/package_release.py
 

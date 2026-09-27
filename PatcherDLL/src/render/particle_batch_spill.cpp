@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
 #include "core/patch_table.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <cstdio>
@@ -11,24 +12,6 @@
 // of gc_visual_limits.cpp.
 
 bool g_particleBatchSpillEnabled = true;
-
-// ---------------------------------------------------------------------------
-// Logging.  Install-time output must go through the CRT, not the engine
-// logger: dllmain has every exe section at PAGE_READWRITE (non-executable)
-// while installers run, so calling game code from here is an EXEC access
-// violation on builds with DEP.
-// ---------------------------------------------------------------------------
-static void install_log(const char* fmt, ...)
-{
-    FILE* f = nullptr;
-    if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
-    va_end(ap);
-    fputc('\n', f);
-    fclose(f);
-}
 
 // ---------------------------------------------------------------------------
 // RedParticleRenderer cache pool layout (identical on all three builds)

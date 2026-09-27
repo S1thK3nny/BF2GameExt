@@ -2,6 +2,7 @@
 #include "hud_widescreen.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/x86_emit.hpp"
 
 #include <detours.h>
 
@@ -237,9 +238,7 @@ void hud_widescreen_install(uintptr_t exe_base)
       memcpy(s_savedPatchBytes, (void*)s_patchLoc, 24);
 
       uint8_t patch[24];
-      patch[0] = 0xE8;
-      uint32_t rel32 = (uint32_t)(uintptr_t)&reticle_y_correction - (uint32_t)(s_patchLoc + 5);
-      memcpy(&patch[1], &rel32, 4);
+      x86::encode_branch(patch, (void*)s_patchLoc, x86::kCall, &reticle_y_correction);
       memcpy(&patch[5], &s_savedPatchBytes[4], 16); // preserve the two MOVs
       patch[21] = patch[22] = patch[23] = 0x90;
 

@@ -483,6 +483,36 @@ namespace modtools {
    constexpr uintptr_t prone_anim_accessor         = 0x005701F0;
    constexpr uintptr_t SoldierAnimator_SetAction   = 0x00575D50;
 
+   // ---- FoleyFXRegion stale list ----------------------------------------------
+   // FoleyFXRegion::smList, a PblListSingle head whose terminator is its own
+   // address.  PostStateCleanup never resets it (FoleyFXRegion::RemoveAll at
+   // 0x00761590 does exactly that and has no callers), so the next mission's
+   // first FoleyFXRegion ctor walks nodes in the dropped mission heap.
+   constexpr uintptr_t foleyfx_region_list         = 0x00ADDC50;
+
+   // ---- FoleyFXRegion lookup ----------------------------------------------------
+   // FoleyFXCollider::CollisionCallback (0x00760EF0) picks the terrain group with
+   // `CALL FoleyFXGroup::GetTerrainFX` (via thunk 0x0040355D) and hands the result
+   // straight to SetupFoleyFX.  The collision position is in ESI at that point
+   // (`MOV ESI,[ESP+0x10]` = 3rd arg, never reassigned).  Address is of the CALL
+   // OPCODE; the rel32 to rewrite is at +1.
+   constexpr uintptr_t foleyfx_terrain_group_call  = 0x00760F40;
+   // FoleyFXGroup* __cdecl FoleyFXGroup::GetTerrainFX() - `MOV EAX,[smTerrain]; RET`.
+   constexpr uintptr_t foleyfx_get_terrain_fx      = 0x007610A0;
+   // bool __thiscall PblRegion::IsPointInside(PblVector3*) - RET 4, result in AL.
+   // Name and body verified against Phantom 0x00868C40.
+   constexpr uintptr_t pbl_region_is_point_inside  = 0x007E7820;
+
+   // ---- FoleyFXGroup same-name fill-in ------------------------------------------
+   // Every world sound lvl defines its own copy of terrain_foley, metal_foley, ...
+   // and the loader never merges them.  FoleyFXGroup::smList holds every copy in
+   // load order (node at group+8).  SetupFoleyFX's only per-class lookup is the
+   // CALL FoleyFXGroup::FindFoleyFX (via thunk 0x0040378D) at the address below;
+   // FindFoleyFX is thiscall(classId), RET 4.
+   constexpr uintptr_t foleyfx_group_list          = 0x00ADDBA8;
+   constexpr uintptr_t foleyfx_setup_find_call     = 0x00760EC8;
+   constexpr uintptr_t foleyfx_group_find_foleyfx  = 0x00761240;
+
    // ---- AILowLevel::UpdateIndirect null-target crash ------------------------
    // The squad-order branch nulls its target pointer for two states then virtual
    // -calls it regardless.  Guard site is the 6 bytes at 0x005A2B84
@@ -998,7 +1028,7 @@ namespace modtools {
    // .enable at 0x00BA3CE8 is what SpawnDisplay::Show fires through the same array.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x00BA3CF4;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -1010,7 +1040,6 @@ namespace modtools {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -1018,12 +1047,36 @@ namespace modtools {
    constexpr uintptr_t hud_event_class_create       = 0x006AD8A0;
    constexpr uintptr_t hud_event_class_find         = 0x006AD940;
    constexpr uintptr_t hud_event_class_list         = 0x00AD866C;
+   // TransformNumberMath native adapter; conventions/evidence in HUDSystem.md.
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006B7770;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x006B6970;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x00A60344;
+   constexpr uintptr_t hud_vector3_vtable           = 0x00A61154;
+   constexpr uintptr_t hud_item_read                = 0x006B6B80;
+   constexpr uintptr_t hud_item_read_event          = 0x006B6360;
+   constexpr uintptr_t hud_filter_event_name        = 0x006B6270;
+   // FillFrom on a BarBitmap (render/hud_bar_fill_from.cpp). The hooks are
+   // thiscall: ReadData(PblConfig*, Data*) -> bool, RET 8; PostReadSetup(),
+   // RET 0; SetValue(float) -> float in ST0, RET 4, with `this` the bar's
+   // ElementBar base (+0x220). The three RedBitmapElement calls are thiscall too:
+   // GetRect/GetTexCoords(float* x4), RET 0x10; SetTexCoords(u0, v0, u1, v1,
+   // bool), RET 0x14. Offsets, same on every build, are in the module.
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x00695900;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x00696340;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x00696090;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x00838E50;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x008392A0;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x00839220;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x006E3DD0;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
    constexpr uintptr_t hud_game_events_update       = 0x006B50A0;
    constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
    constexpr uintptr_t net_game_get_local_player    = 0x006E3D20;
    constexpr uintptr_t camera_manager_instance      = 0x00B70BD4;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x0055F940;
    // sVehicleSpawnList, PblList<VehicleSpawn>: _head at +0, _iCount at +0x10.
    // From the ctor's list link (0x00664C50) and the dtor's count decrement.
    constexpr uintptr_t vehicle_spawn_list            = 0x00AD6004;
@@ -1673,6 +1726,23 @@ namespace steam {
    constexpr uintptr_t prone_anim_accessor       = 0x0063c2d0;
    constexpr uintptr_t SoldierAnimator_SetAction = 0x0063ed60;
    constexpr uintptr_t prone_guard_jnz           = 0x004e8968;
+
+   // FoleyFXRegion::smList (see modtools).  RemoveAll was stripped by the
+   // linker; the only references left are the ctor 0x0052CAE0 and the atexit.
+   constexpr uintptr_t foleyfx_region_list       = 0x007EB8E8;
+   // FoleyFXRegion lookup (see modtools). CollisionCallback 0x0052C540; its
+   // terrain branch `CALL FoleyFXGroup::GetTerrainFX` (0x0052C9D0, direct, no
+   // thunk). Unlike modtools the collision position is in EDI here
+   // (`MOV EDI,[EBP+0x10]`) and the collider in ESI. The other GetTerrainFX call,
+   // 0x0052C4A9, is the FoleyFXCollider ctor and is left alone.
+   constexpr uintptr_t foleyfx_terrain_group_call = 0x0052C591;
+   constexpr uintptr_t foleyfx_get_terrain_fx     = 0x0052C9D0;
+   // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
+   constexpr uintptr_t pbl_region_is_point_inside = 0x00729A40;
+   // FoleyFXGroup same-name fill-in (see modtools). Direct call, no thunk.
+   constexpr uintptr_t foleyfx_group_list         = 0x007EB8CC;
+   constexpr uintptr_t foleyfx_setup_find_call    = 0x0052C52A;
+   constexpr uintptr_t foleyfx_group_find_foleyfx = 0x0052C8F0;
    constexpr uintptr_t prone_acklay_gate_jnz     = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table   = 0x004F07BC;
    constexpr uintptr_t prone_height_switch_end   = 0x004F04F3;
@@ -2232,7 +2302,7 @@ namespace steam {
    // .message ..C8, .vehicle ..CC, .spawninfo ..D0.  Stride is 0xCA here too.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E56DCC;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -2244,7 +2314,6 @@ namespace steam {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -2252,12 +2321,30 @@ namespace steam {
    constexpr uintptr_t hud_event_class_create       = 0x0055DE40;
    constexpr uintptr_t hud_event_class_find         = 0x0055DEE0;
    constexpr uintptr_t hud_event_class_list         = 0x007EBA5C;
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006C3540;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x00564110;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x007A32E4;
+   constexpr uintptr_t hud_vector3_vtable           = 0x007A371C;
+   constexpr uintptr_t hud_item_read                = 0x00564560;
+   constexpr uintptr_t hud_item_read_event          = 0x00564740;
+   constexpr uintptr_t hud_filter_event_name        = 0x00564690;
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054B480;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054B320;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x0054B070;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x006E4DB0;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E48F0;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E4B90;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x005B7470;
+   constexpr uintptr_t net_on_client                = 0x01E62EAB;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
    constexpr uintptr_t net_game_get_local_player    = 0x005B7440;
    constexpr uintptr_t camera_manager_instance      = 0x01E30324;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x00535B30;
    // sVehicleSpawnList, from the dtor's `dec [0x007EBECC]` (_iCount) minus 0x10.
    // VehicleSpawn itself is byte-identical to modtools; verified field by field
    // against the ctor 0x0066E820 (mClass +0x70, mCommandPost +0x74, matrix +0x30,
@@ -2770,7 +2857,7 @@ namespace gog {
    // stride 0xCA, and Open 0x0055F120 stores this Create's result at 0x0055F94E.
    constexpr uintptr_t hud_event_spawn_vehicle       = 0x01E5827C;
 
-   // ---- Latched floating target bar (render/target_bar_latch.cpp) --------------
+   // ---- Floating target bar (render/target_bar_latch.cpp) ---------------------
    // Derived and adversarially re-read per build, 2026-09-19; write-up in
    // docs/RE/HUDSystem.md "Floating elements".  CONVENTIONS DIFFER BY BUILD and
    // are part of the contract:
@@ -2782,7 +2869,6 @@ namespace gog {
    //   hud_game_events_update   modtools: cdecl(float dt), dt pushed and ignored.
    //                            Steam/GOG: LTCG DROPPED the parameter - void(void).
    //   net_game_get_local_player  cdecl(uint localIndex) -> Character*, every build.
-   //   game_object_is_my_enemy  thiscall(GameObject* other), RET 4, returns AL.
    // hud_player_data is HUD::GameEvents::gPlayerData[0]; WeaponData is 0x28 bytes
    // with the cached aim target PblHandle at +0x14/+0x18 on every build.
    // camera_manager_instance is a CameraManager**; the HUD camera is [inst+0x24].
@@ -2790,12 +2876,30 @@ namespace gog {
    constexpr uintptr_t hud_event_class_create       = 0x0055EBC0;
    constexpr uintptr_t hud_event_class_find         = 0x0055EC60;
    constexpr uintptr_t hud_event_class_list         = 0x007ECA2C;
+   constexpr uintptr_t hud_math_factory_alloc       = 0x006C45D0;
+   constexpr uintptr_t hud_item_factory_ctor        = 0x00564E90;
+   constexpr uintptr_t hud_vector3_factory_vtable   = 0x007A40AC;
+   constexpr uintptr_t hud_vector3_vtable           = 0x007A455C;
+   constexpr uintptr_t hud_item_read                = 0x005652E0;
+   constexpr uintptr_t hud_item_read_event          = 0x005654C0;
+   constexpr uintptr_t hud_filter_event_name        = 0x00565410;
+   constexpr uintptr_t hud_bar_bitmap_read_data     = 0x0054C1D0;
+   constexpr uintptr_t hud_bar_bitmap_post_read     = 0x0054C070;
+   constexpr uintptr_t hud_bar_bitmap_set_value     = 0x0054BDC0;
+   constexpr uintptr_t red_bitmap_get_rect          = 0x006E5E50;
+   constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E5990;
+   constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E5C30;
+   // Command post strip (render/hud_command_posts.cpp) also reads the
+   // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
+   // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
+   // CommandPost::Update makes before a client simulates a post's capture.
+   constexpr uintptr_t net_game_is_near_local_player = 0x005B8420;
+   constexpr uintptr_t net_on_client                = 0x01E6435B;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;
    constexpr uintptr_t net_game_get_local_player    = 0x005B83F0;
    constexpr uintptr_t camera_manager_instance      = 0x01E317C4;
-   constexpr uintptr_t game_object_is_my_enemy      = 0x005368A0;
    // sVehicleSpawnList: ~VehicleSpawn 0x0066FAC0 does `dec [0x007ECE9C]` (_iCount).
    constexpr uintptr_t vehicle_spawn_list            = 0x007ECE8C;
    // VehicleSpawn::SetProperty, same hash-cluster derivation as Steam.  Same 538
@@ -2992,6 +3096,19 @@ namespace gog {
    constexpr uintptr_t prone_anim_accessor            = 0x0063d370;
    constexpr uintptr_t SoldierAnimator_SetAction      = 0x0063fe00;
    constexpr uintptr_t prone_guard_jnz                = 0x004e8968;
+
+   // FoleyFXRegion::smList (see modtools).  Same code layout as Steam; the only
+   // references are the ctor 0x0052CAE0 and the atexit.
+   constexpr uintptr_t foleyfx_region_list            = 0x007EC8E8;
+   // FoleyFXRegion lookup: same code layout as Steam, position in EDI.
+   constexpr uintptr_t foleyfx_terrain_group_call     = 0x0052C591;
+   constexpr uintptr_t foleyfx_get_terrain_fx         = 0x0052C9D0;
+   // PblRegion::IsPointInside - thiscall, RET 4, AL. Body matches Phantom.
+   constexpr uintptr_t pbl_region_is_point_inside     = 0x0072AB20;
+   // FoleyFXGroup same-name fill-in (see modtools). Same layout as Steam.
+   constexpr uintptr_t foleyfx_group_list             = 0x007EC8CC;
+   constexpr uintptr_t foleyfx_setup_find_call        = 0x0052C52A;
+   constexpr uintptr_t foleyfx_group_find_foleyfx     = 0x0052C8F0;
    constexpr uintptr_t prone_acklay_gate_jnz          = 0x004e67c0;
    constexpr uintptr_t prone_height_jump_table        = 0x004f07bc;
    constexpr uintptr_t prone_height_switch_end        = 0x004f04f3;

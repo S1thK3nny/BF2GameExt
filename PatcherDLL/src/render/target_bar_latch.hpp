@@ -2,86 +2,57 @@
 
 #include <stdint.h>
 
-// =============================================================================
-// A target health bar that floats on the unit and stays on an enemy you hit.
+// Floating target bars + selection retention, using the engine's target.* data.
 //
-// STOCK BEHAVIOUR.  player1.weaponN.target.* describe whatever is under the
-// reticle and nothing else.  HUD::GameEvents::UpdateWeaponEvents compares the
-// current aim target with a cached handle every tick, and the instant they
-// differ it sends target.disable - so the bar fades the moment the reticle
-// slips off, which during a fight is most of the time.  There is also no way to
-// place a HUD element ON a unit: nothing publishes a unit's screen position.
+// EventPosition("player1.weaponN.target.position") opts a channel into this
+// feature. Without a listener, the stock HUD behaves as before. The Vector3 is
+// viewport-relative: top-centre of the world bounds, pixel-snapped. It is pinned
+// inside the screen while the engine picks the target, so a big vehicle up close
+// keeps its bar; held or fading, the bar leaves the screen with its target.
+// Soldier bounds are non-animated, stance-sized collision bounds at the live
+// centre; vehicles/props use model bounds transformed into a world AABB.
+// Dimensions, artwork alignment, child offsets and labels belong to the .hud.
 //
-// WHAT THIS ADDS.  Exactly one new HUD event per weapon,
+// SELECTION RETENTION:
+//   * sample weapon->mTarget, else the native reticule handle, before lending;
+//   * acquire/refresh only when the engine's filtered HUD target agrees;
+//   * hold the most recently selected target for 0.5s after selection loss;
+//   * a different natural target replaces it immediately, even a friendly,
+//     except the other half of a vehicle and its exposed rider: that must
+//     hold the engine's pick for 0.3s, since the two trade it back and forth;
+//   * a lent/cached target cannot refresh its own hold;
+//   * no affiliation check or fresh LOS/range/frustum gate;
+//   * keep separate state for weapon1/2; clear on death/stale handles, weapon or
+//     controlled-object changes, mission reset or removal of that listener.
 //
-//     player1.weapon1.target.position        type_Vector3, 0..1 viewport fractions
-//     player1.weapon2.target.position
+// During the hold, lend the retained handle to the empty reticule slot only
+// inside HUD::GameEvents::Update, restoring it immediately afterward. The
+// engine continues publishing health/shield/name/colour with its native
+// filtering and change detection. Other target.* consumers share the hold.
+// The rider pair lends the same way, over the engine's pick; aim assist,
+// lock-on and firing never see either loan.
 //
-// produced by projecting ONE point: the top centre of the world bounding box.
-// Soldiers use non-animated, stance-sized collision bounds with the live centre;
-// vehicles/props use model bounds transformed into a world AABB. The anchor is
-// pinned inside a built-in screen safe area and snapped to framebuffer
-// pixels. Wholly behind-camera targets are hidden, not pinned through the view.
-// No animation bones, distance/FOV-dependent sizes, scale events or POI logic.
-// Bind EventPosition on the group holding the bar. All artwork sizes, child
-// offsets, labels and alignment remain in the .hud file, unchanged by the DLL.
+// Hold expiry stops lending; native target.disable then starts the HUD fade.
+// Use FadeInTime(0) and FadeOutTime(0.25) on the existing bar/glow/label elements
+// for reference-style timing. Do NOT bind position to EventEnable, since its
+// trailing updates would keep re-enabling the fade.
 //
-// It also makes the ENGINE's target sticky, rather than publishing a parallel
-// family of health/name/colour events that would only duplicate target.*:
+// Position/death-fade policy: follow living targets through the HUD fade;
+// retain the last live WORLD bounds on death/despawn and reproject them using
+// the current camera, never corpse bounds. This intentionally preserves the
+// user's death fade, rather than adopting the reference's immediate zero-health
+// hide. Wholly behind-camera targets hide, as before.
 //
-//   * a hit by the LOCAL player on an ENEMY latches that unit;
-//   * while a latch is live and nothing is under the reticle, the latched handle
-//     is written into Controllable::mReticuleTarget[channel] for the duration of
-//     HUD::GameEvents::Update and restored immediately after.  The engine then
-//     sees a target, never sends target.disable, and keeps every target.* event
-//     flowing with its own shield handling, name lookup and change detection;
-//   * aiming at ANY other unit cancels the latch, so the bar never snaps back to
-//     someone who may be off screen.  Hitting another enemy transfers it;
-//   * aiming at the latched unit keeps refreshing the hold, so the hold always
-//     measures time since the unit was last hit OR last under the reticle;
-//   * no line of sight, or behind the camera: not lent, but the latch is KEPT, so
-//     the bar returns if the unit reappears inside the hold.
+// INI: [Features] TargetBarLatchSeconds=0.5. Existing overrides still apply;
+// zero retains the legacy no-timeout option. Fade duration stays in the .hud.
+// This ports the retention behaviour, not the reference's autoaim selector.
+// Multiplayer presentation only; no simulation or network state is changed.
 //
-// The hold is NOT a fade timer.  It bounds how long a hit keeps the bar attached;
-// the fade belongs to the .hud file. Living targets continue to be followed
-// during that fade. Once the target dies or its handle expires, retain the last
-// published SCREEN position instead of recomputing corpse bounds or hiding it
-// mid-fade. A new target resets the cached anchor, as does a mission/listener reset.
-// A live target with invalid/behind-camera projection still hides normally.
-//
-// OPT-IN BY DATA.  The whole feature is inert - no lending, no sticky target, no
-// per-tick work - unless some .hud element actually binds target.position.  A
-// stock HUD, or any mod HUD that does not use the event, behaves exactly as
-// before.  EventClass keeps a self-linked handler list at +0x08, so "is anyone
-// listening" is a single pointer comparison.
-//
-// FOR .hud AUTHORS.  Bind position ONLY through EventPosition, never EventEnable:
-// the trailing position updates would switch the bar back on in the middle of
-// its fade.  Enable and disable stay on the stock target.* events.  Everything
-// else bound to target.* (a reticle tint on target.teamColor, say) becomes
-// sticky for the hold as well - that is the engine's target, not just the bar's.
-//
-// MULTIPLAYER.  Presentation only: it reads local state and changes nothing in
-// the simulation.  The latch is taken in Damageable::ApplyDamage and NOT in
-// Character::RegisterHit, because on a multiplayer client ApplyDamageCommon
-// diverts into the cosmetic ApplyNetClientDamage and RegisterHit never runs
-// there; ApplyDamage itself runs for locally simulated hits in every role.
-//
-// Always available on supported builds; no enable toggle or inset INI settings.
-// A HUD binding remains the opt-in. The tested screen safe area is built in;
-// it reserves space around the anchor without setting bar size.
-//   INI: [Features] TargetBarLatchSeconds=2.5      0 = never time out
-//
-// modtools, Steam and GOG.  Every address, offset and calling convention was
-// read per build and independently re-read; the write-up and the per-build
-// convention differences are in docs/RE/HUDSystem.md, "Floating elements".
-// =============================================================================
-
+// Supported builds: modtools, Steam and GOG. See docs/RE/HUDSystem.md.
 extern float g_targetBarLatchSeconds;
 
-// The shared GameEvents hooks also publish player1.reticule.horizonRotation
-// (Vector3 degrees, Z only). Bind EventRotation on an unscaled reticule pivot;
-// keep artwork sizing in a child. Independent of the target-bar/latch binding,
-// with no INI option or controlled-unit requirement.
+// The same Open/Update hooks also drive horizonRotation, NumberMath, the class
+// icons (hud_class_icons.hpp), the command post strip (hud_command_posts.hpp)
+// and FillFrom's Open step. Independent HUD bindings opt into those features.
 void target_bar_latch_install(uintptr_t exe_base);
 void target_bar_latch_uninstall();

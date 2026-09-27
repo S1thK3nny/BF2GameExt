@@ -3,6 +3,7 @@
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -30,13 +31,6 @@ static GameLog_t g_log = nullptr;
 // ---------------------------------------------------------------------------
 // Weapon / Controllable raw offset constants (replaces game type headers)
 // ---------------------------------------------------------------------------
-
-// Weapon instance offsets
-static constexpr unsigned kWpn_mClass     = 0x064;  // WeaponClass* (current)
-static constexpr unsigned kWpn_mOwner     = 0x06C;  // Controllable*
-static constexpr unsigned kWpn_mState     = 0x0B0;  // int WeaponState enum
-static constexpr unsigned kWpn_mHeat      = 0x118;  // float (heat accumulator)
-static constexpr unsigned kWpn_mOverheat  = 0x11C;  // overheat flag
 
 // Controllable offsets
 static constexpr unsigned kCtrl_mPlayerId = 0x0D4;  // int
@@ -425,12 +419,12 @@ void rumble_on_signal_fire(void* weapon)
 
    __try {
       // Read owner Controllable* from weapon
-      void* owner = read_ptr(weapon, kWpn_mOwner);
+      void* owner = read_ptr(weapon, layout::Weapon::kOwner);
       if (!owner) return;
       // Only process for local player (playerId == 0)
       if (read_int(owner, kCtrl_mPlayerId) != 0) return;
 
-      void* weaponClass = read_ptr(weapon, kWpn_mClass);
+      void* weaponClass = read_ptr(weapon, layout::Weapon::kClass);
       if (!weaponClass) return;
 
       using O = WeaponRumbleOffsets;
@@ -554,20 +548,20 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
 
    // Only process rumble for local player's weapons
    __try {
-      void* owner = read_ptr(weapon, kWpn_mOwner);
+      void* owner = read_ptr(weapon, layout::Weapon::kOwner);
       if (!owner) return result;
       if (read_int(owner, kCtrl_mPlayerId) != 0) return result;
    } __except (EXCEPTION_EXECUTE_HANDLER) { return result; }
 
    __try {
       // --- CHARGE state: accumulate charge rumble (Xbox Weapon_UpdateChargeRumble) ---
-      int weaponState = read_int(weapon, kWpn_mState);
+      int weaponState = read_int(weapon, layout::Weapon::kState);
       if (weaponState == WPN_CHARGE) {
          bool newChargeCycle = (s_chargingWeapon != weapon);
          s_chargingWeapon = weapon;
          QueryPerformanceCounter(&s_chargeLastSeen);
 
-         void* weaponClass = read_ptr(weapon, kWpn_mClass);
+         void* weaponClass = read_ptr(weapon, layout::Weapon::kClass);
          if (!weaponClass) { output_vibration(); return result; }
 
          using O = WeaponRumbleOffsets;
@@ -638,7 +632,7 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
 
       // --- Health polling for damage rumble ---
       {
-         void* owner = read_ptr(weapon, kWpn_mOwner);
+         void* owner = read_ptr(weapon, layout::Weapon::kOwner);
          if (owner) {
             uintptr_t entity_base = (uintptr_t)owner - kCtrl_to_entity_base;
             uintptr_t damageable  = entity_base + kDamageable_offset;

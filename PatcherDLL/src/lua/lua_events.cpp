@@ -4,6 +4,7 @@
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 
@@ -241,7 +242,7 @@ void* lua_event_character_from_index(int index)
       if (!base || index >= max) return nullptr;
       // Stride 0x1B0, the same divisor LuaPushItem<Character> uses to turn the
       // pointer back into the index the Lua callback receives.
-      return (void*)(base + (uintptr_t)index * 0x1B0);
+      return (void*)(base + (uintptr_t)index * layout::Character::kSize);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return nullptr;
    }

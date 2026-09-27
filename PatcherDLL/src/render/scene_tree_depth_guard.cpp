@@ -2,6 +2,8 @@
 #include "scene_tree_depth_guard.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <stdio.h>
@@ -73,13 +75,7 @@ bool build_forced_jump(const uint8_t* jcc)
 {
    if (jcc[0] != 0x0F || jcc[1] != 0x8E) return false; // JLE rel32
 
-   uint32_t rel;
-   memcpy(&rel, jcc + 2, 4);
-
-   s_forcedJmp[0] = 0xE9; // JMP rel32, one byte shorter than the JLE
-   rel += 1;
-   memcpy(s_forcedJmp + 1, &rel, 4);
-   s_forcedJmp[5] = 0x90; // NOP, so the instruction boundary after it is unchanged
+   x86::jcc32_as_jmp(jcc, s_forcedJmp);
 
    memcpy(s_originalJcc, jcc, 6);
    return true;
@@ -101,15 +97,11 @@ void report_once()
    if (s_reported) return;
    s_reported = true;
 
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   fprintf(f,
-           "[SceneTreeGuard] depth cap %d reached while building the static world tree. This "
-           "map has objects the engine's splitter cannot separate (coincident, stacked on one "
-           "x/z, or carrying a broken position), which in stock BF2 is a load-time "
-           "STACK_OVERFLOW. One node was left unsplit instead.\n",
-           kMaxDepth);
-   fclose(f);
+   install_log("[SceneTreeGuard] depth cap %d reached while building the static world tree. "
+               "This map has objects the engine's splitter cannot separate (coincident, stacked "
+               "on one x/z, or carrying a broken position), which in stock BF2 is a load-time "
+               "STACK_OVERFLOW. One node was left unsplit instead.",
+               kMaxDepth);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,19 +133,6 @@ char __fastcall hooked_subdivide(void* box)
    return result;
 }
 
-void guard_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   fputs("[SceneTreeGuard] ", f);
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 } // namespace
 
 void scene_tree_depth_guard_install(uintptr_t exe_base)
@@ -164,7 +143,7 @@ void scene_tree_depth_guard_install(uintptr_t exe_base)
    case GameBuild::Steam:    sites = &kSitesSteam;    break;
    case GameBuild::GOG:      sites = &kSitesGOG;      break;
    default:
-      guard_log("not installed: unknown build");
+      install_log("[SceneTreeGuard] not installed: unknown build");
       return;
    }
 
@@ -174,18 +153,18 @@ void scene_tree_depth_guard_install(uintptr_t exe_base)
    // Every byte checked before anything is written. A build that does not match
    // declines rather than patching something it has not recognised.
    if (memcmp(subdivide, sites->prologue, sites->prologueLen) != 0) {
-      guard_log("not installed: subdivide at %08X does not match", (unsigned)sites->subdivide);
+      install_log("[SceneTreeGuard] not installed: subdivide at %08X does not match", (unsigned)sites->subdivide);
       return;
    }
    if (memcmp(cmp, sites->splitTestBytes, sites->splitTestLen) != 0) {
-      guard_log("not installed: split test at %08X does not match", (unsigned)sites->splitTest);
+      install_log("[SceneTreeGuard] not installed: split test at %08X does not match", (unsigned)sites->splitTest);
       return;
    }
 
    s_jccAddress = cmp + sites->splitTestLen;
    if (!build_forced_jump(s_jccAddress)) {
-      guard_log("not installed: expected a JLE rel32 after the split test at %08X",
-                (unsigned)sites->splitTest);
+      install_log("[SceneTreeGuard] not installed: expected a JLE rel32 after the split test at %08X",
+                  (unsigned)sites->splitTest);
       s_jccAddress = nullptr;
       return;
    }
@@ -198,12 +177,12 @@ void scene_tree_depth_guard_install(uintptr_t exe_base)
    const LONG commit = DetourTransactionCommit();
 
    if (attach != NO_ERROR || commit != NO_ERROR) {
-      guard_log("not installed: DetourAttach=%ld commit=%ld", attach, commit);
+      install_log("[SceneTreeGuard] not installed: DetourAttach=%ld commit=%ld", attach, commit);
       g_origSubdivide = nullptr;
       s_jccAddress    = nullptr;
       return;
    }
 
-   guard_log("installed: static world tree depth capped at %d (subdivide %08X, split test %08X)",
-             kMaxDepth, (unsigned)sites->subdivide, (unsigned)sites->splitTest);
+   install_log("[SceneTreeGuard] installed: static world tree depth capped at %d (subdivide %08X, split test %08X)",
+               kMaxDepth, (unsigned)sites->subdivide, (unsigned)sites->splitTest);
 }

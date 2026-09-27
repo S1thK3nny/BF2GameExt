@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 
@@ -163,22 +164,6 @@ static SentState g_sent[kMaxLocalPlayers];
 // The event carries a bare wchar_t*.  Dispatch is synchronous, but a static
 // buffer costs nothing and removes any question about the pointer outliving us.
 static wchar_t g_text[kTextChars];
-
-// install_log() is the ONLY logger that may run during install: dllmain holds the
-// exe sections at PAGE_READWRITE (non-executable) then, so calling the engine's
-// own logger there is an EXEC access violation on DEP builds.  Same split as
-// hud_weapon_icon_fix.cpp.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // ---------------------------------------------------------------------------
 // Reading the engine

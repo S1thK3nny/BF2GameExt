@@ -47,11 +47,13 @@
 #include "weapon/shield_channel_fix.hpp"
 #include "weapon/lightsaber_illumination.hpp"
 #include "render/red_light_stale_node_fix.hpp"
+#include "entity/foleyfx_region_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 
@@ -98,10 +100,10 @@ static void __fastcall hooked_char_exit_vehicle(void* thisPtr, void* /*edx*/, in
       const int       maxChars  = *(int*)      res(g_addr->max_chars);
       if (arrayBase && maxChars > 0) {
          for (int i = 0; i < maxChars; i++) {
-            const uintptr_t slot = arrayBase + (uintptr_t)i * 0x1B0;
-            if (*(void**)(slot + 0x148) == thisPtr) {
+            const uintptr_t slot = arrayBase + (uintptr_t)i * layout::Character::kSize;
+            if (*(void**)(slot + layout::Character::kUnit) == thisPtr) {
                charIndex   = i;
-               vehicleCtrl = *(void**)(slot + 0x14C);
+               vehicleCtrl = *(void**)(slot + layout::Character::kVehicle);
                break;
             }
          }
@@ -159,6 +161,7 @@ static void __cdecl hooked_init_state()
    soldier_override_texture_reset();
    held_ordnance_effect_reset(); // old level's effect/weapon pointers are no longer valid
    freecam_light_reset(); // its pool block did not survive the level change
+   foleyfx_region_reset(); // the old map's regions went with its heap
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).
@@ -345,6 +348,7 @@ void lua_hooks_uninstall()
    voice_limit_uninstall();
    snd_engine_open_fix_uninstall();
    impact_sound_water_fix_uninstall();
+   foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
    content_census_uninstall();

@@ -3,6 +3,7 @@
 #include "patch_table.hpp"
 #include "game_addrs.hpp"
 #include "entity/combo_anim_limit.hpp"
+#include "core/pbl_hash.hpp"
 
 // _RenderLightSabre: match Classic Collection's backward visual extension.
 // Redirect only this renderer's operand; the exe's 0.04f constant is shared.
@@ -138,18 +139,6 @@ static bool audio_stream_prepare()
    snd_stream_queue_address   = (uint32_t)(uintptr_t)snd_stream_queue_storage;
 
    return true;
-}
-
-// FNV-1a hash with forced lowercase — matches PblHash::calcHash in the game engine.
-static uint32_t pbl_hash(const char* str)
-{
-   if (!str || !*str) return 0;
-   uint32_t hash = 0x811c9dc5;
-   while (*str) {
-      hash = (hash ^ ((uint8_t)*str | 0x20)) * 0x1000193;
-      str++;
-   }
-   return hash;
 }
 
 void init_object_limit_sentinel(const char* rtti_class_name)
@@ -598,7 +587,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x00449b5b (VA)
                      patch{0x00449b5b, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },
@@ -1401,7 +1392,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as Steam
                      patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },
@@ -2100,7 +2093,9 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
                .name = "Network Timer Increase",
                .patches =
                   {
-                     // TTYScroll: Timer 2 (FrameUpdate::Update) divisor 30 -> 120 Hz
+                     // Frame timer init (Ghidra's TTYScroll label is a bad match): Timer 2
+                     // divisor 30 -> 120 Hz. Timer 2 runs GameVoiceChat::Update, NetGame::Update
+                     // (the packet pump) and the keyboard poll; see docs/user/MULTIPLAYER.md.
                      // PUSH imm8 operand at 0x0052d4c2 (VA) — same address as GOG
                      patch{0x0052d4c2, 0x1e, 0x78, {.values_are_8bit = true}}, // Timer 2: 30 Hz -> 120 Hz
                   },

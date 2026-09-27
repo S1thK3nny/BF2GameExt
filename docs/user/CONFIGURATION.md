@@ -26,7 +26,7 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `Prone` | `1` | Enable prone stance. Requires data\_lvl_pc\prone.lvl, which is loaded automatically alongside every ingame.lvl read; prone stays off for any mission where that file is missing |
 | `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
 | `SpawnVehicleList` | `1` | On the spawn screen, list the vehicles that spawn at the highlighted command post, the way SWBF1 did. Stock BF2 leaves that line blank. Set 0 for stock |
-| `TargetBarLatchSeconds` | `2.5` | How long the target bar stays on an enemy after you last hit them or had them under the reticle. This is not a fade time - the fade belongs to the .hud file. 0 never times out |
+| `TargetBarLatchSeconds` | `0.5` | Seconds to retain the last naturally selected HUD target after selection is lost; no hit required. Fade time belongs to the .hud file (0.25 matches the reference). 0 never times out |
 | `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
 | `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |
@@ -142,7 +142,7 @@ Engine limit patches. Most only raise a ceiling and do not change behaviour belo
 | `SoundLimit` | `1` | Raise global sound limit |
 | `ObjectLimitIncrease` | `1` | Raise entity / object pool limit |
 | `HighResAnimLimit` | `1` | Raise high-resolution animation limit |
-| `NetworkTimerIncrease` | `1` | Raise the input/voice-chat update tick from 30 Hz to 120 Hz (the simulation tick is untouched) |
+| `NetworkTimerIncrease` | `1` | Raise the tick that reads the keyboard, runs voice chat and takes in network packets from 30 Hz to 120 Hz (the simulation tick, send rate and packet count are untouched) |
 | `MatrixPoolIncrease` | `1` | Extend matrix / item pool size |
 | `StringPoolIncrease` | `1` | Increase string pool size |
 | `AudioStreamLimit` | `1` | Raise how many sounds can stream at the same time from 6 to 12. Uses more memory |

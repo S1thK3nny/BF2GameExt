@@ -2,7 +2,7 @@
 
 See the [compatibility table](../../README.md#compatibility) for the current state of each build.
 
-Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference.
+Every ODF property added by BF2GameExt is collected in one place in the **[ODF Properties](ODF_PROPERTIES.md)** reference, and every `.hud` event and property in **[HUD Properties](HUD_PROPERTIES.md)**.
 
 ## Engine Limit Extensions
 
@@ -30,7 +30,7 @@ Automatic binary patches applied on load:
 - **String Pool** - Increases the string pool from 32 KB to 128 KB, preventing crashes in debug builds with heavy string usage
 - **Matrix/Item Pool** - Extends the matrix pool to 256 times its original capacity
 - **Renderer Cache** - Increases the particle renderer cache from 15 to 120 entries
-- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one gates keyboard, joystick and voice chat updates, and was fixed at 30 Hz, so input was only sampled 30 times a second no matter how high the framerate ran. This raises it to 120 Hz. The simulation timer is untouched, so nothing about game speed or netcode changes, input just stops being the slowest thing in the loop. INI: `[LimitIncreases] NetworkTimerIncrease=1`
+- **Input Update Rate** - The engine runs two fixed-rate update timers. The second one reads the keyboard, runs voice chat and takes in network packets, and was fixed at 30 Hz, so key presses were only picked up 30 times a second however high the framerate ran, and a busy host could read only so many packets per tick, throwing the rest away. This raises it to 120 Hz. The simulation tick, send rate and packet count are untouched, so game speed and what goes over the network do not change. INI: `[LimitIncreases] NetworkTimerIncrease=1`
 - **Sky Object Limit** - Removes the cap on how many objects a sky dome or backdrop can contain. Port of PrismaticFlower's upstream fix. INI: `[Fixes] SkyObjectLimit=1`
 - **Tentacle Limit** - Raises how many tentacles a unit can have from 4 to 9. Bones per tentacle stays capped at 5. Keeps the original offline and multiplayer timing, and fixes extra chains losing their pose when another unit is drawn. On by default. INI: `[LimitIncreases] TentacleLimit=1`
 - **GC Visual Limits** - Raises Galactic Conquest per-frame rendering limits: pathway beams from 64 to 256 (255 on Steam), and planet icons from 128 to 512. Also spreads beams across spare cache slots when the shared batching cache fills up. Without that, every pathway beam competes for one cache and they silently stop drawing at roughly 50 beams no matter how large the buffer is. Fixes pathways and fleet/planet icons disappearing on modded GC maps with many planets. INI: `[LimitIncreases] GCVisualLimits=1`
@@ -61,12 +61,6 @@ General engine bug fixes, several of them ported from PrismaticFlower's upstream
 - **Screenshot Fix** - Print Screen crashes the retail builds. Replaces the broken screenshot routine with a clean capture written to `ScreenShots\screenshot_NNNN.tga`. No effect on Modtools. INI: `[Fixes] ScreenshotFix=1`
 - **Error Dialog Fix** - The retail builds are missing the dialog resource the engine uses for fatal error messages, so those dialogs silently fail and the game just exits with no explanation. This supplies a replacement dialog from BF2GameExt so the error is actually shown. No effect on Modtools. INI: `[Fixes] ErrorDialogFix=1`
 - **DLC Mission List Initialization Fix** *(experimental, off by default)* - Launching straight into a mod map from the command line fails, because the addon mission list is only built when the shell menu runs. This enters and immediately exits the shell first, giving addon scripts their normal context. Ported from upstream but not yet confirmed working on retail builds, where command line addon launches still fail. INI: `[Fixes] DLCMissionInitFix=0`
-- **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
-- **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`
-- **HUD Editor Removal** - Steam and GOG still respond to a leftover development key combination that pauses the game and puts an unusable layout editor on screen. The key does nothing now. No effect on Modtools, where the HUD editor is a working tool and is left alone.
-- **Reticule Horizon Levelling** - Bind `EventRotation("player1.reticule.horizonRotation")` on an unscaled reticule pivot to align it with projected world-up as the camera banks. Position and artwork sizing stay in the `.hud`; keep scaling in a child group. Holds the last reliable angle when looking almost straight up/down. No INI setting, and independent of floating target bars. See [HUD event bindings](HUD_EVENTS.md#reticule-horizon-levelling) for the layout example and limitations.
-- **Floating Target Bar** - The target health bar fades the instant your aim slips off a unit, and nothing lets a HUD place an element on one. A new HUD event, `player1.weaponN.target.position`, carries the target's place on screen: bind it with `EventPosition` (never `EventEnable`) on the bar's group and the bar follows the unit. Hitting an enemy also holds the bar on them; aiming at anyone else drops it, and cover hides it until they reappear. Support is inherently on, but inert unless a `.hud` file uses the event. Only the hold duration is configurable: `[Features] TargetBarLatchSeconds=2.5` (0 never times out).
-  Position uses the world bounding box's top centre, without animation-bone wobble. Units keep stance-sized bounds; vehicles use model bounds. Close/offscreen anchors are pinned inside a built-in screen safe area and pixel-snapped; wholly behind-camera targets hide. The `.hud` still owns all sizes, scales, labels and manual offsets. The tested edge reservations remain unchanged; there are no enable/inset INI settings.
 - **Map Queue Next Mission Fix** - Finishing a match on Modtools always dropped you back to the main menu, even when the mission playlist still had maps queued. This was due to the branch simply not being present due to the modtools simply being older than the retail builds. The branch is restored and the queue now rolls straight into the next map the way it does on retail.
 - **Jetpack First Person Sound Fix** - Switching to first person while the jetpack was running played the jetpack's shutdown sound and left the rest of the flight silent. The jetpack now keeps its sound when you change view, and still shuts down normally when you stop flying.
 - **Hero Team Switch Fix** - Dying as a hero left you unable to change teams. The team switch would silently do nothing, and stayed that way until you respawned as a regular unit. Team switching now works normally after a hero dies. Playing as a hero still blocks it, the same as it always has.
@@ -75,6 +69,8 @@ General engine bug fixes, several of them ported from PrismaticFlower's upstream
 - **Multiplayer Spawn Delay** - Multiplayer always makes you wait 15 seconds to respawn. The number is hardcoded, and the game reads the mission script's `SetSpawnDelay` and then throws it away online, so no map could change it and neither could a host. Set this to the wait you want, in seconds; anything from 0.1 to 300, decimals allowed. Only the host sets it; everyone else follows with nothing installed. INI: `[Features] MPSpawnDelay=15`
 - **Custom In-Game Movies** - `ScriptCB_PlayInGameMovie("ingame.mvs", "segment")` looks like it takes a movie file, but every shipping build throws that first argument away and hardcodes the file, picking `ingame.mvs` (or `ingamefr.mvs` / `ingamegr.mvs` on French and German) from a language table. A custom in-game movie could therefore only ever be played by overwriting the stock `ingame.mvs` in the base game folder. The argument now works, and understands the `dc:` addon prefix, so a mod can ship its movie in its own addon folder. The three stock names still take the old path, so the localised campaign movies are unchanged. See **[Lua API](LUA_API.md)** for the usage.
 - **EntityLightClass Animated ProjectedTexture** - A `light` class object can animate its projected texture by giving the texture name a frame count and adding `FrameRate`, but every frame of the animation showed the same texture, so it never animated. The frames now resolve as written. `OdfMunge` does not collect them for you: list each texture in the `.req` by hand, exactly as with water textures.
+- **Foley Regions** - A `foleyfx <group>` region never changed any sounds in stock BF2, and in a map rotation, loading a map with `foleyfx` regions right after another map that had them crashed the game. Both are fixed: footsteps, landings and impacts on the ground inside the region now use the named foley group, such as `foleyfx metal_foley`. Water and objects keep their own sounds. A unit the group has no sounds for uses the normal ground sounds inside the region. Always on.
+- **Foley Sounds From Several Sound Files** - A mission script that loads more than one world sound file, such as `sound\yav.lvl;yav1cw` and `sound\hot.lvl;hot1gcw`, left some soldiers with silent footsteps, or with the sound of the last object they touched, because each file only covers its own world's soldiers. Those soldiers now take their foley sounds from whichever of the loaded files has them, the most recently loaded one first. Soldiers that already had sounds keep them, and missions that load a single world sound file are unchanged. Always on.
 
 ## Loading Screen System
 
@@ -82,6 +78,23 @@ Adds new loading screen parameters that **allow modders to fully restore bf1 sty
 These work alongside the vanilla ones by redirect the whole loading screen configuration to a custom `load.cfg` from Lua.
 
 See **[Loading Screen](LOADING_SCREEN.md)** for the full parameter reference.
+
+## HUD
+
+New HUD events and properties for `.hud` files, plus fixes to the stock HUD. The new events do nothing until a `.hud` binds them.
+
+See **[HUD System](HUD.md)** for how to use them and **[HUD Properties](HUD_PROPERTIES.md)** for the full list of events and parameters.
+
+- **HUD Widescreen Reticle Correction** - On widescreen displays the game scales and offsets every HUD element, which pushes the aim reticle off the true aim point, with the error growing toward the screen edges. This pre-corrects the reticle so it lands in the right place, leaving all other HUD elements untouched. INI: `[Fixes] ReticleCorrection=-1` (auto; `0` disables, or set `0..1` manually)
+- **Custom Weapon Icon Fix** - Mods that add weapons ship a small HUD file so their weapons get an icon, and each one works on its own. Load two of them in the same session, such as a map mod together with a side mod, and you would get two icons for the same weapon: the correct one plus a stray one showing the weapon's world model in the wrong place. Which weapons broke depended on load order, so it looked random. Each mod's icons now work with the others loaded, and stock icons that some mods were also displacing come back. INI: `[Fixes] WeaponIconFix=1`
+- **HUD Editor Removal** - Steam and GOG still respond to a leftover development key combination that pauses the game and puts an unusable layout editor on screen. The key does nothing now. No effect on Modtools, where the HUD editor is a working tool and is left alone.
+- **Reticule Horizon Levelling** - The reticule tilts with the camera when a flyer banks. A `.hud` can now keep it level with the horizon in first and third person. Aim is unchanged.
+- **Floating Target Bar** - The target health bar vanished the instant your aim slipped off a unit, and a HUD had no way to place anything on one. A `.hud` can now float the bar over its target, and it stays for a moment after you lose aim. INI: `[Features] TargetBarLatchSeconds=0.5` (0 never times out).
+- **Command Post Strip** - Only the post you were capturing ever reached the HUD. A `.hud` can now show a row of every command post with its owner and capture progress, and it works on multiplayer clients.
+- **Bar Fill Direction** - HUD bars could only fill from the left. A `BarBitmap` can now fill from the right, the bottom or the top without breaking its texture.
+- **Weapon Icon Textures** - The `IconTexture` a weapon ODF names never appeared on the HUD. A `.hud` can now show it for both weapon slots, on foot, in vehicles and in turrets.
+- **Class and Vehicle Health Icons** - Health icons that follow your class, stance or vehicle could only be swapped from Lua, which never runs on multiplayer clients. A `.hud` can now take them straight from the class's `HealthTexture`, including crouch, prone and droideka ball variants.
+- **Math Transform** - A `.hud` could only map a value onto a colour, a position or a mesh, never do arithmetic with it. `TransformNumberMath` now adds, subtracts, multiplies or divides two values, or takes the smaller or larger, for things like missing health or a ticket lead.
 
 ## Soldier Systems
 
@@ -158,6 +171,12 @@ retail builds have no command console to add them to.
 - `ShowWeaponRanges` - Draw weapon AI range circles (MinRange, OptimalRange, MaxRange) around soldiers
 - `memwatch` - Reverse-engineering aid. Arms a CPU hardware data breakpoint on an address and reports every distinct piece of code that reads or writes it, with a register snapshot and a best-effort call stack per accessor. Up to four addresses at once, since that is how many debug registers x86 has. `memwatch [u]<hexaddr> [len] [r|w|rw]` to arm, bare `memwatch` to report and disarm, `memwatch clear` to drop all watches. A plain address is a runtime one; the `u` prefix takes an unrelocated address straight out of Ghidra and rebases it for you. Reported accessor and caller addresses are unrelocated, so they paste back into Ghidra as is. See [MemWatchRE.md](../RE/MemWatchRE.md)
 
+## Controller Support
+
+- **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
+- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
+- **Rumble** - Controller vibration on weapon fire, weapon charge and taking damage. Damage rumble works on every unit. Fire and charge rumble read the weapon's own ODF rumble values, and most stock weapons never set them, so a weapon that stays silent while firing needs those values added rather than fixing. ODF (weapon): `RecoilStrengthLight`/`Heavy`, `RecoilLengthLight`/`Heavy`, `RecoilDelayLight`/`Heavy`, `RecoilDecayLight`/`Heavy`, `ChargeRateLight`/`Heavy`, `MaxChargeStrengthLight`/`Heavy`, `ChargeDelayLight`/`Heavy`, `TimeAtMaxCharge`. INI: `[Controller] Rumble=1`
+
 ## Diagnostics
 
 Developer reporting, all off by default and all under `[Diagnostic]` in the INI. They only log; none of them change how the game plays.
@@ -170,9 +189,3 @@ Developer reporting, all off by default and all under `[Diagnostic]` in the INI.
 | `AIUpdateDiag` | How many AI are getting a decision each turn against how many want one. This is what says whether `AIUpdateBudget` is worth raising. |
 | `PoolGrowthDiag` | Every memory pool growth, with the pool name and the heaps involved. |
 | `BranchRegionDebug` | Every step of EntityPath branch region resolution, for tracing a `BranchRegion` that will not resolve. |
-
-## Controller Support
-
-- **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
-- **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
-- **Rumble** - Controller vibration on weapon fire, weapon charge and taking damage. Damage rumble works on every unit. Fire and charge rumble read the weapon's own ODF rumble values, and most stock weapons never set them, so a weapon that stays silent while firing needs those values added rather than fixing. ODF (weapon): `RecoilStrengthLight`/`Heavy`, `RecoilLengthLight`/`Heavy`, `RecoilDelayLight`/`Heavy`, `RecoilDecayLight`/`Heavy`, `ChargeRateLight`/`Heavy`, `MaxChargeStrengthLight`/`Heavy`, `ChargeDelayLight`/`Heavy`, `TimeAtMaxCharge`. INI: `[Controller] Rumble=1`

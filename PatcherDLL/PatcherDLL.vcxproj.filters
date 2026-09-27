@@ -58,6 +58,9 @@
     <ClInclude Include="src\entity\flyer_carrier_fixes.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\foleyfx_region_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -244,7 +247,34 @@
     <ClInclude Include="src\render\target_bar_fade.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\target_bar_selection.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_horizon_math.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_number_math.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_number_math_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_class_icons.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_class_icons_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_command_posts.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_command_posts_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_bar_fill_from.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_bar_fill_from_core.hpp">
       <Filter>render</Filter>
     </ClInclude>
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
@@ -296,6 +326,9 @@
     </ClCompile>
     <ClCompile Include="src\core\patch_table.cpp">
       <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\foleyfx_region_fix.cpp">
+      <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp">
       <Filter>entity</Filter>
@@ -463,6 +496,18 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\target_bar_latch.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_number_math.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_class_icons.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_command_posts.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_bar_fill_from.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">

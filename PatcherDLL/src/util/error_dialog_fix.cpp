@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "error_dialog_fix.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include "../../resource.h"
 
@@ -72,9 +73,6 @@ void error_dialog_fix_install(uintptr_t exe_base)
 
     // Rewrite to 90 (nop) + E8 rel32 (call shim) — same 6 bytes, args untouched
     // (the shim keeps DialogBoxParamA's __stdcall 5-arg signature).
-    const int32_t rel32 = (int32_t)((uintptr_t)&RedWarning_DialogBoxParamA - ((uintptr_t)site + 6));
-
-    site[0] = 0x90;
-    site[1] = 0xE8;
-    memcpy(site + 2, &rel32, sizeof(rel32));
+    site[0] = x86::kNop;
+    x86::write_branch(site + 1, x86::kCall, &RedWarning_DialogBoxParamA);
 }

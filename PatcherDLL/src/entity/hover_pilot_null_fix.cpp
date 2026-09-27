@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -129,8 +130,7 @@ static void install_updateindirect_shim(uintptr_t exe_base)
    // VirtualProtect is needed here.
    s_site    = site;
    s_origRel = *(int32_t*)(site + 1);
-   *(int32_t*)(site + 1) =
-      (int32_t)((uintptr_t)&hover_pilot_getter_guarded - ((uintptr_t)site + 5));
+   x86::write_branch(site, x86::kCall, &hover_pilot_getter_guarded);
 }
 
 // -----------------------------------------------------------------------------
@@ -231,10 +231,7 @@ static void install_command_guard(uintptr_t exe_base)
 
    // E9 rel32 (JMP to guard) over bytes 0..4, NOP the 6th byte.  .text is RW
    // during install.
-   int32_t rel = (int32_t)((uintptr_t)guard - ((uintptr_t)site + 5));
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = rel;
-   site[5] = 0x90;
+   x86::write_branch(site, x86::kJmp, guard, 6);
 }
 
 // -----------------------------------------------------------------------------
@@ -306,10 +303,7 @@ static void install_activate_guard(uintptr_t exe_base)
 
    // E9 rel32 to the guard over bytes 0..4, NOP the remaining 7.  .text is RW
    // during install.
-   const int32_t rel = (int32_t)((uintptr_t)&activate_pilot_null_guard - ((uintptr_t)site + 5));
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = rel;
-   std::memset(site + 5, 0x90, sizeof(kSite) - 5);
+   x86::write_branch(site, x86::kJmp, &activate_pilot_null_guard, sizeof(kSite));
 }
 
 // -----------------------------------------------------------------------------

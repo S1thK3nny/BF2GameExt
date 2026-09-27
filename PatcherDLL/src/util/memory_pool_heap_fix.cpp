@@ -2,6 +2,7 @@
 #include "memory_pool_heap_fix.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <stdio.h>
@@ -39,18 +40,6 @@ volatile LONG s_retargets = 0;
 int  s_logged = 0;
 constexpr int kMaxLogged = 64;
 
-void diag_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 void __fastcall hooked_allocate(void* self, void* edx, uint32_t size)
 {
    uint8_t* const pool = static_cast<uint8_t*>(self);
@@ -66,13 +55,13 @@ void __fastcall hooked_allocate(void* self, void* edx, uint32_t size)
 
       if (g_poolGrowthDiag && s_logged < kMaxLogged) {
          ++s_logged;
-         diag_log("[PoolGrow] \"%.32s\" size=%u count=%u grow=%u  capturedHeap=%d liveHeap=%d%s",
-                  reinterpret_cast<const char*>(pool + kLabel),
-                  *reinterpret_cast<uint32_t*>(pool + kSize),
-                  *reinterpret_cast<uint32_t*>(pool + kCount),
-                  *reinterpret_cast<uint32_t*>(pool + kGrow),
-                  captured, live,
-                  (captured != live && live >= 0) ? "   <-- would grow onto a stale heap" : "");
+         install_log("[PoolGrow] \"%.32s\" size=%u count=%u grow=%u  capturedHeap=%d liveHeap=%d%s",
+                     reinterpret_cast<const char*>(pool + kLabel),
+                     *reinterpret_cast<uint32_t*>(pool + kSize),
+                     *reinterpret_cast<uint32_t*>(pool + kCount),
+                     *reinterpret_cast<uint32_t*>(pool + kGrow),
+                     captured, live,
+                     (captured != live && live >= 0) ? "   <-- would grow onto a stale heap" : "");
       }
 
       // Only act when the captured heap is not the one that is actually live.
@@ -107,7 +96,7 @@ void memory_pool_heap_fix_install(uintptr_t exe_base)
 
    if (rd != NO_ERROR || rc != NO_ERROR) {
       g_origAllocate = nullptr;
-      diag_log("[PoolGrow] install failed: attach=%ld commit=%ld", rd, rc);
+      install_log("[PoolGrow] install failed: attach=%ld commit=%ld", rd, rc);
    }
 }
 
@@ -116,8 +105,8 @@ void memory_pool_heap_fix_uninstall()
    if (!g_origAllocate) return;
 
    if (g_poolGrowthDiag || s_retargets > 0)
-      diag_log("[PoolGrow] --- final --- growths=%ld  retargeted=%ld",
-               s_growths, s_retargets);
+      install_log("[PoolGrow] --- final --- growths=%ld  retargeted=%ld",
+                  s_growths, s_retargets);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

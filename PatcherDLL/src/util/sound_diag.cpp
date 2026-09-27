@@ -2,6 +2,7 @@
 #include "sound_diag.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 #include <stdio.h>
@@ -212,18 +213,6 @@ void now_string(char* out, size_t n)
                st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
 }
 
-void diag_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 using fn_snd_update_t  = void(__cdecl*)(float dt, char full);
 using fn_update_gain_t = void(__fastcall*)(void* self, void* edx, uint32_t a0, float gain);
 using fn_write_data_t  = uint32_t(__fastcall*)(void* self, void* edx, void* dest,
@@ -396,8 +385,8 @@ void sample_voice_pressure()
    // relationship off them instead of reasoning about it again.
    if (!s_dumpedVoice) {
       s_dumpedVoice = true;
-      diag_log("[SndDiag] pool base=%p  stride=%u  managed=%u  (smVoices at %p)",
-               (const void*)pool, kVoiceStride, managed, (void*)g_voicesPtr);
+      install_log("[SndDiag] pool base=%p  stride=%u  managed=%u  (smVoices at %p)",
+                  (const void*)pool, kVoiceStride, managed, (void*)g_voicesPtr);
 
       uint8_t* probe = *reinterpret_cast<uint8_t**>(head);
       for (int i = 0, shown = 0; i < 256 && shown < 8 && probe
@@ -406,9 +395,9 @@ void sample_voice_pressure()
          const uint8_t* const v = *reinterpret_cast<const uint8_t* const*>(obj + kVVVoice);
          if (v) {
             const ptrdiff_t d = v - pool;
-            diag_log("[SndDiag]   vv=%p  mVoice=%p  delta=%td  delta/stride=%td rem=%td",
-                     (const void*)obj, (const void*)v, d, d / (ptrdiff_t)kVoiceStride,
-                     d % (ptrdiff_t)kVoiceStride);
+            install_log("[SndDiag]   vv=%p  mVoice=%p  delta=%td  delta/stride=%td rem=%td",
+                        (const void*)obj, (const void*)v, d, d / (ptrdiff_t)kVoiceStride,
+                        d % (ptrdiff_t)kVoiceStride);
             ++shown;
          }
          probe = *reinterpret_cast<uint8_t**>(probe);
@@ -457,8 +446,8 @@ void drain_events()
       // Overrun: the ring wrapped before the tick could drain it.  Say so rather
       // than replaying whatever is in the slots now.
       if (s_evWrite - s_evRead > kEventRing) {
-         diag_log("[SndDiag] (event ring overran, %ld events lost)",
-                  s_evWrite - s_evRead - kEventRing);
+         install_log("[SndDiag] (event ring overran, %ld events lost)",
+                     s_evWrite - s_evRead - kEventRing);
          s_evRead = s_evWrite - kEventRing;
       }
 
@@ -468,18 +457,18 @@ void drain_events()
 
       switch (e.kind) {
          case EV_SATURATION:
-            diag_log("[SndDiag] %s  SATURATION voice=%d  %u of %u sampled at the rail"
-                     "  gainCurrent=%08X",
-                     when, (int)e.voice, e.a, kSatScanBytes / 2 / kSatStride, e.b);
+            install_log("[SndDiag] %s  SATURATION voice=%d  %u of %u sampled at the rail"
+                        "  gainCurrent=%08X",
+                        when, (int)e.voice, e.a, kSatScanBytes / 2 / kSatStride, e.b);
             break;
          case EV_GAIN_OVER:
-            diag_log("[SndDiag] %s  GAIN OVER UNITY voice=%d  product=%.4f"
-                     "  (Q15 convert overflows past 1.00003)",
-                     when, (int)e.voice, (double)e.f);
+            install_log("[SndDiag] %s  GAIN OVER UNITY voice=%d  product=%.4f"
+                        "  (Q15 convert overflows past 1.00003)",
+                        when, (int)e.voice, (double)e.f);
             break;
          case EV_CURSOR:
-            diag_log("[SndDiag] %s  PACKET CURSOR RUNAWAY voice=%d  cursor=%u request=%u",
-                     when, (int)e.voice, e.a, e.b);
+            install_log("[SndDiag] %s  PACKET CURSOR RUNAWAY voice=%d  cursor=%u request=%u",
+                        when, (int)e.voice, e.a, e.b);
             break;
          default:
             break;
@@ -505,19 +494,19 @@ void report()
    char when[32];
    now_string(when, sizeof(when));
 
-   diag_log("[SndDiag] %s  tick %d  mixConfig=%u (%s)  hwFree3D=%u  managedVoices=%u",
-            when, s_ticks, mixConfig, mixName, hwbufs, managed);
-   diag_log("[SndDiag]   voices: peak wanting=%d  with mVoice=%d  (of those,"
-            " in-pool=%d  unrecognised=%d)  pool slots used=%d  starved ticks=%d",
-            s_peakWanting, s_peakBound, s_peakSounding, s_peakStale,
-            s_peakSlots, s_starvedTicks);
-   diag_log("[SndDiag]   gain: calls=%ld (Q15 path %ld)  over 1.0=%ld  over 2.0=%ld"
-            "  max seen=%ld.%03ld",
-            s_gainCalls, s_gainQ15Calls, s_gainOverUnity, s_gainOverBadly,
-            s_gainMaxMilli / 1000, s_gainMaxMilli % 1000);
-   diag_log("[SndDiag]   output: writes=%ld  saturation bursts=%ld  rail samples=%ld"
-            "  loudest=%ld/32767  max packet cursor=%ld",
-            s_writeCalls, s_satBursts, s_satSamples, s_peakAbsSample, s_maxPacketRead);
+   install_log("[SndDiag] %s  tick %d  mixConfig=%u (%s)  hwFree3D=%u  managedVoices=%u",
+               when, s_ticks, mixConfig, mixName, hwbufs, managed);
+   install_log("[SndDiag]   voices: peak wanting=%d  with mVoice=%d  (of those,"
+               " in-pool=%d  unrecognised=%d)  pool slots used=%d  starved ticks=%d",
+               s_peakWanting, s_peakBound, s_peakSounding, s_peakStale,
+               s_peakSlots, s_starvedTicks);
+   install_log("[SndDiag]   gain: calls=%ld (Q15 path %ld)  over 1.0=%ld  over 2.0=%ld"
+               "  max seen=%ld.%03ld",
+               s_gainCalls, s_gainQ15Calls, s_gainOverUnity, s_gainOverBadly,
+               s_gainMaxMilli / 1000, s_gainMaxMilli % 1000);
+   install_log("[SndDiag]   output: writes=%ld  saturation bursts=%ld  rail samples=%ld"
+               "  loudest=%ld/32767  max packet cursor=%ld",
+               s_writeCalls, s_satBursts, s_satSamples, s_peakAbsSample, s_maxPacketRead);
 }
 
 void __cdecl hooked_snd_update(float dt, char full)
@@ -526,12 +515,12 @@ void __cdecl hooked_snd_update(float dt, char full)
 
    if (!s_headerDone) {
       s_headerDone = true;
-      diag_log("[SndDiag] --- first engine tick ---");
-      diag_log("[SndDiag] gain calls=0 means the hook never fired and the over-1.0 count"
-               " proves nothing; calls>0 with over-1.0=0 is a real negative.");
-      diag_log("[SndDiag] SATURATION lines are theory-free: they mean the output was"
-               " pinned at full scale, whatever put it there. Note the time you hear"
-               " anything odd and compare.");
+      install_log("[SndDiag] --- first engine tick ---");
+      install_log("[SndDiag] gain calls=0 means the hook never fired and the over-1.0 count"
+                  " proves nothing; calls>0 with over-1.0=0 is a real negative.");
+      install_log("[SndDiag] SATURATION lines are theory-free: they mean the output was"
+                  " pinned at full scale, whatever put it there. Note the time you hear"
+                  " anything odd and compare.");
       report();
       return;
    }
@@ -555,7 +544,7 @@ void sound_diag_install(uintptr_t exe_base)
    case GameBuild::Steam:    s_snd = &kSndSteam;    break;
    case GameBuild::GOG:      s_snd = &kSndGOG;      break;
    default:
-      diag_log("[SndDiag] install skipped: unknown build");
+      install_log("[SndDiag] install skipped: unknown build");
       return;
    }
    const SndSites& S = *s_snd;
@@ -564,7 +553,7 @@ void sound_diag_install(uintptr_t exe_base)
    // voice walk would report confident nonsense against a null manager.
    if (!S.mixConfig || !S.hw3dFreeBuffers || !S.voiceManager || !S.voicesPtr ||
        !S.sndUpdate || !S.updateGain || !S.writeData) {
-      diag_log("[SndDiag] install skipped: this build is not ported yet");
+      install_log("[SndDiag] install skipped: this build is not ported yet");
       return;
    }
 
@@ -584,10 +573,10 @@ void sound_diag_install(uintptr_t exe_base)
    const LONG a3 = DetourAttach(reinterpret_cast<PVOID*>(&g_origWriteData),  hooked_write_data);
    const LONG rc = DetourTransactionCommit();
 
-   diag_log("[SndDiag] install: Update=%p UpdateGain=%p WriteData=%p"
-            " attach=(%ld,%ld,%ld) commit=%ld",
-            (void*)g_origSndUpdate, (void*)g_origUpdateGain, (void*)g_origWriteData,
-            a1, a2, a3, rc);
+   install_log("[SndDiag] install: Update=%p UpdateGain=%p WriteData=%p"
+               " attach=(%ld,%ld,%ld) commit=%ld",
+               (void*)g_origSndUpdate, (void*)g_origUpdateGain, (void*)g_origWriteData,
+               a1, a2, a3, rc);
 
    if (rc != NO_ERROR) g_origSndUpdate = nullptr;
 }
@@ -597,7 +586,7 @@ void sound_diag_uninstall()
    if (!g_origSndUpdate) return;
 
    drain_events();
-   diag_log("[SndDiag] --- final ---");
+   install_log("[SndDiag] --- final ---");
    report();
 
    DetourTransactionBegin();

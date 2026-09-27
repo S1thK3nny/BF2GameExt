@@ -1,6 +1,6 @@
-# Engine limits: reservations, command posts, skinning
+# Engine limits: reservations, command posts, skinning, attached effects
 
-Three fixed limits investigated 2026-08-20. Addresses are modtools unless stated.
+Fixed engine limits, first investigated 2026-08-20. Addresses are modtools unless stated.
 
 ---
 
@@ -170,6 +170,35 @@ rewrite, not a byte patch.
 
 ---
 
+### Going past 16 in single player
+
+The HUD does not actually have to grow. The HUD iterates its own 16 and indexes `gPost[i]`, so it
+stays in bounds as long as the game-side arrays have at least 16. Grow only those, and posts 17+
+work but do not appear on the map or radar.
+
+Sites involved (not byte-verified, scope before building):
+
+- `sPostArray` client/host (addresses above). Base imm32s at modtools `0x0064972F`, `0x00649820`,
+  `0x00649850`; retail `0x0047AA51`, `0x0047AB20`.
+- The memset size: modtools `0x00649723` imm32 (any value); retail `0x0047AA40` is `6A 40`, imm8
+  sign-extended, so 31 slots at most without re-encoding.
+- `CommandPostItor::operator_bool`, the funnel about 20 AI, spawn and HUD callers pass through.
+  TWO immediates, both must move: modtools `0x00650035` and `0x0065004E`; Steam and GOG
+  `0x0047F8B5` and `0x0047F8C7`. imm8, so 127 at most.
+- `TargetManager::_gPost[16]` (48 bytes per element), relocatable through its pointer.
+  `TargetManager::AddPost` uses `0x10` as BOTH a loop bound AND a no-free-slot sentinel across
+  three coordinated occurrences, so a partial patch turns "no slot" into an out-of-bounds write.
+- `PlayerStats::AddKill` - two loops, `!= 0x40` (byte count) and `< 0x10` (index).
+
+The last two are not located on the shipped builds yet.
+
+A static byte patch cannot tell single player from multiplayer, and enabled online it corrupts
+post ownership silently. This needs a runtime `netEnabled` check, so it is a hook, not a table
+patch.
+
+The out-of-bounds registration of a 17th post is already handled separately by
+`command_post_overflow_fix.cpp`.
+
 ## 3. Skinning: the limit is 15 bones per SEGMENT, not 32
 
 The premise "32 bones" conflates two unrelated limits.
@@ -291,6 +320,44 @@ m_uNumJoints; uchar m_uNumSkinSets}` — a true 32 ceiling with a uchar count.
 sentinel, giving a 127-joint hierarchy cap. `RedModel::Render` (`0x008993d0`) has a
 stack array `PblMatrix* [129]` memset with `numBones << 2`, so >128 bones smashes
 the stack. `AllocBoneMatricesInCache` (`0x00875d60`) guards at `0xBF5` = 3061.
+
+---
+
+## 4. Attached effects: 64 per geometry class
+
+`AttachedEffectsClass::SetProperty` has exactly ONE caller, `EntityGeometryClass::SetProperty`,
+and `BuildAttachedEffectsClass` has exactly one, `EntityGeometryClass::PostReadSetup`, which
+drains the table and sets `s_uiNumAttached = 0`. So the 64 is **per geometry class**,
+accumulated across that one ODF's property read and flushed at the end of it. A non-geometry ODF
+cannot contribute to it at all.
+
+It is a stage-then-commit design; of the five property hashes only two increment:
+
+| Hash | Parses | Count |
+|---|---|---|
+| `0x576b09cd` | `"%s %s"` effect + bone | **+1** |
+| `0x3be7b80a` | `"%s %f %f"` bone + offsets | **+1** |
+| `0x6a6c7e0d` | effect name -> `_Find` in the 256-slot effect table | stages only |
+| `0xa9d0d48b` | odf name, must be an `EntityLight` | stages only |
+| `0x51e2c845` | `atoi` -> dynamic flag | none |
+
+So one attachment is typically TWO ODF lines but ONE slot: the limit is about 64 attached effects
+or lights on a single object, which is why normal content never approaches it. `EntityProp` has a
+separate attachment cap with its own warning ("too many attached odfs") and its own array.
+
+**Past 255 is impossible without re-laying the object out.** `m_uiNumAttached` is a `uint:8`: the
+count is written with a BYTE store (modtools `0x004C1BF6 MOV byte [EBP+4],AL`) and all three
+consumer loops read it back masked `& 0xFF`, so a 300-effect class silently becomes a 44-effect
+one. Going higher means growing the object from 8 bytes and moving the `bDynamic` bit.
+(`uiNumParams` is `uint:7`, its own separate ceiling.)
+
+Anything past 64 also needs the table relocated: modtools' next byte after the array at
+`0x00B7A7D8` is `s_bDynamic`. That means a fresh `20 * N` allocation and roughly twenty baked-in
+absolute displacements rewritten per build: the six `CMP ...,0x40` sites (modtools `0x004C27B8`,
+`0x004C285B`, `0x004C28A5`, `0x004C29AC`, `0x004C29E0`, `0x004C2ACF`), the memcpy source
+constant at `0x004C1C20` (`MOV ESI,0xB7A2D8`), and every `0x00B7A2C8/CC/D8/DC/E0` displacement in
+`SetProperty`. `[Fixes] AttachedEffectsOverflowFix` refuses past 64 instead, and that is the
+recommendation.
 
 ---
 

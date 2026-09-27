@@ -2,6 +2,7 @@
 #include "anim_textures.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 
 #include <detours.h>
 #include <unordered_map>
@@ -33,15 +34,6 @@ static GameLog_t g_log = nullptr;
 static constexpr uint32_t HASH_ANIM_TEXTURE_1 = 0x2c47e9ee;
 static constexpr uint32_t HASH_ANIM_TEXTURE_2 = 0x2b47e85b;
 static constexpr uint32_t HASH_ANIM_TEXTURE_3 = 0x2a47e6c8;
-
-// FNV-1a hash (PblHash) - case-insensitive, matches the game's texture hash.
-static uint32_t pbl_hash(const char* str)
-{
-   uint32_t h = 0x811c9dc5u;
-   for (; *str; ++str)
-      h = (h ^ ((uint8_t)*str | 0x20)) * 0x01000193u;
-   return h;
-}
 
 // ---------------------------------------------------------------------------
 // Animation data - keyed by base texture hash

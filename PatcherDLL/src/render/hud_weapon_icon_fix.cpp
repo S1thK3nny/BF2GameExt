@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 
@@ -81,22 +82,6 @@ static fn_tnm_event_input_t    original_EventInput = nullptr;
 static fn_tnm_find_name_mesh_t g_findNameMesh      = nullptr;
 static void**                  g_tnmList           = nullptr;
 static bool                    g_installed         = false;
-
-// install_log() is the ONLY logger that may run during install: dllmain holds the
-// exe sections at PAGE_READWRITE (non-executable) then, so calling the engine's
-// own logger there is an EXEC access violation on DEP builds. Runtime code uses
-// get_gamelog() instead. Same split as gc_visual_limits.cpp.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // ---------------------------------------------------------------------------
 // Arbitration

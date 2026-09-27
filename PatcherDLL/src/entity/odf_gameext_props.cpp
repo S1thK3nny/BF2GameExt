@@ -3,6 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 #include <cstdarg>
@@ -303,23 +305,6 @@ struct Site {
    void**    cont;        // where the shim returns to (site + 9)
 };
 
-// Install-time logging must NOT go through the engine. dllmain flips every exe
-// section to PAGE_READWRITE (non-executable) for the whole install window, so
-// calling RedWarning::LogMessage here is an EXEC access violation on any build
-// with DEP - i.e. Steam and GOG will not launch at all, while modtools silently
-// tolerates it. Write to our own file with the CRT instead.
-void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 uint8_t* s_patched[4] = {};
 uint8_t  s_orig[4][9] = {};
 int      s_patchCount = 0;
@@ -339,10 +324,7 @@ bool install_site(uintptr_t exe_base, const Site& s)
    ++s_patchCount;
 
    // .text is RW during install; dllmain re-protects afterwards.
-   int32_t rel = (int32_t)((uintptr_t)s.shim - ((uintptr_t)site + 5));
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = rel;
-   site[5] = site[6] = site[7] = site[8] = 0x90;
+   x86::write_branch(site, x86::kJmp, s.shim, 9);
    return true;
 }
 

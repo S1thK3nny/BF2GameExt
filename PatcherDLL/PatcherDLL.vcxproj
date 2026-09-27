@@ -135,6 +135,7 @@
     <ClInclude Include="src\entity\command_post_overflow_fix.hpp" />
     <ClInclude Include="src\entity\branch_region_debug.hpp" />
     <ClInclude Include="src\entity\branch_region_fix.hpp" />
+    <ClInclude Include="src\entity\foleyfx_region_fix.hpp" />
     <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp" />
     <ClInclude Include="src\weapon\disguise_model_override.hpp" />
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp" />
@@ -196,7 +197,16 @@
     <ClInclude Include="src\render\target_bar_latch.hpp" />
     <ClInclude Include="src\render\target_bar_geometry.hpp" />
     <ClInclude Include="src\render\target_bar_fade.hpp" />
+    <ClInclude Include="src\render\target_bar_selection.hpp" />
     <ClInclude Include="src\render\hud_horizon_math.hpp" />
+    <ClInclude Include="src\render\hud_number_math.hpp" />
+    <ClInclude Include="src\render\hud_number_math_core.hpp" />
+    <ClInclude Include="src\render\hud_class_icons.hpp" />
+    <ClInclude Include="src\render\hud_class_icons_core.hpp" />
+    <ClInclude Include="src\render\hud_command_posts.hpp" />
+    <ClInclude Include="src\render\hud_command_posts_core.hpp" />
+    <ClInclude Include="src\render\hud_bar_fill_from.hpp" />
+    <ClInclude Include="src\render\hud_bar_fill_from_core.hpp" />
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\light_projected_texture_fix.hpp" />
@@ -255,6 +265,7 @@
     <ClCompile Include="src\entity\command_post_overflow_fix.cpp" />
     <ClCompile Include="src\entity\branch_region_debug.cpp" />
     <ClCompile Include="src\entity\branch_region_fix.cpp" />
+    <ClCompile Include="src\entity\foleyfx_region_fix.cpp" />
     <ClCompile Include="src\entity\jetpack_fp_sound_fix.cpp" />
     <ClCompile Include="src\entity\terrain_texture_fix.cpp" />
     <ClCompile Include="src\weapon\disguise_model_override.cpp" />
@@ -299,6 +310,10 @@
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp" />
     <ClCompile Include="src\render\spawn_vehicle_list.cpp" />
     <ClCompile Include="src\render\target_bar_latch.cpp" />
+    <ClCompile Include="src\render\hud_number_math.cpp" />
+    <ClCompile Include="src\render\hud_class_icons.cpp" />
+    <ClCompile Include="src\render\hud_command_posts.cpp" />
+    <ClCompile Include="src\render\hud_bar_fill_from.cpp" />
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\light_projected_texture_fix.cpp" />

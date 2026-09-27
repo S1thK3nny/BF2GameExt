@@ -3,6 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 
@@ -113,7 +115,7 @@ void fp_fire_animation_fix_install(uintptr_t exe_base)
    // Bail (no-op) unless both the load and the timer store that follows it match.
    if (std::memcmp(site, orig, origLen) != 0 ||
        std::memcmp(site + origLen, next, nextLen) != 0) {
-      get_gamelog()("[FPFireAnimFix] unexpected bytes at the FP transition override, skipping\n");
+      install_log("[FPFireAnimFix] unexpected bytes at the FP transition override, skipping");
       return;
    }
 
@@ -142,16 +144,12 @@ void fp_fire_animation_fix_install(uintptr_t exe_base)
    cave[o++] = 0x74; cave[o++] = (uint8_t)origLen;           // over MOV
    std::memcpy(cave + o, orig, origLen);
    o += (int)origLen;
-   cave[o++] = 0xE9;
-   *(int32_t*)(cave + o) = (int32_t)(resume - (cave + o + 4));
-   o += 4;
+   o = x86::emit_jmp(cave, o, resume);
 
    // JMP cave + NOP padding to fill the site exactly.  .text is RW during
    // install (dllmain re-protects afterwards), so no VirtualProtect here.
    std::memcpy(g_siteOrig, site, origLen);
-   site[0] = 0xE9;
-   *(int32_t*)(site + 1) = (int32_t)(cave - (site + 5));
-   std::memset(site + 5, 0x90, origLen - 5);
+   x86::write_branch(site, x86::kJmp, cave, origLen);
 
    g_site    = site;
    g_siteLen = origLen;

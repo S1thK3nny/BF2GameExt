@@ -1,12 +1,19 @@
 #include "pch.h"
 #include "target_bar_latch.hpp"
+#include "target_bar_selection.hpp"
+#include "hud_number_math.hpp"
+#include "hud_class_icons.hpp"
+#include "hud_command_posts.hpp"
+#include "hud_bar_fill_from.hpp"
 #include "target_bar_geometry.hpp"
 #include "target_bar_fade.hpp"
 #include "hud_horizon_math.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
-#include "weapon/barrel_fire_origin.hpp"   // engine_ray_hit
+#include "util/install_log.hpp"
+#include "core/pbl_hash.hpp"
+#include "core/layout/character.hpp"
 
 #include <detours.h>
 
@@ -19,9 +26,10 @@
 // See the header for the behaviour and why it is built on the engine's own
 // target.* events.  This file documents the layouts and calling conventions it
 // relies on. Hook layouts were read per build and independently re-read on
-// 2026-09-19; visual geometry was revised on 2026-09-21. See docs/RE/HUDSystem.md.
+// 2026-09-19; geometry revised 2026-09-21, selection inputs re-read 2026-09-22.
+// See docs/RE/HUDSystem.md.
 //
-// THE ONE WRITE INTO GAME MEMORY
+// THE WRITES INTO GAME MEMORY
 //
 // HUD::GameEvents::UpdateWeaponEvents picks its target as weapon->mTarget, else
 //
@@ -32,7 +40,15 @@
 // GOG 0x00561DCF; Steam and GOG are byte-identical there).  Phantom has the array
 // at +0x160: it is a different compile and is NOT a layout reference.
 //
-// The lend lives strictly inside our detour of HUD::GameEvents::Update: written
+// Two lends write those handles. The hold fills an EMPTY reticule slot with the
+// retained target. The rider pair writes the member it is showing over the
+// engine's pick, in whichever of the two handles the pick was read from. Nothing
+// else in the HUD update reads Weapon::mTarget: a charging launcher's lock-on
+// marker comes from WeaponLauncher::GetLocked and GetLockedTargetBodyId, which
+// read the launcher's own mCurTarget and mCurTargetBodyID (Phantom 0x007C05A0,
+// 0x007C05E0), and no other HUD::GameEvents function touches the field.
+//
+// Each lend lives strictly inside our detour of HUD::GameEvents::Update: written
 // immediately before the original runs, restored immediately after.  Game logic
 // is single-threaded and nothing but the HUD update executes in that window, so
 // no other system can observe the lent value.  The restore only fires if the slot
@@ -46,45 +62,43 @@
 //                             Steam/GOG: hash in ECX, no stack args.
 //
 // Same everywhere: EventClass::Create cdecl varargs, GameEvents::Open void(void),
-// NetGame::GetLocalPlayer cdecl(uint), GameObject::IsMyEnemy thiscall RET 4,
-// Damageable::ApplyDamage thiscall with five stack args RET 0x14, and the four
-// virtuals used here (slot offsets read from each binary, not carried over):
+// NetGame::GetLocalPlayer cdecl(uint), and the virtuals used here (slot offsets
+// read per build, not carried over from Phantom):
 //
 //   Trackable::GetGameObject       vptr at Controllable+0x18, slot +0x20
 //   GameObject::IsRtti             primary vptr, slot +0x00, RET 4
-//   GameObject::GetTargetPoint     primary vptr, slot +0x50, RET 0x10
+//   Controllable weapon index     primary vptr, slot +0x3C, channel, RET 4
+//   Controllable weapon pointer   primary vptr, slot +0x40, index, RET 4
 //   GameObject::GetSmoothedMatrix  primary vptr, slot +0x110
+//   GameObject::GetControllable    primary vptr, slot +0x6C, no arguments
+//
+// The rider test is the engine's own: PlayerController::Update skips a candidate
+// riding the player's vehicle with GetControllable -> Controllable::mCharacter
+// (+0xCC; Phantom +0xC8) -> Character::mVehicle (+0x14C) -> Trackable (+0x18)
+// GetGameObject (+0x20), Steam 0x0061B863, GOG 0x0061C8D3. Modtools reads the
+// same chain at 0x004CE784 to swap a rider for its vehicle.
 //
 // EventClass::Create never checks for an existing name: a second Create with the
 // same name makes an orphan no element can ever bind to, because FindByHashID
 // returns the first match.  Always find first.
 //
-// WHY ApplyDamage AND NOT RegisterHit
-//
-// Character::RegisterHit is what drives the stock hit marker, and hooking its one
-// call site looked like the natural latch.  It is wrong online: on a multiplayer
-// client Damageable::ApplyDamageCommon diverts into the cosmetic
-// ApplyNetClientDamage, so RegisterHit never runs there and the latch would
-// silently never take.  ApplyDamage has no client early-out.  DamageDesc+0x00 is
-// the attacker's Character*, which gives an exact local-player test on every role
-// - a host sees every player's hits pass through here.
+// Selection retention: capture the natural weapon/reticle input before lending,
+// then require the engine's filtered HUD result to agree. Retained results never
+// refresh themselves.
 // =============================================================================
 
-float g_targetBarLatchSeconds = 2.5f;
+float g_targetBarLatchSeconds = 0.5f;
 
 // ---- Layout.  Identical on modtools, Steam and GOG. ------------------------
-static constexpr int kChr_Unit          = 0x148;
-static constexpr int kChr_Vehicle       = 0x14C;
-static constexpr int kChr_Remote        = 0x150;
 
 static constexpr int kCtrl_Trackable    = 0x18;
-static constexpr int kCtrl_EyeDir       = 0xE8;
-static constexpr int kCtrl_AimStart     = 0x148;
 static constexpr int kCtrl_ReticuleTgt  = 0x164;  // + channel * 8
 static constexpr int kVt_GetGameObject  = 0x20;   // on the Trackable vptr
-
-static constexpr int kVt_GetTargetPoint = 0x50;   // on the primary vptr
+static constexpr int kVt_GetWeaponIndex = 0x3C;  // Controllable primary vptr
+static constexpr int kVt_GetWeapon      = 0x40;
 static constexpr int kVt_GetSmoothedMtx = 0x110;
+static constexpr int kVt_GetControllable = 0x6C;  // GameObject primary vptr
+static constexpr int kCtrl_Character    = 0xCC;   // Controllable::mCharacter
 static constexpr int kGO_Active         = 0xDC;   // byte
 static constexpr int kGO_MatrixTrans    = 0x120;  // mMatrix (+0xF0) .trans
 static constexpr int kGO_Model          = 0x130;  // GameModel*
@@ -96,8 +110,7 @@ static constexpr int kGO_CollisionBounds = 0x60; // world AABB: min/max XYZ
 // Collision bounds suit infantry, but vehicles can use sphere-derived cubes.
 static constexpr uint32_t kSoldierRtti = 0x5E8739F4;
 
-static constexpr int kDmg_ToObject      = 0x140;  // GameObject* = Damageable* - 0x140
-static constexpr int kDD_Character      = 0x00;   // DamageDesc.mDamageOwner.mCharacter
+static constexpr int kGO_CurHealth      = 0x144;
 
 static constexpr int kPD_WeaponStride   = 0x28;   // sizeof(WeaponData)
 static constexpr int kWD_TargetObject   = 0x14;
@@ -111,14 +124,11 @@ static constexpr int kCam_TanHalfFovH   = 0x148;
 static constexpr int kEC_HandlerList    = 0x08;   // self-linked when nobody listens
 
 static constexpr int kTypeVector3       = 9;      // HUD::EventClass::Type
-static constexpr int kSafeBodyId        = -1;     // what the engine passes unlocked
 static constexpr int kChannels          = 2;
 
 // ---- Tuning ------------------------------------------------------------------
-static constexpr int   kRayMask     = 0x9A;   // soldiers, vehicles, terrain, statics
-static constexpr float kRayClear    = 0.75f;  // start the ray clear of the shooter
-static constexpr int   kLosInterval = 6;      // ticks between line-of-sight rays
 static constexpr float kMaxTickSecs = 0.25f;  // a pause must not run the hold out
+static constexpr double kPairDwellSecs = 0.3; // rider/vehicle: picked this long to switch
 
 // ---- Engine entry points -----------------------------------------------------
 using fn_event_send_t    = void(__fastcall*)(void* ecx, void* edx);
@@ -126,31 +136,26 @@ using fn_create_t        = void*(__cdecl*)(int type, const char* fmt, ...);
 using fn_find_cdecl_t    = void*(__cdecl*)(unsigned hash);
 using fn_find_fastcall_t = void*(__fastcall*)(unsigned hash);
 using fn_local_player_t  = void*(__cdecl*)(unsigned localIndex);
-using fn_is_my_enemy_t   = bool(__thiscall*)(void* self, void* other);
 using fn_get_object_t    = void*(__thiscall*)(void* self);
-using fn_target_point_t  = const float*(__thiscall*)(void* self, float* out,
-                                                     const float* aimStart,
-                                                     const float* aimDir, int bodyId);
+using fn_weapon_index_t  = int(__thiscall*)(void* self, int channel);
+using fn_get_weapon_t    = uint8_t*(__thiscall*)(void* self, int index);
 using fn_smoothed_t      = const float*(__thiscall*)(void* self);
 using fn_rtti_t          = bool(__thiscall*)(void* self, uint32_t hash);
+using fn_controllable_t  = uint8_t*(__thiscall*)(void* self);
 
 using fn_open_t          = void(__cdecl*)();
 using fn_update_float_t  = void(__cdecl*)(float dt);
 using fn_update_void_t   = void(__cdecl*)();
-using fn_apply_damage_t  = bool(__thiscall*)(void* self, void* desc, void* hitDir,
-                                             void* hitPos, int bodyId, unsigned flags);
 
 static fn_open_t         original_Open        = nullptr;
 static fn_update_float_t original_UpdateFloat = nullptr;  // modtools
 static fn_update_void_t  original_UpdateVoid  = nullptr;  // Steam, GOG
-static fn_apply_damage_t original_ApplyDamage = nullptr;
 
 static fn_event_send_t    s_eventSend    = nullptr;
 static fn_create_t        s_create       = nullptr;
 static fn_find_cdecl_t    s_findCdecl    = nullptr;
 static fn_find_fastcall_t s_findFastcall = nullptr;
 static fn_local_player_t  s_localPlayer  = nullptr;
-static fn_is_my_enemy_t   s_isMyEnemy    = nullptr;
 
 static uintptr_t* s_eventList  = nullptr;  // EventClass::sList
 static uint8_t*   s_playerData = nullptr;  // HUD::GameEvents::gPlayerData[0]
@@ -164,10 +169,9 @@ static constexpr target_bar_geometry::Insets kScreenInsets = { 0.10f, 0.10f, 0.1
 static bool s_installed = false;
 
 // ---- State.  Every object pointer here dies with the mission: see hooked_Open.
-struct Handle {
-   uint8_t* obj;
-   uint32_t id;
-};
+using target_bar_selection::Handle;
+using target_bar_selection::same;
+static_assert(sizeof(Handle) == 8, "PblHandle layout requires a 32-bit build");
 
 static void*  s_evtPosition[kChannels];   // EventClass*, recreated every mission
 static target_bar_fade::Position s_position[kChannels]; // persists through death fade
@@ -181,37 +185,25 @@ static hud_horizon::State s_horizon;
 static const uint8_t* s_horizonCamera = nullptr;
 static float s_horizonRotation[3] = {};
 
-static void*  s_localChr = nullptr;       // non-null only while someone listens
-static Handle s_pending  = {};            // written by the ApplyDamage detour
-static Handle s_latch    = {};
+static void* s_localChr = nullptr;
+static uint8_t* s_controlled = nullptr;
+static Handle s_owner = {};
+static target_bar_selection::Retention s_retained[kChannels];
+static target_bar_selection::Pair s_pair[kChannels];
+// The engine's pick, sampled BEFORE any lending (weapon then reticle), after the
+// rider pair has chosen which member of a vehicle/rider pair to show.
+static Handle s_natural[kChannels];
+static bool   s_pairLent[kChannels];      // this tick shows a pair member over the pick
 static double s_now      = 0.0;           // seconds, advanced only by HUD ticks
-static double s_expiry   = 0.0;
-static bool   s_losOk    = false;
-static int    s_losAge   = kLosInterval;
 static bool   s_announced = false;
 
 struct Lend {
-   uint32_t* slot;       // &mReticuleTarget[ch], two dwords
+   uint32_t* slot;       // a PblHandle the HUD reads: mReticuleTarget[ch] or Weapon::mTarget
    uint32_t  saved[2];   // what was there
    uint32_t  written[2]; // what we put there
    bool      active;
 };
 static Lend s_lend[kChannels];
-
-// install_log() is the ONLY logger that may run during install: dllmain holds the
-// exe sections at PAGE_READWRITE then, so calling the engine's own logger is an
-// EXEC access violation on DEP builds.  Same split as spawn_vehicle_list.cpp.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 // ---------------------------------------------------------------------------
 // Reading the engine
@@ -226,17 +218,6 @@ static bool handle_ok(const Handle& h)
 static bool is_alive(const uint8_t* obj)
 {
    return ((*(const uint32_t*)(obj + kGO_Flags)) >> 3 & 1u) != 0;
-}
-
-// PblHash: FNV-1a over the bytes, each sign-extended and OR'd with 0x20.
-static unsigned pbl_hash(const char* s)
-{
-   unsigned h = 0x811C9DC5u;
-   for (; *s; ++s) {
-      h ^= (unsigned)((int)(signed char)*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
 }
 
 static void* event_find(unsigned hash)
@@ -261,42 +242,65 @@ static void* vcall_object(void* subobject)
    return ((fn_get_object_t)vt[kVt_GetGameObject / 4])(subobject);
 }
 
-// Used only for the native body point in the line-of-sight test. Model-space
-// visual bounds below use the FULL rendered matrix, including its orientation.
-static void rendered_pose_offset(uint8_t* obj, float out[3])
+// Same source precedence as native UpdateWeaponEvents, sampled before lending.
+// Verified on modtools/Steam/GOG: primary virtual +3C(channel) -> index,
+// +40(index) -> Weapon*, then mTarget +128 (modtools) / +104 (retail).
+// `source` is the handle the pick was read from, for the rider pair's lend.
+static Handle natural_target(uint8_t* controlled, int channel, uint8_t*& weapon,
+                             uint32_t*& source)
 {
-   out[0] = out[1] = out[2] = 0.0f;
-   if (*(obj + kGO_Active) == 0) return;
-
-   void** vt = *(void***)obj;
-   const float* sm = ((fn_smoothed_t)vt[kVt_GetSmoothedMtx / 4])(obj);
-   if (!sm) return;    // may be a shared static: copy immediately
-
-   const float* sim = (const float*)(obj + kGO_MatrixTrans);
-   out[0] = sm[12] - sim[0];
-   out[1] = sm[13] - sim[1];
-   out[2] = sm[14] - sim[2];
+   source = nullptr;
+   void** vt = *(void***)controlled;
+   const int index = ((fn_weapon_index_t)vt[kVt_GetWeaponIndex / 4])(controlled, channel);
+   weapon = index >= 0 ? ((fn_get_weapon_t)vt[kVt_GetWeapon / 4])(controlled, index) : nullptr;
+   if (!weapon) return {};
+   const int offset = g_build == GameBuild::Modtools ? 0x128 : 0x104;
+   Handle target;
+   std::memcpy(&target, weapon + offset, sizeof(target));
+   if (handle_ok(target)) {
+      source = (uint32_t*)(weapon + offset);
+      return target;
+   }
+   uint32_t* reticule = (uint32_t*)(controlled + kCtrl_ReticuleTgt + channel * 8);
+   std::memcpy(&target, reticule, sizeof(target));
+   if (!handle_ok(target)) return {};
+   source = reticule;
+   return target;
 }
 
-// The body point the engine would put a lock-on bracket on, moved onto the
-// RENDERED pose the way UpdateWeaponEvents does it.  Without that term a marker
-// follows the simulated position and jitters on a multiplayer client; offline
-// the offset is zero.
-static void target_point(uint8_t* obj, const uint8_t* controlled, float out[3])
+// The object a target shows as part of: a mounted rider's vehicle, anything
+// else itself. The engine's own chain; see the header notes for the addresses.
+static const void* display_group(const Handle& h)
 {
-   void** vt = *(void***)obj;
-   float  tmp[3] = { 0.0f, 0.0f, 0.0f };
-   const float* p = ((fn_target_point_t)vt[kVt_GetTargetPoint / 4])(
-      obj, tmp, (const float*)(controlled + kCtrl_AimStart),
-      (const float*)(controlled + kCtrl_EyeDir), kSafeBodyId);
-   if (!p) p = tmp;   // both implementations return `out`; read through the result anyway
-   out[0] = p[0]; out[1] = p[1]; out[2] = p[2];
+   if (!handle_ok(h)) return nullptr;
+   void** vt = *(void***)h.obj;
+   const uint8_t* ctrl = ((fn_controllable_t)vt[kVt_GetControllable / 4])(h.obj);
+   if (!ctrl) return h.obj;
+   const uint8_t* chr = *(const uint8_t* const*)(ctrl + kCtrl_Character);
+   if (!chr) return h.obj;
+   uint8_t* vehicle = *(uint8_t* const*)(chr + layout::Character::kVehicle);
+   if (!vehicle) return h.obj;
+   const void* obj = vcall_object(vehicle + kCtrl_Trackable);
+   return obj ? obj : h.obj;
+}
 
-   float renderOffset[3];
-   rendered_pose_offset(obj, renderOffset);
-   out[0] += renderOffset[0];
-   out[1] += renderOffset[1];
-   out[2] += renderOffset[2];
+// Shows `h` for this HUD update only; restore_lends puts the slot back.
+static void lend(int ch, uint32_t* slot, const Handle& h)
+{
+   Lend& l = s_lend[ch];
+   l.slot = slot;
+   l.saved[0] = slot[0]; l.saved[1] = slot[1];
+   l.written[0] = (uint32_t)(uintptr_t)h.obj;
+   l.written[1] = h.id;
+   slot[0] = l.written[0]; slot[1] = l.written[1];
+   l.active = true;
+}
+
+static bool retainable(const Handle& target)
+{
+   if (!handle_ok(target) || !is_alive(target.obj)) return false;
+   const float health = *(const float*)(target.obj + kGO_CurHealth);
+   return std::isfinite(health) && health > 0;
 }
 
 static const uint8_t* hud_camera()
@@ -346,12 +350,9 @@ static void tick_horizon()
 // Use the top centre of a WORLD bounding box, not the extrema of a projected
 // rectangle. This is the healthbar-only SWBFIII approach supplied by the user:
 // no head bone, no perspective size and no POI-icon displacement.
-static bool project_target_anchor(uint8_t* obj, float out[3])
+static bool read_target_world_bounds(uint8_t* obj, target_bar_geometry::Box& world)
 {
    using namespace target_bar_geometry;
-   const uint8_t* cam = hud_camera();
-   if (!cam || !s_screenWidth || !s_screenHeight) return false;
-
    float matrix[16];
    const float* rendered = (const float*)(obj + kGO_MatrixTrans - 0x30);
    void** vt = *(void***)obj;
@@ -362,7 +363,6 @@ static bool project_target_anchor(uint8_t* obj, float out[3])
    std::memcpy(matrix, rendered, sizeof(matrix));
    if (!valid_matrix(matrix)) return false;
 
-   Box world;
    bool haveBounds = false;
    if (((fn_rtti_t)vt[0])(obj, kSoldierRtti)) {
       Box collision;
@@ -387,35 +387,32 @@ static bool project_target_anchor(uint8_t* obj, float out[3])
       // cubes. Form the world AABB with the full rendered rotation/translation.
       if (!world_bounds(local, matrix, world)) return false;
    }
+   return true;
+}
+
+static bool project_world_anchor(const target_bar_geometry::Box& world, float out[3], bool pin)
+{
+   using namespace target_bar_geometry;
+   const uint8_t* cam = hud_camera();
+   if (!cam || !s_screenWidth || !s_screenHeight) return false;
 
    if (!project_anchor(world, (const float*)(cam + kCam_Matrix),
                         *(const float*)(cam + kCam_TanHalfFovW),
                         *(const float*)(cam + kCam_TanHalfFovH), out)) return false;
-   return pin_to_screen(out, *s_screenWidth, *s_screenHeight, kScreenInsets);
+   return pin ? pin_to_screen(out, *s_screenWidth, *s_screenHeight, kScreenInsets)
+              : snap_to_screen(out, *s_screenWidth, *s_screenHeight);
 }
 
-// Nothing but the two ends of the line in the way.  Both ends are EXCLUDED rather
-// than recognised: CollisionManager::RayCallback compares each candidate's
-// GetGameObject() against the list, so it takes the same base pointer a handle
-// holds.  If that reading were ever wrong the ray would stop on the target itself
-// and report "no line of sight" - the bar would simply not linger.  It cannot
-// crash: the list is only compared against.
-static bool line_of_sight(const uint8_t* controlled, uint8_t* localObj, uint8_t* target,
-                          const float point[3])
+// Pinned while the engine picks the target, so a big vehicle up close whose top
+// is above the screen keeps its bar. Otherwise the bar leaves with the target.
+static bool project_aimed(const target_bar_geometry::Box& world, float out[3])
 {
-   const float* eye = (const float*)(controlled + kCtrl_AimStart);
-   float d[3] = { point[0] - eye[0], point[1] - eye[1], point[2] - eye[2] };
-   const float dist = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
-   if (!(dist > kRayClear * 2.0f)) return true;   // point blank; also rejects NaN
+   return project_world_anchor(world, out, true);
+}
 
-   d[0] /= dist; d[1] /= dist; d[2] /= dist;
-   const float start[3] = { eye[0] + d[0]*kRayClear, eye[1] + d[1]*kRayClear,
-                            eye[2] + d[2]*kRayClear };
-
-   void* exclude[2] = { localObj, target };
-   void* hit = nullptr;
-   engine_ray_hit(start, d, dist - kRayClear, &hit, exclude, 2, kRayMask);
-   return hit == nullptr;
+static bool project_free(const target_bar_geometry::Box& world, float out[3])
+{
+   return project_world_anchor(world, out, false);
 }
 
 static void send_position(int ch)
@@ -428,22 +425,22 @@ static void send_position(int ch)
 // The latch
 // ---------------------------------------------------------------------------
 
-static void clear_latch()
-{
-   s_latch  = Handle{};
-   s_losOk  = false;
-   s_losAge = kLosInterval;
-}
+static uint8_t* s_weapon[kChannels] = {};
 
 static void clear_all_objects()
 {
-   clear_latch();
-   s_pending  = Handle{};
    s_localChr = nullptr;
+   s_controlled = nullptr;
+   s_owner = {};
    for (int ch = 0; ch < kChannels; ++ch) {
-      s_lastFocus[ch] = Handle{};
+      s_retained[ch].reset();
+      s_pair[ch].reset();
+      s_natural[ch] = {};
+      s_pairLent[ch] = false;
+      s_weapon[ch] = nullptr;
+      s_lastFocus[ch] = {};
       s_position[ch].reset();
-      s_lend[ch]      = Lend{};
+      s_lend[ch] = {};
    }
 }
 
@@ -479,106 +476,90 @@ static void advance_clock()
    s_now += dt;
 }
 
-static void refresh_hold()
-{
-   s_expiry = s_now + (double)g_targetBarLatchSeconds;
-}
-
 // Runs immediately BEFORE the engine's HUD update.
 static void tick_before()
 {
    __try {
-      if (!s_eventList) return;
+      for (int ch = 0; ch < kChannels; ++ch) { s_natural[ch] = {}; s_pairLent[ch] = false; }
+      if (!s_eventList) { clear_all_objects(); return; }
 
-      // EventClass::DestroyAll empties the list at mission end.  Our classes went
-      // with it, and so did every object we were holding.
       if (*s_eventList == (uintptr_t)s_eventList) {
          s_evtPosition[0] = s_evtPosition[1] = nullptr;
          clear_all_objects();
          return;
       }
-
-      const bool listening = has_listener(s_evtPosition[0]) || has_listener(s_evtPosition[1]);
-      if (!listening) {            // opt-in by data: no binding, no behaviour at all
+      if (!has_listener(s_evtPosition[0]) && !has_listener(s_evtPosition[1])) {
          clear_all_objects();
          return;
       }
       if (!s_announced) {
          s_announced = true;
-         install_log("[TargetBarLatch] a .hud element is bound to target.position; "
-                     "latch active, hold %.2fs", (double)g_targetBarLatchSeconds);
+         install_log("[TargetBarLatch] selection retention active, hold %.2fs; fade is HUD-authored",
+                     (double)g_targetBarLatchSeconds);
       }
-
       advance_clock();
 
       uint8_t* chr = (uint8_t*)s_localPlayer(0);
-      s_localChr = chr;            // what the ApplyDamage detour compares against
-      if (!chr) { clear_latch(); s_pending = Handle{}; return; }
-
-      // Same selection HUD::GameEvents::Update makes: remote, else vehicle, else unit.
-      uint8_t* controlled = *(uint8_t**)(chr + kChr_Remote);
-      if (!controlled) controlled = *(uint8_t**)(chr + kChr_Vehicle);
-      if (!controlled) controlled = *(uint8_t**)(chr + kChr_Unit);
-      if (!controlled) { clear_latch(); s_pending = Handle{}; return; }
-
+      if (!chr) { clear_all_objects(); return; }
+      uint8_t* controlled = *(uint8_t**)(chr + layout::Character::kRemote);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kVehicle);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kUnit);
+      if (!controlled) { clear_all_objects(); return; }
       uint8_t* localObj = (uint8_t*)vcall_object(controlled + kCtrl_Trackable);
-      if (!localObj) { clear_latch(); s_pending = Handle{}; return; }
+      if (!localObj || !is_alive(localObj)) { clear_all_objects(); return; }
 
-      // A hit recorded since the last tick.  Hitting someone else transfers.
-      if (s_pending.obj) {
-         const Handle hit = s_pending;
-         s_pending = Handle{};
-         if (handle_ok(hit) && hit.obj != localObj && is_alive(hit.obj) &&
-             s_isMyEnemy(localObj, hit.obj)) {
-            if (hit.obj != s_latch.obj) s_losAge = kLosInterval;   // re-test sight now
-            s_latch = hit;
-            refresh_hold();
+      const Handle owner = { localObj, *(const uint32_t*)(localObj + kGO_HandleId) };
+      if (chr != s_localChr || controlled != s_controlled || !same(owner, s_owner))
+         clear_all_objects(); // respawn, vehicle/remote switch, reused handles
+      s_localChr = chr;
+      s_controlled = controlled;
+      s_owner = owner;
+
+      for (int ch = 0; ch < kChannels; ++ch) {
+         if (!has_listener(s_evtPosition[ch])) {
+            s_retained[ch].reset();
+            s_pair[ch].reset();
+            s_lastFocus[ch] = {};
+            s_position[ch].reset();
+            s_weapon[ch] = nullptr;
+            continue;
          }
-      }
 
-      if (s_latch.obj && (!handle_ok(s_latch) || !is_alive(s_latch.obj))) clear_latch();
+         uint8_t* weapon = nullptr;
+         uint32_t* source = nullptr;
+         const Handle pick = natural_target(controlled, ch, weapon, source);
+         if (weapon != s_weapon[ch]) { s_retained[ch].reset(); s_pair[ch].reset(); }
+         s_weapon[ch] = weapon;
+         if (!weapon) { s_retained[ch].reset(); s_pair[ch].reset(); continue; }
 
-      // What is genuinely under the reticle, per channel.
-      bool slotEmpty[kChannels];
-      for (int ch = 0; ch < kChannels; ++ch) {
-         const uint32_t* slot = (const uint32_t*)(controlled + kCtrl_ReticuleTgt + ch * 8);
-         const Handle aimed = { (uint8_t*)(uintptr_t)slot[0], slot[1] };
-         slotEmpty[ch] = !handle_ok(aimed);
-         if (slotEmpty[ch] || !s_latch.obj) continue;
+         // A vehicle and its exposed rider trade the engine's pick back and
+         // forth: keep showing the member picked first until the other holds.
+         target_bar_selection::Pair& pair = s_pair[ch];
+         const bool shownValid = retainable(pair.shown);
+         s_natural[ch] = pair.resolve(pick, pick.obj ? display_group(pick) : nullptr, shownValid,
+                                      shownValid ? display_group(pair.shown) : nullptr,
+                                      s_now, kPairDwellSecs);
 
-         if (aimed.obj == s_latch.obj) refresh_hold();   // still on him: keep it alive
-         else                          clear_latch();    // looked at someone else: drop it
-      }
-
-      if (!s_latch.obj) return;
-      if (g_targetBarLatchSeconds > 0.0f && s_now > s_expiry) { clear_latch(); return; }
-
-      // Out of sight or behind the camera: do not lend, but KEEP the latch.
-      float point[3], screen[3];
-      target_point(s_latch.obj, controlled, point);
-      if (!project_target_anchor(s_latch.obj, screen)) return;
-
-      if (++s_losAge >= kLosInterval) {
-         s_losAge = 0;
-         s_losOk  = line_of_sight(controlled, localObj, s_latch.obj, point);
-      }
-      if (!s_losOk) return;
-
-      for (int ch = 0; ch < kChannels; ++ch) {
-         if (!slotEmpty[ch]) continue;
-         Lend& l = s_lend[ch];
-         l.slot     = (uint32_t*)(controlled + kCtrl_ReticuleTgt + ch * 8);
-         l.saved[0] = l.slot[0];
-         l.saved[1] = l.slot[1];
-         l.written[0] = (uint32_t)(uintptr_t)s_latch.obj;
-         l.written[1] = s_latch.id;
-         l.slot[0]    = l.written[0];
-         l.slot[1]    = l.written[1];
-         l.active     = true;
+         const Handle held = s_retained[ch].loan(
+            s_natural[ch], retainable(s_retained[ch].target), s_now);
+         if (pick.obj && !same(s_natural[ch], pick)) {
+            // Over the engine's pick, in the handle it was read from.
+            lend(ch, source, s_natural[ch]);
+            s_pairLent[ch] = true;
+            continue;
+         }
+         if (!held.obj) {
+            if (!pick.obj) pair.reset();   // nothing picked or held: the pair is over
+            continue;
+         }
+         // Retention does not re-run acquisition LOS/frustum/range gates.
+         // Native selection wins; only temporarily fill an empty reticle slot.
+         uint32_t* reticule = (uint32_t*)(controlled + kCtrl_ReticuleTgt + ch * 8);
+         Handle slot;
+         std::memcpy(&slot, reticule, sizeof(slot));
+         if (!handle_ok(slot)) lend(ch, reticule, held);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      // Never leave a lend behind, and never let a bad read here be worse than
-      // not having the feature.
       restore_lends();
       clear_all_objects();
    }
@@ -587,16 +568,14 @@ static void tick_before()
 // Runs immediately AFTER the engine's HUD update.
 static void tick_after()
 {
-   bool lent = false;
-   for (int ch = 0; ch < kChannels; ++ch) lent = lent || s_lend[ch].active;
    restore_lends();   // first, and outside the guard: nothing below may skip it
 
    __try {
       if (!s_playerData || !s_localChr) return;
 
-      Handle projected = {};
-      float anchor[3];
-      bool anchorValid = false;
+      Handle measured = {};
+      target_bar_geometry::Box world;
+      bool boundsValid = false;
       for (int ch = 0; ch < kChannels; ++ch) {
          if (!has_listener(s_evtPosition[ch])) {
             s_lastFocus[ch] = Handle{};
@@ -609,36 +588,42 @@ static void tick_after()
          const Handle shown = { *(uint8_t* const*)(wd + kWD_TargetObject),
                                 *(const uint32_t*)(wd + kWD_TargetHandleId) };
 
+         // Require native acceptance of the natural input. The lent HUD result
+         // cannot refresh retention, and rejected/dead/stale targets clear it.
+         const Handle accepted = retainable(shown) ? shown : Handle{};
+         s_retained[ch].observe(s_natural[ch], accepted, s_now, g_targetBarLatchSeconds);
+         // The HUD refused the pair member shown over the pick: show the
+         // engine's own pick from the next tick instead of a blank bar.
+         if (s_pairLent[ch] && !same(accepted, s_natural[ch])) s_pair[ch].reset();
+
          Handle focus = Handle{};
          bool sameTarget = true;
          if (handle_ok(shown)) {
             focus = shown;
             sameTarget = shown.obj == s_lastFocus[ch].obj && shown.id == s_lastFocus[ch].id;
             s_lastFocus[ch] = shown;
-            if (s_latch.obj) {
-               // Not ours: the weapon's own lock picked someone.  One tick late,
-               // harmless - the engine displayed that unit this tick regardless.
-               if (shown.obj != s_latch.obj) clear_latch();
-               else if (!lent)               refresh_hold();
-            }
          } else if (handle_ok(s_lastFocus[ch])) {
             focus = s_lastFocus[ch];   // keep following only while still alive
          } else {
-            // No object left to follow. Keep the cached position for its native
+            // No object left to follow. Keep the cached world anchor for its native
             // fade, but drop the stale handle instead of reading it next tick.
             s_lastFocus[ch] = Handle{};
          }
          const bool alive = focus.obj && is_alive(focus.obj);
          if (alive) {
-            if (focus.obj != projected.obj || focus.id != projected.id) {
-               projected = focus;
-               anchorValid = project_target_anchor(focus.obj, anchor);
+            if (focus.obj != measured.obj || focus.id != measured.id) {
+               measured = focus;
+               boundsValid = read_target_world_bounds(focus.obj, world);
             }
          }
          // Never query dead-unit bounds: death changes the collision/model pose
-         // and pulled the fading bar down into the corpse. Keep screen position
-         // through death/despawn; live projection failures still hide normally.
-         s_position[ch].update(sameTarget, alive, alive && anchorValid ? anchor : nullptr);
+         // and pulled the fading bar down into the corpse. Freeze the last live
+         // world anchor, but reproject it with the current camera through the fade.
+         // Pinned on screen only while the engine picks this target; held or
+         // fading, the bar leaves the screen with it.
+         const bool aimed = s_natural[ch].obj && same(s_natural[ch], focus);
+         s_position[ch].update(sameTarget, alive, alive && boundsValid ? &world : nullptr,
+                               aimed ? project_aimed : project_free);
          send_position(ch); // position only: preserve native enable/fade events
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -656,6 +641,9 @@ static void __cdecl hooked_UpdateFloat(float dt)   // modtools
    original_UpdateFloat(dt);
    tick_after();
    tick_horizon();
+   hud_number_math_update();
+   hud_class_icons_update();
+   hud_command_posts_update();
 }
 
 static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was dropped
@@ -664,6 +652,9 @@ static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was 
    original_UpdateVoid();
    tick_after();
    tick_horizon();
+   hud_number_math_update();
+   hud_class_icons_update();
+   hud_command_posts_update();
 }
 
 // HUD::Manager::Open switches to GameMemory::RunTimeHeap before calling
@@ -674,6 +665,10 @@ static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was 
 static void __cdecl hooked_Open()
 {
    original_Open();
+   hud_number_math_open();
+   hud_class_icons_open();
+   hud_command_posts_open();
+   hud_bar_fill_from_open();
 
    // A new mission.  Every GameObject pointer from the last one is dead memory.
    clear_all_objects();
@@ -703,21 +698,6 @@ static void __cdecl hooked_Open()
    }
 }
 
-static bool __fastcall hooked_ApplyDamage(void* self, void* /*edx*/, void* desc, void* hitDir,
-                                          void* hitPos, int bodyId, unsigned flags)
-{
-   // Read BEFORE the original: it zeroes the shooter handle in the desc when that
-   // handle is stale.  s_localChr is only non-null while a .hud is listening, so
-   // with no binding this is one load and one compare.
-   if (s_localChr && desc && self &&
-       *(void* const*)((const uint8_t*)desc + kDD_Character) == s_localChr) {
-      uint8_t* victim = (uint8_t*)self - kDmg_ToObject;
-      s_pending.obj = victim;
-      s_pending.id  = *(const uint32_t*)(victim + kGO_HandleId);
-   }
-   return original_ApplyDamage(self, desc, hitDir, hitPos, bodyId, flags);
-}
-
 // ---------------------------------------------------------------------------
 // Install
 // ---------------------------------------------------------------------------
@@ -729,7 +709,6 @@ struct Guard {
    uintptr_t      va;
    const uint8_t* bytes;
    const char*    mask;      // 'x' compare, '?' skip
-   bool           mayBeDetoured;
 };
 
 static bool guard_ok(uintptr_t exe_base, const Guard& g)
@@ -737,13 +716,7 @@ static bool guard_ok(uintptr_t exe_base, const Guard& g)
    const uint8_t* p = (const uint8_t*)resolve(exe_base, g.va);
    const size_t   n = std::strlen(g.mask);
 
-   // A sibling module (aim assist) may already have detoured ApplyDamage.  Detours
-   // writes a 5-byte JMP and pads the rest of the last instruction it displaced
-   // with 0xCC - one byte on the retail prologue, none on modtools - so skip the
-   // first eight bytes and fingerprint the four after them.
-   const size_t from = (g.mayBeDetoured && p[0] == 0xE9) ? 8 : 0;
-
-   for (size_t i = from; i < n; ++i) {
+   for (size_t i = 0; i < n; ++i) {
       if (g.mask[i] == 'x' && p[i] != g.bytes[i]) {
          install_log("[TargetBarLatch] NOT installed: prologue mismatch at %s 0x%08X: "
                      "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
@@ -766,8 +739,7 @@ void target_bar_latch_install(uintptr_t exe_base)
        g_addr->hud_game_events_update == 0 || g_addr->hud_player_data == 0 ||
        g_addr->net_game_get_local_player == 0 || g_addr->camera_manager_instance == 0 ||
        g_addr->hud_screen_width == 0 || g_addr->hud_screen_height == 0 ||
-       g_addr->game_object_is_my_enemy == 0 || g_addr->hud_event_send == 0 ||
-       g_addr->apply_damage == 0) {
+       g_addr->hud_event_send == 0) {
       install_log("[TargetBarLatch] NOT installed: no address set for this build");
       return;
    }
@@ -784,26 +756,18 @@ void target_bar_latch_install(uintptr_t exe_base)
    static constexpr uint8_t kUpdateRt[] = { 0x55,0x8B,0xEC,0x81,0xEC,0x6C,0x01,0x00,0x00,0x53,0x56,0x57 };
    static constexpr uint8_t kLocalMt[]  = { 0x55,0x8B,0xEC,0x83,0xEC,0x0C,0x8B,0x45,0x08,0x3B,0x05,0 };
    static constexpr uint8_t kLocalRt[]  = { 0x55,0x8B,0xEC,0xE8,0,0,0,0,0x39,0x45,0x08,0x72 };
-   static constexpr uint8_t kEnemyMt[]  = { 0x8B,0x44,0x24,0x04,0x50,0xE8,0,0,0,0,0x33,0xC9 };
-   static constexpr uint8_t kEnemyRt[]  = { 0x55,0x8B,0xEC,0xFF,0x75,0x08,0xE8,0,0,0,0,0x33 };
-   static constexpr uint8_t kDamageMt[] = { 0x83,0xEC,0x28,0x53,0x55,0x56,0x8B,0xF1,0x8B,0x4C,0x24,0x44 };
-   static constexpr uint8_t kDamageRt[] = { 0x55,0x8B,0xEC,0x83,0xEC,0x28,0x53,0x56,0x57,0xFF,0x75,0x14 };
 
    const Guard guards[] = {
       { "EventClass::Create",      g_addr->hud_event_class_create,
-        modtools ? kCreateMt : kCreateRt, modtools ? "xxxxxxxxxxxx" : "xxxxxx????xx", false },
+        modtools ? kCreateMt : kCreateRt, modtools ? "xxxxxxxxxxxx" : "xxxxxx????xx" },
       { "EventClass::FindByHashID", g_addr->hud_event_class_find,
-        modtools ? kFindMt : kFindRt,     modtools ? "xx????xx????" : "x????xxx????", false },
+        modtools ? kFindMt : kFindRt,     modtools ? "xx????xx????" : "x????xxx????" },
       { "GameEvents::Open",        g_addr->hud_game_events_open,
-        modtools ? kOpenMt : kOpenRt,     modtools ? "xxxxx????xxx" : "xxxx????xxxx", false },
+        modtools ? kOpenMt : kOpenRt,     modtools ? "xxxxx????xxx" : "xxxx????xxxx" },
       { "GameEvents::Update",      g_addr->hud_game_events_update,
-        modtools ? kUpdateMt : kUpdateRt, "xxxxxxxxxxxx", false },
+        modtools ? kUpdateMt : kUpdateRt, "xxxxxxxxxxxx" },
       { "NetGame::GetLocalPlayer", g_addr->net_game_get_local_player,
-        modtools ? kLocalMt : kLocalRt,   modtools ? "xxxxxxxxxxx?" : "xxxx????xxxx", false },
-      { "GameObject::IsMyEnemy",   g_addr->game_object_is_my_enemy,
-        modtools ? kEnemyMt : kEnemyRt,   modtools ? "xxxxxx????xx" : "xxxxxxx????x", false },
-      { "Damageable::ApplyDamage", g_addr->apply_damage,
-        modtools ? kDamageMt : kDamageRt, "xxxxxxxxxxxx", true },
+        modtools ? kLocalMt : kLocalRt,   modtools ? "xxxxxxxxxxx?" : "xxxx????xxxx" },
    };
    for (const Guard& g : guards)
       if (!guard_ok(exe_base, g)) return;
@@ -811,7 +775,6 @@ void target_bar_latch_install(uintptr_t exe_base)
    s_eventSend   = (fn_event_send_t)resolve(exe_base, g_addr->hud_event_send);
    s_create      = (fn_create_t)resolve(exe_base, g_addr->hud_event_class_create);
    s_localPlayer = (fn_local_player_t)resolve(exe_base, g_addr->net_game_get_local_player);
-   s_isMyEnemy   = (fn_is_my_enemy_t)resolve(exe_base, g_addr->game_object_is_my_enemy);
    s_eventList   = (uintptr_t*)resolve(exe_base, g_addr->hud_event_class_list);
    s_playerData  = (uint8_t*)resolve(exe_base, g_addr->hud_player_data);
    s_cameraMgr   = (uintptr_t*)resolve(exe_base, g_addr->camera_manager_instance);
@@ -824,7 +787,6 @@ void target_bar_latch_install(uintptr_t exe_base)
    else          s_findFastcall = (fn_find_fastcall_t)find;
 
    original_Open        = (fn_open_t)resolve(exe_base, g_addr->hud_game_events_open);
-   original_ApplyDamage = (fn_apply_damage_t)resolve(exe_base, g_addr->apply_damage);
    void* update         = resolve(exe_base, g_addr->hud_game_events_update);
 
    DetourTransactionBegin();
@@ -839,7 +801,6 @@ void target_bar_latch_install(uintptr_t exe_base)
          r = DetourAttach(&(PVOID&)original_UpdateVoid, hooked_UpdateVoid);
       }
    }
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)original_ApplyDamage, hooked_ApplyDamage);
 
    if (r != NO_ERROR) {
       DetourTransactionAbort();
@@ -848,14 +809,17 @@ void target_bar_latch_install(uintptr_t exe_base)
    }
    s_installed = (DetourTransactionCommit() == NO_ERROR);
 
-   install_log("[TargetBarLatch] %s (Open 0x%08X, Update 0x%08X %s, ApplyDamage 0x%08X, "
+   install_log("[TargetBarLatch] %s (Open 0x%08X, Update 0x%08X %s, selection retention, "
                "hold %.2fs). Inert until a .hud binds player1.weaponN.target.position",
                s_installed ? "installed" : "commit failed",
                (unsigned)g_addr->hud_game_events_open, (unsigned)g_addr->hud_game_events_update,
-               modtools ? "cdecl(float)" : "void(void)", (unsigned)g_addr->apply_damage,
+               modtools ? "cdecl(float)" : "void(void)",
                (double)g_targetBarLatchSeconds);
    if (s_installed)
       install_log("[HudHorizon] available: EventRotation(\"%s\"); inert without a binding", kHorizonEvent);
+   if (s_installed) hud_number_math_resolve(exe_base);
+   if (s_installed) hud_class_icons_resolve(exe_base);
+   if (s_installed) hud_command_posts_resolve(exe_base);
 }
 
 void target_bar_latch_uninstall()
@@ -863,6 +827,7 @@ void target_bar_latch_uninstall()
    if (!s_installed) return;
 
    restore_lends();
+   clear_all_objects();
    s_evtHorizon = nullptr;
    reset_horizon();
 
@@ -871,7 +836,6 @@ void target_bar_latch_uninstall()
    DetourDetach(&(PVOID&)original_Open, hooked_Open);
    if (original_UpdateFloat) DetourDetach(&(PVOID&)original_UpdateFloat, hooked_UpdateFloat);
    if (original_UpdateVoid)  DetourDetach(&(PVOID&)original_UpdateVoid, hooked_UpdateVoid);
-   DetourDetach(&(PVOID&)original_ApplyDamage, hooked_ApplyDamage);
    DetourTransactionCommit();
 
    s_installed = false;

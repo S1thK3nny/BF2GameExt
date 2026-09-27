@@ -2,6 +2,8 @@
 #include "snd_engine_open_fix.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -117,17 +119,6 @@ struct Saved {
 Saved    s_mallocCall, s_loopGuard, s_closeCall;
 uint32_t s_initSizeOrig = 0;
 
-void ext_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fclose(f);
-}
-
 uint32_t largest_free_range()
 {
    uint32_t best = 0;
@@ -160,8 +151,8 @@ void* __cdecl sound_heap_alloc(size_t requested)
    }
 
    if (!heap) {
-      ext_log("[SoundHeap] could not allocate even %u MB of sample RAM (largest free range "
-              "%u MB) -- starting without sound\n", mb(size), mb(freeBefore));
+      install_log("[SoundHeap] could not allocate even %u MB of sample RAM (largest free range "
+                  "%u MB) -- starting without sound", mb(size), mb(freeBefore));
       warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
                    "[SoundHeap] Could not allocate %u MB of sound memory. The game will run "
                    "without sound. Restarting the PC usually fixes this.", mb(size));
@@ -174,12 +165,12 @@ void* __cdecl sound_heap_alloc(size_t requested)
    if (*g_initSizeImm != size) protected_write(g_initSizeImm, &size, sizeof(size));
 
    if (size == requested) {
-      ext_log("[SoundHeap] %u MB of sample RAM at %p (largest free range was %u MB)\n",
-              mb(size), heap, mb(freeBefore));
+      install_log("[SoundHeap] %u MB of sample RAM at %p (largest free range was %u MB)",
+                  mb(size), heap, mb(freeBefore));
    }
    else {
-      ext_log("[SoundHeap] %u MB of sample RAM did not fit (largest free range %u MB), "
-              "fell back to %u MB at %p\n", mb((uint32_t)requested), mb(freeBefore), mb(size), heap);
+      install_log("[SoundHeap] %u MB of sample RAM did not fit (largest free range %u MB), "
+                  "fell back to %u MB at %p", mb((uint32_t)requested), mb(freeBefore), mb(size), heap);
       warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
                    "[SoundHeap] Not enough free memory for %u MB of sound memory, using %u MB. "
                    "Levels with a lot of sound may run out. Restarting the PC usually fixes this.",
@@ -243,13 +234,6 @@ void restore(Saved& s)
    s.addr = nullptr;
 }
 
-void write_rel32(uint8_t* site, uint8_t opcode, const void* target)
-{
-   site[0] = opcode;
-   const int32_t rel = (int32_t)((uintptr_t)target - (uintptr_t)(site + 5));
-   memcpy(site + 1, &rel, 4);
-}
-
 } // namespace
 
 void snd_engine_open_fix_install(uintptr_t exe_base)
@@ -284,7 +268,7 @@ void snd_engine_open_fix_install(uintptr_t exe_base)
       ok = ok && memcmp(loopGuard, kModtoolsGuardOrig, kModtoolsGuardLen) == 0;
    }
    if (!ok) {
-      ext_log("[SoundHeap] unexpected bytes at the Snd::Engine::Open sites -- fix not installed\n");
+      install_log("[SoundHeap] unexpected bytes at the Snd::Engine::Open sites -- fix not installed");
       return;
    }
 
@@ -295,10 +279,10 @@ void snd_engine_open_fix_install(uintptr_t exe_base)
    s_initSizeOrig   = *g_initSizeImm;
 
    save(s_mallocCall, mallocCall, 5);
-   write_rel32(mallocCall, 0xE8, &sound_heap_alloc);
+   x86::write_branch(mallocCall, x86::kCall, &sound_heap_alloc);
 
    save(s_closeCall, closeCall, 5);
-   write_rel32(closeCall, 0xE8, &enginebase_close_guard);
+   x86::write_branch(closeCall, x86::kCall, &enginebase_close_guard);
 
    if (retail) {
       g_bracket   = (uintptr_t)at(S->bracket);
@@ -306,9 +290,7 @@ void snd_engine_open_fix_install(uintptr_t exe_base)
       g_afterLoop = (uintptr_t)at(S->afterLoop);
 
       save(s_loopGuard, loopGuard, kRetailGuardLen);
-      write_rel32(loopGuard, 0xE9, &dsclose_loop_guard_retail);
-      loopGuard[5] = 0x90;
-      loopGuard[6] = 0x90;
+      x86::write_branch(loopGuard, x86::kJmp, &dsclose_loop_guard_retail, kRetailGuardLen);
    }
    else {
       save(s_loopGuard, loopGuard, kModtoolsGuardLen);

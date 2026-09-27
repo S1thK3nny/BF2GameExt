@@ -1,9 +1,12 @@
 #include "pch.h"
 
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 #include "held_ordnance_effect.hpp"
 #include "held_ordnance_effect_sites.hpp"
+#include "util/install_log.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -59,14 +62,7 @@ using rtti_method = bool(__thiscall*)(void*, uint32_t);
 using property_method = void(__thiscall*)(void*, uint32_t, const char*);
 using derive_method = void*(__thiscall*)(void*, uint32_t);
 
-constexpr uint32_t property_hash(const char* text)
-{
-   uint32_t hash = 0x811C9DC5;
-   for (; *text; ++text) hash = (hash ^ (static_cast<uint8_t>(*text) | 0x20u)) * 0x01000193u;
-   return hash;
-}
-
-constexpr uint32_t kBoneProperty = property_hash("HeldOrdnanceEffectBone");
+constexpr uint32_t kBoneProperty = pbl_hash("HeldOrdnanceEffectBone");
 
 // Same case-sensitive CRC-32/BZIP2 as PblTEMPHash and tentacle bone names.
 uint32_t bone_hash(const char* text)
@@ -461,20 +457,7 @@ void* const kClassHooks[] = {reinterpret_cast<void*>(set_property), reinterpret_
 
 void log_install(const char* message)
 {
-   FILE* file = nullptr;
-   if (fopen_s(&file, "BF2GameExt.log", "a") == 0 && file) {
-      std::fprintf(file, "[HeldOrdnanceEffect] %s\n", message);
-      std::fclose(file);
-   }
-}
-
-void make_call(uint8_t* bytes, void* address, void* target, unsigned length)
-{
-   std::memset(bytes, 0x90, length);
-   bytes[0] = 0xE8;
-   const uint32_t relative = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target) -
-                                                   reinterpret_cast<uintptr_t>(address) - 5);
-   std::memcpy(bytes + 1, &relative, 4);
+   install_log("[HeldOrdnanceEffect] %s", message);
 }
 
 bool write_patch(bool install)
@@ -506,8 +489,8 @@ bool write_patch(bool install)
    if (install) {
       void* createHook = g_sites->createLength == 7 ? reinterpret_cast<void*>(create_trail_debug)
                                                     : reinterpret_cast<void*>(create_trail_retail);
-      make_call(create, g_createSite, createHook, g_sites->createLength);
-      make_call(fireCall, g_fireSite, reinterpret_cast<void*>(fire), 5);
+      x86::encode_branch(create, g_createSite, x86::kCall, createHook, g_sites->createLength);
+      x86::encode_branch(fireCall, g_fireSite, x86::kCall, &fire);
    }
    std::memcpy(g_createSite, install ? create : g_originalCreate, g_sites->createLength);
    std::memcpy(g_fireSite, install ? fireCall : g_originalFire, 5);

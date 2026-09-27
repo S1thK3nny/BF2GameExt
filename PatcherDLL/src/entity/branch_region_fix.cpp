@@ -2,6 +2,7 @@
 #include "branch_region_fix.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -49,17 +50,6 @@ typedef void*(__stdcall* fn_CreateRegion_t)(void* desc, const char* name);
 
 
 fn_CreateRegion_t g_origCreateRegion = nullptr;
-
-// PblHash: FNV-1a with case folded by OR 0x20. Matches the mod tools' Hash.exe.
-uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 2166136261u;
-   for (; s && *s; ++s) {
-      h ^= (uint8_t)(*s | 0x20);
-      h *= 16777619u;
-   }
-   return h;
-}
 
 // BranchRegion::mHashID -- verified at +0x20 on modtools (FindByID compares
 // [region+0x20]) and on the retail builds (the constructor writes param_2 to

@@ -2,6 +2,7 @@
 #include "reservation_pool.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -26,20 +27,6 @@ struct Site {
 
 Site s_site[4] = {};
 int  s_count   = 0;
-
-// CRT logging, not GameLog: install runs inside the window where every section is
-// mapped PAGE_READWRITE, so calling back into the engine would EXEC-fault.
-void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
 
 uint32_t read_at(const uint8_t* p, uint32_t width)
 {

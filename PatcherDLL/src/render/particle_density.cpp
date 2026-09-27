@@ -2,27 +2,11 @@
 #include "particle_density.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "util/install_log.hpp"
 
 #include <cstring>
 #include <stdio.h>
 #include <stdarg.h>
-
-// Install-time logging MUST NOT go through get_gamelog().  Every section of the
-// exe is PAGE_READWRITE for the whole installer sequence (dllmain.cpp:194), so
-// calling the engine's logger jumps into non-executable .text and raises an
-// EXEC access violation -- which is a DLL_INIT_FAILED, i.e. the game refuses to
-// start at all.  The CRT is fine; it lives in this module.
-static void install_log(const char* fmt, ...)
-{
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fclose(f);
-}
-
 
 // See particle_density.hpp for what this dial does and why the LOD numerator is
 // repointed rather than edited.
@@ -123,7 +107,7 @@ void particle_density_install(uintptr_t exe_base)
          s_numOperandAddr = operand;
       } else {
          install_log("[ParticleDensity] LOD numerator at %p reads %f, expected 4.0 -- "
-                     "leaving the distance curve stock\n", (void*)stock, (double)*stock);
+                     "leaving the distance curve stock", (void*)stock, (double)*stock);
       }
    }
 

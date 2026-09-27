@@ -3,6 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/pbl_hash.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <string.h>
@@ -183,10 +185,6 @@ static constexpr int kOrdClass_Anim   = 0x16C;
 // it ever since.
 static constexpr int kOrd_WeaponOffset = 0x14C;
 
-// Weapon::mAimer and Weapon::mTrigger.  Byte 0 bit 0 of a Trigger is "held".
-static constexpr int kWeapon_Aimer    = 0x070;
-static constexpr int kWeapon_Trigger  = 0x074;
-
 // Aimer::mFirePos - the live fire point, and the field BarrelFireOrigin relocates
 // to the barrel hardpoint.
 static constexpr int kAimer_FirePos   = 0x088;
@@ -268,19 +266,6 @@ static bool g_installed = false;
 // ---------------------------------------------------------------------------
 // Cable texture
 // ---------------------------------------------------------------------------
-
-// PblHash: FNV-1a over the lowercased bytes.  Computed here rather than through
-// the engine's PblHash because grapple_install() runs from dllmain, where the
-// exe's sections are not executable yet.
-static uint32_t pbl_hash(const char* s)
-{
-   uint32_t h = 0x811c9dc5u;
-   for (; *s; ++s) {
-      h ^= (uint32_t)(uint8_t)(*s | 0x20);
-      h *= 0x01000193u;
-   }
-   return h;
-}
 
 // The Phantom build's own choice.  Overridable per ODF with CableTexture, which is
 // the better answer than picking for the modder: the shader resolves its texture
@@ -403,7 +388,7 @@ static uint32_t* fire_trigger(void* ordnance)
    __try {
       void* weapon = *(void**)((char*)ordnance + kOrd_FireWeapon);
       if (!weapon) return nullptr;
-      return *(uint32_t**)((char*)weapon + kWeapon_Trigger);
+      return *(uint32_t**)((char*)weapon + layout::Weapon::kTrigger);
    }
    __except (EXCEPTION_EXECUTE_HANDLER) {
       return nullptr;
@@ -538,7 +523,7 @@ static void refresh_cable_anchor(void* ordnance, void* soldier)
 {
    void* weapon = *(void**)((char*)ordnance + kOrd_FireWeapon);
    if (!weapon) return;
-   void* aimer = *(void**)((char*)weapon + kWeapon_Aimer);
+   void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
    if (!aimer) return;
 
    void*  coll   = (char*)soldier + kSol_CollObject;

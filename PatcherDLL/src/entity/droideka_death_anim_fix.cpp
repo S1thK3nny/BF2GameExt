@@ -3,6 +3,9 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
+#include "core/layout/droideka.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 
@@ -145,9 +148,6 @@ static uint32_t s_mStateOff = 0;
 // path looks it up.
 // ---------------------------------------------------------------------------
 
-// Weapon offset, build-invariant (see weapon/shield_channel_fix.cpp).
-static constexpr int kWeapon_mOwner = 0x6C;
-
 static uintptr_t s_rttiHashPtr  = 0;  // -> the EntityDroideka PblHash value
 static uintptr_t s_shieldVtable = 0;  // captured from the first live WeaponShield
 
@@ -188,7 +188,7 @@ static fn_ShieldUpdate_t s_origShieldUpdate = nullptr;
 // does: (mOwner+0x18)->vt[0x20]() yields the entity.
 static uintptr_t shield_owner_entity(uintptr_t wpn)
 {
-   const uintptr_t owner = *(uintptr_t*)(wpn + kWeapon_mOwner);
+   const uintptr_t owner = *(uintptr_t*)(wpn + layout::Weapon::kOwner);
    if (!owner) return 0;
    const uintptr_t sub = owner + 0x18;
    const uintptr_t vt  = *(uintptr_t*)sub;
@@ -233,17 +233,17 @@ void droideka_shield_tracker_install(uintptr_t exe_base)
    case GameBuild::Modtools:
       updVA = game_addrs::modtools::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::modtools::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A74;
+      s_mStateOff   = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       updVA = game_addrs::steam::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::steam::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A54;
+      s_mStateOff   = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       updVA = game_addrs::gog::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::gog::entity_droideka_rtti_hash);
-      s_mStateOff   = 0x1A54; // same release layout as Steam
+      s_mStateOff   = layout::Droideka::kStateRelease; // same release layout as Steam
       break;
    default:
       return; // unknown build
@@ -394,14 +394,14 @@ void droideka_death_anim_install(uintptr_t exe_base)
       updStateVA = game_addrs::modtools::droideka_update_state;
       kSite = kSiteModtools; kPrev = kPrevModtools;
       kUpdState = kUpdStateModtools; kUpdStateLen = sizeof(kUpdStateModtools);
-      s_mStateOff = 0x1A74;
+      s_mStateOff = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       siteVA = game_addrs::steam::droideka_update_nextstate_call;
       updStateVA = game_addrs::steam::droideka_update_state;
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = 0x1A54;
+      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       siteVA = game_addrs::gog::droideka_update_nextstate_call;
@@ -410,7 +410,7 @@ void droideka_death_anim_install(uintptr_t exe_base)
       // (verified against the exe).
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = 0x1A54;
+      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    default:
       return; // unknown build
@@ -426,10 +426,7 @@ void droideka_death_anim_install(uintptr_t exe_base)
 
    // E8 rel32 (CALL thunk) over bytes 0..4, NOP the 6th.  .text is RW during
    // install (dllmain re-protects afterwards), so no VirtualProtect needed.
-   const int32_t rel = (int32_t)((uintptr_t)&droideka_die_input_guard - ((uintptr_t)site + 5));
-   site[0] = 0xE8;
-   *(int32_t*)(site + 1) = rel;
-   site[5] = 0x90;
+   x86::write_branch(site, x86::kCall, &droideka_die_input_guard, 6);
 
    // Steering lock.  Only worth installing now that state 3 actually holds, so
    // it hangs off the same signature check as the call-site patch above.

@@ -53,7 +53,7 @@ In rough order of likelihood:
   is not supported. Only the Modtools, Steam and GOG builds work.
 - **You are on GOG and the game closes with a "Failed to apply patches" box.**
   That is the older 2006 executable. See
-  [GOG, and it says it cannot identify the executable](#gog-and-it-says-it-cannot-identify-the-executable).
+  [I have the GOG version and it says it cannot identify the executable](#i-have-the-gog-version-and-it-says-it-cannot-identify-the-executable).
 - **Your executable has already been patched by something else.** See below.
 - **An overlay or launcher is loading its own `dinput8.dll`** ahead of ours.
 - **`dinput8.dll` is not in the folder any more.** Rare, but a scanner can

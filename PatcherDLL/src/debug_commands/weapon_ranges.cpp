@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "weapon_ranges.hpp"
 #include "command_registry.hpp"
+#include "core/layout/character.hpp"
+#include "core/layout/weapon.hpp"
 
 #include <detours.h>
 #include <cmath>
@@ -27,9 +29,6 @@ static constexpr int kStruct_Entity   = 0x240;  // entity = struct_base + 0x240
 // Offsets from entity pointer
 static constexpr int kEnt_WeaponArray = 0x4F0;  // Weapon*[8]
 static constexpr int kEnt_ActiveSlot  = 0x512;  // uint8 active weapon slot
-
-// Weapon offsets
-static constexpr int kWpn_Class       = 0x060;  // WeaponClass*
 
 // WeaponClass offsets (PDB-confirmed)
 static constexpr int kWC_MinRange     = 0x100;  // float mMinRange
@@ -104,7 +103,7 @@ static void cache_soldier(char* ecx)
    if (!weapon) return;
 
    // WeaponClass
-   char* wc = *(char**)((char*)weapon + kWpn_Class);
+   char* wc = *(char**)((char*)weapon + layout::Weapon::kStart);
    if (!wc) return;
 
    float minR = *(float*)(wc + kWC_MinRange);
@@ -218,8 +217,6 @@ static void __fastcall hooked_SoldierPCU(void* ecx, void* edx, float* outParam, 
 
 static constexpr uintptr_t kCharArrayPtr = 0xB93A08;  // *(uintptr_t*) = charArray base
 static constexpr uintptr_t kMaxCharsPtr  = 0xB939F4;  // *(int*)       = max character count
-static constexpr int kCharStride         = 0x1B0;
-static constexpr int kChar_Intermediate  = 0x148;
 
 static uintptr_t s_exeBase = 0;
 
@@ -239,8 +236,8 @@ static void refresh_cache_from_char_array()
 
    for (int i = 0; i < maxChars && tempCount < kMaxCached; ++i) {
       __try {
-         uintptr_t slot = arrayBase + (uintptr_t)i * kCharStride;
-         void* intermediate = *(void**)(slot + kChar_Intermediate);
+         uintptr_t slot = arrayBase + (uintptr_t)i * layout::Character::kSize;
+         void* intermediate = *(void**)(slot + layout::Character::kUnit);
          if (!intermediate) continue;
 
          char* ctrl = (char*)intermediate + 0x018;
@@ -259,7 +256,7 @@ static void refresh_cache_from_char_array()
          void* weapon = *(void**)(entity + kEnt_WeaponArray + activeSlot * 4);
          if (!weapon) continue;
 
-         char* wc = *(char**)((char*)weapon + kWpn_Class);
+         char* wc = *(char**)((char*)weapon + layout::Weapon::kStart);
          if (!wc) continue;
 
          float minR = *(float*)(wc + kWC_MinRange);

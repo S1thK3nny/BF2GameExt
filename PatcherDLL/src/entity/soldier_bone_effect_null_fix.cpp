@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 
 #include <cstring>
 
@@ -216,10 +217,7 @@ void soldier_bone_effect_null_fix_install(uintptr_t exe_base)
    // JMP rel32 to the guard, then NOP out the rest of the replaced pair so the
    // bytes after it stay decodable if anything ever walks them.
    uint8_t patch[sizeof(kRetailOriginal)];
-   std::memset(patch, 0x90, sizeof(patch));
-   patch[0] = 0xE9;
-   *(int32_t*)(patch + 1) =
-      (int32_t)((uintptr_t)&bone_matrix_guard_retail - ((uintptr_t)site + 5));
+   x86::encode_branch(patch, site, x86::kJmp, &bone_matrix_guard_retail, sizeof(patch));
 
    std::memcpy(site, patch, sizeof(patch));
    s_site    = site;

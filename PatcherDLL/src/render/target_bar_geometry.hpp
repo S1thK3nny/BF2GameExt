@@ -163,4 +163,23 @@ inline bool pin_to_screen(float position[3], unsigned width, unsigned height,
    return true;
 }
 
+// The same pixel snap without the safe area, for a target not being aimed at:
+// the bar follows it off the screen. Anchors past a viewport beyond any edge are
+// held there, which is off screen for any bar and keeps the huge near-plane
+// projections finite.
+inline bool snap_to_screen(float position[3], unsigned width, unsigned height)
+{
+   if (!width || !height || !std::isfinite(position[0]) || !std::isfinite(position[1]))
+      return false;
+   const double size[2] = { (double)width, (double)height };
+   for (int a = 0; a < 2; ++a) {
+      double v = position[a];
+      if (v < -1) v = -1;
+      if (v > 2) v = 2;
+      position[a] = (float)(std::round(v * size[a]) / size[a]);
+   }
+   position[2] = 0;
+   return true;
+}
+
 } // namespace target_bar_geometry
