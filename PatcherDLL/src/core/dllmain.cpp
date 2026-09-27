@@ -56,6 +56,7 @@
 #include "render/spawn_vehicle_list.hpp"
 #include "render/target_bar_latch.hpp"
 #include "render/hud_bar_fill_from.hpp"
+#include "render/camera_shake.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
@@ -305,6 +306,16 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
       g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
+      g_cameraShakeEnabled  = cfg.get_bool("CameraShake", "Enabled", true);
+      g_cameraShakeSmooth   = cfg.get_bool("CameraShake", "Smooth", true);
+      g_cameraShakeStrength = cfg.get_float("CameraShake", "Strength", 1.0f);
+      g_cameraShakeChannel[kShakeFire]   = cfg.get_float("CameraShake", "FireStrength", 1.0f);
+      g_cameraShakeChannel[kShakeHit]    = cfg.get_float("CameraShake", "HitStrength", 1.0f);
+      g_cameraShakeChannel[kShakeLand]   = cfg.get_float("CameraShake", "LandStrength", 1.0f);
+      g_cameraShakeChannel[kShakeRoll]   = cfg.get_float("CameraShake", "RollStrength", 1.0f);
+      g_cameraShakeChannel[kShakeSprint] = cfg.get_float("CameraShake", "SprintStrength", 1.0f);
+      g_cameraShakeChannel[kShakeBrake]  = cfg.get_float("CameraShake", "BrakeStrength", 1.0f);
+      g_cameraShakeChannel[kShakeBlast]  = cfg.get_float("CameraShake", "BlastStrength", 1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -370,6 +381,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
+   camera_shake_install(exe_base);            // after odf_gameext_props: its ODF listeners
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);

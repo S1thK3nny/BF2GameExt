@@ -120,6 +120,12 @@ can follow an animated bone. If not, the shield would be a fixed box in front of
 while holding a block stance and wrong as soon as the arm moves. Settle that first. Details in
 [docs/RE/SoldierCollisionSystem.md](docs/RE/SoldierCollisionSystem.md).
 
+**Roll and jump camera sweep** - In third person the camera follows a roll or a jump rigidly.
+Let it trail behind and look toward the unit's feet through rolls, jump launches and the fall
+from a jump's apex, as BFIII's delay camera does, replacing `RollShake`'s plain shake. It needs
+the soldier's position and vertical speed on each build. Details in
+[docs/RE/CameraShake.md](docs/RE/CameraShake.md).
+
 ## Weapons
 
 **Dual pistols (`dualcannon`)** - Done on `feature/classlabel-dualcannon`: a new `dualcannon`
@@ -185,9 +191,9 @@ cause issues with vehicles, especially hovers, due to being tied to the framerat
 Research and addresses for these are in
 [docs/RE/HUDSystem.md](docs/RE/HUDSystem.md#candidate-events-researched-2026-09-25-not-built).
 
-**HUD shake** - The HUD stays still while the camera shakes from explosions and impacts, and
-nothing shakes anything when a soldier is hit or fires. Publish the camera's real shake as a
-position offset, plus added triggers for taking damage and firing.
+**HUD shake** - The HUD stays still while the camera shakes, so a strong shake leaves the
+reticle off the true aim point. Publish the camera shake's screen offset as a HUD event so a
+reticle can follow it. Details in [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
 
 **Spread-scaled reticle** - The reticle stays one size whatever the weapon's current spread.
 Publish each weapon's live spread as an angle and as an on-screen scale for `EventScale`, so
@@ -315,6 +321,15 @@ Details in [docs/RE/GuiInputSystem.md](docs/RE/GuiInputSystem.md).
 returning the current value instead of writing one. The sound entity limitation above
 applies identically to `GetProperty`, and a `GetInstanceProperty` would need the same
 per-family handling as `SetInstanceProperty`.
+
+**`SetClassProperty` for GameExt's ODF properties** - The camera shake properties (`FireShake`,
+`RollShake` and the rest) are read as the ODF loads, so a script's `SetClassProperty` hands them
+to the class's stock `SetProperty`, which ignores them. Stock `SetClassProperty` also only finds
+entity classes, so weapon classes are out of reach altogether. Route those names through the
+same listeners from the class `SetProperty` (the soldier one is already hooked on every build;
+`EntityFlyerClass::SetProperty`, Phantom `0x00529ED0`, needs porting), and let
+`SetClassProperty` fall back to weapon classes by name. Details in
+[docs/RE/CameraShake.md](docs/RE/CameraShake.md).
 
 **Hero health drain switch** - A way to stop heroes from bleeding health over time. This
 belongs in Lua rather than in an ODF property: the drain is a game rule, and an ODF entry

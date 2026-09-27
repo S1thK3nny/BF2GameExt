@@ -72,6 +72,7 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Gamepad bindings and rumble | ✅ | ✅ | ✅ |
 | Loading screen system | ✅ | ✅ | ✅ |
 | HUD events, `TransformNumberMath`, `FillFrom` | ✅ | ✅ | ✅ |
+| Camera shake | ✅ | ✅ | ✅ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |
 

@@ -10,6 +10,17 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **Camera shake** - The stock shake from explosions, walker deaths and flyer crashes
+  is drawn as a blast, a smooth roll and sway that follows the strongest explosion
+  running and shrinks while zoomed in, instead of a new random jolt every frame. ODFs
+  can shake the local player's view per class: `FireShake` on weapons, `HitShake`,
+  `LandShake`, `RollShake` and `SprintShake` on soldiers and flyers, `BrakeShake` on
+  flyers and `BlastShake` to reshape explosions for a unit. Each takes `Pitch`, `Yaw`,
+  `Roll`, `Push`, `Length`, `Rise`, `Rate` and `Limit` detail properties, and all
+  inherit through `ClassParent`. Only the view moves: the aim is taken before the
+  shake, and the reticle holds still rather than chasing it. INI:
+  `[CameraShake]` `Enabled`, `Smooth`, `Strength` and a strength per shake. See
+  [ODF properties](docs/user/ODF_PROPERTIES.md#camera-shake).
 - **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
   `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
   so a `.hud` can show every command post's owner and capture progress in a row.

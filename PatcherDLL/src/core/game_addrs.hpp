@@ -993,6 +993,19 @@ namespace modtools {
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
    // CommandPost::Update makes before a client simulates a post's capture.
    constexpr uintptr_t net_game_is_near_local_player = 0x006E3DD0;
+   // Camera shake (render/camera_shake.cpp); docs/RE/CameraShake.md.
+   // ChaseCamera::SetupCamera: thiscall(RedCamera*, float dt), RET 8. It turns
+   // the camera by the stock shake and hands the matrix to RedCamera::SetMatrix:
+   // thiscall(const PblMatrix*), RET 4. Tracker::IsFirstPersonView: thiscall(),
+   // bool in AL, plain RET. EntityFlyer::DoTrick: thiscall(Trick), RET 4.
+   // The two Derive sites are the 8-byte `child = parent->Derive(hash)` calls
+   // in EntityClass::Read and WeaponClass::Read (entity/odf_gameext_props.cpp).
+   constexpr uintptr_t chase_camera_setup_camera    = 0x004A2440;
+   constexpr uintptr_t red_camera_set_matrix        = 0x007FEED0;
+   constexpr uintptr_t tracker_is_first_person_view = 0x0049FDD0;
+   constexpr uintptr_t flyer_do_trick               = 0x004F3D10;
+   constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
    constexpr uintptr_t hud_game_events_update       = 0x006B50A0;
    constexpr uintptr_t hud_player_data              = 0x00BA3EA0;
@@ -2221,6 +2234,19 @@ namespace steam {
    // CommandPost::Update makes before a client simulates a post's capture.
    constexpr uintptr_t net_game_is_near_local_player = 0x005B7470;
    constexpr uintptr_t net_on_client                = 0x01E62EAB;
+   // Camera shake (render/camera_shake.cpp); docs/RE/CameraShake.md.
+   // ChaseCamera::SetupCamera: thiscall(RedCamera*, float dt), RET 8. It turns
+   // the camera by the stock shake and hands the matrix to RedCamera::SetMatrix:
+   // thiscall(const PblMatrix*), RET 4. Tracker::IsFirstPersonView: thiscall(),
+   // bool in AL, plain RET. EntityFlyer::DoTrick: thiscall(Trick), RET 4.
+   // The two Derive sites are the 8-byte `child = parent->Derive(hash)` calls
+   // in EntityClass::Read and WeaponClass::Read (entity/odf_gameext_props.cpp).
+   constexpr uintptr_t chase_camera_setup_camera    = 0x00453D00;
+   constexpr uintptr_t red_camera_set_matrix        = 0x006CBEF0;
+   constexpr uintptr_t tracker_is_first_person_view = 0x0044E3C0;
+   constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
@@ -2776,6 +2802,19 @@ namespace gog {
    // CommandPost::Update makes before a client simulates a post's capture.
    constexpr uintptr_t net_game_is_near_local_player = 0x005B8420;
    constexpr uintptr_t net_on_client                = 0x01E6435B;
+   // Camera shake (render/camera_shake.cpp); docs/RE/CameraShake.md.
+   // ChaseCamera::SetupCamera: thiscall(RedCamera*, float dt), RET 8. It turns
+   // the camera by the stock shake and hands the matrix to RedCamera::SetMatrix:
+   // thiscall(const PblMatrix*), RET 4. Tracker::IsFirstPersonView: thiscall(),
+   // bool in AL, plain RET. EntityFlyer::DoTrick: thiscall(Trick), RET 4.
+   // The two Derive sites are the 8-byte `child = parent->Derive(hash)` calls
+   // in EntityClass::Read and WeaponClass::Read (entity/odf_gameext_props.cpp).
+   constexpr uintptr_t chase_camera_setup_camera    = 0x00453CE0;
+   constexpr uintptr_t red_camera_set_matrix        = 0x006CCF90;
+   constexpr uintptr_t tracker_is_first_person_view = 0x0044E3A0;
+   constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;

@@ -204,6 +204,8 @@
     <ClInclude Include="src\render\hud_class_icons_core.hpp" />
     <ClInclude Include="src\render\hud_command_posts.hpp" />
     <ClInclude Include="src\render\hud_command_posts_core.hpp" />
+    <ClInclude Include="src\render\camera_shake.hpp" />
+    <ClInclude Include="src\render\camera_shake_core.hpp" />
     <ClInclude Include="src\render\hud_bar_fill_from.hpp" />
     <ClInclude Include="src\render\hud_bar_fill_from_core.hpp" />
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
@@ -311,6 +313,7 @@
     <ClCompile Include="src\render\hud_number_math.cpp" />
     <ClCompile Include="src\render\hud_class_icons.cpp" />
     <ClCompile Include="src\render\hud_command_posts.cpp" />
+    <ClCompile Include="src\render\camera_shake.cpp" />
     <ClCompile Include="src\render\hud_bar_fill_from.cpp" />
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />

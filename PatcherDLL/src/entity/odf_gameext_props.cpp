@@ -139,6 +139,32 @@
 // which is the world-layer instance property path. That is the lead for
 // extending this to `[InstanceProperties]`, and the three remaining sites in
 // the same cluster have no vcall at all.
+//
+// -----------------------------------------------------------------------------
+// Class derivation, for the property listeners
+//
+// Other modules keep GameExt properties in tables of their own, keyed by class,
+// and need them inherited through ClassParent the way stock fields are: a stock
+// child class is a copy of its parent. Entity and weapon classes are both made
+// in their reader's TYPE branch, `child = parent->Derive(nameHash)` (vtable
+// +0x04, thiscall, RET 4), where `parent` is the class the BASE chunk named:
+// the ClassParent, or the class type's own root. That call is eight bytes on
+// every build - load the vptr, point ECX at the parent, push the hash, call -
+// and the parent lives in a callee-saved register across it, so the site jumps
+// to a shim that repeats the four instructions and reports (parent, child).
+//
+//   build     reader                site        bytes                     parent hash
+//   --------  --------------------  ----------  ------------------------  ------ ----
+//   modtools  EntityClass::Read     0x004D0992  8B 03 52 8B CB FF 50 04   EBX    EDX
+//             WeaponClass::Read     0x0061E55C  8B 16 57 8B CE FF 52 04   ESI    EDI
+//   Steam     EntityClass::Read     0x00491DE0  8B 07 8B CF 52 FF 50 04   EDI    EDX
+//             WeaponClass::Read     0x0067A37D  8B 07 8B CF 56 FF 50 04   EDI    ESI
+//   GOG       EntityClass::Read     0x00491DE0  same as Steam
+//             WeaponClass::Read     0x0067B41D  same as Steam
+//
+// The child comes back in EAX, and each site's next instruction moves it into
+// a register of its own, so the shim leaves EAX as it found it. Phantom's
+// EntityClass::Read (0x005020F0) shows the shape the four builds share.
 // =============================================================================
 
 namespace {
@@ -186,6 +212,13 @@ int    s_recentUsed      = 0;   // slots filled, saturates at kWindow
 
 uint32_t s_applied = 0;
 
+// Listeners registered by other modules (odf_add_*_handler).
+constexpr int kMaxHandlers = 4;
+OdfPropertyHandler s_propertyHandlers[kMaxHandlers] = {};
+OdfDeriveHandler   s_deriveHandlers[kMaxHandlers]   = {};
+int s_propertyHandlerCount = 0;
+int s_deriveHandlerCount   = 0;
+
 // SetProperty(uint nameHash, const char* value), reached through the class
 // vtable. The slot differs between the readers, hence the explicit offset.
 typedef void(__thiscall* SetProperty_t)(void* self, uint32_t hash, const char* value);
@@ -230,20 +263,43 @@ extern "C" void __cdecl odf_gameext_prop_dispatch(void* cls, uint32_t hash,
    // but our own call must not fault.
    if (cls == nullptr) return;
 
+   // An override's name is an earlier property's name plus "@GameExt": apply it
+   // as the property it names. The suffixed hash itself is not forwarded, since
+   // no SetProperty anywhere recognises it.
    uint32_t target;
-   if (find_target(hash, &target)) {
-      // This property's name is an earlier property's name plus "@GameExt".
-      // Apply it as the property it names. The suffixed hash itself is not
-      // forwarded: no SetProperty anywhere recognises it.
-      call_set_property(cls, vslot, target, value);
-      ++s_applied;
-   } else {
-      call_set_property(cls, vslot, hash, value);
-   }
+   const bool overrides = find_target(hash, &target);
+   const uint32_t applied = overrides ? target : hash;
+   if (overrides) ++s_applied;
+
+   bool consumed = false;
+   for (int i = 0; i < s_propertyHandlerCount && !consumed; ++i)
+      consumed = s_propertyHandlers[i](cls, applied, value);
+   if (!consumed) call_set_property(cls, vslot, applied, value);
 
    // Remember the name as WRITTEN either way, so an override never becomes the
    // target of a second one.
    remember(hash);
+}
+
+// Called by the derive shims once a reader has made a class from its base.
+extern "C" void __cdecl odf_class_derived(const void* parent, void* child)
+{
+   if (child == nullptr) return;   // the reader logs its own error for this
+   for (int i = 0; i < s_deriveHandlerCount; ++i) s_deriveHandlers[i](parent, child);
+}
+
+bool odf_add_property_handler(OdfPropertyHandler handler)
+{
+   if (!handler || s_propertyHandlerCount == kMaxHandlers) return false;
+   s_propertyHandlers[s_propertyHandlerCount++] = handler;
+   return true;
+}
+
+bool odf_add_derive_handler(OdfDeriveHandler handler)
+{
+   if (!handler || s_deriveHandlerCount == kMaxHandlers) return false;
+   s_deriveHandlers[s_deriveHandlerCount++] = handler;
+   return true;
 }
 
 namespace {
@@ -297,34 +353,116 @@ ODF_PROP_SHIM(shim_rt_weapon,    ebx, esi, 0x18, s_contWeapon)
 
 #undef ODF_PROP_SHIM
 
+// Derive sites: repeat the site's own four instructions (the vcall pops the
+// hash itself), then report (parent, child). pushad/popad keep the child in EAX
+// and every other register as the reader left them.
+void* s_contEntityDerive = nullptr;
+void* s_contWeaponDerive = nullptr;
+
+// modtools EntityClass::Read: MOV EAX,[EBX] / PUSH EDX / MOV ECX,EBX / CALL [EAX+4]
+__declspec(naked) void shim_mt_entity_derive()
+{
+   __asm {
+      mov  eax, [ebx]
+      push edx
+      mov  ecx, ebx
+      call dword ptr [eax + 4]
+      pushad
+      push eax
+      push ebx
+      call odf_class_derived
+      add  esp, 8
+      popad
+      jmp  [s_contEntityDerive]
+   }
+}
+
+// modtools WeaponClass::Read: MOV EDX,[ESI] / PUSH EDI / MOV ECX,ESI / CALL [EDX+4]
+__declspec(naked) void shim_mt_weapon_derive()
+{
+   __asm {
+      mov  edx, [esi]
+      push edi
+      mov  ecx, esi
+      call dword ptr [edx + 4]
+      pushad
+      push eax
+      push esi
+      call odf_class_derived
+      add  esp, 8
+      popad
+      jmp  [s_contWeaponDerive]
+   }
+}
+
+// Steam and GOG EntityClass::Read: MOV EAX,[EDI] / MOV ECX,EDI / PUSH EDX / CALL [EAX+4]
+__declspec(naked) void shim_rt_entity_derive()
+{
+   __asm {
+      mov  eax, [edi]
+      mov  ecx, edi
+      push edx
+      call dword ptr [eax + 4]
+      pushad
+      push eax
+      push edi
+      call odf_class_derived
+      add  esp, 8
+      popad
+      jmp  [s_contEntityDerive]
+   }
+}
+
+// Steam and GOG WeaponClass::Read: MOV EAX,[EDI] / MOV ECX,EDI / PUSH ESI / CALL [EAX+4]
+__declspec(naked) void shim_rt_weapon_derive()
+{
+   __asm {
+      mov  eax, [edi]
+      mov  ecx, edi
+      push esi
+      call dword ptr [eax + 4]
+      pushad
+      push eax
+      push edi
+      call odf_class_derived
+      add  esp, 8
+      popad
+      jmp  [s_contWeaponDerive]
+   }
+}
+
 struct Site {
    const char* name;      // reader, for the install log
-   uintptr_t va;          // PROP-branch dispatch site, unrelocated
-   uint8_t   expect[9];   // exact bytes the site must carry
+   uintptr_t va;          // site, unrelocated
+   uint8_t   len;         // bytes replaced: 9 for a PROP dispatch, 8 for a Derive call
+   uint8_t   expect[9];   // exact bytes the site must carry (the first len)
    void    (*shim)();
-   void**    cont;        // where the shim returns to (site + 9)
+   void**    cont;        // where the shim returns to (site + len)
 };
 
-uint8_t* s_patched[4] = {};
-uint8_t  s_orig[4][9] = {};
+constexpr int kMaxSites = 6;
+uint8_t* s_patched[kMaxSites] = {};
+uint8_t  s_orig[kMaxSites][9] = {};
+uint8_t  s_origLen[kMaxSites] = {};
 int      s_patchCount = 0;
 
-// Patch one site: verify the nine bytes, then E9 rel32 + four NOPs.
+// Patch one site: verify its bytes, then E9 rel32 and NOPs to the same length.
 bool install_site(uintptr_t exe_base, const Site& s)
 {
-   if (s.va == 0) return false;
+   if (s.va == 0 || s_patchCount == kMaxSites) return false;
 
    uint8_t* site = (uint8_t*)resolve(exe_base, s.va);
-   if (std::memcmp(site, s.expect, sizeof(s.expect)) != 0) return false;
+   if (std::memcmp(site, s.expect, s.len) != 0) return false;
 
-   *s.cont = (void*)(site + sizeof(s.expect));
+   *s.cont = (void*)(site + s.len);
 
-   std::memcpy(s_orig[s_patchCount], site, sizeof(s.expect));
+   std::memcpy(s_orig[s_patchCount], site, s.len);
+   s_origLen[s_patchCount] = s.len;
    s_patched[s_patchCount] = site;
    ++s_patchCount;
 
    // .text is RW during install; dllmain re-protects afterwards.
-   x86::write_branch(site, x86::kJmp, s.shim, 9);
+   x86::write_branch(site, x86::kJmp, s.shim, s.len);
    return true;
 }
 
@@ -338,31 +476,31 @@ void odf_gameext_props_install(uintptr_t exe_base)
 
    // Addresses come from the per-build table; only the shape is chosen here.
    const Site modtoolsSites[] = {
-      { "EntityClass::Read",    g_addr->entity_class_read_prop_site,
+      { "EntityClass::Read",    g_addr->entity_class_read_prop_site, 9,
         {0x8B, 0x13, 0x50, 0x57, 0x8B, 0xCB, 0xFF, 0x52, 0x18},
         &shim_mt_entity,    &s_contEntity },
-      { "ExplosionClass::Read", g_addr->explosion_class_read_prop_site,
+      { "ExplosionClass::Read", g_addr->explosion_class_read_prop_site, 9,
         {0x8B, 0x17, 0x50, 0x56, 0x8B, 0xCF, 0xFF, 0x52, 0x0C},
         &shim_mt_explosion, &s_contExplosion },
-      { "OrdnanceClass::Read",  g_addr->ordnance_class_read_prop_site,
+      { "OrdnanceClass::Read",  g_addr->ordnance_class_read_prop_site, 9,
         {0x8B, 0x16, 0x50, 0x57, 0x8B, 0xCE, 0xFF, 0x52, 0x18},
         &shim_mt_ordnance,  &s_contOrdnance },
-      { "WeaponClass::Read",    g_addr->weapon_class_read_prop_site,
+      { "WeaponClass::Read",    g_addr->weapon_class_read_prop_site, 9,
         {0x8B, 0x13, 0x50, 0x57, 0x8B, 0xCB, 0xFF, 0x52, 0x18},
         &shim_mt_weapon,    &s_contWeapon },
    };
 
    const Site retailSites[] = {
-      { "EntityClass::Read",    g_addr->entity_class_read_prop_site,
+      { "EntityClass::Read",    g_addr->entity_class_read_prop_site, 9,
         {0x8B, 0x17, 0x8B, 0xCF, 0x50, 0x56, 0xFF, 0x52, 0x18},
         &shim_rt_entity,    &s_contEntity },
-      { "ExplosionClass::Read", g_addr->explosion_class_read_prop_site,
+      { "ExplosionClass::Read", g_addr->explosion_class_read_prop_site, 9,
         {0x8B, 0x17, 0x8B, 0xCF, 0x50, 0x56, 0xFF, 0x52, 0x0C},
         &shim_rt_explosion, &s_contExplosion },
-      { "OrdnanceClass::Read",  g_addr->ordnance_class_read_prop_site,
+      { "OrdnanceClass::Read",  g_addr->ordnance_class_read_prop_site, 9,
         {0x8B, 0x17, 0x8B, 0xCF, 0x50, 0x56, 0xFF, 0x52, 0x18},
         &shim_rt_ordnance,  &s_contOrdnance },
-      { "WeaponClass::Read",    g_addr->weapon_class_read_prop_site,
+      { "WeaponClass::Read",    g_addr->weapon_class_read_prop_site, 9,
         {0x8B, 0x13, 0x8B, 0xCB, 0x50, 0x56, 0xFF, 0x52, 0x18},
         &shim_rt_weapon,    &s_contWeapon },
    };
@@ -382,12 +520,46 @@ void odf_gameext_props_install(uintptr_t exe_base)
    }
 
    install_log("[ODF] GameExt property overrides: %d/4 readers hooked", ok);
+
+   // Class derivation, for the property listeners' ClassParent inheritance.
+   const Site modtoolsDerive[] = {
+      { "EntityClass::Read", g_addr->entity_class_read_derive_site, 8,
+        {0x8B, 0x03, 0x52, 0x8B, 0xCB, 0xFF, 0x50, 0x04},
+        &shim_mt_entity_derive, &s_contEntityDerive },
+      { "WeaponClass::Read", g_addr->weapon_class_read_derive_site, 8,
+        {0x8B, 0x16, 0x57, 0x8B, 0xCE, 0xFF, 0x52, 0x04},
+        &shim_mt_weapon_derive, &s_contWeaponDerive },
+   };
+
+   const Site retailDerive[] = {
+      { "EntityClass::Read", g_addr->entity_class_read_derive_site, 8,
+        {0x8B, 0x07, 0x8B, 0xCF, 0x52, 0xFF, 0x50, 0x04},
+        &shim_rt_entity_derive, &s_contEntityDerive },
+      { "WeaponClass::Read", g_addr->weapon_class_read_derive_site, 8,
+        {0x8B, 0x07, 0x8B, 0xCF, 0x56, 0xFF, 0x50, 0x04},
+        &shim_rt_weapon_derive, &s_contWeaponDerive },
+   };
+
+   const Site* derive = modtools ? modtoolsDerive : retailDerive;
+
+   int derived = 0;
+   for (int i = 0; i < 2; ++i) {
+      if (install_site(exe_base, derive[i])) {
+         ++derived;
+      } else {
+         install_log("[ODF] %s Derive site 0x%08x did not match - GameExt properties "
+                     "of that ODF type are not inherited through ClassParent",
+                     derive[i].name, derive[i].va);
+      }
+   }
+
+   install_log("[ODF] class derivation: %d/2 readers hooked", derived);
 }
 
 void odf_gameext_props_uninstall()
 {
    for (int i = 0; i < s_patchCount; ++i)
-      protected_write(s_patched[i], s_orig[i], sizeof(s_orig[i]));
+      protected_write(s_patched[i], s_orig[i], s_origLen[i]);
    s_patchCount = 0;
 }
 
