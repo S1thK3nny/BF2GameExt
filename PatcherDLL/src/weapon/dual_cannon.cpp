@@ -3,12 +3,15 @@
 #include "barrel_fire_origin.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/layout/aimer.hpp"
+#include "core/layout/weapon.hpp"
+#include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #include <detours.h>
 
 #include <cstdio>
-#include <cstdarg>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
@@ -108,22 +111,13 @@ unsigned kClassFlashLength   = 0;
 unsigned kClassShotsPerSalvo = 0;
 unsigned kClassShotsPerShot  = 0;
 
-// Weapon fields (modtools, see Weapon::Render 0x61DFA0 and WeaponCannon::UpdateFire 0x6274C0).
-constexpr unsigned kWeaponClass        = 0x64;
-constexpr unsigned kWeaponRenderClass  = 0x68;
-constexpr unsigned kWeaponAimer        = 0x70;
-constexpr unsigned kWeaponHideFlags    = 0xAC; // bit 0 = mHideWeapon
-constexpr unsigned kWeaponState        = 0xB0;
-constexpr unsigned kWeaponFlashStart   = 0xC4; // mMuzzleFlashStartTime
+// Weapon fields shared by all builds come from core/layout/weapon.hpp; this one sits
+// past the shared range (WeaponCannon::UpdateFire, modtools 0x6274C0).
 unsigned kWeaponSalvoCount = 0; // per build: 0x144 modtools, 0x114 retail
 
 // Weapon::WeaponState
 constexpr uint32_t kStateFire  = 1;
 constexpr uint32_t kStateFire2 = 2;
-
-// Aimer fields.
-constexpr unsigned kAimerDirection = 0x48;
-constexpr unsigned kAimerFirePos   = 0x88;
 
 // RedPose: Weapon::Render looks hardpoints up with _Find(pose + 4, 0x100, crc).
 constexpr unsigned kPoseTable     = 4;
@@ -132,25 +126,6 @@ constexpr int      kPoseTableSize = 0x100;
 // RedModel vtable +4: Render(PblMatrix* world, int, RedColor* color, uint flags, int).
 constexpr unsigned kSlotModelRender = 1;
 
-constexpr uint32_t pbl_hash(const char* text)
-{
-   uint32_t hash = 0x811C9DC5;
-   for (; *text; ++text) hash = (hash ^ (static_cast<uint8_t>(*text) | 0x20u)) * 0x01000193u;
-   return hash;
-}
-
-// PblTEMPHash: case-sensitive CRC-32/BZIP2, the key for model and pose hardpoints.
-constexpr uint32_t temp_hash(const char* text)
-{
-   uint32_t hash = 0xFFFFFFFF;
-   for (; *text; ++text) {
-      hash ^= static_cast<uint32_t>(static_cast<uint8_t>(*text)) << 24;
-      for (unsigned bit = 0; bit != 8; ++bit)
-         hash = (hash << 1) ^ ((hash & 0x80000000u) ? 0x04C11DB7u : 0);
-   }
-   return hash ^ 0xFFFFFFFF;
-}
-
 constexpr uint32_t kPropOffhandGeometry  = pbl_hash("OffhandGeometryName");
 constexpr uint32_t kPropOffhandHardPoint = pbl_hash("OffhandHardPoint");
 constexpr uint32_t kPropOffhandFirePoint = pbl_hash("OffhandFirePointName");
@@ -158,7 +133,7 @@ constexpr uint32_t kPropAlternateMode    = pbl_hash("AlternateMode");
 constexpr uint32_t kPropFireAnim         = pbl_hash("FireAnim");
 
 // WeaponClass::SetProperty falls back to this when an ODF names no FirePointName.
-constexpr uint32_t kDefaultFirePoint = temp_hash("hp_fire");
+constexpr uint32_t kDefaultFirePoint = pbl_temp_hash("hp_fire");
 
 enum class alternate_mode : uint8_t { shot, salvo };
 
@@ -307,20 +282,6 @@ T& at(void* p, unsigned offset)
    return *reinterpret_cast<T*>(static_cast<uint8_t*>(p) + offset);
 }
 
-void install_log(const char* fmt, ...)
-{
-   // CRT only: install runs while every section is mapped PAGE_READWRITE, so
-   // calling back into the engine's logger would EXEC-fault.
-   FILE* f = nullptr;
-   if (fopen_s(&f, "BF2GameExt.log", "a") != 0 || !f) return;
-   va_list ap;
-   va_start(ap, fmt);
-   vfprintf(f, fmt, ap);
-   va_end(ap);
-   fputc('\n', f);
-   fclose(f);
-}
-
 bool is_dual_weapon(void* weapon)
 {
    return weapon && *static_cast<void***>(weapon) == s_weaponVtable;
@@ -362,11 +323,11 @@ void __fastcall dual_set_property(void* cls, void* /*edx*/, uint32_t hash, const
             warning = "OffhandFirePointName not found on OffhandGeometryName \"%s\"";
       }
       else if (hash == kPropOffhandHardPoint) {
-         ext.hardPoint = *value ? temp_hash(value) : 0;
+         ext.hardPoint = *value ? pbl_temp_hash(value) : 0;
       }
       else if (hash == kPropOffhandFirePoint) {
          ext.firePointNamed = *value != 0;
-         ext.firePoint      = *value ? temp_hash(value) : kDefaultFirePoint;
+         ext.firePoint      = *value ? pbl_temp_hash(value) : kDefaultFirePoint;
          if (!resolve_fire_point(ext))
             warning = "OffhandFirePointName \"%s\" does not exist on the offhand model";
       }
@@ -512,7 +473,7 @@ void __fastcall hooked_class_render(void* cls, void* edx, const float* world, vo
 void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, void* pose,
                             const uint8_t* color, uint32_t flags, uint32_t highRes)
 {
-   const bool hidden = (at<uint32_t>(weapon, kWeaponHideFlags) & 1) != 0;
+   const bool hidden = (at<uint32_t>(weapon, layout::Weapon::kFlags) & layout::Weapon::kFlagHideWeapon) != 0;
 
    void*    model     = nullptr;
    uint32_t hardPoint = 0;
@@ -521,7 +482,7 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    uint8_t  lastFired = 0;
    {
       std::lock_guard<std::mutex> lock(s_mutex);
-      auto cls = s_classes.find(at<void*>(weapon, kWeaponRenderClass));
+      auto cls = s_classes.find(at<void*>(weapon, layout::Weapon::kRenderClass));
       if (cls != s_classes.end()) {
          model        = cls->second.model;
          hardPoint    = cls->second.hardPoint;
@@ -535,7 +496,7 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    const bool offhandFlash = lastFired == 1 && model && hardPoint && hasFirePoint;
 
    // Keep the main gun from drawing gun 2's flash.
-   float& flashStart = at<float>(weapon, kWeaponFlashStart);
+   float& flashStart = at<float>(weapon, layout::Weapon::kMuzzleFlashStartTime);
    const float savedFlashStart = flashStart;
    if (offhandFlash) flashStart = 0.0f;
    s_baseRender(weapon, world, pose, color, flags, highRes);
@@ -560,21 +521,21 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    }
 
    if (!offhandFlash) return;
-   void* aimer = at<void*>(weapon, kWeaponAimer);
-   void* cls   = at<void*>(weapon, kWeaponClass);
+   void* aimer = at<void*>(weapon, layout::Weapon::kAimer);
+   void* cls   = at<void*>(weapon, layout::Weapon::kClass);
    if (!aimer || !cls) return;
    const float flashLength = at<float>(cls, kClassFlashLength);
    const float remaining   = savedFlashStart - call_mission_time();
    if (remaining > 0.0f && flashLength > 0.0f)
-      call_render_flash(at<void*>(weapon, kWeaponRenderClass), firePos,
-                        &at<float>(aimer, kAimerDirection), remaining / flashLength);
+      call_render_flash(at<void*>(weapon, layout::Weapon::kRenderClass), firePos,
+                        &at<float>(aimer, layout::Aimer::kDirection), remaining / flashLength);
 }
 
 bool __fastcall hooked_fire(void* weapon, void* edx)
 {
    if (!is_dual_weapon(weapon)) return original_fire(weapon, edx);
 
-   void* cls = at<void*>(weapon, kWeaponClass);
+   void* cls = at<void*>(weapon, layout::Weapon::kClass);
    if (!cls) return original_fire(weapon, edx);
 
    const float now        = call_mission_time();
@@ -619,19 +580,19 @@ bool __fastcall hooked_fire(void* weapon, void* edx)
    }
 
    // Pick shoot or shoot2. Only ever FIRE <-> FIRE2, which every consumer treats alike.
-   uint32_t& state = at<uint32_t>(weapon, kWeaponState);
+   uint32_t& state = at<uint32_t>(weapon, layout::Weapon::kState);
    if (state == kStateFire || state == kStateFire2)
       state = barrel == 1 ? kStateFire2 : kStateFire;
 
-   void* aimer = at<void*>(weapon, kWeaponAimer);
+   void* aimer = at<void*>(weapon, layout::Weapon::kAimer);
    float newDir[3];
    const bool moveOrigin = barrel == 1 && offhandValid && aimer &&
                            barrel_fire_origin_aim_from(weapon, offhandPos, newDir);
    if (!moveOrigin) return original_fire(weapon, edx);
 
    // The next shot of this turn may be gun 1 again, so put the main muzzle back after.
-   float* firePos = &at<float>(aimer, kAimerFirePos);
-   float* dir     = &at<float>(aimer, kAimerDirection);
+   float* firePos = &at<float>(aimer, layout::Aimer::kFirePos);
+   float* dir     = &at<float>(aimer, layout::Aimer::kDirection);
    float savedPos[3], savedDir[3];
    std::memcpy(savedPos, firePos, sizeof(savedPos));
    std::memcpy(savedDir, dir, sizeof(savedDir));

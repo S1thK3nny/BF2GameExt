@@ -5,6 +5,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "core/layout/aimer.hpp"
 #include "core/layout/weapon.hpp"
 
 // =============================================================================
@@ -512,11 +513,11 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       // unconditionally, so it means "UpdateWeaponAndAimer authored mRootPos and
       // mDirection as a matched pair this turn". A turret or vehicle aimer never
       // carries it, which is what keeps those out of scope.
-      if (!*(const unsigned char*)((const char*)aimer + 0x29)) return false;
+      if (!*(const unsigned char*)((const char*)aimer + layout::Aimer::kDirect)) return false;
 
-      float*       dir     = (float*)((char*)aimer + 0x48);        // mDirection
-      float*       firePos = (float*)((char*)aimer + 0x88);        // mFirePos
-      const float* rootPos = (const float*)((char*)aimer + 0x70);  // mRootPos
+      float*       dir     = (float*)((char*)aimer + layout::Aimer::kDirection);
+      float*       firePos = (float*)((char*)aimer + layout::Aimer::kFirePos);
+      const float* rootPos = (const float*)((char*)aimer + layout::Aimer::kRootPos);
 
       float P[3];
       if (!aimTargetPoint(owner, rootPos, P)) return false;
@@ -573,7 +574,7 @@ bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outD
    if (!cached || !cached->valid) return false;
 
    // Same body-distance sanity test trustedBarrelPoint applies to the main muzzle.
-   const float* rootPos = (const float*)((char*)aimer + 0x70);
+   const float* rootPos = (const float*)((char*)aimer + layout::Aimer::kRootPos);
    for (int i = 0; i < 3; ++i) {
       const float d = muzzle[i] - rootPos[i];
       if (!(d > -5.0f && d < 5.0f)) return false;   // also rejects NaN
@@ -581,7 +582,7 @@ bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outD
 
    // mDirection already holds this turn's main-muzzle direction, which is within the
    // AI budget of vanilla, so it is the reference for this muzzle's budget too.
-   const float* dir = (const float*)((char*)aimer + 0x48);
+   const float* dir = (const float*)((char*)aimer + layout::Aimer::kDirection);
    float d2[3];
    if (!aimAt(muzzle, cached->P, dir, d2)) return false;
 

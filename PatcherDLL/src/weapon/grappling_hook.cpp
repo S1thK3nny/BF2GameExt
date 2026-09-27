@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/pbl_hash.hpp"
+#include "core/layout/aimer.hpp"
 #include "core/layout/weapon.hpp"
 
 #include <detours.h>
@@ -184,11 +185,6 @@ static constexpr int kOrdClass_Anim   = 0x16C;
 // soldier's collision space.  The constructor fills it in once and Render has used
 // it ever since.
 static constexpr int kOrd_WeaponOffset = 0x14C;
-
-// Aimer::mFirePos - the live fire point, and the field BarrelFireOrigin relocates
-// to the barrel hardpoint.
-static constexpr int kAimer_FirePos   = 0x088;
-
 
 // The displayable sub-object Render is called on, relative to the ordnance.
 static constexpr int kOrd_DisplayableOff = 0x098;
@@ -532,7 +528,8 @@ static void refresh_cable_anchor(void* ordnance, void* soldier)
    const float* m = ((fn_GetMatrix_t)collVt[kCollVt_GetMatrix / 4])(coll, nullptr);
    if (!m) return;
 
-   const float* firePos = (const float*)((char*)aimer + kAimer_FirePos);
+   // Aimer::mFirePos: the live fire point, which BarrelFireOrigin moves to the barrel.
+   const float* firePos = (const float*)((char*)aimer + layout::Aimer::kFirePos);
    const float d[3] = {
       firePos[0] - m[12], firePos[1] - m[13], firePos[2] - m[14],
    };

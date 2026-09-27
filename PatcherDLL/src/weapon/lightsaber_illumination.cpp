@@ -2,6 +2,7 @@
 #include "lightsaber_illumination.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/layout/weapon.hpp"
 #include "core/resolve.hpp"
 
 #include <detours.h>
@@ -105,9 +106,9 @@ static constexpr int      kLight_Node      = 0x30;
 static constexpr int      kLight_Node2     = 0x40;
 static constexpr int      kNode_Owner      = 0x0C;
 
-// WeaponMelee -> WeaponMeleeClass*. Same slot on every build: modtools
+// WeaponMelee -> WeaponMeleeClass*: the Weapon base's mRenderClass. Modtools
 // WeaponMelee::Render reads [ECX+0x68], Steam reads [ESI+0x68] at 0x0068A0B9.
-static constexpr int kMelee_mClass = 0x68;
+static constexpr int kMelee_mClass = layout::Weapon::kRenderClass;
 
 // WeaponMeleeClass -> blade table: a POINTER to the entries, with the entry
 // count in the dword immediately before it.
