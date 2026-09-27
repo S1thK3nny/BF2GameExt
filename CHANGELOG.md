@@ -37,7 +37,8 @@ Scripts can check the running version through `GameExt.version`.
   `.hud` binds them. Modtools, Steam and GOG.
   See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
 - **`EnableStrafe`** - Flyer ODF property that makes the strafe controls slide the
-  flyer sideways at `StrafeSpeed` instead of rolling it, leaning by `StrafeRollAngle`.
+  flyer sideways at `StrafeSpeed` instead of rolling it, leaning by `StrafeRollAngle`,
+  and lets it come out of reverse as quickly as it brakes into it.
   Off by default and inherited through `ClassParent`.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#vehicle-classes).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or

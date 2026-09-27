@@ -55,6 +55,14 @@ AI already produces a strafe value from `StrafeSpeed` (stock gunships and the MA
 in vanilla ends up as roll; in strafe mode it would strafe as the AI code intended. Whether that
 flies well needs a play test. Patch sites are mapped for modtools, Steam and GOG.
 
+**Flyer reverse recovery for all flyers** - A stock flyer takes several times longer to come out
+of reverse than to brake into it. The engine only snaps the forward speed to the throttle while
+the flyer is not still moving backwards, so braking out of reverse is left to the momentum
+filter: about 7x slower at 60 FPS, and slower still the higher the frame rate. `EnableStrafe`
+classes already have the fix, which pins the forward speed to the throttle target in normal
+flight. Goal is the same fix for every flyer. The stock MAF and the campaign ride gunships are
+the only stock flyers that can reverse.
+
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
 The fix is to add an additional check to the AI spawning code to check if the CommandFlyer is flying, and if so, 

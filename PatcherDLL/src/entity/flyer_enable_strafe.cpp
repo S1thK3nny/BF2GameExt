@@ -64,6 +64,18 @@
 // stock.  It applies to every flyer of a flagged class, player and AI alike, so
 // host and clients simulate the same thing in multiplayer.
 //
+// The same rescale also makes reverse lopsided.  Its guard is
+// `d > S || (S > d && d > 0)` with d = v.fwd, S = mSetSpeed: slowing down,
+// flipping through zero into reverse and speeding up in reverse all snap the
+// forward speed to S, but braking OUT of reverse (d < 0, S > d) does not, so
+// there only the momentum blend moves it, at Acceleration * MomentumFilter * dt
+// per second instead of Acceleration (about 7x slower at 60 fps, and frame rate
+// dependent: dt is the real frame time in single player).  BF1 sets velocity
+// directly, so it has no such asymmetry.  For a flagged class in FLYING the same
+// hook therefore also sets the forward component of mVelocity to mSetSpeed.
+// Wherever the engine's rescale already ran that is a no-op; it only changes
+// the reverse case, which then recovers at Acceleration like every other case.
+//
 // Patch shapes:
 //   modtools  `FLD [ebx+0x84]` -> `FLD [&s_rollInput]`    (D9 83 / D9 05, 6 bytes)
 //             `FMUL [zero]`    -> `FMUL [&s_rampInput]` at the ramp and
@@ -72,9 +84,11 @@
 //             `MULSS xmmA,xmm7 ; MULSS xmmB,xmmC` (8 bytes, no relative operands)
 //             -> JMP cave: `MULSS xmmA,[&input] ; MULSS xmmB,xmmC ; JMP back`
 //   both      `LEA EAX,[ESP+disp32]` (7 bytes) at the head of the integration
-//             -> JMP cave: add s_lat into mVelocity with x87 (the x87 stack is
-//             empty there on every build and no XMM register is touched), then
-//             the displaced LEA, JMP back.
+//             -> JMP cave: CALL integrate_hook, the displaced LEA, JMP back.
+//             The site is followed on every build by LEA EAX / PUSH EAX /
+//             LEA ECX / CALL, so EAX, ECX, EDX, the XMM registers and the
+//             flags are dead there, and the x87 stack is empty: a plain cdecl
+//             call is safe.  integrate_hook finds the flyer through s_in.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -86,6 +100,7 @@
 struct FlyerLayout {
    int mClass;        // EntityFlyerClass*
    int mVelocity;     // PblVector3, world space
+   int mSetSpeed;     // float, the throttle's target forward speed
    int mSetStrafe;    // float
    int mState;        // EntityFlyer::State
    int mFlightRatio;  // float, 0..1 through TAKEOFF / LANDING
@@ -95,16 +110,15 @@ struct FlyerLayout {
    // EntityFlyerClass
    int clsAcceleration;
    int clsStrafeSpeed;
-   // Integration cave
-   uint8_t baseRm;    // ModRM r/m of the register holding the Controllable base
+   // Integration site, `LEA EAX,[ESP+disp32]`
    uint8_t leaOrig[7];
 };
 static constexpr FlyerLayout kLayoutModtools = {
-   0x42C, 0x340, 0x35C, 0x364, 0x368, 0x36C, 0x374, 0x398, 0x884, 0x89C,
-   3 /* ebx */, {0x8D, 0x84, 0x24, 0x90, 0x00, 0x00, 0x00} };
+   0x42C, 0x340, 0x358, 0x35C, 0x364, 0x368, 0x36C, 0x374, 0x398, 0x884, 0x89C,
+   {0x8D, 0x84, 0x24, 0x90, 0x00, 0x00, 0x00} };
 static constexpr FlyerLayout kLayoutRelease = {
-   0x3EC, 0x300, 0x31C, 0x324, 0x328, 0x32C, 0x334, 0x358, 0x7BC, 0x7D4,
-   7 /* edi */, {0x8D, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00} };
+   0x3EC, 0x300, 0x318, 0x31C, 0x324, 0x328, 0x32C, 0x334, 0x358, 0x7BC, 0x7D4,
+   {0x8D, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00} };
 
 static constexpr int kControlStrafe = 0x84;   // mControlStrafe, every build
 static constexpr int kWorldRight    = -0x150; // object +0xF0
@@ -124,9 +138,11 @@ struct StrafeInputs {
    float   ramp;        // StrafeSpeed * ramp at the engine's strafe ramp
    float   lean;        // StrafeRollAngle * lean at the four lean sites
    float   roll;        // replaces the mControlStrafe roll load
+   void*   flyer;       // flagged flyer being updated, else null
    float   lat[3];      // added into mVelocity before integration
-   uint8_t latActive;   // cave adds lat only when set
-   uint8_t latApplied;  // cave sets it once it has added lat
+   uint8_t latActive;   // integrate_hook adds lat only when set
+   uint8_t latApplied;  // integrate_hook sets it once it has added lat
+   uint8_t fwdLock;     // integrate_hook pins the forward speed to mSetSpeed
 };
 static StrafeInputs s_in = {};
 
@@ -313,7 +329,9 @@ static bool update_flagged(void* ecx, float dt, uintptr_t cls, float axis)
    const bool  trick = field<float>(ecx, s_layout.mSideRollX) != 0.0f ||
                        field<float>(ecx, s_layout.mSideRollX + 4) != 0.0f;
 
-   s_in.roll = 0.0f; // the strafe axis never rolls a flagged class
+   s_in.roll    = 0.0f; // the strafe axis never rolls a flagged class
+   s_in.flyer   = ecx;
+   s_in.fwdLock = 1;    // symmetric reverse, see the header
 
    const bool ours = !trick && dt > 0.0f &&
                      (state == kStateTakeoff || state == kStateFlying ||
@@ -467,12 +485,6 @@ static uint8_t* cave_alloc(int size)
    return p;
 }
 
-static void put32(uint8_t* p, int& o, uint32_t v)
-{
-   std::memcpy(p + o, &v, 4);
-   o += 4;
-}
-
 static uint32_t abs32(const void* p) { return (uint32_t)(uintptr_t)p; }
 
 static bool integrate_site_ok(uintptr_t exe_base)
@@ -481,38 +493,46 @@ static bool integrate_site_ok(uintptr_t exe_base)
    return std::memcmp(site, s_layout.leaOrig, sizeof(s_layout.leaOrig)) == 0;
 }
 
+// Runs at the head of the position integration, after the state's velocity
+// code (and FLYING's rescale) and before `position += dt * mVelocity`.
+static void __cdecl integrate_hook()
+{
+   void* f = s_in.flyer;
+   if (!f) return; // not a flagged flyer: stock
+
+   float* v = &field<float>(f, s_layout.mVelocity);
+
+   if (s_in.latActive) {
+      for (int i = 0; i < 3; i++) v[i] += s_in.lat[i];
+      s_in.latApplied = 1;
+   }
+
+   // Pin the forward component to the throttle target.  Where the engine's
+   // rescale already ran it is already there; this only acts when braking out
+   // of reverse.  The strafe above lies along the flight frame's right axis,
+   // which is perpendicular to World.fwd, so it does not change d.
+   if (s_in.fwdLock && field<int>(f, s_layout.mState) == kStateFlying) {
+      const float* fwd = &field<float>(f, kWorldFwd);
+      const float  d   = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
+      const float  dS  = field<float>(f, s_layout.mSetSpeed) - d;
+      for (int i = 0; i < 3; i++) v[i] += fwd[i] * dS;
+   }
+}
+
 // At the head of the position integration, `LEA EAX,[ESP+disp32]` becomes a JMP
 // to:
-//      CMP  byte [s_in.latActive], 0
-//      JE   skip
-//      FLD  dword [base+mVelocity+0]  ; FADD dword [s_in.lat+0] ; FSTP [base+mVelocity+0]
-//      ... +4, +8
-//      MOV  byte [s_in.latApplied], 1
-//   skip:
-//      LEA  EAX,[ESP+disp32]          ; displaced, ESP untouched since the JMP
+//      CALL integrate_hook
+//      LEA  EAX,[ESP+disp32]   ; displaced, ESP is back where it was after the call
 //      JMP  back
-// Flags are dead here (the next flag reader follows its own CMP/TEST), and
-// the x87 stack is empty on every build, so one slot is free.
 static bool patch_integrate(uintptr_t exe_base)
 {
    uint8_t* site = (uint8_t*)resolve(exe_base, g_addr->flyer_strafe_integrate);
-   uint8_t* c    = cave_alloc(96);
+   uint8_t* c    = cave_alloc(17);
    if (!c) return false;
 
-   const uint8_t rm = s_layout.baseRm;
-   int o = 0;
-   c[o++] = 0x80; c[o++] = 0x3D; put32(c, o, abs32(&s_in.latActive)); c[o++] = 0x00;
-   c[o++] = 0x74; const int jeAt = o++;
-   for (int i = 0; i < 3; i++) {
-      const uint32_t vel = (uint32_t)(s_layout.mVelocity + 4 * i);
-      c[o++] = 0xD9; c[o++] = (uint8_t)(0x80 | rm);        put32(c, o, vel);                // FLD  [base+vel]
-      c[o++] = 0xD8; c[o++] = 0x05;                        put32(c, o, abs32(&s_in.lat[i])); // FADD [abs]
-      c[o++] = 0xD9; c[o++] = (uint8_t)(0x98 | rm);        put32(c, o, vel);                // FSTP [base+vel]
-   }
-   c[o++] = 0xC6; c[o++] = 0x05; put32(c, o, abs32(&s_in.latApplied)); c[o++] = 0x01;
-   c[jeAt] = (uint8_t)(o - (jeAt + 1));
-   std::memcpy(c + o, site, 7); o += 7;
-   o = x86::emit_jmp(c, o, site + 7);
+   x86::encode_branch(c, c, x86::kCall, &integrate_hook);
+   std::memcpy(c + 5, site, 7);
+   x86::emit_jmp(c, 12, site + 7);
 
    remember(site, 7);
    x86::write_branch(site, x86::kJmp, c, 7);
