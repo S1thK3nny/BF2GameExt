@@ -94,6 +94,7 @@ See **[HUD System](HUD.md)** for the full event and parameter reference.
 - **Bar Fill Direction** - HUD bars could only fill from the left. A `BarBitmap` can now fill from the right, the bottom or the top without breaking its texture.
 - **Weapon Icon Textures** - The `IconTexture` a weapon ODF names never appeared on the HUD. A `.hud` can now show it for both weapon slots, on foot, in vehicles and in turrets.
 - **Class and Vehicle Health Icons** - Health icons that follow your class, stance or vehicle could only be swapped from Lua, which never runs on multiplayer clients. A `.hud` can now take them straight from the class's `HealthTexture`, including crouch, prone and droideka ball variants.
+- **Math Transform** - A `.hud` could only map a value onto a colour, a position or a mesh, never do arithmetic with it. `TransformNumberMath` now adds, subtracts, multiplies or divides two values, or takes the smaller or larger, for things like missing health or a ticket lead.
 
 ## Soldier Systems
 

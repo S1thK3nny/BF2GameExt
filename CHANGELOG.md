@@ -36,6 +36,11 @@ Scripts can check the running version through `GameExt.version`.
   Published from the HUD update, so they work on multiplayer clients; inert unless a
   `.hud` binds them. Modtools, Steam and GOG.
   See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
+- **`TransformNumberMath`** - A HUD transform that adds, subtracts, multiplies,
+  divides or takes the minimum or maximum of two events or constants, optionally
+  clamped, and publishes the result as a new event, for values the stock transforms
+  cannot make, such as missing health or a ticket lead. Inert unless a `.hud`
+  declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
