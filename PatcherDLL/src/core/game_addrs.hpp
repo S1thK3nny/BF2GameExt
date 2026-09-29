@@ -801,9 +801,15 @@ namespace modtools {
    // CommandWalker::Kill -- __thiscall on the Damageable sub-object (base+0x140),
    // bare RET.  Kills the mobile command post at [this+0x2000] and then zeroes it,
    // with no null check (the destructor has one).  Detoured so a second Kill is a
-   // no-op; see entity/command_walker_kill_fix.cpp.
+   // no-op; see entity/flyer_carrier_fixes.cpp.
    constexpr uintptr_t command_walker_kill          = 0x006508B0;
    constexpr uintptr_t command_walker_post_off      = 0x2000;      // Damageable -> post
+
+   // Net send-list visitor, __cdecl(GameObject* obj, int depth), bare RET.  Passes
+   // itself to obj->AddSends (vtable +0x10C).  Detoured to break pilot cycles that
+   // recurse at constant depth until the stack overflows; see
+   // entity/flyer_carrier_fixes.cpp.
+   constexpr uintptr_t net_send_visitor             = 0x00703750;
 
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0064FDF0, __cdecl(entity, CommandPostClass*).  sPostArray is a fixed 16
@@ -2039,6 +2045,10 @@ namespace steam {
    constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
    constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
 
+   // Net send-list visitor -- same body as modtools (PUSH 0x005BD590 as its own
+   // callback, list at [0x01FA65B4], count 0x01FA87A4 capped at 0x40), bare RET.
+   constexpr uintptr_t net_send_visitor            = 0x005BD590;
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0047AC80, __fastcall(ECX = entity, EDX = CommandPostClass*) -- a DIFFERENT
    // convention from modtools' __cdecl, read from this build's own prologue.
@@ -3237,6 +3247,9 @@ namespace gog {
    // shift 0), same layout.
    constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
    constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
+
+   // Net send-list visitor -- tools/port_gog.py code: score 1.00, shift +0xFA0.
+   constexpr uintptr_t net_send_visitor            = 0x005BE530;
 
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // Same VA as Steam and byte-identical: tools/port_gog.py `deep` compares the

@@ -172,9 +172,6 @@
     <ClInclude Include="src\entity\command_post_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
-    <ClInclude Include="src\entity\command_walker_kill_fix.hpp">
-      <Filter>entity</Filter>
-    </ClInclude>
     <ClInclude Include="src\entity\soldier_override_texture.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -433,9 +430,6 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\command_post_null_fix.cpp">
-      <Filter>entity</Filter>
-    </ClCompile>
-    <ClCompile Include="src\entity\command_walker_kill_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\soldier_override_texture.cpp">

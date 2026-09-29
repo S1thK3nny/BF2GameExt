@@ -132,7 +132,6 @@
     <ClInclude Include="src\entity\hero_team_switch_fix.hpp" />
     <ClInclude Include="src\entity\fp_fire_animation_fix.hpp" />
     <ClInclude Include="src\entity\command_post_null_fix.hpp" />
-    <ClInclude Include="src\entity\command_walker_kill_fix.hpp" />
     <ClInclude Include="src\entity\command_post_overflow_fix.hpp" />
     <ClInclude Include="src\entity\branch_region_debug.hpp" />
     <ClInclude Include="src\entity\branch_region_fix.hpp" />
@@ -262,7 +261,6 @@
     <ClCompile Include="src\entity\hero_team_switch_fix.cpp" />
     <ClCompile Include="src\entity\fp_fire_animation_fix.cpp" />
     <ClCompile Include="src\entity\command_post_null_fix.cpp" />
-    <ClCompile Include="src\entity\command_walker_kill_fix.cpp" />
     <ClCompile Include="src\entity\command_post_overflow_fix.cpp" />
     <ClCompile Include="src\entity\branch_region_debug.cpp" />
     <ClCompile Include="src\entity\branch_region_fix.cpp" />

@@ -231,7 +231,7 @@ ground distance > `TakeoffHeight + LandedHeight`.
   clears Damageable+0xBC bit 3) without the dead flag (`+0x2060` bit 1, set by `Die`)
   and runs its death branch: `Kill` again, then `Die`. For a CommandWalker the second
   `Kill` dereferences the already-zeroed mobile command post (modtools `0x0064BB26`).
-  `command_walker_kill_fix.cpp` makes that second call a no-op on all builds.
+  GameExt makes that second call a no-op on all builds (see 9.8).
 - **ActivatePhysics**: only activates the Controllable with priority -1. EntityFlyer's
   version also activates the post-collision sub-object (-15), aimers, turrets and
   passenger slots, so carrier turrets are built but never activated.
@@ -391,7 +391,17 @@ net delta zeroed). The scene bounding sphere is kept on the pivot with radius at
 - **CreateController null check** (modtools only): PlayerController path dereferences
   `[ESI+0xD0]+0xD4` without a check.
 
-### 9.8 Calling-convention traps
+### 9.8 Carrier-exposed engine crashes
+
+- **CommandWalker::Kill** (modtools `0x006508B0`, release `0x0047FFE0`): returns at once when
+  the mobile command post pointer (Damageable `+0x2000` / `+0x1FC0`) is already NULL, i.e.
+  Kill already ran. See 5.5.
+- **Net send-list visitor** (modtools `0x00703750`, Steam `0x005BD590`, GOG `0x005BE530`,
+  `__cdecl(obj, depth)`, bare RET): tracks the objects whose AddSends is running and skips one
+  that comes around again (nesting cap 128). Logs `[NetSendCycleFix]` with the chain once.
+  See 10.
+
+### 9.9 Calling-convention traps
 
 - `VehicleSpawn::UpdateSpawn` on release: dt in XMM1, bare RET. Bridged with naked thunks.
 - Release `AttachCargo` ignores its slot argument.
@@ -418,6 +428,12 @@ net delta zeroed). The scene bounding sphere is kept on the pivot with radius at
   keeping the flight model in charge instead of overwriting positions. Not verified.
 - **Turrets share the carrier's AI state** during their borrowed UpdateIndirect call, so
   several turrets don't select targets independently. Needs UnitController RE.
+- **Multiplayer host stack overflow**: the host's send-list visitor (modtools `0x00703750`,
+  Steam `0x005BD590`, GOG `0x005BE530`) recursed forever through `EntityFlyer::AddSends`,
+  which sends `mPilot->GetGameObject()` at the same depth with no PILOT_SELF guard, on an
+  EntityCarrier whose pilot resolves to itself (a Steam MP test logged a one-object chain).
+  GameExt breaks the loop (see 9.8). Why the carrier's `mPilot` leads back to itself is
+  still not known.
 - **Multiplayer clients**: `dropStrandedCargo` runs on every machine; carriers on clients
   were not checked.
 - The EntityCarrier memory pool size caps carriers map-wide; GameExt tracks at most 8.

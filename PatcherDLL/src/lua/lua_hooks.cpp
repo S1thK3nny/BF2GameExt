@@ -27,7 +27,6 @@
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
 #include "entity/command_post_null_fix.hpp"
-#include "entity/command_walker_kill_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
 #include "util/sound_diag.hpp"
@@ -317,7 +316,6 @@ void lua_hooks_uninstall()
    particle_batch_spill_uninstall();
    particle_density_uninstall();
    command_post_null_fix_uninstall();
-   command_walker_kill_fix_uninstall();
    branch_region_debug_uninstall();
    branch_region_fix_uninstall();
    anim_bank_append_uninstall();
