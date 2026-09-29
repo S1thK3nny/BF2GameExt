@@ -362,7 +362,10 @@ detaches go through the hooked DetachCargo so the restore always runs.
   normal into heading and pitch. While a tracked carrier is more than
   `max(2 * landedHeight, 10)` above its pad (the **instance** landed height, which includes
   the cargo; the class value left tall cargo such as an AT-AT parked above that threshold
-  at the descent target, so it never landed) they report "no hit" (ground distance 1024) for
+  at the descent target, so it never landed), or is LANDING and more than 2 m from the pad
+  horizontally (under a low `SetMaxFlyHeight` the whole approach is inside the height
+  threshold, so the landing check passed over the terrain it crossed and the cargo was set
+  down short of the pad), they report "no hit" (ground distance 1024) for
   the duration of its Update: modtools `FLD1` + NOPs, release a CALL to a stub that sets
   XMM0 = 1.0. Sites: modtools `0x004FE8CD` / `0x004FEAE2`, release `0x004AE246` /
   `0x004AE478`.

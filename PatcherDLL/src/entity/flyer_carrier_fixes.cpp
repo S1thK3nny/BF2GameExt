@@ -883,6 +883,10 @@ static void applyAscentLock(CarrierTrack& t, char* base)
    fieldF(base, kPosZ) = t.snapZ + t.fwdDirZ * dist;
 }
 
+// During LANDING the ground rays stay off until the carrier is this close to the
+// pad horizontally (see hooked_CarrierUpdate).
+static constexpr float kOverPadRadius = 2.0f;
+
 // Descent: from wherever LANDING starts, smoothstep X/Y/Z onto the pad over
 // LandingTime.  Y targets padY + instance LandedHeight - 1 so vanilla's own
 // ground check (groundDistance < LandedHeight) fires directly over the pad.
@@ -964,10 +968,18 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          // Instance landed height, which includes the cargo.  The descent
          // parks the carrier at padY + landedHeight - 1, so the rays must be
          // live there or the landing check never passes (tall cargo such as
-         // an AT-AT would hover over the pad forever).
+         // an AT-AT would hover over the pad forever).  While LANDING they also
+         // stay off until the carrier is over the pad, so vanilla's landing
+         // check cannot pass over terrain the approach crosses (a low
+         // SetMaxFlyHeight keeps the whole approach within the height
+         // threshold, and the cargo was set down short of the pad).
          const float landedHt  = fieldF(base, L->landedHeight);
          const float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
-         if (fieldF(base, kPosY) - t->padY > threshold) {
+         const float dx = fieldF(base, kPosX) - t->padX;
+         const float dz = fieldF(base, kPosZ) - t->padZ;
+         const bool  approaching = flightState(base) == 3 &&
+                                   dx * dx + dz * dz > kOverPadRadius * kOverPadRadius;
+         if (approaching || fieldF(base, kPosY) - t->padY > threshold) {
             rayHitSet(true);
             neutralised = true;
          }

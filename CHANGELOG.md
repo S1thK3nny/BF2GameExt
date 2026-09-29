@@ -86,6 +86,8 @@ Scripts can check the running version through `GameExt.version`.
     hovering over the pad.
   - Shooting down a carrier that is still carrying an AT-AT or another command walker no
     longer crashes the game.
+  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
+    ceiling.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.
