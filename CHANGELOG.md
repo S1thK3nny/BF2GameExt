@@ -111,6 +111,11 @@ Scripts can check the running version through `GameExt.version`.
 - **Foley sounds from several sound files** - Soldiers no longer lose their footstep
   and impact sounds when a mission script loads world sound files from more than one
   map. Missions that load a single one are unchanged.
+- **`GameExt_TestVersion(major, minor, patch)`** - True if the running BF2GameExt is
+  that version or newer, as Shader Patch's `SP_TestVersion` is for SP, so a script can
+  gate what it loads on a minimum version in one line:
+  `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
+  See [Lua API](docs/user/LUA_API.md#detection).
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.

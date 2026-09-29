@@ -1487,6 +1487,45 @@ static int lua_ContentCensus(lua_State* L)
    return 0;
 }
 
+// Whether version `have` is `want` or newer, part by part.
+constexpr bool version_at_least(int haveMajor, int haveMinor, int havePatch,
+                                int wantMajor, int wantMinor, int wantPatch)
+{
+   return haveMajor != wantMajor ? haveMajor > wantMajor
+        : haveMinor != wantMinor ? haveMinor > wantMinor
+        : havePatch >= wantPatch;
+}
+static_assert(version_at_least(1, 2, 0, 1, 2, 0) && version_at_least(1, 2, 0, 1, 1, 9) &&
+              version_at_least(2, 0, 0, 1, 9, 9) && version_at_least(1, 10, 0, 1, 9, 0));
+static_assert(!version_at_least(1, 2, 0, 1, 2, 1) && !version_at_least(1, 2, 0, 1, 3, 0) &&
+              !version_at_least(1, 9, 9, 2, 0, 0) && !version_at_least(1, 1, 5, 1, 2, 0));
+
+// GameExt_TestVersion(major [, minor [, patch]]): true if this BF2GameExt is that
+// version or newer, as Shader Patch's SP_TestVersion answers for SP. A missing
+// part counts as 0. It arrived in 1.2.0, so on older builds it is nil and
+// `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)` is false, as it should be.
+static int lua_TestVersion(lua_State* L)
+{
+   if (!g_lua.gettop || !g_lua.isnumber || !g_lua.tonumber || !g_lua.pushboolean) return 0;
+   int want[3] = { 0, 0, 0 };
+   const int count = g_lua.gettop(L);
+   bool valid = count >= 1;
+   for (int i = 0; valid && i < 3 && i < count; ++i) {
+      if (g_lua.isnumber(L, i + 1)) want[i] = (int)g_lua.tonumber(L, i + 1);
+      else valid = false;
+   }
+   static bool warned = false;
+   if (!valid && !warned) {
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "GameExt_TestVersion takes version numbers, as in GameExt_TestVersion(1, 2, 0); "
+                   "answering false.\n");
+      warned = true;
+   }
+   g_lua.pushboolean(L, valid && version_at_least(GAMEEXT_VERSION_MAJOR, GAMEEXT_VERSION_MINOR,
+                                                  GAMEEXT_VERSION_PATCH, want[0], want[1], want[2]));
+   return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Mission-script name validity
 //
@@ -1636,6 +1675,7 @@ static int lua_GetMissionName(lua_State* L)
 }
 
 static const lua_func_entry custom_functions[] = {
+   { "GameExt_TestVersion",   lua_TestVersion },
    { "GameExtContentCensus",  lua_ContentCensus },
    // The name it shipped under in 1.0.0, kept so scripts using it still work.
    { "ContentCensus",         lua_ContentCensus },

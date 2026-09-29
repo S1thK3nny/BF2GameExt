@@ -12,6 +12,7 @@ Set alongside the function registrations, so scripts can degrade gracefully when
 | `GameExt.version` | Version string, e.g. `"1.0.0"`. |
 | `GameExt.build` | Which executable is being patched: `"modtools"`, `"steam"`, `"gog"` or `"unknown"`. |
 | `GameExt.disable` | Write-only opt-out. Set it truthy to disable BF2GameExt's intrusive gameplay features for a mission (see below). |
+| `GameExt_TestVersion(major, minor, patch)` | `true` if the running BF2GameExt is that version or newer, as Shader Patch's `SP_TestVersion` is for SP. `minor` and `patch` can be left out and count as 0. New in 1.2.0, so it is `nil` on older versions and without BF2GameExt. |
 
 ```lua
 if GameExt then
@@ -19,6 +20,18 @@ if GameExt then
     SetFogEnable(1)
 end
 ```
+
+**Checking the version (`GameExt_TestVersion`)** - Check that it exists before calling it.
+It is `nil` without BF2GameExt and before 1.2.0, so the whole check comes out false
+there, which is right for anything that needs 1.2.0 or later:
+
+```lua
+useGameExtHud = GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)
+```
+
+Versions older than 1.2.0 do not have it, so it cannot tell them apart. To use
+something that arrived earlier, check that the function exists instead, as in
+`if SetInstanceProperty then`. Anything but numbers answers false and logs a warning.
 
 **Opting out (`GameExt.disable`)** - A mod that wants the extension's fixes and Lua API but *not* its gameplay-altering features can set `GameExt.disable = true`. Set it in your mission's `ScriptPreInit` or `ScriptInit`, but before the `ReadDataFile("ingame.lvl")` call, so it takes effect for that mission:
 
