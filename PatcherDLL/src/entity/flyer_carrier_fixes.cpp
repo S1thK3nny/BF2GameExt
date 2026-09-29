@@ -197,7 +197,6 @@ struct CarrierTrack {
    float    padX, padY, padZ;
    float    descentDuration;    // LandingTime (clamped)
    float    forwardSpeed;       // TakeoffSpeed (clamped)
-   float    landedHt;           // class LandedHeight
    int      savedCargoTeam[kMaxCargo];  // -1 = nothing saved
 
    int      lastState;
@@ -962,7 +961,12 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    __try {
       if (t) {
          applyAscentLock(*t, base);
-         const float threshold = (t->landedHt * 2.0f > 10.0f) ? t->landedHt * 2.0f : 10.0f;
+         // Instance landed height, which includes the cargo.  The descent
+         // parks the carrier at padY + landedHeight - 1, so the rays must be
+         // live there or the landing check never passes (tall cargo such as
+         // an AT-AT would hover over the pad forever).
+         const float landedHt  = fieldF(base, L->landedHeight);
+         const float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
          if (fieldF(base, kPosY) - t->padY > threshold) {
             rayHitSet(true);
             neutralised = true;
@@ -1177,7 +1181,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          const float speed     = cls ? fieldF(cls, L->clsTakeoffSpeed) : 20.0f;
          t->descentDuration = (landingTm > 2.0f) ? landingTm : 2.0f;
          t->forwardSpeed    = (speed > 1.0f) ? speed : 1.0f;
-         t->landedHt        = cls ? fieldF(cls, L->clsLandedHeight) : 5.0f;
 
          // Slot 0 was attached inside the original, before we tracked it.
          if (void* cargo0 = slotCargo(carrier, 0)) saveCargoTeam(*t, 0, cargo0);

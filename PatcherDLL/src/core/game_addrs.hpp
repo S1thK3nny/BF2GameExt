@@ -798,6 +798,13 @@ namespace modtools {
    // non-CommandPost entity can produce; see entity/command_post_null_fix.cpp.
    constexpr uintptr_t command_post_set_team        = 0x0064FBC0;
 
+   // CommandWalker::Kill -- __thiscall on the Damageable sub-object (base+0x140),
+   // bare RET.  Kills the mobile command post at [this+0x2000] and then zeroes it,
+   // with no null check (the destructor has one).  Detoured so a second Kill is a
+   // no-op; see entity/command_walker_kill_fix.cpp.
+   constexpr uintptr_t command_walker_kill          = 0x006508B0;
+   constexpr uintptr_t command_walker_post_off      = 0x2000;      // Damageable -> post
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0064FDF0, __cdecl(entity, CommandPostClass*).  sPostArray is a fixed 16
    // entries and the append path has no capacity check, so the 17th registration
@@ -2025,6 +2032,13 @@ namespace steam {
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
 
+   // CommandWalker::Kill -- Damageable vtable slot 1 (vtable 0x00798974, set by the
+   // ctor at 0x0047FE70).  Same body as modtools: PUSH ESI / MOV ESI,ECX / CALL
+   // EntityWalker::Kill / kill [ESI+0x1FC0] with no null check / zero it / bare RET.
+   // The post sits 0x40 lower than modtools, like the rest of the walker fields.
+   constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
+   constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0047AC80, __fastcall(ECX = entity, EDX = CommandPostClass*) -- a DIFFERENT
    // convention from modtools' __cdecl, read from this build's own prologue.
@@ -3218,6 +3232,11 @@ namespace gog {
    // Detours steals whole instructions, which matters here: a hand-rolled 5-byte
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
+
+   // CommandWalker::Kill -- same VA as Steam (tools/port_gog.py code: score 1.00,
+   // shift 0), same layout.
+   constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
+   constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
 
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // Same VA as Steam and byte-identical: tools/port_gog.py `deep` compares the

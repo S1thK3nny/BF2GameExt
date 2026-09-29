@@ -174,6 +174,12 @@ scene bounding sphere `+0xC4..+0xD0`, PblHandle id `+0x204`, team bits `+0x234`
 
 After spawning, the carrier's Y is clamped to `AIUtil::gMaxFlyHeight` (default 200, Lua
 `SetMaxFlyHeight`), so a spawn height above that is pulled down on the first frame.
+The clamp is in `EntityFlyer::Update` (modtools `0x005006BB`), runs every frame on the
+integrated position and caps the **absolute world Y** at the limit + 0.2:
+`gMaxFlyHeight` for AI-driven flyers, `gMaxPlayerFlyHeight` when `[this+0xD4] >= 0`.
+A BF1 port that keeps `SetMaxFlyHeight(30)` therefore starts every descent about 30 m
+above a pad at Y=0 and (with LandingTime 15, MinSpeed 70) 525 m out, which reads as a
+low approach from the side.
 
 ### 5.3 Descent and landing (`EntityFlyer::Update`, state 3)
 
@@ -217,8 +223,15 @@ ground distance > `TakeoffHeight + LandedHeight`.
 - **DetachCargo**: clears `cargo->mParent`, remembers the cargo for 1.5 s (collisions with
   it are ignored meanwhile), clears the slot, updates the landed height, plays
   `DropoffSound`.
-- **Kill**: drops first person for a local pilot, wakes and detaches every live cargo,
-  then `EntityFlyer::Kill`.
+- **Kill**: drops first person for a local pilot, **kills** and detaches every live
+  cargo, then `EntityFlyer::Kill`. The kill is cargo `vtable+0x6C` (returns the
+  Controllable, base+0x240) then its `vtable+0x14`, which on a CommandWalker is a thunk
+  (`SUB ECX,0x100`) to the Damageable `Kill`. That is a direct Kill with no `Die`, so the
+  cargo's next `EntityWalker::Update` sees the alive bit cleared (`EntityWalker::Kill`
+  clears Damageable+0xBC bit 3) without the dead flag (`+0x2060` bit 1, set by `Die`)
+  and runs its death branch: `Kill` again, then `Die`. For a CommandWalker the second
+  `Kill` dereferences the already-zeroed mobile command post (modtools `0x0064BB26`).
+  `command_walker_kill_fix.cpp` makes that second call a no-op on all builds.
 - **ActivatePhysics**: only activates the Controllable with priority -1. EntityFlyer's
   version also activates the post-collision sub-object (-15), aimers, turrets and
   passenger slots, so carrier turrets are built but never activated.
@@ -347,7 +360,9 @@ detaches go through the hooked DetachCargo so the restore always runs.
   post-drop carrier can't re-enter LANDING.
 - **Terrain wobble**: the two downward RayHit calls in `EntityFlyer::Update` feed the terrain
   normal into heading and pitch. While a tracked carrier is more than
-  `max(2 * landedHeight, 10)` above its pad they report "no hit" (ground distance 1024) for
+  `max(2 * landedHeight, 10)` above its pad (the **instance** landed height, which includes
+  the cargo; the class value left tall cargo such as an AT-AT parked above that threshold
+  at the descent target, so it never landed) they report "no hit" (ground distance 1024) for
   the duration of its Update: modtools `FLD1` + NOPs, release a CALL to a stub that sets
   XMM0 = 1.0. Sites: modtools `0x004FE8CD` / `0x004FEAE2`, release `0x004AE246` /
   `0x004AE478`.
