@@ -37,6 +37,9 @@
 //   - Terrain-wobble suppression (RayHit neutralised at altitude).
 //   - Pad lifecycle gaps vanilla leaves open (see padCarrierUpdate and
 //     dropStrandedCargo).
+//   - Engine crashes carriers expose: a second CommandWalker::Kill after the
+//     carrier kills its cargo, and the multiplayer host's send-list recursion
+//     on a carrier that pilots itself.
 //
 // Per-carrier state is keyed by (object pointer, PblHandle id at +0x204).
 // Vanilla deletes finished carriers from VehicleSpawn, not from their own
@@ -197,7 +200,6 @@ struct CarrierTrack {
    float    padX, padY, padZ;
    float    descentDuration;    // LandingTime (clamped)
    float    forwardSpeed;       // TakeoffSpeed (clamped)
-   float    landedHt;           // class LandedHeight
    int      savedCargoTeam[kMaxCargo];  // -1 = nothing saved
 
    int      lastState;
@@ -884,6 +886,10 @@ static void applyAscentLock(CarrierTrack& t, char* base)
    fieldF(base, kPosZ) = t.snapZ + t.fwdDirZ * dist;
 }
 
+// During LANDING the ground rays stay off until the carrier is this close to the
+// pad horizontally (see hooked_CarrierUpdate).
+static constexpr float kOverPadRadius = 2.0f;
+
 // Descent: from wherever LANDING starts, smoothstep X/Y/Z onto the pad over
 // LandingTime.  Y targets padY + instance LandedHeight - 1 so vanilla's own
 // ground check (groundDistance < LandedHeight) fires directly over the pad.
@@ -962,8 +968,21 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    __try {
       if (t) {
          applyAscentLock(*t, base);
-         const float threshold = (t->landedHt * 2.0f > 10.0f) ? t->landedHt * 2.0f : 10.0f;
-         if (fieldF(base, kPosY) - t->padY > threshold) {
+         // Instance landed height, which includes the cargo.  The descent
+         // parks the carrier at padY + landedHeight - 1, so the rays must be
+         // live there or the landing check never passes (tall cargo such as
+         // an AT-AT would hover over the pad forever).  While LANDING they also
+         // stay off until the carrier is over the pad, so vanilla's landing
+         // check cannot pass over terrain the approach crosses (a low
+         // SetMaxFlyHeight keeps the whole approach within the height
+         // threshold, and the cargo was set down short of the pad).
+         const float landedHt  = fieldF(base, L->landedHeight);
+         const float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
+         const float dx = fieldF(base, kPosX) - t->padX;
+         const float dz = fieldF(base, kPosZ) - t->padZ;
+         const bool  approaching = flightState(base) == 3 &&
+                                   dx * dx + dz * dz > kOverPadRadius * kOverPadRadius;
+         if (approaching || fieldF(base, kPosY) - t->padY > threshold) {
             rayHitSet(true);
             neutralised = true;
          }
@@ -1177,7 +1196,6 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
          const float speed     = cls ? fieldF(cls, L->clsTakeoffSpeed) : 20.0f;
          t->descentDuration = (landingTm > 2.0f) ? landingTm : 2.0f;
          t->forwardSpeed    = (speed > 1.0f) ? speed : 1.0f;
-         t->landedHt        = cls ? fieldF(cls, L->clsLandedHeight) : 5.0f;
 
          // Slot 0 was attached inside the original, before we tracked it.
          if (void* cargo0 = slotCargo(carrier, 0)) saveCargoTeam(*t, 0, cargo0);
@@ -1186,6 +1204,107 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       spawnExtraCargo(vs, carrier, t, team, countAfter);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       if (auto fn = get_gamelog()) fn("[Carrier] exception after UpdateSpawn\n");
+   }
+}
+
+// ---------------------------------------------------------------------------
+// CommandWalker::Kill double call
+//
+// EntityCarrier::Kill kills every attached cargo directly (cargo vtable +0x6C
+// returns the Controllable, whose slot 5 is a thunk to the Damageable Kill).
+// EntityWalker::Kill clears the alive bit (Damageable+0xBC bit 3) but only
+// EntityWalker::Update's own death branch follows with Die(), which sets the
+// dead flag, so the walker's next Update runs Kill() again, then Die().
+// CommandWalker::Kill kills its mobile command post and zeroes the pointer with
+// no null check (the destructor has one), so the second call reads NULL
+// (modtools AV at 0x0064BB26).  Lua KillObject is the same kind of direct Kill.
+//
+// The post is built in the constructor and BuildPost always returns a slot, so
+// a NULL post means Kill already ran: the second call becomes a no-op and
+// Update's Die() still finishes the death.  CommandHover and the command
+// buildings never zero their post, and the post-kill function returns early on
+// an inactive post, so they are safe as they are.
+// ---------------------------------------------------------------------------
+
+using fn_WalkerKill_t = void(__fastcall*)(void* ecx, void* edx);   // __thiscall, bare RET
+static fn_WalkerKill_t original_CommandWalkerKill = nullptr;
+static uintptr_t       s_walkerPostOff = 0;                        // Damageable -> post
+
+static void __fastcall hooked_CommandWalkerKill(void* ecx, void* edx)
+{
+   if (ecx && *(void**)((char*)ecx + s_walkerPostOff) == nullptr) return;  // already killed
+   original_CommandWalkerKill(ecx, edx);
+}
+
+// ---------------------------------------------------------------------------
+// Net send-list cycle (multiplayer host)
+//
+// The host builds each client's send list with a visitor, __cdecl(obj, depth),
+// that skips obj when it is already in list[0 .. depth-1], otherwise inserts it
+// at `depth` and calls obj->AddSends(visitor, depth) (vtable +0x10C).
+// EntityFlyer::AddSends sends mPilot->GetGameObject() at the SAME depth with no
+// PILOT_SELF guard, and a carrier's pilot can resolve to the carrier itself
+// (seen in a Steam MP test).  The entry the visitor just wrote sits at index
+// `depth`, outside the range the dedupe scans, so the carrier is re-inserted at
+// the same depth until the stack overflows (GOG: STACK_OVERFLOW at 0x005BE545).
+//
+// The hook tracks the objects whose AddSends is running and returns early when
+// one comes around again, which breaks any loop shape; the object is already in
+// the list at that point.  The visitor passes its own address as the callback,
+// so hooking its entry covers every nested call.  Logs the chain once.
+// ---------------------------------------------------------------------------
+
+using fn_SendVisitor_t = void(__cdecl*)(void* obj, int depth);
+static fn_SendVisitor_t original_SendVisitor = nullptr;
+static uintptr_t        s_exeBase = 0;
+
+static constexpr int kMaxSendNesting = 128;   // the list itself holds 64 entries
+static void* s_sendActive[kMaxSendNesting];
+static int   s_sendTop = 0;
+static bool  s_sendReported = false;
+
+static uintptr_t unrelocatedVtable(void* obj)
+{
+   uintptr_t vt = 0;
+   __try { vt = *(uintptr_t*)obj; } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+   return vt ? vt - s_exeBase + 0x400000 : 0;
+}
+
+static void reportSendCycle(const char* what, void* obj, int depth)
+{
+   if (s_sendReported) return;
+   s_sendReported = true;
+
+   char chain[512] = {};
+   int  len = 0;
+   for (int i = 0; i < s_sendTop && len < (int)sizeof(chain) - 24; ++i)
+      len += sprintf_s(chain + len, sizeof(chain) - len, " %p(vt %08X)",
+                       s_sendActive[i], (unsigned)unrelocatedVtable(s_sendActive[i]));
+
+   warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                "[NetSendCycleFix] %s: object %p (vt %08X) at depth %d; skipped instead of "
+                "recursing forever. Expansion chain:%s\n",
+                what, obj, (unsigned)unrelocatedVtable(obj), depth, chain);
+}
+
+static void __cdecl hooked_SendVisitor(void* obj, int depth)
+{
+   for (int i = 0; i < s_sendTop; ++i) {
+      if (s_sendActive[i] == obj) {
+         reportSendCycle("send-list cycle", obj, depth);
+         return;
+      }
+   }
+   if (s_sendTop >= kMaxSendNesting) {
+      reportSendCycle("send-list nesting cap", obj, depth);
+      return;
+   }
+
+   s_sendActive[s_sendTop++] = obj;
+   __try {
+      original_SendVisitor(obj, depth);
+   } __finally {
+      --s_sendTop;
    }
 }
 
@@ -1243,6 +1362,14 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    s_updateSpawnDetour = L->updateSpawnRegcall ? (void*)hooked_UpdateSpawn_regcall
                                                : (void*)hooked_UpdateSpawn;
 
+   s_exeBase = exe_base;
+   if (g_addr->command_walker_kill && g_addr->command_walker_post_off) {
+      original_CommandWalkerKill = (fn_WalkerKill_t)resolve(exe_base, g_addr->command_walker_kill);
+      s_walkerPostOff            = g_addr->command_walker_post_off;
+   }
+   if (g_addr->net_send_visitor)
+      original_SendVisitor = (fn_SendVisitor_t)resolve(exe_base, g_addr->net_send_visitor);
+
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    DetourAttach(&(PVOID&)original_SetProperty, hooked_SetProperty);
@@ -1257,6 +1384,10 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    }
    if (s_turretAIHooked)
       DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
+   if (original_CommandWalkerKill)
+      DetourAttach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
+   if (original_SendVisitor)
+      DetourAttach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
    DetourTransactionCommit();
 
    // After the Detours commit, to avoid page-protection conflicts.
@@ -1297,7 +1428,13 @@ void entity_carrier_fixes_uninstall()
    }
    if (s_turretAIHooked)
       DetourDetach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
+   if (original_CommandWalkerKill)
+      DetourDetach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
+   if (original_SendVisitor)
+      DetourDetach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
    DetourTransactionCommit();
+   original_CommandWalkerKill = nullptr;
+   original_SendVisitor       = nullptr;
 
    if (s_activatePhysicsSlot) {
       DWORD oldProt;

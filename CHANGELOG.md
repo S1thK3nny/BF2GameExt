@@ -87,6 +87,13 @@ Scripts can check the running version through `GameExt.version`.
   - Extra vehicles on multi-cargo carriers now get their team back when dropped.
   - Carriers no longer look skewed while climbing away.
   - Carrier turrets keep cooling down and reloading while searching for a target.
+  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
+    hovering over the pad.
+  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
+    longer crashes the game.
+  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
+    ceiling.
+  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.
