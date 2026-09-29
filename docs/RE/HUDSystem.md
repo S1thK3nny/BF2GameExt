@@ -449,6 +449,9 @@ The engine-side mirror of this list is the `HUD::PlayerEvents` struct (796 bytes
 
 ## Consumers: which element reads which event
 
+Every property each class reads, events included, with its reader's address, is
+catalogued in [HUDElementProperties.md](HUDElementProperties.md).
+
 | `.hud` key | Class | Handler |
 |---|---|---|
 | `EventEnable` / `EventDisable` | `Element` | `Element::EventEnable` / `EventDisable` |
@@ -593,6 +596,9 @@ HudEventSend("gameext.myvalue", 0.75)        -- fire
 with `HudEventSend` doing `FindByHashID(PblHash(name))`, a type check against
 `EventClass::GetType`, and a stack `HudEvent` + `Send`. That is roughly 60 lines in
 `lua_funcs.cpp` plus the address table entries.
+
+Load order, the stock Lua HUD calls, multiplayer and a design are in
+[Lua and the HUD](#lua-and-the-hud-researched-2026-09-28).
 
 Caveat worth stating up front: **HUD events are client-side presentation only.**
 `GameEvents::Update` reads the local player's state and fires locally. A Lua-driven
@@ -1565,7 +1571,8 @@ read by Phantom's group reader `005FC510`) sets bit 0 of the group's render
 element at +84. The per-element render (modtools `00816FA0`) passes its colour into
 the element's render, modulated channel by channel with the colour it is handed
 (`a × b / 255`, `004D0ED0`). With the flag, a group's alpha reaches the elements
-inside it. Without it, a group still tints its children's RGB.
+inside it. Without it, a group still tints its children's RGB. Every property of
+every element class is in [HUDElementProperties.md](HUDElementProperties.md).
 
 ### ConfigMunge and trailing comments (tested 2026-09-28)
 
@@ -1914,6 +1921,146 @@ shipping safe-zone value; `CanSeePosition` on S and G (probably inlined); `mPosi
 +34 on retail; whether `EventRotation` turns the same way as the stock arrow; whether
 slot bitmaps honour a template's fades; and a probably harmless stock slip where
 `EventRefreshTargetCommon` indexes `gMarkers` with a common-target index.
+
+## Lua and the HUD (researched 2026-09-28)
+
+Addresses are Phantom (P) unless a build is named. Nothing here is built.
+
+### Load order: a script can create events in time
+
+| Step | P | M | S |
+|---|---|---|---|
+| `LuaHelper::InitState`, where GameExt registers its Lua functions | call `005DF76F` in PreStateInit `005DF6D0` | call `0044EF5E` in PreStateInit `0044EEC0` | in PreStateInit `0053AF10` |
+| `HUD::Manager::Open`, which ends with `GameEvents::Open` (GameExt's `hooked_Open`) | call `005DF77E` → `00619970` | call `0044EF6D` → `006B8A00` | call `0053AFC4` → `00565140` |
+| `MISSION.lvl`, `OpenScript` (file scope), `InitMission`, **ScriptPreInit** | `005DF85A` | push `0044F078` | push `0053B0C1` |
+| `GameLoop::Init`: `EventManager::Init`, InitState again, **ScriptInit** | `005CC3A0`; ScriptInit call `005CCB4E` | `00734040`; push `007347B7` | `00530EE0`; push `0053169B` |
+| `GameLoop::PostLoad`: **ScriptPostLoad** | `005CD2B0`, call `005CD90E` | `007352B0`, push `0073586A` | `00531A70`, push `005320C9` |
+
+Checked on M: the `Manager::Open` call at `0044EF6D` comes before the `MISSION.lvl`
+push (`0044EFA1`) and the `ScriptPreInit` push (`0044F078`).
+
+A Lua `ReadDataFile` parses synchronously: `Lua_Callbacks::ReadDataFile` (P `00651ED0`)
+→ `LoadUtil::ReadDataFile` (P `00638F30`) → `ReadDataFileOnHeap` (P `006398D0`) →
+`ReadDataFileChunk` (P `00638F60`) → `HUD::Manager::Load` (P `00619510`) →
+`Item::ReadEvent` (P `00617E30`), which only finds. On S, `FindByHashID` (`0055DEE0`)
+is called only by `ReadEvent`, `CreateEventA`, `SetEvent` and the HUD editor, and every
+access to `sList` lies inside `0055DC30`–`0055DFD2`, so no reader has its own lookup.
+
+Everything is torn down at each state change: `MissionState::Exit` (P `005DD240`) →
+`PostStateCleanup` (P `005DF0D0`) runs `LuaHelper::CleanupState` and then
+`HUD::Manager::Close` (P `00619070`), whose `EventClass::DestroyAll` frees every event.
+
+So a Lua call at file scope, in `ScriptPreInit` or at the top of `ScriptInit` runs
+after `GameEvents::Open` and before `ReadDataFile("ingame.lvl")`, the first load in
+stock `ScriptInit`, and every `.hud` read after it can bind the event. Conditions:
+
+- Create with `EventClass::Create(type, "%s", name)` (P `0060F400`, M `006AD8A0`, S
+  `0055DE40`, G `0055EBC0`) after `FindByHashID`: `Create` never de-duplicates.
+  Not `CreateEventA`, which applies a stale `sEventFilter`.
+- Wrap it in `RedSetCurrentHeap(RunTimeHeap)`. Static reading says RunTimeHeap is
+  current during ScriptInit, but [RedHeapSystem.md](RedHeapSystem.md) says TempLoadHeap
+  throughout; unresolved, so set it explicitly.
+- Reset any per-name cache in `hooked_Open`, not in `hooked_init_state`: InitState runs
+  three times per mission.
+
+### Stock Lua functions that reach the HUD
+
+| Lua function | How it reaches the HUD | Multiplayer |
+|---|---|---|
+| `ShowMessageText` (P `006554A0`, S `0058D6A0`) | `GameEvents::DisplayCenterMessage` (P `00611B20`) sends `player1.message.color` and `player1.message` | Replicated to clients (`NetGame::CreateEvent_ScriptMessage`, P `0068AD00`) |
+| `ShowTimer` (P `00655660`) | `GameEvents::SetObjectiveTimer` (P `00613230`), read by `GameEvents::Update` | Host and single player; the timer itself replicates |
+| `SetMissionTimer` / `SetVictoryTimer` / `SetDefeatTimer` | `MissionTimer::Set` | Replicated (`AloMissionTimer`) |
+| `ShowObjectiveTextPopup` / `ShowSelectionTextPopup` | `PopupText::ShowPopup` (P `00725910`): `objectivePopup` / `selectionPopup` plus three Bool events | Local |
+| `MapHideCommandPosts` (P `00656060`) | sends one Bool event itself, the only stock direct send (class at P `00B270EC`, presumably `map.hideCPs`) | Local |
+| `ShowTeamPoints` (P `00653C50`) | flags in `gPlayerData` | Local |
+| `DisableSmallMapMiniMap` (P `006518E0`) | `ElementMap` flags | Local |
+| `SpaceAssaultSetupBitmaps` (P `006552E0`) | finds the `player%dspaceassaultgroup` element by name (`Element::FindByHashID`, P `005F34D0`) | |
+
+No stock Lua call can show or hide an arbitrary element. Only whole-HUD toggles exist:
+`ScriptCB_DoConsoleCmd("ToggleDisplay")`, modtools only, and `ScriptCB_Freecamera`.
+The engine has element-level primitives, `Element::FindByHashID` and the editor's
+`Element::SetProperty` (P `005F4B00`, which can rebind `EventEnable` through
+`Item::SetEvent`, P `00618020`), but no Lua binding reaches them.
+
+### Multiplayer
+
+- Load-phase script code (file scope, `ScriptPreInit`, `ScriptInit`,
+  `ScriptPostLoad`) runs on every machine; it has to, to load each client's assets.
+- Lua timers tick on the host only: `Timer::Start` (P `0077AD00`) activates on the
+  host turn list, which a pure client never runs, so `OnTimerElapse` never fires there
+  (static reading).
+- `On…` callbacks: the registrars install `DummyLuaCallback` only when `netOnClient`
+  is set at registration, but that flag is scoped (set in `NetGame::EnterClient`,
+  P `0068D790`; cleared in `LeaveClient` and `NetGame::Create`), and
+  `EventManager::Init` runs before the first `EnterClient` (P `005CC3FF` against
+  `005CC440`). So clients probably get real registrations, contrary to
+  [OnEventSystem.md](OnEventSystem.md), although fire sites gated on `netOnClient`
+  still keep most runtime callbacks on the host. Needs a runtime check: log
+  `netOnClient` in the `EventManager::Init` detour on a client. If clients do get real
+  registrations, GameExt's own `OnCharacterExitVehicle`, fired from
+  `hooked_char_exit_vehicle` with no `netOnClient` check, may run on clients too.
+- HUD changes that can work on clients: load-time sends, engine-replicated output
+  (messages, timers, objectives) and native publishers in `GameEvents::Update`.
+  Anything driven by callbacks or timers is host-local.
+- A call to a function the game does not have aborts `ScriptInit` under `lua_pcall`
+  (`LuaHelper::CallProc`, P `0066AF10`) and the level loads broken, so scripts must
+  guard new calls: `if HudEventSend then ... end`.
+
+### What the element handlers accept (P)
+
+- **Value ignored:** `EventEnable` (`005F3410`), `EventDisable` (`005F33E0`),
+  `EventChanged` (`005F3380`), `Sound::EventTrigger` (`0061C140`). Sending false to an
+  `EventEnable` binding still shows the element: hiding needs a second name, as stock
+  does, or `TransformNumberCompare`'s `EventOutputTrue`/`EventOutputFalse`.
+- **Int, Uint or Float:** `ElementText::EventNumber` (`0060BE50`; Int and Uint print
+  with `IntegerFormat`, Float with `FloatFormat`), `ElementBar::EventValue`
+  (`005F6650`), `EventPulseRate`, the transforms' `EventInput`, ColorBlend's
+  `EventAlpha`.
+- **Text:** `EventText` on Text (`0060C360`) and MultilineText (`00607960`) takes a
+  String or a Uint localize hash and copies it (`RedTextElement::SetText` `008C6690`,
+  `AddText` `00607180`); MultilineText appends a line per send.
+- **Copied values:** Color (`005F3390`, `006078A0`), Vector3 (`EventPosition`
+  `005FB930`, `EventScale` `005FBDE0`).
+- **Uint or pointer:** `EventBitmap` (`005FA0B0`, a texture hash not checked for being
+  loaded), `EventMesh` (`006057C0`); NameMesh's `EventInput` (`0061C8E0`) Uint only;
+  `EventPlayerIndex` (`005FCE30`) Int only.
+
+String, Color and Vector3 payloads therefore only need to outlive the synchronous send;
+`SendDelayed` shares the engine's 32-slot queue and would need persistent storage.
+
+### Design
+
+1. **`HudEventCreate(name, type)` and `HudEventSend(name, value)`**, explicit types, in
+   a reserved `lua.` namespace so the `player%` filter never rewrites the name.
+   `HudEventCreate` finds first, reuses a match of the same type, and refuses a stock
+   name or a different type; it creates under RunTimeHeap. `HudEventSend` checks the
+   value against the type and skips when nothing listens (the handler list at +8 is
+   self-linked). A Uint accepts a name and hashes it, with textures checked against the
+   texture table as `hud_class_icons.cpp` does. Lua never passes Model or Texture
+   pointers. Cache per name, cleared in `hooked_Open`. It needs no new detour: Create,
+   FindByHashID and Send are already resolved and guarded.
+2. **Then, optionally, creation at bind time:** a detour on `Item::ReadEvent` (M
+   `006B6360` cdecl(Data*, Handler*); S `00564740`, G `005654C0` fastcall, Data in ECX,
+   Handler in EDX; the prologues are already guarded by `hud_number_math.cpp`) that
+   creates a missing `lua.` name with the type the binding key implies, but only for
+   keys where that is unambiguous. It must hash the filtered name
+   (`GetFilteredEventName`). An explicit `HudEventCreate` wins.
+3. **Keep the last value per event and replay it once** from the `GameEvents::Update`
+   detour, so a send made during loading is not lost.
+
+Not recommended: a fixed pool of anonymous events (slots collide between scripts), and
+driving elements directly through `Element::FindByHashID` and the fade virtual (stock
+events fight it, and the retail slots are not derived).
+
+### Not determined (Lua)
+
+`netOnClient` at `EventManager::Init` on a real client; which heap is current in
+`ScriptInit`; whether spawning or `initialize` resets element state after a load-time
+send; the names behind P `00B270EC` and PopupText's three Bool events; the payload
+types of `EventRotation`, `EventBlend`, `EventInputFactor` and `Sound::EventStop`; the
+client-side HUD path for objectives and `MapAddEntityMarker`; retail addresses for
+direct element control; whether the Lua IF screens can overlay in game. The gates in
+the table were checked on Phantom only, `ShowMessageText` on Steam too.
 
 ## Candidate events (researched 2026-09-25, not built)
 

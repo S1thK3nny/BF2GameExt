@@ -189,7 +189,10 @@ cause issues with vehicles, especially hovers, due to being tied to the framerat
 ## HUD
 
 Research and addresses for these are in
-[docs/RE/HUDSystem.md](docs/RE/HUDSystem.md#candidate-events-researched-2026-09-25-not-built).
+[docs/RE/HUDSystem.md](docs/RE/HUDSystem.md#candidate-events-researched-2026-09-25-not-built),
+[world markers and distances](docs/RE/HUDSystem.md#world-markers-and-distances-researched-2026-09-28),
+[Lua and the HUD](docs/RE/HUDSystem.md#lua-and-the-hud-researched-2026-09-28) and
+[docs/RE/HUDElementProperties.md](docs/RE/HUDElementProperties.md).
 
 **HUD shake** - The HUD stays still while the camera shakes, so a strong shake leaves the
 reticle off the true aim point. Publish the camera shake's screen offset as a HUD event so a
@@ -214,18 +217,34 @@ statistic already fires on each kill; otherwise add a pulse from the kill feed.
 **Missile and grenade warnings** - The missile warning gives no direction and nothing warns
 about grenades. Publish a bearing and distance for the incoming missile and live grenades.
 
-**Objective waypoints** - Objectives only show on the minimap. Project the minimap's own
-markers onto the screen, so every script that already places markers gets waypoints.
+**Objective waypoints** - The stock `Target` element already draws script markers on
+objects in 3D with edge arrows, but every objective shares one icon and region markers
+get nothing. Publish each marker's screen position so a HUD can style them itself.
 
 **Friendly name tags** - Teammates are hard to pick out online. Publish a fixed set of slots
 with name, health and position for teammates in view.
 
-**Off-screen arrows** - A floating marker vanishes when its target leaves the screen.
-Publish an edge position and rotation for any marker that is off screen or behind you.
+**Off-screen arrows** - The floating target bar vanishes when its target leaves the
+screen. Pin it to the edge with a rotation, as the command post markers already are.
 
-**Script-assigned markers** - A mission script cannot put a marker on an escort target or
-VIP. Add a Lua function that binds an entity to a marker slot; host only, since script
-callbacks never fire on clients.
+**Script-assigned markers** - `MapAddEntityMarker(..., true)` already puts a stock 3D
+marker on an entity and replicates it online, but with the shared objective icon and no
+distance. Add `player1.trackN.*` slots with the command post markers' events, filled by
+a Lua call that names an entity and a height; needs a design for slot ownership between
+scripts, and a timer or callback only fills them on the host.
+
+**Script HUD events** - A mission script cannot show, hide or feed a HUD element. Add
+`HudEventCreate`/`HudEventSend` for a reserved `lua.` namespace, created at the top of
+`ScriptInit`, before the `.hud` files load.
+
+**Alpha, scale and rotation on any element** - Only groups take `EventAlpha` (for one
+frame), `EventScale` and `EventRotation`. Extend all three to every element through the
+reader every class shares, with a persistent alpha.
+
+**Repeated HUD blocks** - A `.hud` must write out a command post slot or marker, and its
+transforms, once per slot: `EventNameFilter` only renumbers by camera, once on PC. Add a
+`Repeat` block that re-reads its contents N times with the filter set to each index, as
+`ViewPort` does per camera.
 
 ## Sound
 
