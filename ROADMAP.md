@@ -241,6 +241,12 @@ scripts, and a timer or callback only fills them on the host.
 frame), `EventScale` and `EventRotation`. Extend all three to every element through the
 reader every class shares, with a persistent alpha.
 
+**Sub-pixel per element** - `[Features] HudSubPixel` is all or nothing and each player's
+own choice, so a mod cannot ship gliding markers without softening still text as well.
+Add a `SubPixel(1)` property covering an element and everything inside it; the reader,
+a spare flag bit and the draw are in
+[pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).
+
 **Repeated HUD blocks** - A `.hud` must write out a command post slot or marker, and its
 transforms, once per slot: `EventNameFilter` only renumbers by camera, once on PC. Add a
 `Repeat` block that re-reads its contents N times with the filter set to each index, as

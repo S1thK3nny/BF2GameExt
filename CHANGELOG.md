@@ -29,6 +29,12 @@ Scripts can check the running version through `GameExt.version`.
   `.onScreen`/`.offScreen`, `.direction` for an edge arrow, and `.distance` in metres.
   Works on multiplayer clients; inert unless a `.hud` binds it.
   See [HUD authoring](docs/user/HUD.md#command-post-strip).
+- **Sub-pixel HUD** - `[Features] HudSubPixel=1` draws every HUD and menu element at
+  its exact position instead of the nearest whole pixel, so floating markers, target
+  bars and anything else that moves glide instead of stepping a pixel at a time. The
+  command post markers and floating target bar send exact positions while it is on.
+  Off by default: an element that comes to rest between two pixels looks slightly
+  softer. See [Configuration](docs/user/CONFIGURATION.md).
 - **`FillFrom` for HUD bars** - A `BarBitmap` can keep its right end and grow or
   shrink at its left (`"Right"`), or fill vertically from its bottom or top (`"Bottom"`,
   `"Top"`), showing the same part of its texture the full bar shows there, so an

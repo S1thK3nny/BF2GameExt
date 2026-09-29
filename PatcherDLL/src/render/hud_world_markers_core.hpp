@@ -29,7 +29,7 @@ struct Camera {
 };
 
 struct Placement {
-   float position[3];     // viewport fractions, Y down, on whole pixels; z is 0
+   float position[3];     // viewport fractions, Y down, whole pixels if asked; z is 0
    float rotation[3];     // (0, 0, degrees) for EventRotation
    bool  onScreen;
 };
@@ -46,10 +46,13 @@ inline double distance(const float a[3], const float b[3])
 }
 
 // Places `world` for `camera`. `sideSlide` is the stock rule for everything but a
-// flyer. The rotation turns an arrow drawn pointing up toward the point: HUD Y is
-// down and a positive EventRotation turns up toward +X, so it is atan2(dx, -dy)
-// in pixels, the stock off-screen arrow's angle.
-inline bool place(const Camera& camera, const float world[3], bool sideSlide, Placement& out)
+// flyer. `wholePixels` rounds the position to the nearest pixel, as the engine's
+// draw does anyway unless HudSubPixel is on. The rotation turns an arrow drawn
+// pointing up toward the point: HUD Y is down and a positive EventRotation turns
+// up toward +X, so it is atan2(dx, -dy) in pixels, the stock off-screen arrow's
+// angle.
+inline bool place(const Camera& camera, const float world[3], bool sideSlide, Placement& out,
+                  bool wholePixels = true)
 {
    if (!camera.matrix || !camera.width || !camera.height || !finite3(world) ||
        !(camera.tanW > 1.0e-6f) || !(camera.tanH > 1.0e-6f) ||
@@ -92,8 +95,8 @@ inline bool place(const Camera& camera, const float world[3], bool sideSlide, Pl
    }
 
    const double fx = 0.5 + 0.5 * x, fy = 0.5 - 0.5 * y;
-   out.position[0] = (float)(std::round(fx * camera.width) / camera.width);
-   out.position[1] = (float)(std::round(fy * camera.height) / camera.height);
+   out.position[0] = (float)(wholePixels ? std::round(fx * camera.width) / camera.width : fx);
+   out.position[1] = (float)(wholePixels ? std::round(fy * camera.height) / camera.height : fy);
    out.position[2] = 0.0f;
    const double px = x * camera.width, py = y * camera.height;   // py is up
    out.rotation[0] = out.rotation[1] = 0.0f;

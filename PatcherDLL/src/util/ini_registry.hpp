@@ -42,6 +42,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Features", "GameLogging", "0", "Enable the engine's BFront2.log file logging on retail builds"),
    INI_ENTRY("Features", "SpawnVehicleList", "1", "On the spawn screen, list the vehicles that spawn at the highlighted command post, the way SWBF1 did. Stock BF2 leaves that line blank. Set 0 for stock"),
    INI_ENTRY("Features", "TargetBarLatchSeconds", "0.5", "Seconds to retain the last naturally selected HUD target after selection is lost; no hit required. Fade time belongs to the .hud file (0.25 matches the reference). 0 never times out"),
+   INI_ENTRY("Features", "HudSubPixel", "0", "Draw the HUD and menus at their exact positions instead of rounding each element to a whole pixel. Anything that moves across the screen, such as floating markers and health bars, glides instead of stepping a pixel at a time. Text and icons that come to rest between two pixels look slightly softer. Set 1 to enable"),
    INI_ENTRY("Features", "EnableSoundWarnings", "0", "Log 'Unable to find sound property' warnings for missing sounds (modtools only)"),
    INI_ENTRY("Features", "DisableAwardBuffs", "0", "Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive"),
    INI_ENTRY("Features", "DisableAwardWeapons", "0", "Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards"),

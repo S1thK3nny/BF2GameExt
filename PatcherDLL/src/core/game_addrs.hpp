@@ -988,6 +988,17 @@ namespace modtools {
    constexpr uintptr_t red_bitmap_get_rect          = 0x00838E50;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x008392A0;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x00839220;
+   // Sub-pixel HUD (render/hud_sub_pixel.cpp). Every interface element, HUD
+   // and menus alike, is drawn through one RedInterfaceElement draw:
+   // thiscall(const PblMatrix* parent, const RedColor*), RET 8. It rounds the
+   // element's world translation to whole pixels with floor(x + 0.5) and
+   // floor(y + 0.5); the two floor CALLs are the sites, and crt_floor is what
+   // they call, cdecl(double) -> ST0. Groups draw their children through the
+   // same function. Write-up: docs/RE/HUDSystem.md "Pixel snapping".
+   constexpr uintptr_t hud_element_draw             = 0x00816FA0;
+   constexpr uintptr_t hud_element_draw_floor_x     = 0x00816FFE;
+   constexpr uintptr_t hud_element_draw_floor_y     = 0x00817014;
+   constexpr uintptr_t crt_floor                    = 0x008D5020;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
@@ -2228,6 +2239,12 @@ namespace steam {
    constexpr uintptr_t red_bitmap_get_rect          = 0x006E4DB0;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E48F0;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E4B90;
+   // Sub-pixel HUD (render/hud_sub_pixel.cpp); crt_floor is the MSVCR120
+   // floor import thunk.
+   constexpr uintptr_t hud_element_draw             = 0x006C0DE0;
+   constexpr uintptr_t hud_element_draw_floor_x     = 0x006C0E43;
+   constexpr uintptr_t hud_element_draw_floor_y     = 0x006C0E66;
+   constexpr uintptr_t crt_floor                    = 0x0075317C;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
@@ -2796,6 +2813,12 @@ namespace gog {
    constexpr uintptr_t red_bitmap_get_rect          = 0x006E5E50;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x006E5990;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x006E5C30;
+   // Sub-pixel HUD (render/hud_sub_pixel.cpp); crt_floor is the MSVCR120
+   // floor import thunk.
+   constexpr uintptr_t hud_element_draw             = 0x006C1E70;
+   constexpr uintptr_t hud_element_draw_floor_x     = 0x006C1ED3;
+   constexpr uintptr_t hud_element_draw_floor_y     = 0x006C1EF6;
+   constexpr uintptr_t crt_floor                    = 0x0075427C;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test

@@ -206,6 +206,8 @@ Group("player1targetbar")
   restarting the fade.
 - Sizes, offsets and labels stay in the `.hud`: put offsets on child groups, since
   the event replaces the parent's own `Position`.
+- The bar moves a whole pixel at a time unless the player turns on
+  `[Features] HudSubPixel`; see [Markers in the world](#markers-in-the-world).
 
 `player1.weapon1.target.distance` and `player1.weapon2.target.distance` carry how far
 away that target is, in metres, from what you control, or from the camera while you
@@ -520,6 +522,11 @@ Group("player1cpmarker1")
   bind that with `EventAlpha` on the marker group, given `PropagateAlpha(1)`.
 - Markers are worked out on each machine, so they work on multiplayer clients, and
   only for the slots a `.hud` binds.
+- The game draws every HUD element on a whole pixel, so a moving marker steps a pixel
+  at a time. `HudSubPixel=1` under `[Features]` in `BF2GameExt.ini` draws every
+  element at its exact position instead, stock ones and the menus included, and the
+  markers glide. It is each player's own setting, not part of the `.hud`, and off by
+  default, since an element that comes to rest between two pixels looks slightly softer.
 
 ## FillFrom
 

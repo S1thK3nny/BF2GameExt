@@ -5,6 +5,7 @@
 #include "hud_class_icons.hpp"
 #include "hud_command_posts.hpp"
 #include "hud_bar_fill_from.hpp"
+#include "hud_sub_pixel.hpp"
 #include "target_bar_geometry.hpp"
 #include "target_bar_fade.hpp"
 #include "hud_horizon_math.hpp"
@@ -405,8 +406,8 @@ static bool project_world_anchor(const target_bar_geometry::Box& world, float ou
    if (!project_anchor(world, (const float*)(cam + kCam_Matrix),
                         *(const float*)(cam + kCam_TanHalfFovW),
                         *(const float*)(cam + kCam_TanHalfFovH), out)) return false;
-   return pin ? pin_to_screen(out, *s_screenWidth, *s_screenHeight, kScreenInsets)
-              : snap_to_screen(out, *s_screenWidth, *s_screenHeight);
+   return pin ? pin_to_screen(out, *s_screenWidth, *s_screenHeight, kScreenInsets, !g_hudSubPixel)
+              : snap_to_screen(out, *s_screenWidth, *s_screenHeight, !g_hudSubPixel);
 }
 
 // Pinned while the engine picks the target, so a big vehicle up close whose top

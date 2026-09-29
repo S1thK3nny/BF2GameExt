@@ -125,6 +125,21 @@ int main()
    out[0] = std::numeric_limits<float>::quiet_NaN();
    assert(!snap_to_screen(out, 1920, 1080));
 
+   // Without whole pixels (HudSubPixel): held inside the same safe area and the
+   // same viewports past the edges, and otherwise left as projected.
+   out[0] = 0.33331f; out[1] = 0.25001f;
+   assert(pin_to_screen(out, 1920, 1080, insets, false));
+   assert(out[0] == 0.33331f && out[1] == 0.25001f && out[2] == 0);
+   out[0] = -50; out[1] = -100;
+   assert(pin_to_screen(out, 1920, 1080, insets, false));
+   assert(out[0] >= insets.left && out[1] >= insets.top && out[0] < 0.101f && out[1] < 0.101f);
+   out[0] = 0.33331f; out[1] = 1.05f;
+   assert(snap_to_screen(out, 1920, 1080, false));
+   assert(out[0] == 0.33331f && out[1] == 1.05f);
+   out[0] = -1.0e6f; out[1] = 5.0e5f;
+   assert(snap_to_screen(out, 1920, 1080, false));
+   assert(out[0] == -1 && out[1] == 2);
+
    std::mt19937 rng(20260921);
    std::uniform_real_distribution<float> coordinate(-100, 100);
    for (int trial=0; trial<20000; ++trial) {

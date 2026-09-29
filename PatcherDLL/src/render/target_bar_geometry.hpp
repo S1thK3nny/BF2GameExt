@@ -142,8 +142,10 @@ inline bool valid_insets(const Insets& insets)
    return insets.left + insets.right < 1 && insets.top + insets.bottom < 1;
 }
 
+// `wholePixels` rounds to the nearest pixel, as the engine's draw does anyway
+// unless HudSubPixel is on; the safe area's edges are whole pixels either way.
 inline bool pin_to_screen(float position[3], unsigned width, unsigned height,
-                          const Insets& insets)
+                          const Insets& insets, bool wholePixels = true)
 {
    if (!width || !height || !valid_insets(insets) ||
        !std::isfinite(position[0]) || !std::isfinite(position[1])) return false;
@@ -154,7 +156,8 @@ inline bool pin_to_screen(float position[3], unsigned width, unsigned height,
    const double size[2] = { (double)width, (double)height };
    for (int a = 0; a < 2; ++a) {
       if (minPx[a] > maxPx[a]) return false;
-      double px = std::round((double)position[a]*size[a]);
+      double px = (double)position[a]*size[a];
+      if (wholePixels) px = std::round(px);
       if (px < minPx[a]) px = minPx[a];
       if (px > maxPx[a]) px = maxPx[a];
       position[a] = (float)(px / size[a]);
@@ -167,7 +170,8 @@ inline bool pin_to_screen(float position[3], unsigned width, unsigned height,
 // the bar follows it off the screen. Anchors past a viewport beyond any edge are
 // held there, which is off screen for any bar and keeps the huge near-plane
 // projections finite.
-inline bool snap_to_screen(float position[3], unsigned width, unsigned height)
+inline bool snap_to_screen(float position[3], unsigned width, unsigned height,
+                           bool wholePixels = true)
 {
    if (!width || !height || !std::isfinite(position[0]) || !std::isfinite(position[1]))
       return false;
@@ -176,7 +180,7 @@ inline bool snap_to_screen(float position[3], unsigned width, unsigned height)
       double v = position[a];
       if (v < -1) v = -1;
       if (v > 2) v = 2;
-      position[a] = (float)(std::round(v * size[a]) / size[a]);
+      position[a] = (float)(wholePixels ? std::round(v * size[a]) / size[a] : v);
    }
    position[2] = 0;
    return true;

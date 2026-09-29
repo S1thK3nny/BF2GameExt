@@ -339,7 +339,8 @@ reference timing. Zero keeps the explicit no-timeout option.
 
 The anchor is the top centre of the target's world bounding box, so it does not
 wobble with animated bones. Units use bounds sized for their stance, vehicles their
-model's bounds, and the anchor is snapped to whole pixels.
+model's bounds, and the anchor is snapped to whole pixels unless
+`[Features] HudSubPixel` is on.
 
 While the game has the target selected, its anchor is kept inside the screen's
 safe area, so a big vehicle up close, whose top is above the screen, still shows
@@ -558,7 +559,8 @@ binds, and sent when they change. The recipe is in
   inside the 0.9 safe square is on screen at its projection. Anything else is pinned to
   that square's edge along its direction on screen, mirrored behind the camera. Except
   while the player is in a flyer, a point more than about 78 degrees off the view axis
-  slides to the left or right edge. Positions are snapped to whole pixels.
+  slides to the left or right edge. Positions are snapped to whole pixels unless
+  `[Features] HudSubPixel` is on, which also stops the draw rounding them.
 - **Direction:** degrees for `EventRotation` in pixel space, so an arrow drawn
   pointing up turns toward the point, as the stock off-screen arrow does. Put it on a
   unit-scale pivot group.
@@ -1521,6 +1523,20 @@ texture alignment of all three modes, and `tests/hud_bar_fill_from_abi_tests.py
 "path\to\GameData"` checks the hooks' prologues and offsets on all three executables,
 read-only.
 
+### Sub-pixel checks
+
+Set `HudSubPixel=1` under `[Features]` and look for `[HudSubPixel] installed` in
+`BF2GameExt.log`. Turn slowly on the spot with command post markers or a floating
+target bar in view: they should glide rather than step a pixel at a time, the icon and
+its distance text moving together. Menus and still HUD elements should look as before,
+or at most slightly softer. `tests/hud_sub_pixel_tests.cpp` runs the stand-in the patch
+puts in place of the draw's `floor`, at both x87 precisions, and checks it leaves the
+x87 stack balanced; `tests/hud_world_markers_tests.cpp` and
+`tests/target_bar_geometry_tests.cpp` cover the unrounded marker and target bar
+positions. `tests/hud_sub_pixel_abi_tests.py "path\to\GameData"` checks the draw, both
+`floor` sites, the 0.5 each adds and the draw's callers on all three executables,
+read-only.
+
 ### Math transform checks
 
 #### In-game stability checklist
@@ -1614,6 +1630,7 @@ state mapping, landings and shots, and `tests/hud_number_math_tests.cpp` the ler
 | A lerp fades the wrong way | `RiseTime` and `FallTime` follow the input, not the output: with A = 1 and B = 0 the output falls over `RiseTime` |
 | A lerp never sends | Its input has not sent a valid value yet, or an event end has not arrived; nothing is sent before both |
 | A state event stays at 0 | The unit states are for soldiers on foot only; a droideka, vehicle, turret or remote reads 0 |
+| A moving marker or bar steps a pixel at a time | The game draws every element on a whole pixel. `[Features] HudSubPixel=1` in `BF2GameExt.ini` draws them at their exact positions; it is each player's setting and off by default |
 
 ## Evidence and related references
 

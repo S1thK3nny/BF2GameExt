@@ -94,6 +94,28 @@ int main()
    p = at(wide, 0.5f, 0.5f, -1);
    assert(near(p.rotation[2], std::atan2(960.0, 540.0) * kDegrees, 1e-3));
 
+   // Without whole pixels (HudSubPixel) the point keeps its fraction, within half
+   // a pixel of the rounded place, with the same turn and side of the edge.
+   const float third[3] = { 0.3333f, -0.1234f, -1 };
+   Placement rounded{}, exact{};
+   assert(place(wide, third, true, rounded) && place(wide, third, true, exact, false));
+   assert(std::round(exact.position[0] * 1920) != exact.position[0] * 1920);
+   assert(std::fabs(exact.position[0] - rounded.position[0]) * 1920 <= 0.501);
+   assert(std::fabs(exact.position[1] - rounded.position[1]) * 1080 <= 0.501);
+   assert(exact.onScreen == rounded.onScreen && exact.rotation[2] == rounded.rotation[2]);
+   // A point sliding a tenth of a pixel at a time: rounded, it moves on one step
+   // in ten; exact, on every step.
+   int roundedMoves = 0, exactMoves = 0;
+   for (int i = 1; i <= 200; ++i) {
+      const float from[3] = { 0.0001f * (i - 1), 0, -1 }, to[3] = { 0.0001f * i, 0, -1 };
+      Placement a{}, b{}, c{}, d{};
+      assert(place(wide, from, true, a) && place(wide, to, true, b));
+      assert(place(wide, from, true, c, false) && place(wide, to, true, d, false));
+      roundedMoves += a.position[0] != b.position[0];
+      exactMoves += d.position[0] > c.position[0];
+   }
+   assert(exactMoves == 200 && roundedMoves >= 18 && roundedMoves <= 21);
+
    // A moved and turned camera: at x = 100, looking down world +X.
    const float turned[16] = { 0, 0, 1, 0,   0, 1, 0, 0,   -1, 0, 0, 0,   100, 0, 0, 1 };
    p = at(square(turned), 110, 0, 0);

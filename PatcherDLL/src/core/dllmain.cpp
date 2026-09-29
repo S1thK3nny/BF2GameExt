@@ -56,6 +56,7 @@
 #include "render/spawn_vehicle_list.hpp"
 #include "render/target_bar_latch.hpp"
 #include "render/hud_bar_fill_from.hpp"
+#include "render/hud_sub_pixel.hpp"
 #include "render/camera_shake.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
@@ -306,6 +307,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
       g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
+      g_hudSubPixel = cfg.get_bool("Features", "HudSubPixel", false);
       g_cameraShakeEnabled  = cfg.get_bool("CameraShake", "Enabled", true);
       g_cameraShakeSmooth   = cfg.get_bool("CameraShake", "Smooth", true);
       g_cameraShakeStrength = cfg.get_float("CameraShake", "Strength", 1.0f);
@@ -372,6 +374,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // class icons and the command post strip.
    target_bar_latch_install(exe_base);
    hud_bar_fill_from_install(exe_base);
+   hud_sub_pixel_install(exe_base);        // rewrites two CALL rel32s - needs the RW window
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window

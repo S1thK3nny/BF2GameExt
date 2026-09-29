@@ -1133,7 +1133,8 @@ silhouette extrema, POI icons or perspective scaling are involved.
 - **Pixel alignment:** snap the anchor to framebuffer pixels using live screen
   dimensions, with the safe-area limits rounded inward. This does not rewrite
   bitmap sizes/child offsets, so it does not guarantee every child edge is an
-  integer pixel when the HUD author uses fractional dimensions.
+  integer pixel when the HUD author uses fractional dimensions. Skipped while
+  `HudSubPixel` is on; see [Pixel snapping](#pixel-snapping-built-2026-09-29).
 - **Death fade:** `tick_after` reads bounds only from a valid, living focus. Death
   or an expired handle retains that channel's last live world-bounds snapshot,
   fixing its top-centre anchor in the world instead of on the screen. Every tick
@@ -1888,6 +1889,8 @@ the markers in `render/hud_command_posts.cpp`, the placement in
 - Occlusion is not built.
 - The distance from what the player controls falls back to the camera while the player
   is dead.
+- Positions are rounded to whole pixels unless `HudSubPixel` is on; see
+  [Pixel snapping](#pixel-snapping-built-2026-09-29).
 
 The designs as researched:
 
@@ -1921,6 +1924,108 @@ shipping safe-zone value; `CanSeePosition` on S and G (probably inlined); `mPosi
 +34 on retail; whether `EventRotation` turns the same way as the stock arrow; whether
 slot bitmaps honour a template's fades; and a probably harmless stock slip where
 `EventRefreshTargetCommon` indexes `gMarkers` with a common-target index.
+
+## Pixel snapping (built 2026-09-29)
+
+Moving HUD elements stepped one or two pixels at a time instead of gliding. Two things
+rounded them, and `[Features] HudSubPixel` (`render/hud_sub_pixel.cpp`) turns both off.
+Addresses are modtools (M), Steam (S), GOG (G) and Phantom (P).
+
+### The draw rounds every element
+
+Every interface element, the HUD and the shell's `ifs` screens alike
+(`ScriptCB_AddIFText`, P `006413A0`, adds a `RedTextElement` to the same hierarchy), is
+drawn by one non-virtual `RedInterfaceElement` draw, thiscall(`const PblMatrix*`
+parent, `const RedColor*`), RET 8:
+
+| | M | S | G |
+|---|---|---|---|
+| draw | `00816FA0` | `006C0DE0` | `006C1E70` |
+| `CALL floor`, x | `00816FFE` | `006C0E43` | `006C1ED3` |
+| `CALL floor`, y | `00817014` | `006C0E66` | `006C1EF6` |
+| `floor` | `008D5020`, the CRT's | `0075317C`, MSVCR120 import thunk | `0075427C`, the same |
+| called from | `00817CB8`, `00838C34`, `00838C4B` | `006C142F`, `006D6B9E`, `006D6BB5` | `006C24BF`, `006D7C3E`, `006D7C55` |
+
+With the enabled flag set (+14 bit `0x100`, `m_uiFlags` bit 0), it multiplies `m_mLocal`
+(+30) by the parent matrix, rounds the result's translation x and y as
+`floor(v + 0.5)`, sets w to 1, multiplies the colour, and calls `RenderUsingContext`
+(vtable +40) with the rounded matrix, then hands the same matrix to the hot spot (+18).
+The first caller is `RedInterfaceScreen::Render`, once per top-level group. The other
+two are `RedGroupElement::RenderUsingContext`, once per child, with and without
+`PropagateAlpha` (+84 bit 0). So a child starts from its group's rounded matrix and is
+rounded again. Modtools adds the 0.5 with x87 `FADD` and retail with `ADDSS`; both pass
+the sum to `floor` as a double on the stack.
+
+Phantom does not round: its `RedInterfaceScreen::Render` (P `008930E0`) and
+`RedGroupElement::RenderUsingContext` (P `008C38F0`) inline the same multiply, colour
+and call, with no `floor`.
+
+HUD units are device pixels (`HUD::Element::SetupViewportDimensions`, P `005F57D0`, from
+`s_screenFull`). `EventPosition` stays in floats all the way to the matrix: the group
+callback (M `0069A350`) converts by the group's relative mode with a multiply
+(M `00691120`), `RedInterfaceElement::SetPosition` (M `008285C0`) stores floats, and the
+alignment step (M `0069A230`) adds float offsets.
+
+### Rounding that stays
+
+These place an element's pieces relative to it once, when they are set, and never move
+the element:
+
+- `RedBitmapElement::SetRect` (M `00839130`) rounds its four edges into the quad; the
+  bordered variant (M `008398A0`) rounds six.
+- `RedGlyphCacheElement::AddGlyph` (M `00827C40`) rounds each glyph quad as
+  `RedTextElement::WriteCache` (P `008C6A20`) lays text out in local space.
+  `RedGlyphCacheElement::RenderUsingContext` (P `008C4870`) draws the cache with the
+  matrix as given.
+
+### GameExt rounded too
+
+`hud_world_markers::place` (the command post markers) and
+`target_bar_geometry::pin_to_screen` and `snap_to_screen` (the floating target bar)
+rounded their positions to whole pixels as well. With the draw patched but those still
+rounding, markers moved in even one-pixel steps instead of uneven ones: smoother, but
+still stepping. They now round only while `HudSubPixel` is off.
+
+### Filtering
+
+The interface samples textures bilinearly: `pcInterfaceShader::Begin_Fixed`
+(P `008F29C0`, M `00870270`) sets `MAGFILTER`, `MINFILTER` and `MIPFILTER` to `LINEAR`
+on both stages. An element a fraction of a pixel off is filtered across two pixels,
+so it glides in motion and looks slightly soft at rest.
+
+### `HudSubPixel`
+
+Off by default. When on, both floor CALLs go to `keep_fraction`, cdecl(double) → ST0
+like `floor`, which returns its argument less 0.5, so the translation keeps its
+fraction. Its only error is what the draw's own single-precision add already rounded,
+where 0.5 carries a coordinate into the next power of two: at most half a float step,
+2^-10 of a pixel at 16384.
+
+The install checks the draw's prologue through its enabled-flag test, then at each site
+`FSTP qword [esp]`, `CALL floor` and the add's constant of 0.5, before writing either
+CALL. If any check fails it leaves the draw alone and clears the switch, so the markers
+and target bar go on rounding with it. `tests/hud_sub_pixel_abi_tests.py` audits the
+same bytes on all three builds, and `tests/hud_sub_pixel_tests.cpp` runs the stand-in,
+including under the 24-bit x87 precision Direct3D sets. Confirmed much smoother in
+play on modtools; Steam and GOG are audited, not played.
+
+### Per element (not built)
+
+A `SubPixel(1)` property covering one element and everything inside it would need:
+
+- **A reader.** `HUD::Element::ReadData` (M `00693790`, S `00549250`, G `00549FA0`;
+  thiscall(`PblConfig*`, `Data*`) → bool, RET 8) is where every element type ends up:
+  its only direct callers on each build are `ElementGroupBase`, `ElementBitmapBase`,
+  `ElementText` and `ElementModel3D::ReadData`. `mElement` (+B0) exists by then; the
+  stock `PropagateAlpha` writes straight into it.
+- **A mark.** Bits 29 to 31 of +14 are outside the declared bitfields (`m_zorder:8`,
+  `m_uiFlags:21`). The constructors clear bits 11 to 31 (`AND [+14], 5FF`: M `00828E56`;
+  S `006BFF68`, `006C004E`; G `006C0FF8`, `006C10DE`), and the other writes read on
+  modtools (destructor, name registration, z-order) change only bits 0 to 10.
+- **A count.** A detour on the draw counting marked elements while they draw, since a
+  group draws its children inside its own draw. The stand-in would call `floor` while
+  the count is zero, and GameExt's position events could stop rounding altogether, as
+  the draw rounds an unmarked element anyway.
 
 ## Lua and the HUD (researched 2026-09-28)
 

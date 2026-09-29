@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "hud_command_posts.hpp"
 #include "hud_command_posts_core.hpp"
+#include "hud_sub_pixel.hpp"
 #include "hud_world_markers_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -379,7 +380,7 @@ void publish_marker(int slot, const uint8_t* obj, const View& view)
    for (int a = 0; a < 3; ++a) anchor[a] = centre[a] + up[a] * kMarkerLift;
    hud_world_markers::Placement at;
    if (!hud_world_markers::finite3(centre) ||
-       !hud_world_markers::place(view.camera, anchor, view.sideSlide, at)) return;
+       !hud_world_markers::place(view.camera, anchor, view.sideSlide, at, !g_hudSubPixel)) return;
 
    Slot& s = s_slots[slot];
    const bool movedX = s.x.set_float(at.position[0]);
