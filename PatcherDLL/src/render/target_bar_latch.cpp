@@ -8,6 +8,7 @@
 #include "target_bar_geometry.hpp"
 #include "target_bar_fade.hpp"
 #include "hud_horizon_math.hpp"
+#include "hud_world_markers_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
@@ -17,6 +18,7 @@
 
 #include <detours.h>
 
+#include <cfloat>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -123,7 +125,8 @@ static constexpr int kCam_TanHalfFovH   = 0x148;
 
 static constexpr int kEC_HandlerList    = 0x08;   // self-linked when nobody listens
 
-static constexpr int kTypeVector3       = 9;      // HUD::EventClass::Type
+static constexpr int kTypeFloat         = 4;      // HUD::EventClass::Type
+static constexpr int kTypeVector3       = 9;
 static constexpr int kChannels          = 2;
 
 // ---- Tuning ------------------------------------------------------------------
@@ -174,6 +177,9 @@ using target_bar_selection::same;
 static_assert(sizeof(Handle) == 8, "PblHandle layout requires a 32-bit build");
 
 static void*  s_evtPosition[kChannels];   // EventClass*, recreated every mission
+static void*  s_evtDistance[kChannels];   // likewise; independent of the latch
+static uint32_t s_distanceBits[kChannels];
+static bool   s_distanceSent[kChannels];
 static target_bar_fade::Position s_position[kChannels]; // persists through death fade
 static Handle s_lastFocus[kChannels];     // keeps position alive through a fade
 
@@ -415,6 +421,61 @@ static bool project_free(const target_bar_geometry::Box& world, float out[3])
    return project_world_anchor(world, out, false);
 }
 
+// The point distances run from: what the player controls, as the stock lock-on
+// distance measures it (GameEvents::UpdateLockOn, modtools 0x006B2720), else the
+// camera while dead or spectating.
+static bool local_origin(float out[3])
+{
+   uint8_t* chr = (uint8_t*)s_localPlayer(0);
+   uint8_t* controlled = nullptr;
+   if (chr) {
+      controlled = *(uint8_t**)(chr + layout::Character::kRemote);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kVehicle);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kUnit);
+   }
+   const uint8_t* obj = controlled ? (const uint8_t*)vcall_object(controlled + kCtrl_Trackable) : nullptr;
+   const float* p = nullptr;
+   if (obj && is_alive(obj)) p = (const float*)(obj + kGO_MatrixTrans);
+   else if (const uint8_t* cam = hud_camera()) p = (const float*)(cam + kCam_Matrix) + 12;
+   if (!p) return false;
+   std::memcpy(out, p, 3 * sizeof(float));
+   return hud_world_markers::finite3(out);
+}
+
+// player1.weaponN.target.distance: from what the player controls to the target
+// the HUD shows, in metres, after the engine's update and so after any lend.
+// FLT_MAX with no target, which a Text with InfiniteDashes prints as "--".
+static void publish_distances()
+{
+   if (!s_playerData || !s_eventList || *s_eventList == (uintptr_t)s_eventList) {
+      s_evtDistance[0] = s_evtDistance[1] = nullptr;
+      s_distanceSent[0] = s_distanceSent[1] = false;
+      return;
+   }
+   if (!has_listener(s_evtDistance[0]) && !has_listener(s_evtDistance[1])) {
+      s_distanceSent[0] = s_distanceSent[1] = false;
+      return;
+   }
+   float origin[3];
+   const bool haveOrigin = local_origin(origin);
+   for (int ch = 0; ch < kChannels; ++ch) {
+      if (!has_listener(s_evtDistance[ch])) { s_distanceSent[ch] = false; continue; }
+      const uint8_t* wd = s_playerData + ch * kPD_WeaponStride;
+      const Handle shown = { *(uint8_t* const*)(wd + kWD_TargetObject),
+                             *(const uint32_t*)(wd + kWD_TargetHandleId) };
+      float d = FLT_MAX;
+      if (haveOrigin && handle_ok(shown))
+         d = (float)hud_world_markers::distance(origin, (const float*)(shown.obj + kGO_MatrixTrans));
+      uint32_t bits;
+      std::memcpy(&bits, &d, sizeof(bits));
+      if (s_distanceSent[ch] && s_distanceBits[ch] == bits) continue;
+      s_distanceSent[ch] = true;
+      s_distanceBits[ch] = bits;
+      struct { void* mClass; uint32_t mData; } ev = { s_evtDistance[ch], bits };
+      s_eventSend(&ev, nullptr);
+   }
+}
+
 static void send_position(int ch)
 {
    struct { void* mClass; const float* mData; } ev = { s_evtPosition[ch], s_position[ch].value };
@@ -571,6 +632,12 @@ static void tick_after()
    restore_lends();   // first, and outside the guard: nothing below may skip it
 
    __try {
+      publish_distances();
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      s_distanceSent[0] = s_distanceSent[1] = false;
+   }
+
+   __try {
       if (!s_playerData || !s_localChr) return;
 
       Handle measured = {};
@@ -674,6 +741,8 @@ static void __cdecl hooked_Open()
    clear_all_objects();
    s_announced = false;
    s_evtPosition[0] = s_evtPosition[1] = nullptr;
+   s_evtDistance[0] = s_evtDistance[1] = nullptr;
+   s_distanceSent[0] = s_distanceSent[1] = false;
    s_evtHorizon = nullptr;
    reset_horizon();
    // Separate guards keep either event family usable if the other fails.
@@ -695,6 +764,18 @@ static void __cdecl hooked_Open()
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       s_evtPosition[0] = s_evtPosition[1] = nullptr;
+   }
+   __try {
+      for (int ch = 0; ch < kChannels; ++ch) {
+         char name[64];
+         _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.weapon%d.target.distance", ch + 1);
+         void* cls = event_find(pbl_hash(name));
+         if (!cls) cls = s_create(kTypeFloat, "%s", name);
+         else if (*(const uint32_t*)((const uint8_t*)cls + 4) != (uint32_t)kTypeFloat) cls = nullptr;
+         s_evtDistance[ch] = cls;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      s_evtDistance[0] = s_evtDistance[1] = nullptr;
    }
 }
 
@@ -810,7 +891,7 @@ void target_bar_latch_install(uintptr_t exe_base)
    s_installed = (DetourTransactionCommit() == NO_ERROR);
 
    install_log("[TargetBarLatch] %s (Open 0x%08X, Update 0x%08X %s, selection retention, "
-               "hold %.2fs). Inert until a .hud binds player1.weaponN.target.position",
+               "hold %.2fs). Inert until a .hud binds player1.weaponN.target.position or .distance",
                s_installed ? "installed" : "commit failed",
                (unsigned)g_addr->hud_game_events_open, (unsigned)g_addr->hud_game_events_update,
                modtools ? "cdecl(float)" : "void(void)",

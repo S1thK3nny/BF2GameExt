@@ -214,9 +214,6 @@ statistic already fires on each kill; otherwise add a pulse from the kill feed.
 **Missile and grenade warnings** - The missile warning gives no direction and nothing warns
 about grenades. Publish a bearing and distance for the incoming missile and live grenades.
 
-**Command post markers** - The strip of per-post slots is built, but a post has no marker
-over it in the world. Add a floating position per slot, part of a wider POI system.
-
 **Objective waypoints** - Objectives only show on the minimap. Project the minimap's own
 markers onto the screen, so every script that already places markers gets waypoints.
 

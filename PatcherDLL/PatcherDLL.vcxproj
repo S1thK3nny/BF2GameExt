@@ -204,6 +204,7 @@
     <ClInclude Include="src\render\hud_class_icons_core.hpp" />
     <ClInclude Include="src\render\hud_command_posts.hpp" />
     <ClInclude Include="src\render\hud_command_posts_core.hpp" />
+    <ClInclude Include="src\render\hud_world_markers_core.hpp" />
     <ClInclude Include="src\render\camera_shake.hpp" />
     <ClInclude Include="src\render\camera_shake_core.hpp" />
     <ClInclude Include="src\render\hud_bar_fill_from.hpp" />

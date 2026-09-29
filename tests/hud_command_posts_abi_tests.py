@@ -19,6 +19,8 @@ SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "render" / "hud_command_posts.cpp").read_text()
 layout = (SRC / "core" / "layout" / "command_post.hpp").read_text()
 character = (SRC / "core" / "layout" / "character.hpp").read_text()
+camera = (SRC / "core" / "layout" / "red_camera.hpp").read_text()
+latch = (SRC / "render" / "target_bar_latch.cpp").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
 
@@ -39,9 +41,20 @@ expected = {
     (module, "kGO_MatrixTrans"): 0x120, (module, "kGO_Flags"): 0x1FC,
     (module, "kGO_HandleId"): 0x204, (module, "kGO_Team"): 0x234,
     (module, "kTypeColor"): 7, (module, "kTypeFloat"): 4, (module, "kTypeUint"): 3,
+    (module, "kTypeVector3"): 9,
+    # The markers: the stock objective anchor's reads (sites below), the camera
+    # the target bar already projects with, and the controlled object.
+    (module, "kGO_SphereStack"): 0x10, (module, "kGO_SphereIndex"): 0x14,
+    (module, "kGO_SphereCentre"): 0x18, (module, "kGO_MatrixUp"): 0x100,
+    (module, "kCtrl_Trackable"): 0x18, (module, "kVt_GetGameObject"): 0x20,
+    (camera, "kMatrix"): 0x30, (camera, "kTanHalfFovW"): 0x144,
+    (camera, "kTanHalfFovH"): 0x148, (camera, "kRedCamera0"): 0x24,
+    (latch, "kCam_Matrix"): 0x30, (latch, "kCam_TanHalfFovW"): 0x144,
+    (latch, "kCam_TanHalfFovH"): 0x148, (latch, "kCM_Camera0"): 0x24,
 }
 for (text, name), value in expected.items():
     assert const(text, name) == value, name
+assert re.search(r"kMarkerLift\s*=\s*1\.3f", module), "the stock 1.3 m lift"
 
 guard = re.search(r'guard\(base, g_addr->net_game_is_near_local_player, "[^"]*",\s*'
                   r'modtools \? "([^"]*)"\s*: "([^"]*)",\s*"([^"]*)"\)', module)
@@ -101,6 +114,14 @@ sites = {
         0x00415A00: [("jmp", "{net_game_is_near_local_player}")],
         0x00692B94: [("cmp", "eax, 7")],                                  # EventColor
         0x00692BA5: [("mov", "eax, dword ptr [eax]"), ("mov", "ecx, dword ptr [eax]")],
+        # LockOnManager::UpdateTargetVisibility: the sphere centre, from the stack
+        # at +0x10 (index +0x14) when set, else +0x18; then the 1.3 m lift.
+        0x00454BB1: [("mov", "ecx, dword ptr [edi + 0x10]"), ("test", "ecx, ecx"),
+                     ("lea", "ebx, [edi + 0x10]"), ("je", "0x454bc8"),
+                     ("mov", "eax, dword ptr [ebx + 4]"), ("add", "eax, 4"),
+                     ("shl", "eax, 4"), ("add", "eax, ecx")],
+        0x00454BC8: [("lea", "eax, [ebx + 8]")],
+        0x00454CD7: [("mov", "dword ptr [esp + 0x34], 0x3fa66666")],
     },
     "steam": {**common_rt, **{
         0x0058FFDF: [("mov", "eax, dword ptr [ecx + 0x2c]")],
@@ -112,6 +133,11 @@ sites = {
         0x0058F85C: [("movd", "xmm0, dword ptr [eax + 0x134]")],
         0x0054A095: [("cmp", "eax, 7")],
         0x0054A0A5: [("mov", "eax, dword ptr [eax]"), ("mov", "ecx, dword ptr [eax]")],
+        0x0057B769: [("mov", "edx, dword ptr [edi + 0x10]")],
+        0x0057B770: [("mov", "eax, dword ptr [edi + 0x14]")],
+        0x0057B776: [("shl", "eax, 4")],
+        0x0057B77D: [("lea", "eax, [edi + 0x18]")],
+        0x0057B8AA: [("mov", "dword ptr [ebp - 8], 0x3fa66666")],
     }},
     "gog": {**common_rt, **{
         0x00590F7F: [("mov", "eax, dword ptr [ecx + 0x2c]")],
@@ -123,6 +149,11 @@ sites = {
         0x005907FC: [("movd", "xmm0, dword ptr [eax + 0x134]")],
         0x0054ADE5: [("cmp", "eax, 7")],
         0x0054ADF5: [("mov", "eax, dword ptr [eax]"), ("mov", "ecx, dword ptr [eax]")],
+        0x0057C4E9: [("mov", "edx, dword ptr [edi + 0x10]")],
+        0x0057C4F0: [("mov", "eax, dword ptr [edi + 0x14]")],
+        0x0057C4F6: [("shl", "eax, 4")],
+        0x0057C4FD: [("lea", "eax, [edi + 0x18]")],
+        0x0057C62A: [("mov", "dword ptr [ebp - 8], 0x3fa66666")],
     }},
 }
 

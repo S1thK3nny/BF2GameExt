@@ -31,7 +31,18 @@
 
 namespace layout::RedCamera {
 
+constexpr uint32_t kMatrix        = 0x30;  // PblMatrix _Matrix: right, up, forward, translation
 constexpr uint32_t kMatrixInverse = 0x70;  // PblMatrix _MatrixInverse (64 bytes)
 constexpr uint32_t kZoom          = 0x140; // float _fZoom
+constexpr uint32_t kTanHalfFovW   = 0x144; // float _fTanHalfFOVWidth
+constexpr uint32_t kTanHalfFovH   = 0x148; // float _fTanHalfFOVHeight
 
 } // namespace layout::RedCamera
+
+// CameraManager::sInstance (game_addrs camera_manager_instance) -> mRedCamera[0],
+// the camera the HUD draws for, as target_bar_latch.cpp reads it on every build.
+namespace layout::CameraManager {
+
+constexpr uint32_t kRedCamera0 = 0x24;
+
+} // namespace layout::CameraManager

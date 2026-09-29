@@ -1730,6 +1730,191 @@ same audit. The recorded bars are forgotten when `GameEvents::Open` runs for a n
 a record left by a freed bar is inert, because only a bar with both flag bits clear is
 laid out and a stock bar keeps bit 1 on by default.
 
+## World markers and distances (researched 2026-09-28)
+
+Addresses are Phantom (P) unless a build is named: M modtools, S Steam, G GOG.
+Nothing here is built.
+
+### The stock `Target` element already draws 3D markers
+
+`Target("player1target")` is in the stock `1playerhud.hud` (line 1491; `PC\` variant
+line 1389). It draws the GameObjects `LockOnManager` tracks, with off-screen edge
+arrows:
+
+- **Common targets**, a global `sTargetCommon[32]` (M `00B306C8`, S `01EC7D50`,
+  G `01EC91F0`): script and objective markers and flags. Only
+  `TargetManager::AddMarker` (P `00773CA0`) adds them, through
+  `LockOnManager::AddTargetCommon` (P `0063A190`; M `00457360` cdecl; S `0057DA40`
+  fastcall, object in ECX and team mask in EDX; G `0057E7C0`), and only for an
+  **object** marker whose `showHudTarget` is set. Region markers never become 3D
+  targets. `AddMarker` is called by Lua `MapAddEntityMarker` (P `00655B50`), class
+  markers (`CheckObjectClassMarker`, P `007741D0`), replication
+  (`AloMapDisplayMarkers::Read`, P `0069ABE0`) and `TeamAssist`, which passes
+  `showHudTarget` false.
+- **Player targets**, `mTargetPlayer[64]` at `LockOnManager` +8: lock-on, attacker and
+  hint targets. `LockOnManager::sLockOnManagers[player]` is game_addrs
+  `lockon_mgr_array` (M `00B30698`, S `01E57400`, G `01E588B0`).
+- **Ranges.** Common targets: track 10000, min 100, max 10000 (`InitCommon`, P
+  `0063A870`, M `004546D0`, S `0057ACB0`). Player targets take the class's lock-on
+  min, max and track distances (+31C, +320, +324; defaults 100, 500, 200000;
+  `InitPlayer`, P `0063A8C0`).
+
+Each frame `LockOnManager::Update` (P `0063D0B0`, M `00457670`, S `0057B030`,
+G `0057BDB0`) calls `UpdateTargetVisibility` (P `0063D4D0`, M `00454B60`, S
+`0057B720`, G `0057C4A0`) per target:
+
+- **Anchor:** the collision-sphere centre; a soldier adds up × 0.4, or uses bone
+  `0x3483A489` if the model has it. Common targets are lifted by up × 1.3 m (the
+  `1.3f` stores at M `00454CD7`, S `0057B8AA`, G `0057C62A`; checked on M and S).
+- **Distance** is from the camera to the anchor, before the lift; a target beyond
+  its track distance is dropped.
+- **Occlusion:** `AIUtil::CanSeePosition` (P `00486740`, M `0058F4E0`), a ray test with
+  mask `0x9E` ignoring viewer and target, one ray per frame round-robin.
+- **Info flags** at +C: `0x02` on screen, `0x04` visible, `0x40` tracked, `0x80`
+  friendly, `0x10` locked, `0x08` attacker; +D bit 0 marks a flag.
+
+`LockOnManager::CalculateScreenCoordinates` (P `0063A2A0`, M `00453DF0`, S
+`0057B430`, G `0057C1B0`) places a target and pins it to the screen edge:
+
+1. Project through the camera's inverse matrix and
+   `TransformCameraPointToProjectionSpace`; behind the camera, negate x and y.
+2. `facing` = dot(view direction, direction to target). Except in flyers, if
+   `facing` < 0.2 and |y| > 0.3|x|, squash y toward 0.3|x|, so side and rear targets
+   slide to the left and right edges rather than the top and bottom.
+3. On screen if `facing` > 0 and |x| and |y| are within `mSafeZone` (+96C, on all
+   three builds); otherwise both are scaled by `mSafeZone / max(|x|, |y|)` onto that
+   square. `mSafeZone` is `s_screenFull.m_fSafeZoneWidth`, 0.9 on Phantom
+   (`RedRenderer::internalResetState`, P `0087FB30`); the shipping value is unverified.
+
+`Target::Update` (P `0060A360`, M `006A7FD0`, S `00558F30`, G `00559CA0`; the element's
+own Update is P `0060A0A0`, M `006A9170`, S `0055A340`, G `0055B0B0`) draws it at
+x = `ConvertXForWideScreen((x·0.5 + 0.5)·W)`, y = (y·0.5 + 0.5)·H, rotated by
+atan2(x, −y) off screen, scaled by `lerp(MinScale, MaxScale, clamp((d − min) /
+(max − min)))` (flyers and remote terminals use fixed 200 to 1700 m ranges). There is
+no distance fade: occluded targets swap to the "Behind" templates, which carry a lower
+`Alpha`. Common targets take the marker's colour and pulse, but the icon is always the
+template bitmap; the marker's texture is used only on the minimap.
+
+Stock single-player conquest already puts these markers on command posts:
+`ObjectiveConquest.lua` calls `MapAddEntityMarker(cp, self.icon, 4.0, self.teamATT,
+"YELLOW", true)` only when `multiplayerRules` is off (lines 264 to 303; checked).
+
+### Why command post markers should not reuse it
+
+Feeding posts in with data (`MapAddEntityMarker` on each post, which replicates to
+clients) is limited: GameObjects only, one bitmap for every objective, a static colour
+where the first marker's colour wins and nothing is relative to the viewer, no capture
+progress, 32 slots shared with every objective, and a fixed 100 to 10000 m scale range
+that barely shrinks on infantry maps. Feeding them from the DLL through
+`AddTargetCommon` would make the stock element draw an objective icon over every post
+in unmodified HUDs, and `RemoveMarker` (P `00774620`) removes common targets by object,
+so conquest removing its marker on capture would remove ours too.
+
+### The minimap
+
+- **Posts:** `TargetManager::AddPost` (P `00773F10`, from `CommandPost::Respawn` P
+  `004E23F0`) fills `gPost[16]` and sends `map.refreshPost`; `EventRefreshPost` (P
+  `005FF900`) takes the icon from the class's `MapTexture`; `UpdatePostIcons` (P
+  `00603470`) places it from the post object's translation. Lua
+  `MapHideCommandPosts` (P `00656060`) sends `map.hideCPs`.
+- **Markers:** `gMarkers[32]`, 40 bytes each (actor, region, team mask, texture hash,
+  scale, colour, `showHudTarget` +28, pulse scale, flash and pulse bits +36; array
+  pointer P `00C47A74`, M `00B47140`). Lua signature:
+  `MapAddEntityMarker(ent, icon, scale, team (0 = all), color, showHudTarget = true,
+  flashAlpha = true, pulseSize = true)`. `UpdateMarkerIcons` (P `00602980`) places a
+  marker at the sphere centre plus the smoothing offset, or at a region's centre
+  (`RedRegion` +30); a colour with alpha 0 means the viewer's team colour.
+- **Other stock world-space drawing:** command post holograms (`CommandPost::Attach`,
+  P `004DFF60`, at bone `0xD1E4CC7A`, never on a dedicated host), player name tags
+  (`NameDisplayThread`) and item countdowns (`ItemTimerDisplay`).
+
+### Distances the stock HUD shows
+
+- **`player1.lockOnDistance`** (`GameEvents::UpdateLockOn`, P `006148B0`, M `006B2720`,
+  S `00560520` fastcall, G `005612A0`): from the controlled object's translation
+  (remote, else vehicle, else soldier) to the locked object's (`LockOnManager` +928),
+  in world units, which the engine calls metres. Sent every HUD tick while locked,
+  **only** in an `EntityFlyer` or a remote-piloted `EntityBuildingArmed` (pilot type
+  +144 = 3), with the map closed; `PlayerEvents` +300 on M and S. The stock PC HUD
+  prints it in `player1lockon.distance` with `FloatFormat("%.0f")`. Infantry has no
+  distance at all.
+- **`missileLockDistance`** (Uint) is `Controllable::mEnemyLockedOnMeDistance`, every
+  tick while an enemy has a lock on you, flyers and turrets only (`UpdateMissleLock`,
+  P `00615080`).
+- **Name tags** (`NameDisplayThread::Update`, P `00678000`, M `0067F1E0`, S
+  `005AAA60`, G `005ABA10`): anchored at the origin plus radius × 1.2 up, hidden behind
+  the camera, no occlusion test, alpha 255 to 20 m (350 m for a named flyer pilot) then
+  335 − 4·d, gone by about 84 m. Always on in split-screen; in single-camera play only
+  online with `netShowNames` (M `00ADABCE`, S `007E8E50`). Item countdowns
+  (`ItemTimerDisplay::DisplayThread::Update`, P `00621720`, S `0056AC50`, G
+  `0056B9D0`) use the same 20 m fade.
+- **Printing:** `EventNumber` takes Int, Uint or Float; `FLT_MAX` prints nothing, or
+  `--` with `InfiniteDashes(1)` (key present on M and S).
+
+### Where a command post is
+
+- `CommandPost`: `mObject` +2C; `mPosition` +34, the translation cached at attach (M
+  `Attach` `0064B880`, write `0064B8B5`; the retail offset is inferred);
+  `mCaptureRegion` +80 (M `00591614`, S `0058FF0D`, G `00590EAD`) with its centre at
+  `RedRegion` +30. `AIUtil::GetCommandPostPos` (M `00591610`) uses the region centre,
+  else the object's translation.
+- The GameObject: matrix +F0, up row +100, translation +120; collision sphere +18 and
+  radius +24, or, when the pointer at +10 is set, at `stack + 0x40 + index·0x10` with
+  the index at +14 (read on M and S).
+- Neither `CommandPostClass_data` nor `GameObjectClass_data` has a HUD height. The stock
+  anchors: objective markers sphere centre + up × 1.3; name tags origin + radius × 1.2;
+  item countdowns sphere centre + radius × 1.2; the minimap the object origin.
+
+### Designs
+
+Items 1 and 2 were built on 2026-09-28: the distance in `render/target_bar_latch.cpp`,
+the markers in `render/hud_command_posts.cpp`, the placement in
+`render/hud_world_markers_core.hpp`. As built:
+
+- The anchor reads the sphere as the stock code does (+10 stack, +14 index, +18
+  centre; audited on all three builds with the 1.3 m lift), but lifts along the
+  object's matrix up row (+100) rather than the rendered matrix the stock virtual
+  returns, and skips the bone `0x3483A489` override. The two are the same for a
+  static post.
+- The safe square is the constant 0.9. The shipping builds' safe-zone value is still
+  unread.
+- Occlusion is not built.
+- The distance from what the player controls falls back to the camera while the player
+  is dead.
+
+The designs as researched:
+
+1. **`player1.weaponN.target.distance`** (Float, metres). After the stock update, from
+   `gPlayerData.weaponData[ch].target` (+14/+18), which already holds our retention;
+   measured as `lockOnDistance` is, controlled object's translation to the target's.
+   Send `FLT_MAX` with no target, so text prints blank or `--`. Gate it on its own
+   listener; it stays through the retention hold like every `target.*` event.
+2. **Per-slot command post markers**, pumped beside `hud_command_posts_update` and using
+   its slot order: `player1.commandPostN.position` (Vector3 viewport fractions: the
+   projection, or the pinned edge point, pixel-snapped), an `onScreen`/`offScreen` Bool
+   pair, `direction` (Vector3 `(0, 0, degrees)` for `EventRotation`, the stock angle
+   atan2(x, −y)), `distance`, and optionally `visible`/`occluded` from one
+   `engine_ray_hit` per tick round-robin, as `barrel_fire_origin.cpp` casts. Anchor at
+   the stock objective anchor (sphere centre + up × 1.3), where stock conquest's
+   markers sit, falling back to `mPosition` plus a height. Copy the stock pin rule
+   (mirroring behind, the side squash, scaling onto the 0.9 square) into a new testable
+   header; for points behind or near the camera use (x/tanW, y/tanH) rather than
+   dividing by depth. The target bar's `project_anchor` and `pin_to_screen` follow a
+   different rule. Scale and fade are left to `.hud` authors through transforms.
+   Online, projection, distance and rays are local; ownership replicates; capture
+   progress only simulates within 100 units of the player on a client, as the strip
+   already handles. In single-player conquest the stock objective icons appear too.
+
+### Not determined (markers)
+
+The names behind bones `0x3483A489` and `0xD1E4CC7A`; the ODF keys for the lock-on
+distances; who sets the nearest-target count (`SetupAttackerTargets`, P `0063B240`,
+looks like a stub); whether `RayHit`'s mask means the same as `RayTest`'s `0x9E`; the
+shipping safe-zone value; `CanSeePosition` on S and G (probably inlined); `mPosition`
++34 on retail; whether `EventRotation` turns the same way as the stock arrow; whether
+slot bitmaps honour a template's fades; and a probably harmless stock slip where
+`EventRefreshTargetCommon` indexes `gMarkers` with a common-target index.
+
 ## Candidate events (researched 2026-09-25, not built)
 
 The research behind the HUD entries in `ROADMAP.md`. **Addresses are Phantom unless

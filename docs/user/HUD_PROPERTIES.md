@@ -91,6 +91,8 @@ The unit states are for soldiers on foot: a droideka, a vehicle, a turret and a 
 |-------|------|-------------|-------|
 | `player1.weapon1.target.position` | Vector3 | Where weapon 1's current target is on screen: the top centre of its bounds, kept inside the screen's safe area while the game has it selected. Bind it with `EventPosition` on the group holding the target health bar and the bar floats over the unit. | 1.2.0 |
 | `player1.weapon2.target.position` | Vector3 | The same for weapon 2. | 1.2.0 |
+| `player1.weapon1.target.distance` | Float | How far away weapon 1's target is, in metres, from what you control (the camera while you are dead). With no target it sends a value `InfiniteDashes(1)` prints as `--`. | 1.2.0 |
+| `player1.weapon2.target.distance` | Float | The same for weapon 2. | 1.2.0 |
 
 The last target stays for `[Features] TargetBarLatchSeconds` (default `0.5`) after the selection is lost, then the `.hud`'s own `FadeOutTime` plays. A vehicle and its exposed rider no longer make the bar flicker between them. Bind these with `EventPosition` only: an `EventEnable` on them keeps restarting the fade. The event replaces the group's own `Position`, so put offsets on child groups.
 
@@ -115,6 +117,11 @@ Put the rotation on a group with `Scale(1,1,1)` and give the artwork its own sca
 | `player1.commandPostN.capture` | Float | How much of the post its side holds, `0` to `1`. A held post sits at `1` and drains while another team neutralises it; a neutral post sits at `0` and fills as a team captures it. | 1.2.0 |
 | `player1.commandPostN.captureColor` | Color | The team gaining or holding the post, so one bar coloured by it shows the whole fight. | 1.2.0 |
 | `player1.commandPostN.disable` | Bool | The slot is not in use. | 1.2.0 |
+| `player1.commandPostN.position` | Vector3 | Where the post is on screen, for `EventPosition` on a marker group: 1.3 m above its middle, where the stock objective markers sit. Off screen or behind you it stays on the screen's edge, keeping a 5% margin. | 1.2.0 |
+| `player1.commandPostN.onScreen` | Bool | Sent as the post comes into view. | 1.2.0 |
+| `player1.commandPostN.offScreen` | Bool | Sent as it leaves the view, and when the slot goes out of use, so it alone can hide a marker. | 1.2.0 |
+| `player1.commandPostN.direction` | Vector3 | `(0, 0, angle)` for `EventRotation`, turning an arrow drawn pointing up toward the post. | 1.2.0 |
+| `player1.commandPostN.distance` | Float | How far away the post is, in metres, from what you control (the camera while you are dead). | 1.2.0 |
 
 Slots follow each post's `HUDIndex`, lowest first, then posts without one in map order. Posts with `HUDIndexDisplay = 0`, such as the invisible spawn posts and command vehicles, are left out, and a destroyed post drops out of the row. Give neutral posts an icon from the mission script with `SetTeamIcon(0, "icon_name")`. On a multiplayer client, owners are always right but capture progress only moves for posts near the player.
 

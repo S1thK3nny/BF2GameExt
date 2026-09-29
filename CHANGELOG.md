@@ -24,8 +24,10 @@ Scripts can check the running version through `GameExt.version`.
 - **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
   `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
   so a `.hud` can show every command post's owner and capture progress in a row.
-  Slots follow `HUDIndex`; neutral posts use team 0's `SetTeamIcon`. Works on
-  multiplayer clients; inert unless a `.hud` binds it.
+  Slots follow `HUDIndex`; neutral posts use team 0's `SetTeamIcon`. Each slot also
+  floats a marker over its post: `.position` (pinned to the screen's edge off screen),
+  `.onScreen`/`.offScreen`, `.direction` for an edge arrow, and `.distance` in metres.
+  Works on multiplayer clients; inert unless a `.hud` binds it.
   See [HUD authoring](docs/user/HUD.md#command-post-strip).
 - **`FillFrom` for HUD bars** - A `BarBitmap` can keep its right end and grow or
   shrink at its left (`"Right"`), or fill vertically from its bottom or top (`"Bottom"`,
@@ -96,6 +98,7 @@ Scripts can check the running version through `GameExt.version`.
   pixels. While selected, the anchor stays inside the screen's safe area, so a big
   vehicle up close keeps its bar; otherwise the bar leaves the screen with its target.
   Bar sizes, scales, labels and offsets stay in the `.hud`.
+  `player1.weaponN.target.distance` carries the target's distance in metres.
 - **Foley regions** - A `foleyfx <group>` region now changes the footstep, landing
   and impact sounds on the ground inside it to that foley group. In stock BF2 these
   regions did nothing. See [Features](docs/user/FEATURES.md).

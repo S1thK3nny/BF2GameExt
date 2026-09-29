@@ -1,10 +1,12 @@
 #include "pch.h"
 #include "hud_command_posts.hpp"
 #include "hud_command_posts_core.hpp"
+#include "hud_world_markers_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/layout/character.hpp"
 #include "core/layout/command_post.hpp"
+#include "core/layout/red_camera.hpp"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
@@ -31,6 +33,17 @@
 // dereferences it (modtools 0x00692B80, Steam 0x0054A080, GOG 0x0054ADD0).
 // Icons are texture hashes (type 3), checked against the texture table as the
 // class icons are, since EventBitmap does not check.
+//
+// The markers (position, onScreen/offScreen, direction, distance) place each
+// post the way the stock Target element places objective markers; the rule is
+// in hud_world_markers_core.hpp. The anchor is the stock one,
+// LockOnManager::UpdateTargetVisibility (modtools 0x00454BB1): the collision
+// sphere's centre, from the object's sphere stack when it has one, lifted by the
+// object's up axis x 1.3 m (the 1.3f at modtools 0x00454CD7, Steam 0x0057B8AA,
+// GOG 0x0057C62A). The camera is CameraManager::sInstance->mRedCamera[0], as the
+// target bar reads it. Distances run from what the player controls, as the stock
+// lock-on distance does (GameEvents::UpdateLockOn, modtools 0x006B2720), else
+// from the camera, to the sphere's centre.
 // =============================================================================
 
 namespace {
@@ -41,9 +54,14 @@ constexpr int kTypeBool  = 1;  // HUD::EventClass::Type
 constexpr int kTypeUint  = 3;
 constexpr int kTypeFloat = 4;
 constexpr int kTypeColor = 7;
+constexpr int kTypeVector3 = 9;
 
 constexpr uint32_t kEC_Type          = 0x04;
 constexpr uint32_t kEC_HandlerList   = 0x08;   // self-linked when nobody listens
+constexpr uint32_t kGO_SphereStack   = 0x10;   // when set, the centre is at stack + 0x40 + index * 0x10
+constexpr uint32_t kGO_SphereIndex   = 0x14;
+constexpr uint32_t kGO_SphereCentre  = 0x18;
+constexpr uint32_t kGO_MatrixUp      = 0x100;  // mMatrix (+0xF0) .up
 constexpr uint32_t kGO_MatrixTrans   = 0x120;  // mMatrix (+0xF0) .trans
 constexpr uint32_t kGO_Flags         = 0x1FC;  // bit 3: alive
 constexpr uint32_t kGO_HandleId      = 0x204;
@@ -51,12 +69,21 @@ constexpr uint32_t kGO_Team          = 0x234;  // low 4 bits, signed
 constexpr uint32_t kTextureTableSize = 0x2000;
 constexpr int      kMaxPosts         = 64;     // CommandPost::sPostArray's length
 constexpr int      kTeams            = layout::Team::kColorCount;
+constexpr float    kMarkerLift       = 1.3f;
+constexpr uint32_t kCtrl_Trackable   = 0x18;
+constexpr uint32_t kVt_GetGameObject = 0x20;   // on the Trackable vptr
+constexpr uint32_t kFlyerRtti        = pbl_hash("EntityFlyer");
 
-enum Field { kIcon, kIconDisable, kColor, kCapture, kCaptureColor, kDisable, kFieldCount };
+enum Field {
+   kIcon, kIconDisable, kColor, kCapture, kCaptureColor, kDisable,
+   kPosition, kOnScreen, kOffScreen, kDirection, kDistance, kFieldCount
+};
 const char* const kFieldNames[kFieldCount] = {
-   "icon", "iconDisable", "color", "capture", "captureColor", "disable" };
+   "icon", "iconDisable", "color", "capture", "captureColor", "disable",
+   "position", "onScreen", "offScreen", "direction", "distance" };
 constexpr int kFieldTypes[kFieldCount] = {
-   kTypeUint, kTypeBool, kTypeColor, kTypeFloat, kTypeColor, kTypeBool };
+   kTypeUint, kTypeBool, kTypeColor, kTypeFloat, kTypeColor, kTypeBool,
+   kTypeVector3, kTypeBool, kTypeBool, kTypeVector3, kTypeFloat };
 constexpr char kCountName[] = "player1.commandPosts.count";
 
 using Find        = void*(__cdecl*)(uint32_t hash);
@@ -66,6 +93,8 @@ using Send        = void(__fastcall*)(void* ev, void* edx);
 using LocalPlayer = uint8_t*(__cdecl*)(unsigned localIndex);
 using TableFind   = void*(__cdecl*)(const void* table, uint32_t size, uint32_t hash);
 using IsNear      = bool(__cdecl*)(const float* position);
+using GameObjectOf = uint8_t*(__thiscall*)(void* self);
+using IsRtti      = bool(__thiscall*)(void* self, uint32_t hash);
 
 bool        s_active = false;
 uint32_t    s_flagsOffset = cp::kFlagsModtools;
@@ -86,9 +115,13 @@ const uint8_t*   s_netInShell = nullptr;
 const uint8_t*   s_netEnabled = nullptr;
 const uint8_t*   s_netEnabledNext = nullptr;
 const uint8_t*   s_netOnClient = nullptr;
+const uintptr_t* s_cameraMgr = nullptr;       // CameraManager::sInstance
+const uint32_t*  s_screenWidth = nullptr;
+const uint32_t*  s_screenHeight = nullptr;
 
 struct Slot {
    Sent icon, color, capture, captureColor, disabled;
+   Sent x, y, onScreen, direction, distance;
 
    // After a disable every value is sent again, so the slot shows again.
    void invalidate_values()
@@ -97,6 +130,11 @@ struct Slot {
       color.invalidate();
       capture.invalidate();
       captureColor.invalidate();
+      x.invalidate();
+      y.invalidate();
+      onScreen.invalidate();
+      direction.invalidate();
+      distance.invalidate();
    }
 };
 
@@ -112,6 +150,7 @@ void*     s_events[kSlots][kFieldCount];
 Sent      s_sentCount;
 Slot      s_slots[kSlots];
 uint32_t  s_colors[kSlots][2];   // sent by pointer, so they live here
+float     s_vectors[kSlots][2][3];   // position and direction, likewise
 IconState s_icons[kTeams];       // a missed texture lookup walks the whole table
 bool      s_announced = false;
 
@@ -277,6 +316,86 @@ void publish_post(int slot, uint8_t* post, uint8_t* obj, uint8_t** teams,
    }
 }
 
+// Where markers are seen from this update: the HUD's camera, and the point
+// distances run from.
+struct View {
+   hud_world_markers::Camera camera;
+   float origin[3];
+   bool  sideSlide;   // the stock rule, except in a flyer
+   bool  valid;
+};
+
+View read_view(uint8_t* chr)
+{
+   View v{};
+   const uintptr_t mgr = s_cameraMgr ? *s_cameraMgr : 0;
+   const uint8_t* cam = mgr ? *(const uint8_t* const*)(mgr + layout::CameraManager::kRedCamera0) : nullptr;
+   if (!cam || !s_screenWidth || !s_screenHeight) return v;
+   v.camera = { (const float*)(cam + layout::RedCamera::kMatrix),
+                *(const float*)(cam + layout::RedCamera::kTanHalfFovW),
+                *(const float*)(cam + layout::RedCamera::kTanHalfFovH),
+                *s_screenWidth, *s_screenHeight };
+   std::memcpy(v.origin, v.camera.matrix + 12, sizeof(v.origin));
+   v.sideSlide = true;
+   uint8_t* controlled = nullptr;
+   if (chr) {
+      controlled = *(uint8_t**)(chr + layout::Character::kRemote);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kVehicle);
+      if (!controlled) controlled = *(uint8_t**)(chr + layout::Character::kUnit);
+   }
+   if (controlled) {
+      void* trackable = controlled + kCtrl_Trackable;
+      uint8_t* obj = ((GameObjectOf)(*(void***)trackable)[kVt_GetGameObject / 4])(trackable);
+      if (obj && (*(const uint32_t*)(obj + kGO_Flags) >> 3 & 1)) {
+         std::memcpy(v.origin, obj + kGO_MatrixTrans, sizeof(v.origin));
+         v.sideSlide = !((IsRtti)(*(void***)obj)[0])(obj, kFlyerRtti);
+      }
+   }
+   v.valid = hud_world_markers::finite3(v.origin);
+   return v;
+}
+
+bool wants_marker(int slot)
+{
+   for (int f = kPosition; f <= kDistance; ++f)
+      if (has_listener(s_events[slot][f])) return true;
+   return false;
+}
+
+void publish_vector(Field field, int slot, int which, const float value[3])
+{
+   std::memcpy(s_vectors[slot][which], value, sizeof(s_vectors[slot][which]));
+   send_pointer(s_events[slot][field], s_vectors[slot][which]);
+}
+
+void publish_marker(int slot, const uint8_t* obj, const View& view)
+{
+   const uint8_t* stack = *(const uint8_t* const*)(obj + kGO_SphereStack);
+   const float* centre = stack
+      ? (const float*)(stack + 0x40 + *(const int*)(obj + kGO_SphereIndex) * 0x10)
+      : (const float*)(obj + kGO_SphereCentre);
+   const float* up = (const float*)(obj + kGO_MatrixUp);
+   float anchor[3];
+   for (int a = 0; a < 3; ++a) anchor[a] = centre[a] + up[a] * kMarkerLift;
+   hud_world_markers::Placement at;
+   if (!hud_world_markers::finite3(centre) ||
+       !hud_world_markers::place(view.camera, anchor, view.sideSlide, at)) return;
+
+   Slot& s = s_slots[slot];
+   const bool movedX = s.x.set_float(at.position[0]);
+   const bool movedY = s.y.set_float(at.position[1]);
+   if (movedX || movedY) publish_vector(kPosition, slot, 0, at.position);
+   if (s.onScreen.set(at.onScreen ? 1 : 0))
+      send(s_events[slot][at.onScreen ? kOnScreen : kOffScreen], 1);
+   if (s.direction.set_float(at.rotation[2])) publish_vector(kDirection, slot, 1, at.rotation);
+   const float d = (float)hud_world_markers::distance(view.origin, centre);
+   if (s.distance.set_float(d)) {
+      uint32_t bits;
+      std::memcpy(&bits, &d, sizeof(bits));
+      send(s_events[slot][kDistance], bits);
+   }
+}
+
 struct Post {
    Entry    entry;
    uint8_t* post;
@@ -332,9 +451,16 @@ void hud_command_posts_resolve(uintptr_t base)
    s_netEnabled     = (const uint8_t*)resolve(base, g_addr->net_enabled);
    s_netEnabledNext = (const uint8_t*)resolve(base, g_addr->net_enabled_next);
    s_netOnClient    = (const uint8_t*)resolve(base, g_addr->net_on_client);
+   // The markers need the camera too; the strip works without it.
+   if (g_addr->camera_manager_instance && g_addr->hud_screen_width && g_addr->hud_screen_height) {
+      s_cameraMgr    = (const uintptr_t*)resolve(base, g_addr->camera_manager_instance);
+      s_screenWidth  = (const uint32_t*)resolve(base, g_addr->hud_screen_width);
+      s_screenHeight = (const uint32_t*)resolve(base, g_addr->hud_screen_height);
+   }
    s_active = true;
    install_log("[HudCommandPosts] available: player1.commandPosts.count and "
-               "player1.commandPost1..16.*; inert without a binding");
+               "player1.commandPost1..16.*%s; inert without a binding",
+               s_cameraMgr ? " with markers" : " (no markers: camera not addressed)");
 }
 
 // HUD::Manager::Open runs GameEvents::Open before any .lvl is read, and a .hud
@@ -400,22 +526,27 @@ void hud_command_posts_update()
       if (s_sentCount.set((uint32_t)shown)) send(s_countEvent, (uint32_t)shown);
 
       uint8_t** teams = *s_teams;
-      const uint8_t* chr = s_localPlayer(0);
+      uint8_t* chr = s_localPlayer(0);
       const uint8_t* viewer = chr ? team_ptr(teams, valid_team(
          *(const int*)(chr + layout::Character::kTeam), kTeams)) : nullptr;
       const bool client = is_client();
+      const View view = read_view(chr);
 
       for (int slot = 0; slot < kSlots; ++slot) {
          Slot& s = s_slots[slot];
          if (slot >= shown) {
             if (s.disabled.set(1)) {
+               // Its marker leaves the screen with it, so one EventDisable on
+               // offScreen hides a marker either way: an element binds only one.
                send(s_events[slot][kDisable], 1);
+               send(s_events[slot][kOffScreen], 1);
                s.invalidate_values();
             }
             continue;
          }
          s.disabled.invalidate();
          publish_post(slot, posts[slot].post, posts[slot].obj, teams, viewer, client);
+         if (view.valid && wants_marker(slot)) publish_marker(slot, posts[slot].obj, view);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // A torn-down post must not escape into the game's HUD update.

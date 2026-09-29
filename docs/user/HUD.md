@@ -207,6 +207,22 @@ Group("player1targetbar")
 - Sizes, offsets and labels stay in the `.hud`: put offsets on child groups, since
   the event replaces the parent's own `Position`.
 
+`player1.weapon1.target.distance` and `player1.weapon2.target.distance` carry how far
+away that target is, in metres, from what you control, or from the camera while you
+are dead. With no target they send a value that `InfiniteDashes(1)` prints as `--`:
+
+```
+Text("player1targetdistance")
+{
+    EventNumber("player1.weapon1.target.distance")
+    FloatFormat("%.0fm")
+    InfiniteDashes(1)
+}
+```
+
+The distance follows the same target as the bar, and works with or without the
+position.
+
 ## Reticule horizon levelling
 
 `player1.reticule.horizonRotation` rotates a group so it stays level with the horizon
@@ -437,6 +453,73 @@ Group("cp_slot1")
 - On a multiplayer client, owners are always right, but capture progress only moves
   for posts near the player. Elsewhere a post shows full for its owner or empty when
   neutral. On the host and in single player every post is live.
+
+### Markers in the world
+
+Each slot can also float a marker over its post, like BF3's. These events place it:
+
+| Event | Type | Carries |
+|-------|------|---------|
+| `player1.commandPostN.position` | Vector3 | Where the post is on screen, for `EventPosition`. Off screen or behind you, it stays on the screen's edge |
+| `player1.commandPostN.onScreen` | Bool | Sent as the post comes into view |
+| `player1.commandPostN.offScreen` | Bool | Sent as it leaves the view, and when the slot goes out of use |
+| `player1.commandPostN.direction` | Vector3 | `(0, 0, angle)` for `EventRotation`: turns an arrow drawn pointing up toward the post |
+| `player1.commandPostN.distance` | Float | How far away the post is, in metres |
+
+The group follows the post and everything in it is offset from it, so an icon with its
+distance under it, and an arrow at the screen's edge, is one group:
+
+```
+Group("player1cpmarker1")
+{
+    EventPosition("player1.commandPost1.position")
+    EventEnable("player1.commandPost1.icon")
+    EventDisable("player1.commandPost1.disable")
+    Bitmap("player1cpmarker1_icon")
+    {
+        Bitmap("bf3_neutral_icon")
+        BitmapRect(0.030, 0.030, "Center", "Center", "Viewport")
+        EventBitmap("player1.commandPost1.icon")
+        EventColor("player1.commandPost1.color")
+    }
+    Text("player1cpmarker1_distance")
+    {
+        // Under the icon.
+        Position(0.000, 0.025, 0.000, "Viewport")
+        EventNumber("player1.commandPost1.distance")
+        FloatFormat("%.0fm")
+        EventEnable("player1.commandPost1.onScreen")
+        EventDisable("player1.commandPost1.offScreen")
+    }
+    Group("player1cpmarker1_arrow")
+    {
+        Scale(1, 1, 1)
+        EventRotation("player1.commandPost1.direction")
+        EventEnable("player1.commandPost1.offScreen")
+        EventDisable("player1.commandPost1.onScreen")
+        // An arrow bitmap pointing up, with its own scale, goes here.
+    }
+}
+```
+
+- For a marker only while its post is on screen, as BF3 does, put
+  `EventEnable(".onScreen")` and `EventDisable(".offScreen")` on the marker group itself
+  and leave out the arrow. `offScreen` also hides it when the slot goes out of use.
+- An element binds one `EventEnable` and one `EventDisable`: a second line replaces
+  the first rather than adding to it.
+- Every element in the marker needs an `EventEnable` of its own, or it never shows.
+  Inside a group that does the hiding, `EventEnable("initialize")` is enough.
+- The marker sits where the stock conquest objective markers do: 1.3 m above the
+  middle of the post.
+- Off screen, it keeps a 5% margin from the edge. A post behind you slides to the
+  left or right edge, as the stock markers do, except while you fly.
+- The distance runs from what you control, or from the camera while you are dead,
+  to the middle of the post.
+- To fade markers out with distance, feed `distance` to a `TransformNumberLerp` with
+  `InputRange(250, 300)`, `ConstantA(1)`, `ConstantB(0)` and `OutputIsAlpha(1)`, and
+  bind that with `EventAlpha` on the marker group, given `PropagateAlpha(1)`.
+- Markers are worked out on each machine, so they work on multiplayer clients, and
+  only for the slots a `.hud` binds.
 
 ## FillFrom
 

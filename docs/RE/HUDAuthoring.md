@@ -375,6 +375,18 @@ The BF3 `Common/hud/legacy_gameext_hud.hud` inspected for this revision has nine
 target bar/glow/label `FadeOutTime(0.65)` entries. Changing those to `0.25` is an
 asset-only way to match the reference's fade. That file was not edited here.
 
+#### Distance
+
+`player1.weapon1.target.distance` and `player1.weapon2.target.distance` are Floats in
+metres, sent when they change: the distance from the translation of what the player
+controls (remote, else vehicle, else soldier), as the stock lock-on distance measures,
+to the target's translation. While the player is dead the camera stands in. The target
+is the one the engine's HUD update settled on, so it includes the retention and rider
+pair lends when a position is bound, and is the engine's own pick when only the
+distance is. With no target the value is `FLT_MAX`, which a `Text` prints as nothing,
+or as `--` with `InfiniteDashes(1)`. The stock `player1.lockOnDistance` exists only in
+flyers and remote turrets; this works for everything.
+
 ### Reticule horizon levelling
 
 This event keeps a reticule level with the horizon as the camera banks. Bind it on
@@ -531,6 +543,33 @@ spacing alone.
 
 To fill each emblem from the bottom rather than left to right, add `FillFrom("Bottom")`
 to its capture bar; see [Filling upward or downward](#filling-upward-or-downward).
+
+#### Markers in the world
+
+`player1.commandPostN.position`, `.onScreen`, `.offScreen`, `.direction` and
+`.distance` place a marker over each slot's post, computed only for slots a `.hud`
+binds, and sent when they change. The recipe is in
+[HUD.md](../user/HUD.md#markers-in-the-world).
+
+- **Anchor:** the stock objective anchor, the post's collision-sphere centre lifted
+  1.3 m along the post's up axis. Stock single-player conquest's `MapAddEntityMarker`
+  markers sit at the same point.
+- **Placement:** the stock `Target` element's rule. A point in front of the camera and
+  inside the 0.9 safe square is on screen at its projection. Anything else is pinned to
+  that square's edge along its direction on screen, mirrored behind the camera. Except
+  while the player is in a flyer, a point more than about 78 degrees off the view axis
+  slides to the left or right edge. Positions are snapped to whole pixels.
+- **Direction:** degrees for `EventRotation` in pixel space, so an arrow drawn
+  pointing up turns toward the point, as the stock off-screen arrow does. Put it on a
+  unit-scale pivot group.
+- **Distance:** from what the player controls, else the camera, to the sphere's centre.
+- **Visibility:** `onScreen` and `offScreen` are sent when the state changes, and
+  `offScreen` also when the slot goes out of use, so `EventEnable`/`EventDisable` on
+  them are enough to show a marker only while its post is in view. An element binds
+  one of each (a second line replaces the first), which is why the slot's own
+  `disable` is not needed there.
+- **Not included:** occlusion. The stock markers dim behind walls with a ray per frame;
+  these do not test line of sight.
 
 #### Online
 
@@ -1425,6 +1464,9 @@ settings, expect immediate appearance, a 0.5-second hold after selection loss,
 then a 0.25-second HUD fade. Also test death/respawn, changing weapons, entering
 and leaving vehicles, and mission reloads. Multiplayer still needs a live test.
 
+Bind `target.distance` to a text and walk toward and away from a target: it should
+count in metres and print `--` with `InfiniteDashes(1)` when nothing is targeted.
+
 For the edges, turn away from a selected target: its bar should slide off the
 screen with it rather than park at the edge. Then walk up to a large vehicle and
 aim at it: its bar should stay at the top of the screen while selected. For the
@@ -1457,10 +1499,17 @@ should flip to your team. Neutralise an enemy post: its bar should drain in its
 owner's colour, and the icon should turn neutral when it empties. Watch an AI capture
 elsewhere on the map in single player; the bar should move there too.
 
+For the markers, bind the recipe from HUD.md and turn on the spot: each icon should
+sit over its post, slide to the screen's edge as the post leaves the view, with the
+arrow pointing the way to turn, and go to the side edges behind you, the top and
+bottom in a flyer. The distance should count down as you walk to a post.
+
 `tests/hud_command_posts_tests.cpp` covers the slot order, the capture value and
-colour, and change detection. `tests/hud_command_posts_abi_tests.py
-"path\to\GameData"` checks every offset, address and guard against all three
-executables, read-only.
+colour, and change detection, and `tests/hud_world_markers_tests.cpp` the placement,
+edge pinning, arrow angle and distance, with 20,000 random points.
+`tests/hud_command_posts_abi_tests.py "path\to\GameData"` checks every offset,
+address and guard against all three executables, read-only, including the stock
+anchor reads and the 1.3 m lift.
 
 ### Bar fill checks
 
