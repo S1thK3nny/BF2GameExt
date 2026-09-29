@@ -174,6 +174,12 @@ scene bounding sphere `+0xC4..+0xD0`, PblHandle id `+0x204`, team bits `+0x234`
 
 After spawning, the carrier's Y is clamped to `AIUtil::gMaxFlyHeight` (default 200, Lua
 `SetMaxFlyHeight`), so a spawn height above that is pulled down on the first frame.
+The clamp is in `EntityFlyer::Update` (modtools `0x005006BB`), runs every frame on the
+integrated position and caps the **absolute world Y** at the limit + 0.2:
+`gMaxFlyHeight` for AI-driven flyers, `gMaxPlayerFlyHeight` when `[this+0xD4] >= 0`.
+A BF1 port that keeps `SetMaxFlyHeight(30)` therefore starts every descent about 30 m
+above a pad at Y=0 and (with LandingTime 15, MinSpeed 70) 525 m out, which reads as a
+low approach from the side.
 
 ### 5.3 Descent and landing (`EntityFlyer::Update`, state 3)
 
@@ -217,8 +223,15 @@ ground distance > `TakeoffHeight + LandedHeight`.
 - **DetachCargo**: clears `cargo->mParent`, remembers the cargo for 1.5 s (collisions with
   it are ignored meanwhile), clears the slot, updates the landed height, plays
   `DropoffSound`.
-- **Kill**: drops first person for a local pilot, wakes and detaches every live cargo,
-  then `EntityFlyer::Kill`.
+- **Kill**: drops first person for a local pilot, **kills** and detaches every live
+  cargo, then `EntityFlyer::Kill`. The kill is cargo `vtable+0x6C` (returns the
+  Controllable, base+0x240) then its `vtable+0x14`, which on a CommandWalker is a thunk
+  (`SUB ECX,0x100`) to the Damageable `Kill`. That is a direct Kill with no `Die`, so the
+  cargo's next `EntityWalker::Update` sees the alive bit cleared (`EntityWalker::Kill`
+  clears Damageable+0xBC bit 3) without the dead flag (`+0x2060` bit 1, set by `Die`)
+  and runs its death branch: `Kill` again, then `Die`. For a CommandWalker the second
+  `Kill` dereferences the already-zeroed mobile command post (modtools `0x0064BB26`).
+  GameExt makes that second call a no-op on all builds (see 9.8).
 - **ActivatePhysics**: only activates the Controllable with priority -1. EntityFlyer's
   version also activates the post-collision sub-object (-15), aimers, turrets and
   passenger slots, so carrier turrets are built but never activated.
@@ -347,7 +360,12 @@ detaches go through the hooked DetachCargo so the restore always runs.
   post-drop carrier can't re-enter LANDING.
 - **Terrain wobble**: the two downward RayHit calls in `EntityFlyer::Update` feed the terrain
   normal into heading and pitch. While a tracked carrier is more than
-  `max(2 * landedHeight, 10)` above its pad they report "no hit" (ground distance 1024) for
+  `max(2 * landedHeight, 10)` above its pad (the **instance** landed height, which includes
+  the cargo; the class value left tall cargo such as an AT-AT parked above that threshold
+  at the descent target, so it never landed), or is LANDING and more than 2 m from the pad
+  horizontally (under a low `SetMaxFlyHeight` the whole approach is inside the height
+  threshold, so the landing check passed over the terrain it crossed and the cargo was set
+  down short of the pad), they report "no hit" (ground distance 1024) for
   the duration of its Update: modtools `FLD1` + NOPs, release a CALL to a stub that sets
   XMM0 = 1.0. Sites: modtools `0x004FE8CD` / `0x004FEAE2`, release `0x004AE246` /
   `0x004AE478`.
@@ -373,7 +391,17 @@ net delta zeroed). The scene bounding sphere is kept on the pivot with radius at
 - **CreateController null check** (modtools only): PlayerController path dereferences
   `[ESI+0xD0]+0xD4` without a check.
 
-### 9.8 Calling-convention traps
+### 9.8 Carrier-exposed engine crashes
+
+- **CommandWalker::Kill** (modtools `0x006508B0`, release `0x0047FFE0`): returns at once when
+  the mobile command post pointer (Damageable `+0x2000` / `+0x1FC0`) is already NULL, i.e.
+  Kill already ran. See 5.5.
+- **Net send-list visitor** (modtools `0x00703750`, Steam `0x005BD590`, GOG `0x005BE530`,
+  `__cdecl(obj, depth)`, bare RET): tracks the objects whose AddSends is running and skips one
+  that comes around again (nesting cap 128). Logs `[NetSendCycleFix]` with the chain once.
+  See 10.
+
+### 9.9 Calling-convention traps
 
 - `VehicleSpawn::UpdateSpawn` on release: dt in XMM1, bare RET. Bridged with naked thunks.
 - Release `AttachCargo` ignores its slot argument.
@@ -400,6 +428,12 @@ net delta zeroed). The scene bounding sphere is kept on the pivot with radius at
   keeping the flight model in charge instead of overwriting positions. Not verified.
 - **Turrets share the carrier's AI state** during their borrowed UpdateIndirect call, so
   several turrets don't select targets independently. Needs UnitController RE.
+- **Multiplayer host stack overflow**: the host's send-list visitor (modtools `0x00703750`,
+  Steam `0x005BD590`, GOG `0x005BE530`) recursed forever through `EntityFlyer::AddSends`,
+  which sends `mPilot->GetGameObject()` at the same depth with no PILOT_SELF guard, on an
+  EntityCarrier whose pilot resolves to itself (a Steam MP test logged a one-object chain).
+  GameExt breaks the loop (see 9.8). Why the carrier's `mPilot` leads back to itself is
+  still not known.
 - **Multiplayer clients**: `dropStrandedCargo` runs on every machine; carriers on clients
   were not checked.
 - The EntityCarrier memory pool size caps carriers map-wide; GameExt tracks at most 8.
