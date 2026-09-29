@@ -186,3 +186,13 @@ Make HTTP requests directly from Lua. Useful for telemetry, live configuration, 
 | `HttpGetAsync(url)` | Fire-and-forget GET on a background thread. | 1.0.0 |
 | `HttpPutAsync(url, body)` | Fire-and-forget PUT. | 1.0.0 |
 | `HttpPostAsync(url, body)` | Fire-and-forget POST. | 1.0.0 |
+
+## Diagnostics
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `GameExtContentCensus()` | Writes the content budget report to `BF2GameExt.log` straight away: what the map loaded against the limits the engine imposes, starting with effect classes out of 256. Works on every build, including retail, which has no debug console. | 1.2.0 |
+
+`ContentCensus()`, the name it shipped under in 1.0.0, still works. To run the same
+report on a timer instead, set `[Diagnostic] ContentCensus` in `BF2GameExt.ini`; see
+[Configuration](CONFIGURATION.md).

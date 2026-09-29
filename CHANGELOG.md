@@ -129,6 +129,9 @@ Scripts can check the running version through `GameExt.version`.
   corpse. Living targets still track normally; new targets reset the cached anchor.
 - A map rotation no longer crashes when a map with `foleyfx` regions follows another
   map that has them.
+- `GameExtContentCensus()`, the name the documentation gives for the content budget
+  report, did not exist: the report was registered for Lua as `ContentCensus()`. Both
+  names now work.
 
 ## 1.1.0
 

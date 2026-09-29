@@ -1636,6 +1636,8 @@ static int lua_GetMissionName(lua_State* L)
 }
 
 static const lua_func_entry custom_functions[] = {
+   { "GameExtContentCensus",  lua_ContentCensus },
+   // The name it shipped under in 1.0.0, kept so scripts using it still work.
    { "ContentCensus",         lua_ContentCensus },
    { "GetMissionName",        lua_GetMissionName },
    { "HttpGet",               lua_HttpGet },
