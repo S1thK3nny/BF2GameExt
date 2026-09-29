@@ -13,7 +13,7 @@ The Type column says what an event can drive:
 | Type | Bind it with |
 |------|--------------|
 | Uint texture | `EventBitmap` on a `Bitmap` or `BarBitmap`, which swaps in that texture |
-| Uint number, Float | `EventNumber` on text, `EventValue` on a bar, or the input of a transform |
+| Uint number, Float | `EventNumber` on text, `EventValue` on a bar, `EventAlpha` on a group for a Float from 0 to 1 (see `OutputIsAlpha`), or the input of a transform |
 | Bool | `EventEnable` or `EventDisable` |
 | Color | `EventColor` |
 | Vector3 | `EventPosition` or `EventRotation`, as given for each event |
@@ -60,6 +60,30 @@ Bitmap("player1classicon")
 | `player1.weapon2.iconTextureDisable` | Bool | The same for slot 2. | 1.2.0 |
 
 `IconTexture` goes in the weapon ODF's `[WeaponClass]` section. Weapons have no stance variants.
+
+### Unit and Weapon States
+
+Each is a Float, `1` while the state lasts and `0` otherwise, with nothing in between. Feed one through a [`TransformNumberLerp`](#transformnumberlerp) to fade an element with it. See [Unit and weapon states](HUD.md#unit-and-weapon-states) for the reticule recipe.
+
+| Event | Type | Description | Since |
+|-------|------|-------------|-------|
+| `player1.unit.state.sprint` | Float | `1` while sprinting. | 1.2.0 |
+| `player1.unit.state.jump` | Float | `1` while jumping. | 1.2.0 |
+| `player1.unit.state.fall` | Float | `1` while falling. | 1.2.0 |
+| `player1.unit.state.roll` | Float | `1` while rolling. | 1.2.0 |
+| `player1.unit.state.jet` | Float | `1` while jet jumping. | 1.2.0 |
+| `player1.unit.state.hover` | Float | `1` while hovering on a jet pack. | 1.2.0 |
+| `player1.unit.state.tumble` | Float | `1` while thrown, knocked down or getting back up. | 1.2.0 |
+| `player1.unit.state.land` | Float | `1` for one update on touching down from a jump, a fall or a jet, then `0`. | 1.2.0 |
+| `player1.weapon1.state.firing` | Float | `1` while the weapon in slot 1 fires, or a melee weapon attacks. | 1.2.0 |
+| `player1.weapon1.state.charging` | Float | `1` while it charges a shot. | 1.2.0 |
+| `player1.weapon1.state.reloading` | Float | `1` while it reloads. Never for a melee weapon. | 1.2.0 |
+| `player1.weapon1.state.overheated` | Float | `1` while it is overheated and cooling down. | 1.2.0 |
+| `player1.weapon1.state.blocking` | Float | `1` while a melee weapon blocks. | 1.2.0 |
+| `player1.weapon1.state.shot` | Float | `1` for one update each time it fires, so fast fire can hold it at `1`. | 1.2.0 |
+| `player1.weapon2.state.*` | Float | The same six for slot 2. | 1.2.0 |
+
+The unit states are for soldiers on foot: a droideka, a vehicle, a turret and a remote read `0` throughout. The weapon states follow the same weapon as the stock `player1.weaponN.*` events.
 
 ### Target Bars
 
@@ -118,6 +142,8 @@ BarBitmap("player1health_missing")
 | Transform | Output | Description | Since |
 |-----------|--------|-------------|-------|
 | `TransformNumberMath` | Float | Works out `A operation B`, where each side is a constant or a live number event, and sends the result as a new event. | 1.2.0 |
+| `TransformNumberLerp` | Float | Slides between A and B as its input goes from 0 to 1 (or across `InputRange`), over set times up and down, and sends the result as a new event. | 1.2.0 |
+| `TransformNumberCompare` | Float, Bool | Compares A with B and sends 1 or 0, and optionally Bool events as the result turns on and off, for `EventEnable` and `EventDisable`. | 1.2.0 |
 
 ### TransformNumberMath
 
@@ -130,6 +156,7 @@ BarBitmap("player1health_missing")
 | `EventInputB` | event name | An Int, Uint or Float event for the right side. Use this or `ConstantB`. | 1.2.0 |
 | `Clamp` | minimum, maximum | Optional. Keeps the result between the two numbers. The minimum cannot be above the maximum. | 1.2.0 |
 | `EventOutput` | event name | Required. The name of the new Float event. It must not already exist. | 1.2.0 |
+| `OutputIsAlpha` | `1`/`0` or `true`/`false` | Optional, off by default. On, the result is sent every HUD update rather than only when it changes, which a group's `EventAlpha` needs to hold. | 1.2.0 |
 
 ```
 TransformNumberMath("player1example_healthpercent")
@@ -141,7 +168,68 @@ TransformNumberMath("player1example_healthpercent")
 }
 ```
 
-Declare a transform after whatever sends its inputs and before anything that uses its output: a later declaration cannot be found. Each parameter appears once. A repeated or unknown parameter switches that transform off and writes the reason to `BF2GameExt.log` under `[HudNumberMath]`. Dividing by zero, or any other invalid result, sends nothing, so the bound element keeps its last value. The HUD editor's export drops these blocks, so keep your source file.
+Declare a transform after whatever sends its inputs and before anything that uses its output: a later declaration cannot be found. Each parameter appears once. A repeated or unknown parameter switches that transform off and writes the reason to `BF2GameExt.log` under `[HudNumberMath]`. Dividing by zero, or any other invalid result, sends nothing, so the bound element keeps its last value. A `// comment` after a parameter is fine with a space after the `//`; written `//comment`, it counts as a value and switches the transform off. The HUD editor's export drops these blocks, so keep your source file.
+
+`EventAlpha` exists only on groups, and a value sent to it holds for one frame, because the group repaints its own alpha every frame. So a transform feeding one needs `OutputIsAlpha(1)`, and the group needs the stock `PropagateAlpha(1)` for its alpha to reach what is inside it. Leave `OutputIsAlpha` off otherwise: with `EventChanged` it would fire every frame.
+
+### TransformNumberLerp
+
+| Parameter | Value | Description | Since |
+|-----------|-------|-------------|-------|
+| `EventInput` | event name | Required. An Int, Uint or Float event: `0` gives A, `1` gives B, and anything in between that share of the way from A to B. Values outside count as the nearer end. | 1.2.0 |
+| `InputRange` | min, max | Optional. The inputs that give A and B instead of `0` and `1`, such as `InputRange(0, 30)` for a clip of 30. Each end is a number or a quoted event name, which is followed as it changes. | 1.2.0 |
+| `ConstantA` | number | The output at `0`, unquoted. Defaults to `0`. Use this or `EventInputA`. | 1.2.0 |
+| `EventInputA` | event name | An Int, Uint or Float event for the output at `0`. Use this or `ConstantA`. | 1.2.0 |
+| `ConstantB` | number | The output at `1`, unquoted. Defaults to `1`. Use this or `EventInputB`. | 1.2.0 |
+| `EventInputB` | event name | An Int, Uint or Float event for the output at `1`. Use this or `ConstantB`. | 1.2.0 |
+| `RiseTime` | seconds | Optional. How long the output takes to follow the input all the way up from `0` to `1`. `0`, the default, follows at once. | 1.2.0 |
+| `FallTime` | seconds | Optional. The same for the way down from `1` to `0`. Defaults to `0`. | 1.2.0 |
+| `EventOutput` | event name | Required. The name of the new Float event. It must not already exist. | 1.2.0 |
+| `OutputIsAlpha` | `1`/`0` or `true`/`false` | Optional, off by default. On, the result is sent every HUD update rather than only when it changes, which a group's `EventAlpha` needs to hold. | 1.2.0 |
+
+```
+TransformNumberLerp("player1example_sprintalpha")
+{
+    EventInput("player1.unit.state.sprint")
+    ConstantA(1.00)
+    ConstantB(0.00)
+    RiseTime(0.15)
+    FallTime(0.30)
+    EventOutput("player1.example.sprintAlpha")
+    OutputIsAlpha(1)
+}
+```
+
+A and B do any inverting: here `ConstantA(1.00)` and `ConstantB(0.00)` turn the sprint's `0` and `1` into an alpha of `1` and `0` with no `TransformNumberMath`, fading out over `RiseTime` as the sprint starts and back in over `FallTime` as it ends. The [HUD System](HUD.md#transformnumberlerp) page has the whole timeline. The times are for a whole swing, so half a swing takes half the time. With only a `FallTime`, a state that lasts a single update, such as `land` or `shot`, still shows in full before it fades. The first input is taken at once, so nothing fades in when the mission loads. With events for A or B, nothing is sent until each has arrived, and a change to either end moves the output at once. The declaring, parameter and logging rules are the same as `TransformNumberMath`'s.
+
+### TransformNumberCompare
+
+| Parameter | Value | Description | Since |
+|-----------|-------|-------------|-------|
+| `Operation` | `"Greater"`, `"GreaterOrEqual"`, `"Less"`, `"LessOrEqual"`, `"Equal"` or `"NotEqual"` | Required. A compared with B. Case does not matter. | 1.2.0 |
+| `ConstantA` | number | A fixed number for the left side. Use this or `EventInputA`. | 1.2.0 |
+| `EventInputA` | event name | An Int, Uint or Float event for the left side. Use this or `ConstantA`. | 1.2.0 |
+| `ConstantB` | number | A fixed number for the right side. Use this or `EventInputB`. | 1.2.0 |
+| `EventInputB` | event name | An Int, Uint or Float event for the right side. Use this or `ConstantB`. | 1.2.0 |
+| `Hysteresis` | number, `0` or more | Optional. Once the result is `1`, it stays `1` until A is this far back past B. For `Equal` and `NotEqual`, how close counts as equal. Defaults to `0`. | 1.2.0 |
+| `EventOutput` | event name | A new Float event, `1` or `0`. | 1.2.0 |
+| `EventOutputTrue` | event name | A new Bool event sent as the result turns to `1`, for `EventEnable`. | 1.2.0 |
+| `EventOutputFalse` | event name | A new Bool event sent as the result turns to `0`, for `EventDisable`. | 1.2.0 |
+| `OutputIsAlpha` | `1`/`0` or `true`/`false` | Optional, off by default. Sends the Float every HUD update; the Bool events never repeat. | 1.2.0 |
+
+```
+TransformNumberCompare("player1example_lowammo")
+{
+    Operation("Less")
+    EventInputA("player1.weapon1.totalClipFraction")
+    ConstantB(0.25)
+    Hysteresis(0.05)
+    EventOutputTrue("player1.example.lowAmmo")
+    EventOutputFalse("player1.example.lowAmmoOff")
+}
+```
+
+At least one output is required. The Bool events are sent when the result changes, and once when the first result is known, so `EventEnable` and `EventDisable` on them show and hide an element with its fade. Nothing is sent until both sides are known. The declaring, parameter and logging rules are the same as `TransformNumberMath`'s.
 
 ## INI Settings
 

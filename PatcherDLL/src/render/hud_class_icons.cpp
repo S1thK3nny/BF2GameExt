@@ -11,6 +11,8 @@
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 
+#include <cstring>
+
 // =============================================================================
 // What it reads, read off each build (names from the Phantom PDB). Details and
 // the rest of the research are in docs/RE/HUDSystem.md.
@@ -43,13 +45,21 @@
 //
 // EventBitmap's SetTexture(uint) only stores the hash. Nothing checks that the
 // texture is loaded, so every candidate is checked here before it is sent.
+//
+// The state flags (player1.unit.state.* and player1.weaponN.state.*) are Floats
+// (type 4), 1 or 0, sent with the float's bits in the data word as
+// hud_command_posts.cpp sends its capture fraction. The unit's come from the
+// same soldier mState the stance does; the weapon's from Weapon::mState (+0xB0,
+// every build), its IsMelee (primary slot 21, as aim_assist.cpp calls it) and
+// Weapon::mLastFireTime (layout::Weapon, per build) for shots.
 // =============================================================================
 
 namespace {
 using namespace hud_class_icons;
 
-constexpr int kTypeBool = 1;  // HUD::EventClass::Type
-constexpr int kTypeUint = 3;
+constexpr int kTypeBool  = 1;  // HUD::EventClass::Type
+constexpr int kTypeUint  = 3;
+constexpr int kTypeFloat = 4;
 
 constexpr uint32_t kCtrl_Trackable     = 0x18;
 constexpr uint32_t kVt_GetGameObject   = 0x1C;  // on the Trackable vptr
@@ -67,9 +77,10 @@ static_assert(kSoldierRtti == 0x5E8739F4u, "the target bar's soldier RTTI hash")
 struct Layout {
    uint32_t classHealthTexture;  // EntityClass::mHealthTexture
    uint32_t droidekaState;       // EntityDroideka::mState, from the object start
+   uint32_t lastFireTime;        // Weapon::mLastFireTime
 };
-constexpr Layout kModtools = { 0x48, layout::Droideka::kStateModtools };
-constexpr Layout kRelease  = { 0x28, layout::Droideka::kStateRelease };  // Steam, GOG
+constexpr Layout kModtools = { 0x48, layout::Droideka::kStateModtools, layout::Weapon::kLastFireTimeModtools };
+constexpr Layout kRelease  = { 0x28, layout::Droideka::kStateRelease,  layout::Weapon::kLastFireTimeRelease };  // Steam, GOG
 
 using Find         = void*(__cdecl*)(uint32_t hash);
 using FindFast     = void*(__fastcall*)(uint32_t hash);
@@ -82,6 +93,7 @@ using ClassFn      = const uint8_t*(__thiscall*)(void* self);
 using IsRtti       = bool(__thiscall*)(void* self, uint32_t hash);
 using WeaponIndexFn = int(__thiscall*)(void* self, int channel);
 using WeaponFn     = uint8_t*(__thiscall*)(void* self, int index);
+using IsMeleeFn    = bool(__thiscall*)(void* self);
 
 // Each weapon channel's pair must stay texture then Disable, weapon1 then weapon2.
 enum EventId { kUnitTexture, kUnitDisable, kUnitStance, kVehicleTexture, kVehicleDisable,
@@ -101,6 +113,9 @@ const char* const kNames[kEventCount] = {
 constexpr int kTypes[kEventCount] = { kTypeUint, kTypeBool, kTypeUint, kTypeUint, kTypeBool,
                                       kTypeUint, kTypeBool, kTypeUint, kTypeBool };
 
+constexpr uint32_t kVt_IsMelee = 21 * 4;       // Weapon primary vptr, thiscall(), bool in AL
+constexpr uint32_t kFloatOne   = 0x3F800000u;  // 1.0f
+
 bool        s_active = false;
 Layout      s_layout = kModtools;
 Find        s_find = nullptr;
@@ -116,6 +131,12 @@ const uint32_t*  s_droidekaRtti = nullptr;  // set by a static initialiser
 // Every pointer below dies with the mission: see hud_class_icons_open.
 void*     s_events[kEventCount];
 Published s_sentUnit, s_sentStance, s_sentVehicle, s_sentWeapon[kWeaponChannels];
+void*     s_unitStateEvents[kUnitStates];
+void*     s_weaponStateEvents[kWeaponChannels][kWeaponStates];
+Published s_sentUnitState[kUnitStates];
+Published s_sentWeaponState[kWeaponChannels][kWeaponStates];
+Landing   s_landing;
+Shots     s_shots[kWeaponChannels];
 Pick      s_unitPick, s_vehiclePick, s_weaponPick[kWeaponChannels];
 bool      s_announced = false;
 
@@ -126,9 +147,13 @@ void invalidate()
    s_sentVehicle.invalidate();
    s_unitPick.invalidate();
    s_vehiclePick.invalidate();
+   for (Published& p : s_sentUnitState) p.invalidate();
+   s_landing.reset();
    for (int ch = 0; ch < kWeaponChannels; ++ch) {
       s_sentWeapon[ch].invalidate();
       s_weaponPick[ch].invalidate();
+      for (Published& p : s_sentWeaponState[ch]) p.invalidate();
+      s_shots[ch].reset();
    }
 }
 
@@ -205,21 +230,58 @@ uint32_t unit_stance(uint8_t* unit, uint8_t* obj)
    return kStand;
 }
 
-// The weapon class HUD::GameEvents::UpdateWeaponEvents shows for a channel.
-const uint8_t* weapon_class(uint8_t* controlled, int channel)
+// The soldier's state, or -1 for anything else (a droideka has a state machine
+// of its own).
+int soldier_state(uint8_t* unit, uint8_t* obj)
+{
+   const IsRtti is_rtti = (IsRtti)(*(void***)obj)[0];
+   const uint32_t droideka = s_droidekaRtti ? *s_droidekaRtti : 0;
+   if (droideka && is_rtti(obj, droideka)) return -1;
+   return is_rtti(obj, kSoldierRtti) ? *(const int*)(unit + g_soldier->mState) : -1;
+}
+
+// The weapon HUD::GameEvents::UpdateWeaponEvents shows for a channel.
+uint8_t* weapon_of(uint8_t* controlled, int channel)
 {
    void** vt = *(void***)controlled;
    const int index = ((WeaponIndexFn)vt[kVt_GetWeaponIndex / 4])(controlled, channel);
    if (index < 0) return nullptr;
-   uint8_t* weapon = ((WeaponFn)vt[kVt_GetWeapon / 4])(controlled, index);
-   return weapon ? *(const uint8_t* const*)(weapon + layout::Weapon::kClass) : nullptr;
+   return ((WeaponFn)vt[kVt_GetWeapon / 4])(controlled, index);
 }
 
 bool any_listener()
 {
    for (void* cls : s_events)
       if (has_listener(cls)) return true;
+   for (void* cls : s_unitStateEvents)
+      if (has_listener(cls)) return true;
+   for (auto& channel : s_weaponStateEvents)
+      for (void* cls : channel)
+         if (has_listener(cls)) return true;
    return false;
+}
+
+// A flag as a Float: 1 or 0, sent when it changes.
+void publish_flag(Published& sent, void* cls, bool on)
+{
+   const uint32_t bits = on ? kFloatOne : 0u;
+   if (!cls || !sent.set(bits)) return;
+   struct { void* mClass; uint32_t mData; } ev = { cls, bits };
+   s_send(&ev, nullptr);
+}
+
+// Finds or creates a GameExt event of `type`; null if a stock one of another
+// type already has the name.
+void* event_named(const char* name, int type)
+{
+   void* cls = find_event(pbl_hash(name));
+   if (!cls)   // literal name through "%s": Create runs its fmt through vsnprintf
+      return s_create(type, "%s", name);
+   if (*(const uint32_t*)((const uint8_t*)cls + kEC_Type) != (uint32_t)type) {
+      install_log("[HudClassIcons] %s already exists with another type; not published", name);
+      return nullptr;
+   }
+   return cls;
 }
 
 } // namespace
@@ -258,7 +320,8 @@ void hud_class_icons_resolve(uintptr_t base)
    s_droidekaRtti = (const uint32_t*)resolve(base, g_addr->entity_droideka_rtti_hash);
    s_active = true;
    install_log("[HudClassIcons] available: player1.unit.healthTexture, player1.unit.stance, "
-               "player1.vehicle.healthTexture, player1.weaponN.iconTexture; inert without a binding");
+               "player1.unit.state.*, player1.vehicle.healthTexture, player1.weaponN.iconTexture, "
+               "player1.weaponN.state.*; inert without a binding");
 }
 
 // HUD::Manager::Open runs GameEvents::Open before any .lvl is read, and a .hud
@@ -271,17 +334,31 @@ void hud_class_icons_open()
    for (int i = 0; i < kEventCount; ++i) {
       s_events[i] = nullptr;
       __try {
-         void* cls = find_event(pbl_hash(kNames[i]));
-         if (!cls)   // literal name through "%s": Create runs its fmt through vsnprintf
-            cls = s_create(kTypes[i], "%s", kNames[i]);
-         else if (*(const uint32_t*)((const uint8_t*)cls + kEC_Type) != (uint32_t)kTypes[i]) {
-            install_log("[HudClassIcons] %s already exists with another type; not published",
-                        kNames[i]);
-            cls = nullptr;
-         }
-         s_events[i] = cls;
+         s_events[i] = event_named(kNames[i], kTypes[i]);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
          s_events[i] = nullptr;
+      }
+   }
+   char name[64];
+   for (int f = 0; f < kUnitStates; ++f) {
+      s_unitStateEvents[f] = nullptr;
+      _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.unit.state.%s", kUnitStateNames[f]);
+      __try {
+         s_unitStateEvents[f] = event_named(name, kTypeFloat);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         s_unitStateEvents[f] = nullptr;
+      }
+   }
+   for (int ch = 0; ch < kWeaponChannels; ++ch) {
+      for (int f = 0; f < kWeaponStates; ++f) {
+         s_weaponStateEvents[ch][f] = nullptr;
+         _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.weapon%d.state.%s", ch + 1,
+                     kWeaponStateNames[f]);
+         __try {
+            s_weaponStateEvents[ch][f] = event_named(name, kTypeFloat);
+         } __except (EXCEPTION_EXECUTE_HANDLER) {
+            s_weaponStateEvents[ch][f] = nullptr;
+         }
       }
    }
 }
@@ -292,6 +369,9 @@ void hud_class_icons_update()
    __try {
       if (!s_eventList || *s_eventList == (uintptr_t)s_eventList) {
          for (void*& cls : s_events) cls = nullptr;  // the HUD has been torn down
+         for (void*& cls : s_unitStateEvents) cls = nullptr;
+         for (auto& channel : s_weaponStateEvents)
+            for (void*& cls : channel) cls = nullptr;
          return;
       }
       if (!any_listener()) return;
@@ -305,25 +385,41 @@ void hud_class_icons_update()
       uint8_t* chr     = s_localPlayer(0);
       uint8_t* unit    = chr ? *(uint8_t**)(chr + layout::Character::kUnit) : nullptr;
       uint8_t* vehicle = chr ? *(uint8_t**)(chr + layout::Character::kVehicle) : nullptr;
+      uint8_t* remote  = chr ? *(uint8_t**)(chr + layout::Character::kRemote) : nullptr;
 
       uint32_t stance = kStand, unitTexture = 0, vehicleTexture = 0;
+      int soldierState = -1;
       if (uint8_t* obj = unit ? game_object(unit) : nullptr) {
          stance = unit_stance(unit, obj);
          unitTexture = s_unitPick.get(class_texture(obj), stance, texture_loaded);
+         // EntitySoldier::EnterControllable deactivates the soldier without
+         // touching mState, so a seat or a remote would keep a sprint or a jump.
+         if (!vehicle && !remote) soldierState = soldier_state(unit, obj);
       }
       if (uint8_t* obj = vehicle ? game_object(vehicle) : nullptr)
          vehicleTexture = s_vehiclePick.get(class_texture(obj), kStand, texture_loaded);
 
       publish_texture(s_sentUnit, kUnitTexture, kUnitDisable, unitTexture);
       if (s_sentStance.set(stance)) send(kUnitStance, stance);
+      const bool landed = s_landing.update(soldierState);
+      for (int f = 0; f < kUnitStates; ++f)
+         publish_flag(s_sentUnitState[f], s_unitStateEvents[f],
+                      f == kUnitLand ? landed : unit_state(soldierState, f));
       publish_texture(s_sentVehicle, kVehicleTexture, kVehicleDisable, vehicleTexture);
 
       // Weapons follow the object the stock weapon events do: remote, else
       // vehicle, else unit.
-      uint8_t* remote     = chr ? *(uint8_t**)(chr + layout::Character::kRemote) : nullptr;
       uint8_t* controlled = remote ? remote : vehicle ? vehicle : unit;
       for (int ch = 0; ch < kWeaponChannels; ++ch) {
-         const uint8_t* cls = controlled ? weapon_class(controlled, ch) : nullptr;
+         uint8_t* weapon = controlled ? weapon_of(controlled, ch) : nullptr;
+         const uint8_t* cls = weapon ? *(const uint8_t* const*)(weapon + layout::Weapon::kClass) : nullptr;
+         const int state = weapon ? *(const int*)(weapon + layout::Weapon::kState) : -1;
+         const bool melee = weapon && ((IsMeleeFn)(*(void***)weapon)[kVt_IsMelee / 4])(weapon);
+         const bool shot = s_shots[ch].update(
+            weapon, weapon ? *(const uint32_t*)(weapon + s_layout.lastFireTime) : 0);
+         for (int f = 0; f < kWeaponStates; ++f)
+            publish_flag(s_sentWeaponState[ch][f], s_weaponStateEvents[ch][f],
+                         f == kWeaponShot ? shot : weapon_state(state, melee, f));
          const uint32_t icon = cls ? s_weaponPick[ch].get(
             *(const uint32_t*)(cls + kWeaponClassIcon), kStand, texture_loaded) : 0;
          publish_texture(s_sentWeapon[ch], EventId(kWeapon1Texture + 2 * ch),

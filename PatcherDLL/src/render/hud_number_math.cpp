@@ -59,10 +59,27 @@ using FactoryCtor = void*(__fastcall*)(void*, void*, uint32_t);
 using Send = void(__fastcall*)(Event*, void*);
 using NativeCreateEvent = EventClass*(__cdecl*)(int, const char*, ...);
 
+enum class Kind { Math, Lerp, Compare };
+
+constexpr int kBool = 1;    // HUD::EventClass::Type
+constexpr int kFloat = 4;
+
+// TransformNumberLerp has up to five event inputs where the shell has two
+// handlers: the shell's inputA carries EventInput and inputB EventInputA, and
+// B's event and InputRange's get handlers of their own here, bound through the
+// same Item::ReadEvent and unbound in destroy before the native destructor runs.
 struct Node {
    Shell* shell = nullptr;
    Node* next = nullptr;
+   Kind kind = Kind::Math;
    State state;
+   Lerp lerp;
+   Compare compare;
+   Handler endB{};
+   Handler rangeEnd[2]{};
+   EventClass* outputTrue = nullptr;    // Compare's Bool events, sent as the result turns
+   EventClass* outputFalse = nullptr;
+   bool outputIsAlpha = false;   // OutputIsAlpha: send every update, not only on change
    unsigned fields = 0;
    bool invalid = false;
    bool ready = false;
@@ -86,7 +103,28 @@ void* findEvent = nullptr;
 NativeCreateEvent createEvent = nullptr;
 Send sendEvent = nullptr;
 void* factoryVtable[2]{};
+void* lerpFactoryVtable[2]{};
+void* compareFactoryVtable[2]{};
 void* itemVtable[12]{};
+
+// EventClass::UnregisterEventHandler (Phantom 0x0060F870) and EventHandler's
+// destructor (modtools 0x006AD6B0, Steam 0x0055DB70, GOG 0x0055E8F0) are a plain
+// unlink of the handler's {next, prev} node at +0x08: done here for the one
+// handler the native destructor does not know about.
+void unlink_handler(Handler* h)
+{
+   if (h->next && h->prev) {
+      *reinterpret_cast<void**>(static_cast<char*>(h->next) + 4) = h->prev;   // next->prev
+      *reinterpret_cast<void**>(h->prev) = h->next;                            // prev->next
+   }
+   h->next = h->prev = nullptr;
+   h->cls = nullptr;
+}
+void (*unbindHandler)(Handler*) = unlink_handler;   // the tests swap in their own
+
+// The longest step a lerp takes from one HUD update: a hitch or a pause must
+// not jump it.
+constexpr float kMaxTick = 0.1f;
 
 void log(const char* format, ...)
 {
@@ -115,22 +153,55 @@ EventClass* find(uint32_t id)
    return reinterpret_cast<EventClass*(__fastcall*)(uint32_t)>(findEvent)(id);
 }
 
-void publish(Node& n)
+// Sends the node's result when it changed, and with `again` its last one even
+// when it did not. OutputIsAlpha asks for that every update: a group's
+// EventAlpha lasts one frame, because Element::Update rewrites the render
+// element's alpha from the element's own fader every frame (modtools
+// 0x006920F0), so a held value has to be sent again.
+void publish(Node& n, bool again = false)
 {
-   if (!n.active || !n.ready || n.invalid || !n.pending) return;
+   if (!n.active || !n.ready || n.invalid || !(n.pending || again)) return;
    if (n.busy || dispatchDepth >= 32) {
       if (!n.warnedRuntime) log("%s: feedback/depth limit; update ignored", name(n));
       n.warnedRuntime = true;
       return;
    }
-   float result;
    n.pending = false;
-   if (!n.state.next(result)) return;
-   Event event{ n.shell->output, 0 };
-   std::memcpy(&event.bits, &result, sizeof(result));
+   float result = 0.0f;
+   bool changed = false, have = false;
+   EventClass* twin = nullptr;   // Compare's Bool event for a new result
+   switch (n.kind) {
+   case Kind::Lerp:
+      changed = n.lerp.next(result);
+      have = n.lerp.sent;
+      if (!changed) result = n.lerp.previous;
+      break;
+   case Kind::Compare: {
+      bool on = false;
+      changed = n.compare.next(on);
+      have = n.compare.decided;
+      result = n.compare.on ? 1.0f : 0.0f;
+      if (changed) twin = on ? n.outputTrue : n.outputFalse;
+      break;
+   }
+   default:
+      changed = n.state.next(result);
+      have = n.state.sent;
+      if (!changed) result = n.state.previous;
+   }
+   // Only the Float repeats: an EventEnable restarts its fade each time it fires.
+   if (!changed && !(again && have)) return;
    n.busy = true;
    ++dispatchDepth;
-   sendEvent(&event, nullptr);
+   if (n.shell->output) {
+      Event event{ n.shell->output, 0 };
+      std::memcpy(&event.bits, &result, sizeof(result));
+      sendEvent(&event, nullptr);
+   }
+   if (twin) {
+      Event event{ twin, 1 };
+      sendEvent(&event, nullptr);
+   }
    --dispatchDepth;
    n.busy = false;
 }
@@ -147,10 +218,24 @@ void __cdecl input(const Event* event, void* context)
    }
    double value = 0;
    const bool acceptable = numeric_event(event->cls->type, event->bits, value);
-   // A and B bound to the SAME event must update together, not briefly publish
-   // (new A op stale B) on the first of the two native callbacks.
-   if (event->cls == n.shell->inputA.cls) n.state.input(0, acceptable, value);
-   if (event->cls == n.shell->inputB.cls) n.state.input(1, acceptable, value);
+   // Inputs bound to the SAME event must update together, not briefly publish
+   // (new A op stale B) on the first of the native callbacks.
+   switch (n.kind) {
+   case Kind::Lerp:
+      if (event->cls == n.shell->inputA.cls) n.lerp.input(acceptable, value);
+      if (event->cls == n.shell->inputB.cls) n.lerp.end(0, acceptable, value);
+      if (event->cls == n.endB.cls)          n.lerp.end(1, acceptable, value);
+      if (event->cls == n.rangeEnd[0].cls)   n.lerp.bound(0, acceptable, value);
+      if (event->cls == n.rangeEnd[1].cls)   n.lerp.bound(1, acceptable, value);
+      break;
+   case Kind::Compare:
+      if (event->cls == n.shell->inputA.cls) n.compare.input(0, acceptable, value);
+      if (event->cls == n.shell->inputB.cls) n.compare.input(1, acceptable, value);
+      break;
+   default:
+      if (event->cls == n.shell->inputA.cls) n.state.input(0, acceptable, value);
+      if (event->cls == n.shell->inputB.cls) n.state.input(1, acceptable, value);
+   }
    n.pending = true;
    publish(n);
 }
@@ -171,11 +256,226 @@ void bind(Node& n, const Data* data, Handler& handler)
       fail(n, "input must be Int, Uint or Float (not Bool, Vector3, etc.)");
 }
 
+bool name_ok(const char* text) { return text && *text && std::strlen(text) <= 240; }
+
+// Item::ReadEvent reads its event name from argument 0 only (Phantom
+// 0x00617E30), so an event a later argument names is bound through a copy of
+// the property holding just that name.
+Data one_argument(const Data& data, const char* text)
+{
+   Data single{ data.id, 1, { 4 } };
+   std::memcpy(reinterpret_cast<char*>(single.args) + 4, text, std::strlen(text) + 1);
+   return single;
+}
+
+// A new event this node writes. Never overwrite a stock event or allow two
+// writers; that also stops two nodes building an indirect feedback graph.
+EventClass* create_named(Node& n, const char* text, int type)
+{
+   if (!name_ok(text)) { fail(n, "output expects an event name (1..240 bytes)"); return nullptr; }
+   char filtered[512]{};
+   if (modtools) reinterpret_cast<void(__cdecl*)(const char*, char*, unsigned)>(filterName)(text, filtered, 511);
+   else reinterpret_cast<void(__fastcall*)(const char*, char*)>(filterName)(text, filtered);
+   filtered[511] = 0;
+   if (find(hash(filtered))) { fail(n, "output event already exists; use a unique name"); return nullptr; }
+   EventClass* cls = createEvent(type, "%s", filtered);
+   if (!cls) fail(n, "could not create the output event");
+   return cls;
+}
+
+void create_output(Shell* shell, Node& n, const char* text)
+{
+   shell->output = create_named(n, text, kFloat);
+}
+
+// OutputIsAlpha, on every kind: claim bit 64.
+void read_output_is_alpha(Node& n, const Data* data, unsigned args)
+{
+   if (claim(n, 64) && (args != 1 || !data->flag(0, n.outputIsAlpha)))
+      fail(n, "OutputIsAlpha expects 1 or 0 (or true or false)");
+}
+
+// TransformNumberLerp's properties. Claim bits: 1 EventInput, 2 A, 4 B,
+// 8 EventOutput, 16 RiseTime, 32 FallTime, 64 OutputIsAlpha, 128 InputRange.
+bool read_lerp(Shell* shell, Node& n, const Data* data)
+{
+   const uint32_t key = data->id;
+   const unsigned args = data->arguments();
+   const char* text = args == 1 ? data->string(0) : nullptr;
+   float number;
+   switch (key) {
+   case hash("EventInput"):
+      if (claim(n, 1)) {
+         if (!name_ok(text)) fail(n, "input expects an event name (1..240 bytes)");
+         else bind(n, data, shell->inputA);
+      }
+      break;
+   case hash("ConstantA"):
+   case hash("ConstantB"): {
+      const unsigned end = key == hash("ConstantA") ? 0 : 1;
+      if (claim(n, 2u << end)) {
+         if (args != 1 || !data->number(0, number)) fail(n, "constant expects one finite number");
+         else n.lerp.end(end, true, number);
+      }
+      break;
+   }
+   case hash("EventInputA"):
+   case hash("EventInputB"): {
+      const unsigned end = key == hash("EventInputA") ? 0 : 1;
+      if (claim(n, 2u << end)) {
+         if (!name_ok(text)) { fail(n, "input expects an event name (1..240 bytes)"); break; }
+         n.lerp.known[end] = false;   // until its event first arrives
+         bind(n, data, end ? n.endB : shell->inputB);
+      }
+      break;
+   }
+   case hash("RiseTime"):
+   case hash("FallTime"): {
+      const bool rise = key == hash("RiseTime");
+      if (claim(n, rise ? 16 : 32)) {
+         if (args != 1 || !data->number(0, number) || number < 0.0f)
+            fail(n, "RiseTime and FallTime expect one number of seconds, 0 or more");
+         else (rise ? n.lerp.riseTime : n.lerp.fallTime) = number;
+      }
+      break;
+   }
+   case hash("InputRange"):
+      // Each end a number or the name of an Int, Uint or Float event.
+      if (claim(n, 128)) {
+         if (args != 2) { fail(n, "InputRange expects two ends, each a number or an event name"); break; }
+         for (unsigned end = 0; end < 2 && !n.invalid; ++end) {
+            if (const char* event = data->string(end)) {
+               if (!name_ok(event)) { fail(n, "input expects an event name (1..240 bytes)"); break; }
+               n.lerp.rangeKnown[end] = false;   // until its event first arrives
+               const Data single = one_argument(*data, event);
+               bind(n, &single, n.rangeEnd[end]);
+            } else if (data->number(end, number)) {
+               n.lerp.bound(end, true, number);
+            } else {
+               fail(n, "InputRange expects two ends, each a number or an event name");
+            }
+         }
+         if (!n.invalid && !data->string(0) && !data->string(1) && n.lerp.range[0] == n.lerp.range[1])
+            fail(n, "InputRange needs two different ends");
+      }
+      break;
+   case hash("EventOutput"):
+      if (claim(n, 8)) create_output(shell, n, text);
+      break;
+   case hash("OutputIsAlpha"):
+      read_output_is_alpha(n, data, args);
+      break;
+   default:
+      log("%s: unrecognised property 0x%08X", name(n), key);
+      fail(n, "unsupported property");
+      return false;
+   }
+   return true;
+}
+
+// TransformNumberCompare's properties. Claim bits: 1 Operation, 2 A, 4 B,
+// 8 EventOutput, 16 EventOutputTrue, 32 EventOutputFalse, 64 OutputIsAlpha,
+// 128 Hysteresis.
+bool read_compare(Shell* shell, Node& n, const Data* data)
+{
+   const uint32_t key = data->id;
+   const unsigned args = data->arguments();
+   const char* text = args == 1 ? data->string(0) : nullptr;
+   float number;
+   switch (key) {
+   case hash("Operation"):
+      if (claim(n, 1) && !parse_comparison(text, n.compare.op))
+         fail(n, "Operation expects Greater, GreaterOrEqual, Less, LessOrEqual, Equal or NotEqual");
+      break;
+   case hash("ConstantA"):
+   case hash("ConstantB"): {
+      const unsigned operand = key == hash("ConstantA") ? 0 : 1;
+      if (claim(n, 2u << operand)) {
+         if (args != 1 || !data->number(0, number)) fail(n, "constant expects one finite number");
+         else n.compare.input(operand, true, number);
+      }
+      break;
+   }
+   case hash("EventInputA"):
+   case hash("EventInputB"): {
+      const unsigned operand = key == hash("EventInputA") ? 0 : 1;
+      if (claim(n, 2u << operand)) {
+         if (!name_ok(text)) fail(n, "input expects an event name (1..240 bytes)");
+         else bind(n, data, operand ? shell->inputB : shell->inputA);
+      }
+      break;
+   }
+   case hash("EventOutput"):
+      if (claim(n, 8)) create_output(shell, n, text);
+      break;
+   case hash("EventOutputTrue"):
+      if (claim(n, 16)) n.outputTrue = create_named(n, text, kBool);
+      break;
+   case hash("EventOutputFalse"):
+      if (claim(n, 32)) n.outputFalse = create_named(n, text, kBool);
+      break;
+   case hash("Hysteresis"):
+      if (claim(n, 128)) {
+         if (args != 1 || !data->number(0, number) || number < 0.0f)
+            fail(n, "Hysteresis expects one number, 0 or more");
+         else n.compare.hysteresis = number;
+      }
+      break;
+   case hash("OutputIsAlpha"):
+      read_output_is_alpha(n, data, args);
+      break;
+   default:
+      log("%s: unrecognised property 0x%08X", name(n), key);
+      fail(n, "unsupported property");
+      return false;
+   }
+   return true;
+}
+
+// How many arguments each property takes; 0 for a key this kind does not
+// read, which its reader rejects itself.
+struct Arity { unsigned count; const char* name; };
+Arity arity(Kind kind, uint32_t key)
+{
+   const unsigned math = kind == Kind::Math, lerp = kind == Kind::Lerp, compare = kind == Kind::Compare;
+   switch (key) {
+   case hash("ConstantA"):        return { 1, "ConstantA" };
+   case hash("ConstantB"):        return { 1, "ConstantB" };
+   case hash("EventInputA"):      return { 1, "EventInputA" };
+   case hash("EventInputB"):      return { 1, "EventInputB" };
+   case hash("EventOutput"):      return { 1, "EventOutput" };
+   case hash("OutputIsAlpha"):    return { 1, "OutputIsAlpha" };
+   case hash("Operation"):        return { math | compare, "Operation" };
+   case hash("Clamp"):            return { math * 2, "Clamp" };
+   case hash("EventInput"):       return { lerp, "EventInput" };
+   case hash("RiseTime"):         return { lerp, "RiseTime" };
+   case hash("FallTime"):         return { lerp, "FallTime" };
+   case hash("InputRange"):       return { lerp * 2, "InputRange" };
+   case hash("EventOutputTrue"):  return { compare, "EventOutputTrue" };
+   case hash("EventOutputFalse"): return { compare, "EventOutputFalse" };
+   case hash("Hysteresis"):       return { compare, "Hysteresis" };
+   default:                       return { 0, nullptr };
+   }
+}
+
 bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
 {
    Node& n = node(shell);
+   // Data::arguments() has already dropped a "// comment". Anything still
+   // extra is almost always a comment with no space after its "//", which the
+   // munger hashes into one word with the comment's first.
+   const Arity want = arity(n.kind, data->id);
+   if (want.count && data->arguments() > want.count) {
+      log("%s: disabled: %s has more arguments than it takes; a comment after it on the "
+          "same line needs a space after //", name(n), want.name);
+      n.invalid = true;
+      return true;
+   }
+   if (n.kind == Kind::Lerp) return read_lerp(shell, n, data);
+   if (n.kind == Kind::Compare) return read_compare(shell, n, data);
    const uint32_t key = data->id;
-   const char* text = data->count == 1 ? data->string(0) : nullptr;
+   const unsigned args = data->arguments();
+   const char* text = args == 1 ? data->string(0) : nullptr;
    float number;
    switch (key) {
    case hash("Operation"):
@@ -186,7 +486,7 @@ bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
    case hash("ConstantB"): {
       const unsigned operand = key == hash("ConstantA") ? 0 : 1;
       if (claim(n, 2u << operand)) {
-         if (data->count != 1 || !data->number(0, number)) fail(n, "constant expects one finite number");
+         if (args != 1 || !data->number(0, number)) fail(n, "constant expects one finite number");
          else n.state.input(operand, true, number);
       }
       break;
@@ -195,32 +495,24 @@ bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
    case hash("EventInputB"): {
       const unsigned operand = key == hash("EventInputA") ? 0 : 1;
       if (claim(n, 2u << operand)) {
-         if (!text || !*text || std::strlen(text) > 240) fail(n, "input expects an event name (1..240 bytes)");
+         if (!name_ok(text)) fail(n, "input expects an event name (1..240 bytes)");
          else bind(n, data, operand ? shell->inputB : shell->inputA);
       }
       break;
    }
    case hash("EventOutput"):
-      if (claim(n, 8)) {
-         if (!text || !*text || std::strlen(text) > 240) { fail(n, "output expects an event name (1..240 bytes)"); break; }
-         char filtered[512]{};
-         if (modtools) reinterpret_cast<void(__cdecl*)(const char*, char*, unsigned)>(filterName)(text, filtered, 511);
-         else reinterpret_cast<void(__fastcall*)(const char*, char*)>(filterName)(text, filtered);
-         filtered[511] = 0;
-         // Never overwrite a stock event or allow two writers. This also stops
-         // two math nodes constructing an indirect feedback graph.
-         if (find(hash(filtered))) { fail(n, "output event already exists; use a unique name"); break; }
-         shell->output = createEvent(4, "%s", filtered);
-         if (!shell->output) fail(n, "could not create Float output event");
-      }
+      if (claim(n, 8)) create_output(shell, n, text);
       break;
    case hash("Clamp"):
       if (claim(n, 16)) {
          n.state.config.clamp = true;
-         if (data->count != 2 || !data->number(0, n.state.config.minimum)
+         if (args != 2 || !data->number(0, n.state.config.minimum)
              || !data->number(1, n.state.config.maximum) || !valid(n.state.config))
             fail(n, "Clamp expects finite minimum, maximum with minimum <= maximum");
       }
+      break;
+   case hash("OutputIsAlpha"):
+      read_output_is_alpha(n, data, args);
       break;
    default:
       log("%s: unrecognised property 0x%08X", name(n), key);
@@ -233,8 +525,23 @@ bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
 void __fastcall post_read(Shell* shell, void*)
 {
    Node& n = node(shell);
-   if ((n.fields & 15) != 15) fail(n, "Operation, A, B and EventOutput are all required");
-   if (shell->output && (shell->output == shell->inputA.cls || shell->output == shell->inputB.cls))
+   switch (n.kind) {
+   case Kind::Lerp:
+      if ((n.fields & 9) != 9) fail(n, "EventInput and EventOutput are required");
+      break;
+   case Kind::Compare:
+      if ((n.fields & 7) != 7 || !(n.fields & 56))
+         fail(n, "Operation, A, B and at least one of EventOutput, EventOutputTrue and "
+                 "EventOutputFalse are required");
+      break;
+   default:
+      if ((n.fields & 15) != 15) fail(n, "Operation, A, B and EventOutput are all required");
+   }
+   const auto feeds = [&](const EventClass* out) {
+      return out && (out == shell->inputA.cls || out == shell->inputB.cls || out == n.endB.cls
+                     || out == n.rangeEnd[0].cls || out == n.rangeEnd[1].cls);
+   };
+   if (feeds(shell->output) || feeds(n.outputTrue) || feeds(n.outputFalse))
       fail(n, "an output cannot be its own input");
    n.ready = !n.invalid;
    // No send here: later items in this same HUD have not bound yet.
@@ -248,26 +555,75 @@ void* __fastcall destroy(Shell* shell, void*, unsigned flags)
    Node** link = &nodes;
    while (*link && *link != dead) link = &(*link)->next;
    if (*link) *link = dead->next;
-   // Native destructor unregisters BOTH handlers and removes both list nodes.
+   unbindHandler(&dead->endB);
+   unbindHandler(&dead->rangeEnd[0]);
+   unbindHandler(&dead->rangeEnd[1]);
+   // Native destructor unregisters BOTH shell handlers and removes both list nodes.
    void* result = destroyItem(shell, nullptr, flags);
    delete dead;
    return result;
 }
 
-Shell* __fastcall create(void* factory, void*, const char* itemName, void* callback, void* argument)
+Shell* make(Kind kind, void* factory, const char* itemName, void* callback, void* argument)
 {
    Node* n = new (std::nothrow) Node;
    if (!n) { log("out of memory allocating math state"); return nullptr; }
    Shell* shell = createItem(factory, nullptr, itemName, callback, argument);
    if (!shell) { delete n; return nullptr; }
    n->shell = shell;
+   n->kind = kind;
    n->next = nodes;
    nodes = n;
    shell->output = nullptr; // Native base constructor does not initialise this.
-   shell->inputA.callback = shell->inputB.callback = input;
-   shell->inputA.data = shell->inputB.data = n;
+   for (Handler* h : { &shell->inputA, &shell->inputB, &n->endB, &n->rangeEnd[0], &n->rangeEnd[1] }) {
+      h->callback = input;
+      h->data = n;
+   }
    shell->vtable = itemVtable;
    return shell;
+}
+
+Shell* __fastcall create(void* factory, void*, const char* itemName, void* callback, void* argument)
+{
+   return make(Kind::Math, factory, itemName, callback, argument);
+}
+
+Shell* __fastcall create_lerp(void* factory, void*, const char* itemName, void* callback, void* argument)
+{
+   return make(Kind::Lerp, factory, itemName, callback, argument);
+}
+
+Shell* __fastcall create_compare(void* factory, void*, const char* itemName, void* callback, void* argument)
+{
+   return make(Kind::Compare, factory, itemName, callback, argument);
+}
+
+// Wall-clock seconds since the last HUD update, capped at kMaxTick. Steam and GOG
+// dropped the update's dt, so every build measures its own.
+float tick_seconds()
+{
+   static LARGE_INTEGER freq = {};
+   static LARGE_INTEGER last = {};
+   LARGE_INTEGER now;
+   QueryPerformanceCounter(&now);
+   if (freq.QuadPart == 0) {
+      QueryPerformanceFrequency(&freq);
+      last = now;
+   }
+   const double dt = double(now.QuadPart - last.QuadPart) / double(freq.QuadPart);
+   last = now;
+   return dt < 0.0 ? 0.0f : dt > kMaxTick ? kMaxTick : float(dt);
+}
+
+void update(float dt)
+{
+   // Activate newcomers together, so constant nodes can initialise downstream
+   // chains on the first update after all the HUD consumers have loaded.
+   for (Node* n = nodes; n; n = n->next) if (n->ready) n->active = true;
+   for (Node* n = nodes; n; n = n->next) {
+      if (n->kind == Kind::Lerp && n->active && !n->invalid && n->lerp.advance(dt)) n->pending = true;
+      publish(*n, n->outputIsAlpha);
+   }
 }
 
 #ifndef HUD_NUMBER_MATH_TEST
@@ -340,7 +696,11 @@ void hud_number_math_resolve(uintptr_t base)
    }
    createItem = reinterpret_cast<CreateItem>(factoryVtable[1]);
    destroyItem = reinterpret_cast<DestroyItem>(itemVtable[0]);
+   std::memcpy(lerpFactoryVtable, factoryVtable, sizeof(lerpFactoryVtable));
+   std::memcpy(compareFactoryVtable, factoryVtable, sizeof(compareFactoryVtable));
    factoryVtable[1] = reinterpret_cast<void*>(create);
+   lerpFactoryVtable[1] = reinterpret_cast<void*>(create_lerp);
+   compareFactoryVtable[1] = reinterpret_cast<void*>(create_compare);
    itemVtable[0] = reinterpret_cast<void*>(destroy);
    itemVtable[2] = resolve(base, g_addr->hud_item_read);
    itemVtable[4] = reinterpret_cast<void*>(write_enabled); // No lossy stock-editor write.
@@ -354,7 +714,8 @@ void hud_number_math_resolve(uintptr_t base)
    createEvent = reinterpret_cast<NativeCreateEvent>(resolve(base, g_addr->hud_event_class_create));
    sendEvent = reinterpret_cast<Send>(resolve(base, g_addr->hud_event_send));
    resolved = true;
-   log("available: TransformNumberMath (Add/Subtract/Multiply/Divide/Min/Max)");
+   log("available: TransformNumberMath (Add/Subtract/Multiply/Divide/Min/Max), TransformNumberLerp, "
+       "TransformNumberCompare");
 }
 #endif
 
@@ -363,19 +724,23 @@ void hud_number_math_open()
    if (!resolved) return;
    // Never hide a native-lifetime bug by discarding a nonempty sidecar list.
    if (nodes) { log("new mission still has live math items; factory not registered"); return; }
-   void* factory = modtools ? reinterpret_cast<void*(__cdecl*)(bool)>(factoryAlloc)(false)
-                            : reinterpret_cast<void*(__cdecl*)(unsigned)>(factoryAlloc)(28);
-   if (!factory) { log("could not allocate TransformNumberMath factory"); return; }
-   factoryCtor(factory, nullptr, hash("TransformNumberMath"));
-   *static_cast<void***>(factory) = factoryVtable;
-   *reinterpret_cast<const char**>(static_cast<char*>(factory) + 24) = "TransformNumberMath";
+   struct { void** vtable; const char* name; } kinds[] = {
+      { factoryVtable, "TransformNumberMath" },
+      { lerpFactoryVtable, "TransformNumberLerp" },
+      { compareFactoryVtable, "TransformNumberCompare" },
+   };
+   for (const auto& kind : kinds) {
+      void* factory = modtools ? reinterpret_cast<void*(__cdecl*)(bool)>(factoryAlloc)(false)
+                               : reinterpret_cast<void*(__cdecl*)(unsigned)>(factoryAlloc)(28);
+      if (!factory) { log("could not allocate %s factory", kind.name); continue; }
+      factoryCtor(factory, nullptr, hash(kind.name));
+      *static_cast<void***>(factory) = kind.vtable;
+      *reinterpret_cast<const char**>(static_cast<char*>(factory) + 24) = kind.name;
+   }
    dispatchDepth = 0;
 }
 
 void hud_number_math_update()
 {
-   // Activate newcomers together, so constant nodes can initialise downstream
-   // chains on the first update after all the HUD consumers have loaded.
-   for (Node* n = nodes; n; n = n->next) if (n->ready) n->active = true;
-   for (Node* n = nodes; n; n = n->next) publish(*n);
+   update(tick_seconds());
 }

@@ -28,6 +28,12 @@
 //
 // mStart, mClass and mRenderClass (0x68) are all set to the same WeaponClass*
 // by the constructor. Most code reads mStart as "the weapon's class".
+//
+// mLastFireTime is past the split, so it has a value per build. Weapon::
+// SignalFire stamps it with the mission time on every shot:
+//   modtools 0x11C   MOV [ESI+0x11C],ECX     @0061C8EF
+//   Steam    0xF8    MOVSS [ESI+0xF8],XMM1   @006796A5
+//   GOG      0xF8    MOVSS [ESI+0xF8],XMM1   @0067A745
 // =============================================================================
 
 namespace layout::Weapon {
@@ -41,5 +47,9 @@ constexpr uint32_t kTrigger             = 0x074; // Trigger* mTrigger
 constexpr uint32_t kAmmoCounter         = 0x088; // AmmoCounter* m_pAmmoCounter
 constexpr uint32_t kState               = 0x0B0; // WeaponState mState
 constexpr uint32_t kSoldierAnimationMap = 0x0C8; // MAP mSoldierAnimationMap
+
+// Past the build split (see above).
+constexpr uint32_t kLastFireTimeModtools = 0x11C; // float mLastFireTime
+constexpr uint32_t kLastFireTimeRelease  = 0x0F8; // Steam, GOG
 
 } // namespace layout::Weapon

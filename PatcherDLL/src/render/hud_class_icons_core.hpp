@@ -89,6 +89,100 @@ struct Pick {
    }
 };
 
+// -----------------------------------------------------------------------------
+// State flags: player1.unit.state.<name> and player1.weaponN.state.<name>, each
+// 1 or 0. Held flags stay 1 for as long as the state lasts; a moment (land,
+// shot) is 1 for the one update it happens on. Easing is left to the .hud, with
+// TransformNumberLerp.
+// -----------------------------------------------------------------------------
+
+enum UnitState : int {
+   kUnitSprint, kUnitJump, kUnitFall, kUnitRoll, kUnitJet, kUnitHover, kUnitTumble, kUnitLand,
+   kUnitStates
+};
+constexpr const char* kUnitStateNames[kUnitStates] = {
+   "sprint", "jump", "fall", "roll", "jet", "hover", "tumble", "land",
+};
+
+// SoldierState (PDB enum): 0 STAND, 1 CROUCH, 2 PRONE, 3 SPRINT, 4 JUMP, 5 ROLL,
+// 6 JET_JUMP, 7 JET_HOVER, 8 FALL, then 9 FLY, 10 TUMBLE, 11 BOUNCE,
+// 12 FLY_RECOVER and 13 TUMBLE_RECOVER for being thrown and getting back up,
+// and 19 SLIDE. The held flags, all but land.
+constexpr bool unit_state(int soldierState, int flag)
+{
+   switch (flag) {
+   case kUnitSprint: return soldierState == 3;
+   case kUnitJump:   return soldierState == 4;
+   case kUnitFall:   return soldierState == 8;
+   case kUnitRoll:   return soldierState == 5;
+   case kUnitJet:    return soldierState == 6;
+   case kUnitHover:  return soldierState == 7;
+   case kUnitTumble: return soldierState >= 9 && soldierState <= 13;
+   default:          return false;
+   }
+}
+
+constexpr bool soldier_airborne(int s) { return s == 4 || s == 6 || s == 7 || s == 8; }
+constexpr bool soldier_grounded(int s) { return s == 0 || s == 1 || s == 2 || s == 3 || s == 5 || s == 19; }
+
+// A landing is the first grounded state after an airborne one. Anything else in
+// between (thrown, dead, in a vehicle) ends the jump without one.
+struct Landing {
+   bool airborne = false;
+
+   void reset() { airborne = false; }
+
+   bool update(int soldierState)
+   {
+      if (soldier_airborne(soldierState)) { airborne = true; return false; }
+      const bool landed = airborne && soldier_grounded(soldierState);
+      airborne = false;
+      return landed;
+   }
+};
+
+enum WeaponStateFlag : int {
+   kWeaponFiring, kWeaponCharging, kWeaponReloading, kWeaponOverheated, kWeaponBlocking, kWeaponShot,
+   kWeaponStates
+};
+constexpr const char* kWeaponStateNames[kWeaponStates] = {
+   "firing", "charging", "reloading", "overheated", "blocking", "shot",
+};
+
+// WeaponState (PDB enum): 0 IDLE, 1 FIRE, 2 FIRE2, 3 CHARGE, 4 RELOAD,
+// 5 OVERHEAT, 6 EMPTY. A melee weapon reuses FIRE for an attack, RELOAD for a
+// block and OVERHEAT for the recovery after an attack (WeaponMelee::EnterState),
+// so on one RELOAD is blocking and neither reload nor overheat is reported.
+constexpr bool weapon_state(int state, bool melee, int flag)
+{
+   switch (flag) {
+   case kWeaponFiring:     return state == 1 || state == 2;
+   case kWeaponCharging:   return !melee && state == 3;
+   case kWeaponReloading:  return !melee && state == 4;
+   case kWeaponOverheated: return !melee && state == 5;
+   case kWeaponBlocking:   return melee && state == 4;
+   default:                return false;
+   }
+}
+
+// A shot: Weapon::SignalFire stamps the weapon's last fire time with the mission
+// time, so a new time on the same weapon is a new shot (a melee weapon signals
+// each attack the same way). A different weapon is only noted.
+struct Shots {
+   const void* weapon   = nullptr;
+   uint32_t    lastFire = 0;   // the float's bits
+
+   void reset() { weapon = nullptr; }
+
+   bool update(const void* w, uint32_t fireTimeBits)
+   {
+      const bool shot = w && w == weapon && fireTimeBits != lastFire;
+      weapon   = w;
+      lastFire = fireTimeBits;
+      return shot;
+   }
+};
+
 // Change detection for one published value. Invalidated at GameEvents::Open,
 // so the first update of every mission sends and later ones only on change.
 struct Published {

@@ -33,6 +33,12 @@ entry_pattern = (r'entry_guard\(base, (factoryVtable|itemVtable)\[(\d)\],\s*'
                  r'(?:modtools \? "([^"]*)" : "([^"]*)"|"([^"]*)")\)')
 entry_guards = re.findall(entry_pattern, source)
 assert len(entry_guards) == 3
+unlink_sites = {
+    'modtools': (0x006AD6BF, bytes.fromhex('8B4108 8B510C 895004 8B410C 8B5108 8910')),
+    'steam': (0x0055DB7E, bytes.fromhex('8B4A08 8B420C 894104 8B4A0C 8B4208 8901')),
+    'gog': (0x0055E8FE, bytes.fromhex('8B4A08 8B420C 894104 8B4A0C 8B4208 8901')),
+}
+assert 'static_cast<char*>(h->next) + 4) = h->prev' in source, 'unlink_handler changed shape'
 
 for build, filename in builds.items():
     body = re.search(r'namespace '+build+r'\s*\{(.*?)\n\s*\}\s*//\s*namespace '+build,
@@ -61,4 +67,10 @@ for build, filename in builds.items():
             address += 5 + struct.unpack_from('<i', image, address-base+1)[0]
         check(address, mt_bytes if mt else rt_bytes, common or (mt_mask if mt else rt_mask))
     check(table['hud_event_send'], r'\x51\x8b\x09\xe8', 'xxxx')
-    print(f'{build}: all 9 native entry fingerprints passed')
+    # TransformNumberLerp unlinks its third handler itself. EventHandler's
+    # destructor (TransformNumber's dtor calls it on +0x40) is the same unlink
+    # on every build: next = [h+8], prev = [h+0xC]; next->prev = prev at +4,
+    # prev->next = next at +0.
+    unlink = unlink_sites[build]
+    assert image[unlink[0]-base:unlink[0]-base+len(unlink[1])] == unlink[1], (build, 'unlink')
+    print(f'{build}: all 9 native entry fingerprints and the handler unlink passed')

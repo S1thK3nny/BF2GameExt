@@ -1,6 +1,7 @@
 // Standalone tests (not a DLL build). Compile with /std:c++17 /W4 /WX, no NDEBUG.
 #include "../PatcherDLL/src/render/hud_class_icons_core.hpp"
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -98,5 +99,62 @@ int main()
    sent.invalidate();
    assert(sent.set(5));
 
-   std::puts("Class icon tests passed (hash suffixes, stance maps, prone/crouch/stand fallback, probe caching, change detection).");
+   // Unit states: each held flag is exactly its SoldierState(s); nothing else
+   // and no non-soldier (-1) sets one.
+   {
+      const int expected[][2] = { { kUnitSprint, 3 }, { kUnitJump, 4 }, { kUnitRoll, 5 },
+                                  { kUnitJet, 6 }, { kUnitHover, 7 }, { kUnitFall, 8 } };
+      for (const auto& e : expected)
+         for (int s = -1; s < 20; ++s)
+            assert(unit_state(s, e[0]) == (s == e[1]));
+      for (int s = -1; s < 20; ++s) {
+         assert(unit_state(s, kUnitTumble) == (s >= 9 && s <= 13));
+         assert(!unit_state(s, kUnitLand));   // a moment, from Landing
+      }
+      assert(std::string(kUnitStateNames[kUnitHover]) == "hover");
+   }
+
+   // Landing: airborne then grounded is one landing; anything else in between
+   // (thrown, dead, a vehicle) ends the jump without one.
+   {
+      Landing l;
+      assert(!l.update(0) && !l.update(4) && !l.update(8));
+      assert(l.update(0));              // touched down
+      assert(!l.update(0));             // once
+      assert(!l.update(6) && l.update(5));   // jet, then a roll on landing
+      assert(!l.update(4) && !l.update(10) && !l.update(0));   // thrown mid-jump
+      assert(!l.update(7) && !l.update(-1) && !l.update(0));   // into a vehicle
+      l.update(4);
+      l.reset();
+      assert(!l.update(0));
+   }
+
+   // Weapon states: FIRE and FIRE2 are firing for every weapon; a melee weapon's
+   // RELOAD is blocking, and it reports no reload, overheat or charge.
+   {
+      for (int s = -1; s < 7; ++s) {
+         for (bool melee : { false, true }) {
+            assert(weapon_state(s, melee, kWeaponFiring) == (s == 1 || s == 2));
+            assert(weapon_state(s, melee, kWeaponCharging) == (!melee && s == 3));
+            assert(weapon_state(s, melee, kWeaponReloading) == (!melee && s == 4));
+            assert(weapon_state(s, melee, kWeaponOverheated) == (!melee && s == 5));
+            assert(weapon_state(s, melee, kWeaponBlocking) == (melee && s == 4));
+            assert(!weapon_state(s, melee, kWeaponShot));
+         }
+      }
+   }
+
+   // Shots: a new fire time on the same weapon; switching weapons is not one.
+   {
+      int a = 0, b = 0;
+      Shots shots;
+      assert(!shots.update(&a, 100));          // first sight: noted only
+      assert(!shots.update(&a, 100));
+      assert(shots.update(&a, 200));           // fired
+      assert(!shots.update(&b, 300));          // switched weapon
+      assert(shots.update(&b, 400));
+      assert(!shots.update(nullptr, 0) && !shots.update(&b, 400));
+   }
+
+   std::puts("Class icon tests passed (hash suffixes, stance maps, prone/crouch/stand fallback, probe caching, change detection, unit and weapon states, landings, shots).");
 }

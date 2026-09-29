@@ -2,8 +2,8 @@
 
 The stock HUD can only show what the game sends it, and a `.hud` file has no way to do
 arithmetic, follow a unit on screen or pick up a class's own icons. BF2GameExt adds
-new HUD events, a new transform and a new bar property that work alongside the stock
-ones in any `.hud` file.
+new HUD events, three new transforms and a new bar property that work alongside the
+stock ones in any `.hud` file.
 
 Everything here is opt-in: nothing changes until a `.hud` binds one of the new events
 or uses the new property. Only the first local viewport (`player1`) has these events.
@@ -31,6 +31,7 @@ event. Either side can be a constant or a live numeric event.
 | `EventInputB` | `EventInputB("event")` | An event for the right side. Use this **or** `ConstantB` |
 | `Clamp` | `Clamp(min, max)` | Optional. Keeps the result between the two numbers |
 | `EventOutput` | `EventOutput("event")` | Required. The name of the new event. It must not already exist |
+| `OutputIsAlpha` | `OutputIsAlpha(1)` | Optional. Sends the result every update rather than only when it changes. Needed for a group's `EventAlpha` (below) |
 
 ```
 TransformNumberMath("player1example_healthpercent")
@@ -53,7 +54,133 @@ with `FloatFormat("%.0f")` on a text element.
   last value.
 - A mistake in the block, such as a repeated or unknown parameter, switches that
   transform off and writes the reason to `BF2GameExt.log` under `[HudNumberMath]`.
+- A `// comment` after a parameter on the same line is fine. Leave a space after
+  the `//`: written `//comment`, it counts as a value and switches the transform off.
+- `EventAlpha` only works on a group, and only holds for one frame, because the
+  group repaints its own alpha every frame. For an alpha, add `OutputIsAlpha(1)` so
+  the value is sent every update, and give the group `PropagateAlpha(1)` so the
+  alpha reaches what is inside it. Leave `OutputIsAlpha` off for anything else, and
+  never use it with `EventChanged`, which would then fire every frame.
 - The HUD editor's export drops these blocks, so keep your source file.
+
+## TransformNumberLerp
+
+Slides a value between two ends, A and B, and publishes it as a new Float event. The
+lerp keeps a point between 0 and 1 and sends the matching value between A and B:
+
+| Point | Output |
+|-------|--------|
+| 0 | A |
+| 0.5 | Halfway from A to B |
+| 1 | B |
+
+A and B do any inverting, so no `TransformNumberMath` is needed for it. With
+`ConstantA(1.00)` and `ConstantB(0.00)`, a point of 0 gives 1 and a point of 1 gives
+0. Left out, A is 0 and B is 1, and the output is the point itself.
+
+The input says where the point should be. When it changes, the point does not jump:
+it travels there at a steady speed, so an alpha or a bar made from it fades rather
+than pops. `RiseTime` is the seconds a whole trip up from 0 to 1 takes, and
+`FallTime` the seconds from 1 back down to 0. Both follow the input, not the output.
+The sprint alpha from [Unit and weapon states](#unit-and-weapon-states), with A = 1,
+B = 0, `RiseTime(0.15)` and `FallTime(0.30)`, runs like this:
+
+| Moment | Sprint event | Point | Output |
+|--------|--------------|-------|--------|
+| Walking | 0 | 0 | 1.0 |
+| Sprint starts | 1 | 0 | 1.0 |
+| 0.075 s later | 1 | 0.5 | 0.5 |
+| 0.15 s later | 1 | 1 | 0.0 |
+| Sprint ends | 0 | 1 | 0.0 |
+| 0.15 s later | 0 | 0.5 | 0.5 |
+| 0.30 s later | 0 | 0 | 1.0 |
+
+Any input from 0 to 1 works, not only 0 and 1: fed `player1.healthFraction`, the
+point glides after the health. For any other range, `InputRange` gives the inputs
+that mean 0 and 1: `InputRange(0, 30)` takes a clip of 30 bullets straight in, with
+15 as the halfway point. Either end can be an event instead of a number, such as
+`InputRange(0, "player1.example.clipSize")`, and the point then follows it when it
+changes. Inputs past either end count as that end.
+
+| Parameter | Syntax | Description |
+|-----------|--------|-------------|
+| `EventInput` | `EventInput("event")` | Required. An Int, Uint or Float event: where the point should be |
+| `InputRange` | `InputRange(min, max)` | Optional. The inputs that give point 0 and point 1. Each is a number or a quoted event name. Defaults to 0 and 1 |
+| `ConstantA` | `ConstantA(value)` | The output at point 0. Defaults to 0 |
+| `EventInputA` | `EventInputA("event")` | An event for the output at point 0. Use this **or** `ConstantA` |
+| `ConstantB` | `ConstantB(value)` | The output at point 1. Defaults to 1 |
+| `EventInputB` | `EventInputB("event")` | An event for the output at point 1. Use this **or** `ConstantB` |
+| `RiseTime` | `RiseTime(seconds)` | Optional. Seconds for the point to travel from 0 up to 1. Defaults to 0, at once |
+| `FallTime` | `FallTime(seconds)` | Optional. Seconds for the point to travel from 1 down to 0. Defaults to 0, at once |
+| `EventOutput` | `EventOutput("event")` | Required. The name of the new event. It must not already exist |
+| `OutputIsAlpha` | `OutputIsAlpha(1)` | Optional. Sends the value every update rather than only when it changes. Needed for a group's `EventAlpha`, as under `TransformNumberMath` above |
+
+```
+TransformNumberLerp("player1example_landflash")
+{
+    EventInput("player1.unit.state.land")
+    FallTime(0.40)
+    EventOutput("player1.example.landFlash")
+    OutputIsAlpha(1)
+}
+```
+
+Bound with `EventAlpha` on a group with `PropagateAlpha(1)`, this shows what is in
+the group in full on landing and fades it out over 0.4 seconds.
+
+- The times are for a whole trip: half a trip takes half the time, and a point
+  that turns round part way goes back from where it got to.
+- A time of 0 follows at once, so with only a `FallTime` a change that lasts a
+  single update, such as a landing or a shot, still shows in full before it fades.
+- The first input is taken at once, so nothing fades in when the mission loads.
+- With events for A or B, nothing is sent until each has arrived. A change to either
+  end moves the output at once; only the point travels.
+- Everything else follows `TransformNumberMath`'s rules above: declare it before its
+  consumers, give each parameter once, and read `[HudNumberMath]` in the log for
+  mistakes.
+
+## TransformNumberCompare
+
+Compares A with B and publishes 1 when the comparison holds and 0 when it does not,
+so a HUD can react to a value crossing a line: low ammo, low health, a full charge.
+Either side can be a constant or a live numeric event.
+
+| Parameter | Syntax | Description |
+|-----------|--------|-------------|
+| `Operation` | `Operation("name")` | Required. `Greater`, `GreaterOrEqual`, `Less`, `LessOrEqual`, `Equal` or `NotEqual`: A compared with B |
+| `ConstantA` | `ConstantA(value)` | A fixed number for the left side |
+| `EventInputA` | `EventInputA("event")` | An Int, Uint or Float event for the left side. Use this **or** `ConstantA` |
+| `ConstantB` | `ConstantB(value)` | A fixed number for the right side |
+| `EventInputB` | `EventInputB("event")` | An event for the right side. Use this **or** `ConstantB` |
+| `Hysteresis` | `Hysteresis(amount)` | Optional. Once on, it stays on until A is this far back past B, so a value sitting on the line does not flicker. For `Equal` and `NotEqual`, how close counts as equal. Defaults to 0 |
+| `EventOutput` | `EventOutput("event")` | A new Float event: 1 or 0 |
+| `EventOutputTrue` | `EventOutputTrue("event")` | A new Bool event, sent each time the result turns to 1. For `EventEnable` |
+| `EventOutputFalse` | `EventOutputFalse("event")` | A new Bool event, sent each time the result turns to 0. For `EventDisable` |
+| `OutputIsAlpha` | `OutputIsAlpha(1)` | Optional. Sends the Float every update, as under `TransformNumberMath` above |
+
+At least one of the three outputs is required.
+
+```
+TransformNumberCompare("player1example_lowammo")
+{
+    Operation("Less")
+    EventInputA("player1.weapon1.totalClipFraction")
+    ConstantB(0.25)
+    Hysteresis(0.05)
+    EventOutputTrue("player1.example.lowAmmo")
+    EventOutputFalse("player1.example.lowAmmoOff")
+}
+```
+
+Show a warning with `EventEnable("player1.example.lowAmmo")` and
+`EventDisable("player1.example.lowAmmoOff")`. It comes on below a quarter of a clip
+and goes off again only once the clip is back above 30%. To fade the warning
+instead, send `EventOutput` through a `TransformNumberLerp`.
+
+- The Bool events are sent only when the result changes, and once when the first
+  result is known, so a fade on the element plays each time rather than restarting.
+- Nothing is sent until both sides are known. An invalid value holds the last result.
+- Everything else follows `TransformNumberMath`'s rules above.
 
 ## Floating target bars
 
@@ -109,6 +236,75 @@ Group("player1reticule_group")
   into a child group, as above. A stretched group changes shape as it rotates.
 - Looking almost straight up or down, the reticule holds its last angle.
 - It rotates the picture only; aim is unchanged.
+
+## Unit and weapon states
+
+These Float events are 1 while you are doing something and 0 otherwise, so a HUD can
+react to it. Each jumps straight between 0 and 1: feed it through a
+`TransformNumberLerp` to fade something rather than pop it.
+
+| Event | 1 while |
+|-------|---------|
+| `player1.unit.state.sprint` | Sprinting |
+| `player1.unit.state.jump` | Jumping |
+| `player1.unit.state.fall` | Falling |
+| `player1.unit.state.roll` | Rolling |
+| `player1.unit.state.jet` | Jet jumping |
+| `player1.unit.state.hover` | Hovering on a jet pack |
+| `player1.unit.state.tumble` | Thrown, knocked down or getting back up |
+| `player1.unit.state.land` | One update, on touching down from a jump, a fall or a jet |
+| `player1.weapon1.state.firing` | The weapon in slot 1 fires, or a melee weapon attacks |
+| `player1.weapon1.state.charging` | It charges a shot |
+| `player1.weapon1.state.reloading` | It reloads |
+| `player1.weapon1.state.overheated` | It has overheated and is cooling down |
+| `player1.weapon1.state.blocking` | A melee weapon blocks |
+| `player1.weapon1.state.shot` | One update, each time it fires |
+
+`weapon2` is the same for slot 2.
+
+To fade the reticule out while you sprint, turn the sprint into an alpha that goes
+from 1 to 0:
+
+```
+TransformNumberLerp("player1example_sprintalpha")
+{
+    EventInput("player1.unit.state.sprint")
+    ConstantA(1.00)
+    ConstantB(0.00)
+    RiseTime(0.15)
+    FallTime(0.30)
+    EventOutput("player1.example.sprintAlpha")
+    OutputIsAlpha(1)
+}
+```
+
+A and B turn the sprint round, so no `TransformNumberMath` is needed. `RiseTime` is
+the fade out as the sprint starts and `FallTime` the fade back in as it ends; the
+timeline is under [TransformNumberLerp](#transformnumberlerp). `OutputIsAlpha(1)`
+keeps the reticule hidden for the whole sprint rather than only while it fades.
+Bind the result on a child group, so the reticule group keeps its own alpha:
+
+```
+Group("player1reticule_group")
+{
+    // Existing position, rotation, enable and EventAlpha lines stay as they are.
+    Group("player1reticule_artwork")
+    {
+        EventAlpha("player1.example.sprintAlpha")
+        PropagateAlpha(1)
+        // The existing reticule Model3D blocks go here, unchanged.
+    }
+}
+```
+
+- The unit states are for soldiers on foot. A droideka, a vehicle, a turret and a
+  remote read 0 throughout.
+- The weapon states follow the same weapon as the stock `player1.weaponN.*` events:
+  the soldier's on foot, the seat's in a vehicle or turret, and a remote's while you
+  control one.
+- A melee weapon's block counts as `blocking`, never as reloading, and it never
+  reads charging or overheated.
+- Fast fire can keep `shot` at 1 from one update to the next.
 
 ## Class, stance and vehicle icons
 

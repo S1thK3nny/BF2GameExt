@@ -47,11 +47,33 @@ Scripts can check the running version through `GameExt.version`.
   Published from the HUD update, so they work on multiplayer clients; inert unless a
   `.hud` binds them. Modtools, Steam and GOG.
   See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
+- **Unit and weapon state events** - HUD Floats that are 1 while the local player is
+  in a state and 0 otherwise: `player1.unit.state.sprint`, `.jump`, `.fall`, `.roll`,
+  `.jet`, `.hover` and `.tumble`, plus `.land` for one update on touching down; and
+  for each weapon slot `player1.weaponN.state.firing`, `.charging`, `.reloading`,
+  `.overheated`, `.blocking` for melee weapons, and `.shot` for one update per shot.
+  The unit's are for soldiers on foot. Work on multiplayer clients; inert unless a
+  `.hud` binds them. See [HUD authoring](docs/user/HUD.md#unit-and-weapon-states).
+- **`TransformNumberCompare`** - A HUD transform that compares two events or
+  constants (`Greater`, `Less`, `Equal` and their variants) and sends 1 or 0, plus
+  optional Bool events as the result turns on and off for `EventEnable` and
+  `EventDisable`, with `Hysteresis` against flicker. For warnings such as low ammo
+  or low health. Inert unless a `.hud` declares one.
+  See [HUD authoring](docs/user/HUD.md#transformnumbercompare).
+- **`TransformNumberLerp`** - A HUD transform that slides its output between two ends,
+  each a constant or an event, as its input goes from 0 to 1 (or across an
+  `InputRange` of numbers or events), taking `RiseTime`
+  seconds on the way up and `FallTime` on the way down. A state event fed through one
+  can fade an element, such as the reticule while sprinting, or flash one on a landing
+  or a shot, with `OutputIsAlpha(1)` for a group's `EventAlpha`. Inert unless a `.hud`
+  declares one.
+  See [HUD authoring](docs/user/HUD.md#transformnumberlerp).
 - **`TransformNumberMath`** - A HUD transform that adds, subtracts, multiplies,
   divides or takes the minimum or maximum of two events or constants, optionally
   clamped, and publishes the result as a new event, for values the stock transforms
-  cannot make, such as missing health or a ticket lead. Inert unless a `.hud`
-  declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
+  cannot make, such as missing health or a ticket lead. `OutputIsAlpha(1)` sends the
+  result every update, which a group's `EventAlpha` needs to hold. Inert unless a
+  `.hud` declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.

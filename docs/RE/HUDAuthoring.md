@@ -6,11 +6,13 @@ the detail behind it, every parameter and edge case, in four parts:
 
 - **How events are wired**: file structure, names, load order and which element
   property takes which type of event.
-- **GameExt events**: class, stance, vehicle and weapon icons, floating target bar
-  positions, a horizon-levelled reticule angle and the command post strip.
+- **GameExt events**: class, stance, vehicle and weapon icons, unit and weapon
+  states, floating target bar positions, a horizon-levelled reticule angle and the
+  command post strip.
 - **Bar fill direction**: `FillFrom` on a `BarBitmap`.
-- **Transforms**: `TransformNumberMath` and the four native transforms it sits
-  beside, with math recipes and an input event catalogue.
+- **Transforms**: `TransformNumberMath`, `TransformNumberLerp`,
+  `TransformNumberCompare` and the four native transforms they sit beside, with
+  math recipes and an input event catalogue.
 
 Test procedures, troubleshooting and references come last. The GameExt additions
 arrived after version 1.1.0, work on Modtools, Steam and GOG, and change nothing
@@ -24,6 +26,7 @@ supplied by GameExt.
 - [How events are wired](#how-events-are-wired)
 - [GameExt events](#gameext-events)
   - [Class, stance, vehicle and weapon icons](#class-stance-vehicle-and-weapon-icons)
+  - [Unit and weapon states](#unit-and-weapon-states)
   - [Floating target bars](#floating-target-bars)
   - [Reticule horizon levelling](#reticule-horizon-levelling)
   - [Command post strip](#command-post-strip)
@@ -31,6 +34,8 @@ supplied by GameExt.
 - [Transforms](#transforms)
   - [Choose a transform](#choose-a-transform)
   - [TransformNumberMath](#transformnumbermath)
+  - [TransformNumberLerp](#transformnumberlerp)
+  - [TransformNumberCompare](#transformnumbercompare)
   - [Shared native numeric parameters](#shared-native-numeric-parameters)
   - [TransformNumberColor](#transformnumbercolor)
   - [TransformNumberVector3](#transformnumbervector3)
@@ -112,7 +117,7 @@ native transforms too. Do not use a stock input name as your output.
 
 | Output type | Typical consumer |
 |---|---|
-| Float | `EventValue` on a bar; `EventNumber` on text; `EventAlpha` for opacity |
+| Float | `EventValue` on a bar; `EventNumber` on text; `EventAlpha` on a group for opacity |
 | Color | `EventColor` |
 | Vector3 | `EventPosition`, `EventScale`, `EventRotation` on a suitable group |
 | Model | `EventMesh` on `Model3D` |
@@ -125,6 +130,13 @@ explicitly connect an appropriate output to that property.
 `EventEnable`/`EventDisable` are event notifications, **not numeric comparisons**.
 Sending zero to an `EventEnable` binding does not mean "disable". Keep existing
 visibility events and use `EventAlpha` for a continuously varying opacity.
+
+`EventAlpha` exists only on groups, and a value sent to it lasts **one frame**:
+`Element::Update` repaints the group's alpha from its own fade every frame, so
+the value has to be sent again every frame to hold. Stock alpha events are; a
+GameExt transform is only when it has `OutputIsAlpha(1)`. Give the group
+`PropagateAlpha(1)`, a stock property, so its alpha reaches the elements inside
+it.
 
 ## GameExt events
 
@@ -237,6 +249,61 @@ Disable twin is sent otherwise, and for an empty slot.
 - A mission script can keep an older Lua icon swap for games without GameExt by
   checking `type(GameExt) == "table"` first; the check is on the type because
   `GameExt` can fall back to a plain `true`.
+
+### Unit and weapon states
+
+Float flags, `1` while a state lasts and `0` otherwise, for what the local player's
+soldier and weapons are doing. They step straight between the two; ease them with a
+[`TransformNumberLerp`](#transformnumberlerp).
+
+| Event | 1 while | Read from |
+|---|---|---|
+| `player1.unit.state.sprint` | Sprinting | Soldier `mState` 3 (`SPRINT`) |
+| `player1.unit.state.jump` | Jumping | `mState` 4 (`JUMP`) |
+| `player1.unit.state.fall` | Falling | `mState` 8 (`FALL`) |
+| `player1.unit.state.roll` | Rolling | `mState` 5 (`ROLL`) |
+| `player1.unit.state.jet` | Jet jumping | `mState` 6 (`JET_JUMP`) |
+| `player1.unit.state.hover` | Hovering on a jet pack | `mState` 7 (`JET_HOVER`) |
+| `player1.unit.state.tumble` | Thrown, knocked down or getting up | `mState` 9 to 13 (`FLY`, `TUMBLE`, `BOUNCE`, `FLY_RECOVER`, `TUMBLE_RECOVER`) |
+| `player1.unit.state.land` | One update after touching down | Jump, jet jump, hover or fall, then stand, crouch, prone, sprint, roll or slide |
+| `player1.weaponN.state.firing` | Firing, or a melee attack | Weapon `mState` 1 or 2 (`FIRE`, `FIRE2`) |
+| `player1.weaponN.state.charging` | Charging a shot | `mState` 3 (`CHARGE`), not melee |
+| `player1.weaponN.state.reloading` | Reloading | `mState` 4 (`RELOAD`), not melee |
+| `player1.weaponN.state.overheated` | Overheated, cooling down | `mState` 5 (`OVERHEAT`), not melee |
+| `player1.weaponN.state.blocking` | A melee block | `mState` 4 on a weapon whose `IsMelee` is true |
+| `player1.weaponN.state.shot` | One update after each shot | A new `mLastFireTime`, which `SignalFire` stores |
+
+`N` is 1 or 2, as for the stock weapon events.
+
+A melee weapon runs its attack through `FIRE` and its block through `RELOAD`, and
+uses `OVERHEAT` for the recovery after a swing, so a melee weapon reports `firing`
+and `blocking` and nothing for charge, reload or overheat. A swing also stores a fire
+time, so it reads as a `shot`.
+
+The unit flags come from the soldier in `Character::mUnit`, and only while the
+Character has no vehicle and no remote: `EntitySoldier::EnterControllable`
+deactivates the soldier without resetting `mState`, so a soldier that boards while
+sprinting would otherwise read as sprinting for the whole ride. A droideka has its
+own state machine and reads `0` throughout. A landing needs the soldier to go
+straight from an airborne state to a grounded one; being thrown, dying or boarding
+in between cancels it.
+
+The weapon flags follow the weapon the stock `player1.weaponN.*` events show: the
+remote's, else the vehicle or turret seat's, else the soldier's. Switching weapons is
+not a shot.
+
+Each flag is sent on the first HUD update of a mission and then only when it changes,
+from the same update and under the same rule as the icon events: nothing is sent
+unless a `.hud` binds at least one GameExt icon or state event. `land` and `shot` go
+to `1` for one update and back to `0` on the next, so a consumer bound to them
+directly sees a one-frame blink; a lerp with only a `FallTime` turns that into a flash.
+At a fire rate above the HUD update rate, `shot` can stay at `1` across updates.
+
+To hide the reticule while sprinting, ease `player1.unit.state.sprint` from `1` to `0`
+with a lerp that has `OutputIsAlpha(1)`, and bind the result with `EventAlpha` on the
+reticule's artwork child group, which also needs `PropagateAlpha(1)`. The outer group
+keeps its stock `EventAlpha("player1.reticule.alpha")`. The recipe is in
+[HUD.md](../user/HUD.md#unit-and-weapon-states).
 
 ### Floating target bars
 
@@ -566,14 +633,16 @@ BarBitmap("player1cpstrip_slot1_fill")
 ## Transforms
 
 A transform turns an event's value into a new event for elements to bind.
-`TransformNumberMath` comes with GameExt; the other four classes are native engine
-features.
+`TransformNumberMath`, `TransformNumberLerp` and `TransformNumberCompare` come with
+GameExt; the other four classes are native engine features.
 
 ### Choose a transform
 
 | Class | Input | Output | Use it for |
 |---|---|---|---|
 | `TransformNumberMath` | Two operands: numeric events or constants | Float | Arithmetic, ratios, offsets, clamping, combining live values |
+| `TransformNumberLerp` | A numeric event placed in 0..1 or `InputRange`, plus two ends: numeric events or constants | Float | Fades and flashes: easing between two values over time; remapping a range |
+| `TransformNumberCompare` | Two operands: numeric events or constants | Float, Bool | Thresholds: warnings that show, hide or fade as a value crosses a line |
 | `TransformNumberColor` | One numeric event, with optional input factors | Color | Health/ammo tints and piecewise colour gradients |
 | `TransformNumberVector3` | One numeric event, with optional input factors | Vector3 | Driving position, scale or rotation from a number |
 | `TransformNumberColorBlend` | Numeric mapping input, plus a Color event and optional numeric blend-weight event | Color | Blending mapped RGB with another colour |
@@ -583,11 +652,14 @@ features.
 authorable factory keywords**. `TransformNumberType` is not a numeric conversion
 or arithmetic transform.
 
-Smooth/trail, timeline, compare, gate and select transforms are not implemented
-by this work. Do not put those proposed class names into a production `.hud`.
+Trail, timeline, gate and select transforms are not implemented by this work; a
+lerp with no times, fed a 0/1 input, already picks between A and B. Do not put
+those proposed class names into a production `.hud`.
 
 No transform here reads a bone, projects world geometry, scales with distance
-automatically, invents missing gameplay events, or supplies smoothing/history.
+automatically, invents missing gameplay events, or keeps a history. The one with
+time in it is `TransformNumberLerp`, which eases toward its latest input at a set
+rate and remembers nothing else.
 The floating healthbar and horizon-rotation events are separate event producers.
 Their bindings are documented in [Floating target bars](#floating-target-bars)
 and [Reticule horizon levelling](#reticule-horizon-levelling) above.
@@ -618,7 +690,7 @@ player's lead; leave it unclamped if negative values should remain visible.
 
 #### Complete parameter list
 
-These seven keys are the complete accepted property set for the new class.
+These eight keys are the complete accepted property set for the new class.
 
 | Parameter | Arguments | Required/default | Accepted values and meaning |
 |---|---|---|---|
@@ -629,6 +701,12 @@ These seven keys are the complete accepted property set for the new class.
 | `EventInputB("event")` | Exactly one string | Choose this **or** `ConstantB` | Same event rules as `EventInputA` |
 | `Clamp(minimum, maximum)` | Exactly two numbers | Optional; no clamp if absent | Both finite; minimum must be ≤ maximum; applies to the final result |
 | `EventOutput("event")` | Exactly one string | Required | New Float event; nonempty name, at most 240 bytes; must not already exist |
+| `OutputIsAlpha(flag)` | Exactly one number, or `true`/`false` | Optional; off | On: the result is sent every HUD update, not only on change, for a group's `EventAlpha`. `1` or `true` is on, `0` or `false` off; a quoted value is invalid |
+
+A comment after a property on the same line is fine: the munger turns its words
+into more arguments, and the reader drops everything from the `//` on. Leave a
+space after the `//`. Written `//comment`, it is one hashed word that cannot be
+told from an argument, and the transform switches off with a log line saying so.
 
 Every operand must have exactly one source. Repeating a property, even with the
 same value, disables that transform. Repeating `ConstantA` as `EventInputA` is
@@ -689,7 +767,9 @@ not repair invalid inputs or division by zero.
 - First publication is delayed until a HUD update after loading, allowing
   consumers to bind. Constant-only transforms also publish then.
 - After activation, publication is synchronous with input events. Unchanged
-  Float results are not resent; idle frames do not produce repeated output.
+  Float results are not resent; idle frames do not produce repeated output,
+  unless `OutputIsAlpha(1)` asks for the last result every HUD update. Leave it
+  off for `EventChanged`, which would then fire every frame.
 - Separate input events are **not an atomic pair**. If two related sources
   update in sequence, an intermediate result can use one new and one old value.
   The final value follows the second update. Math does not buffer a whole frame.
@@ -708,6 +788,137 @@ not repair invalid inputs or division by zero.
 
 Math is currently **source-authored only**. Native HUD-editor export omits these
 blocks. Do not overwrite the source transform file with an editor export.
+
+### TransformNumberLerp
+
+#### Capability
+
+Publishes `A + (B - A) × s` as a Float. `s` follows the input, held to 0..1, but
+moves at no more than `1 / RiseTime` per second toward a higher input and
+`1 / FallTime` per second toward a lower one. A and B are each a constant or the
+latest value of a numeric event, and default to 0 and 1, so a lerp with only times
+set is its input, eased. No INI setting is needed; declaring it is the opt-in.
+
+A and B do any inverting: `ConstantA(1)` with `ConstantB(0)` turns a rising input
+into a falling output with no Math stage. The input is not limited to 0 and 1: any
+value between sets `s` part way, so a health fraction comes out eased, and
+`InputRange(min, max)` places any other range, such as `InputRange(0, 30)` for a
+clip. Each end of the range is a number or a quoted event name.
+
+```text
+TransformNumberLerp("player1example_reloaddim")
+{
+    EventInput("player1.weapon1.state.reloading")
+    ConstantA(1.00)
+    ConstantB(0.35)
+    RiseTime(0.20)
+    FallTime(0.20)
+    EventOutput("player1.example.reloadDim")
+    OutputIsAlpha(1)
+}
+```
+
+Bound with `EventAlpha` on a group with `PropagateAlpha(1)` around the weapon icon,
+this dims the icon to 35% over a fifth of a second as a reload starts and brings it
+back as the reload ends.
+
+#### Complete parameter list
+
+These ten keys are the complete accepted property set.
+
+| Parameter | Arguments | Required/default | Accepted values and meaning |
+|---|---|---|---|
+| `EventInput("event")` | Exactly one string | Required | Existing Int, Uint or Float event; nonempty name, at most 240 bytes. Placed in `InputRange`; values past either end count as that end |
+| `InputRange(min, max)` | Exactly two, each a number or a string | Default 0, 1 | The inputs that give `s` = 0 and 1. A string is an existing Int, Uint or Float event, followed as it changes. Two equal numbers are invalid; a reversed range is fine |
+| `ConstantA(value)` | Exactly one number | Default 0; or `EventInputA` | Finite numeric literal: the output at 0 |
+| `EventInputA("event")` | Exactly one string | Or `ConstantA` | Existing Int, Uint or Float event for the output at 0 |
+| `ConstantB(value)` | Exactly one number | Default 1; or `EventInputB` | Finite numeric literal: the output at 1. B may be below A |
+| `EventInputB("event")` | Exactly one string | Or `ConstantB` | Existing Int, Uint or Float event for the output at 1 |
+| `RiseTime(seconds)` | Exactly one number | Default 0 | Finite, 0 or more: the time for `s` to go from 0 to 1. 0 follows at once |
+| `FallTime(seconds)` | Exactly one number | Default 0 | Finite, 0 or more: the time for `s` to go from 1 to 0. 0 follows at once |
+| `EventOutput("event")` | Exactly one string | Required | New Float event; nonempty name, at most 240 bytes; must not already exist |
+| `OutputIsAlpha(flag)` | Exactly one number, or `true`/`false` | Optional; off | On: the result is sent every HUD update, not only on change, for a group's `EventAlpha`. `1` or `true` is on, `0` or `false` off; a quoted value is invalid |
+
+As with Math, a constant and an event for the same end are a duplicate, as is any
+repeated key, and either disables the transform. Trailing comments follow Math's
+rule. `Operation`, `Clamp` and the native
+`InputFactor`, `EventInputFactor` and `WrapInput` are not accepted. `RiseTime` and
+`FallTime` refer to the input: with `ConstantA(1)` and `ConstantB(0)` the output
+falls over `RiseTime` while the input rises.
+
+#### Update and failure behaviour
+
+- The first valid input sets `s` at once, so nothing eases in at load. After that,
+  `s` moves each HUD update by the time since the last one, capped at 0.1 s, so a
+  hitch or a pause cannot jump it. The time is the wall clock between updates on
+  every build: Steam and GOG pass the HUD update no time step.
+- A direction with a time of 0 moves `s` inside the input's own callback, so a
+  change that lasts one update (`land`, `shot`) always reaches the output in full.
+- The rate is for a whole swing, so part of one takes that share of the time. A
+  swing that reverses part way turns round from where `s` got to.
+- A change to A or B republishes at once; only `s` is eased. With an event end,
+  nothing is published until that event has sent a valid value.
+- A non-finite input holds `s` where it is until a valid one arrives. A non-finite
+  end holds the last output.
+- With an event for an end of `InputRange`, nothing is sent until it has arrived. A
+  later change moves the target, and `s` travels there at the usual rate. Equal ends
+  from events hold `s` where it is.
+- Publication, the first-update delay, change suppression, output naming, player
+  filtering, feedback limits and teardown are the same as Math's, and so are the
+  `[HudNumberMath]` log lines. A lerp can take a Math result or another lerp's as
+  any of its inputs, and feed either, in declaration order.
+
+The native shell has two handlers, so the lerp's B event binds a third handler the
+DLL owns, through the same `Item::ReadEvent`, and unlinks it itself when the item is
+destroyed; the unlink is the one `EventHandler`'s destructor performs on every build.
+Details are in [HUDSystem.md](HUDSystem.md#transformnumberlerp).
+
+### TransformNumberCompare
+
+#### Capability
+
+Compares A with B and publishes 1 or 0 as a Float, and optionally Bool events as the
+result turns on and off. A and B are each a constant or the latest value of a
+numeric event, as in Math. It exists for thresholds the stock HUD cannot express:
+low ammo, low health, full charge, a lead lost.
+
+```text
+TransformNumberCompare("player1example_lowhealth")
+{
+    Operation("Less")
+    EventInputA("player1.healthFraction")
+    ConstantB(0.25)
+    Hysteresis(0.05)
+    EventOutput("player1.example.lowHealth")
+    EventOutputTrue("player1.example.lowHealthOn")
+    EventOutputFalse("player1.example.lowHealthOff")
+}
+```
+
+#### Complete parameter list
+
+| Parameter | Arguments | Required/default | Accepted values and meaning |
+|---|---|---|---|
+| `Operation("name")` | Exactly one string | Required | `Greater`, `GreaterOrEqual`, `Less`, `LessOrEqual`, `Equal`, `NotEqual`: A compared with B; case-insensitive, no symbols |
+| `ConstantA(value)` / `EventInputA("event")` | As in Math | One required | The left side |
+| `ConstantB(value)` / `EventInputB("event")` | As in Math | One required | The right side |
+| `Hysteresis(amount)` | Exactly one number | Default 0 | Finite, 0 or more. Once on, `Greater` stays on while A > B − amount, `Less` while A < B + amount, and the `OrEqual` forms alike. For `Equal`, on while \|A − B\| ≤ amount; `NotEqual` the reverse |
+| `EventOutput("event")` | Exactly one string | One output required | New Float event: 1 or 0 |
+| `EventOutputTrue("event")` | Exactly one string | One output required | New Bool event, sent as the result turns to 1 |
+| `EventOutputFalse("event")` | Exactly one string | One output required | New Bool event, sent as the result turns to 0 |
+| `OutputIsAlpha(flag)` | As in Math | Optional; off | Repeats the Float every HUD update; the Bool events never repeat |
+
+#### Update and failure behaviour
+
+- The first result is published once both sides are known: the Float, and the Bool
+  event that matches it. After that, each change sends the Float and the other Bool
+  event. The Bool events are never sent twice in a row, so `EventEnable` and
+  `EventDisable` on them play their fades once per change.
+- An invalid side holds the last result until a valid value arrives.
+- Comparisons are on the values as sent, in double precision: an Int or Uint side
+  compares exactly, and `Equal` on two Floats usually wants a `Hysteresis`.
+- Publication, activation, output naming, filtering, feedback limits, comments and
+  teardown are the same as Math's.
 
 ### Shared native numeric parameters
 
@@ -937,8 +1148,8 @@ TransformNumberColorBlend("player1example_softhealthtint")
 }
 ```
 
-Bind `EventColor("player1.example.softHealthTint")` on the artwork. Use a separate
-element `EventAlpha` if opacity should also vary. An element's own
+Bind `EventColor("player1.example.softHealthTint")` on the artwork. Use `EventAlpha`
+on a group around it if opacity should also vary. An element's own
 `BlendMode("Additive")` is a different rendering setting; see
 [HUD blend modes](../RE/HUDBlendMode.md) for bitmap/model limitations.
 
@@ -1023,11 +1234,13 @@ TransformNumberMath("player1example_dangerintensity")
     EventInputA("player1.example.missingHealth")
     EventInputB("player1.example.missingHealth")
     EventOutput("player1.example.dangerIntensity")
+    OutputIsAlpha(1)
 }
 ```
 
-Bind `EventAlpha("player1.example.dangerIntensity")` on a dedicated warning
-overlay or a test copy of `player1health_colourchange`. Opacity is 0 at full
+Bind `EventAlpha("player1.example.dangerIntensity")`, with `PropagateAlpha(1)`, on
+a group around a dedicated warning overlay or a test copy of
+`player1health_colourchange`. Opacity is 0 at full
 health, 0.25 at half health and 0.5625 at quarter health. The clamp prevents bonus
 health above 100% from generating a negative deficit that would square positive.
 Keep the normal health-disable behaviour: this is not a persistent death overlay.
@@ -1282,9 +1495,13 @@ Math coverage includes all six operations, 20,000 random arithmetic cases,
 nonfinite values/overflow, malformed config arguments, both native calling
 conventions with mocked engine callbacks, initial publication, two-input updates,
 same-source operands, chaining, filtering, invalid configurations, feedback, and
-200 simulated mission reloads. Installer fingerprints are checked read-only
-against all three local executables. These are **not** a replacement for a DLL
-build and in-game testing.
+200 simulated mission reloads. Lerp and Compare coverage adds the easing in both directions, input ranges from
+numbers and events, every comparison with and without hysteresis, the Bool events,
+turning round mid-swing, one-update pulses, clamped and invalid inputs, event and
+constant ends, one event on two inputs, the third handler's unlink, invalid
+configurations and 200 more reloads. Installer fingerprints and the handler unlink
+are checked read-only against all three local executables. These are **not** a
+replacement for a DLL build and in-game testing.
 
 The optional x86 MSVC AddressSanitizer executable compiled, but this host's ASan
 runtime failed during interceptor initialisation before running tests; that run
@@ -1308,6 +1525,20 @@ the repository root:
 python tests/hud_number_math_abi_tests.py "path\to\GameData"
 ```
 
+### State and lerp checks
+
+Bind the sprint recipe from [HUD.md](../user/HUD.md#unit-and-weapon-states), then
+sprint in first and third person: the reticule should fade out over `RiseTime`, stay
+hidden for the whole sprint, fade back over `FallTime`, and turn round if the sprint
+is cut short. If it snaps back as soon as a fade finishes, `OutputIsAlpha(1)` is
+missing. Board a
+vehicle while sprinting; the reticule should come back and stay. Bind a text element
+to each state event with `FloatFormat("%.0f")` and jump, fall, roll, jet, hover, get
+knocked down, fire, charge, reload, overheat, swing and block a melee weapon, then
+repeat on a multiplayer client. A lerp on `land` or `shot` with only a `FallTime`
+should flash on every landing or shot. `tests/hud_class_icons_tests.cpp` covers the
+state mapping, landings and shots, and `tests/hud_number_math_tests.cpp` the lerp.
+
 ## Troubleshooting and limits
 
 | Symptom | Check |
@@ -1327,12 +1558,20 @@ python tests/hud_number_math_abi_tests.py "path\to\GameData"
 | Zero-valued output still enables something | EventEnable is not a numeric gate; use appropriate visibility events or alpha |
 | Unexpected flicker/transient value | Different sources/graph branches publish sequentially; inspect update order and stale context |
 | Colours unexpectedly mix or overwrite | Multiple writers share an output or element colour binding; use unique events |
+| An alpha fades, then snaps back to full | `EventAlpha` lasts one frame: give the transform feeding it `OutputIsAlpha(1)` |
+| `EventAlpha` changes nothing | It only exists on groups; give that group `PropagateAlpha(1)` so its alpha reaches the elements inside it |
+| `... has more arguments than it takes` in the log | A comment on that property's line has no space after its `//` |
+| A comparison flickers on and off | The value is sitting on the line: give it a `Hysteresis` |
+| A lerp fades the wrong way | `RiseTime` and `FallTime` follow the input, not the output: with A = 1 and B = 0 the output falls over `RiseTime` |
+| A lerp never sends | Its input has not sent a valid value yet, or an event end has not arrived; nothing is sent before both |
+| A state event stays at 0 | The unit states are for soldiers on foot only; a droideka, vehicle, turret or remote reads 0 |
 
 ## Evidence and related references
 
-- [Math implementation](../../PatcherDLL/src/render/hud_number_math.cpp): the exact property whitelist, name limits, activation, callbacks and failure handling.
-- [Math numeric core](../../PatcherDLL/src/render/hud_number_math_core.hpp): six operations, type conversion, clamp, numeric range and change suppression.
-- [Math tests](../../tests/hud_number_math_tests.cpp): parser, arithmetic and mocked native event/lifetime tests.
+- [Math and lerp implementation](../../PatcherDLL/src/render/hud_number_math.cpp): the exact property whitelists, name limits, activation, callbacks, the lerp's third handler and failure handling.
+- [Math and lerp numeric core](../../PatcherDLL/src/render/hud_number_math_core.hpp): six operations, the lerp's easing, type conversion, clamp, numeric range and change suppression.
+- [Math and lerp tests](../../tests/hud_number_math_tests.cpp): parser, arithmetic, easing and mocked native event/lifetime tests.
+- [State events](../../PatcherDLL/src/render/hud_class_icons.cpp) and [their rules](../../PatcherDLL/src/render/hud_class_icons_core.hpp): which soldier and weapon states set each flag, landings and shots.
 - [HUD system RE](../RE/HUDSystem.md): factory registration, type catalogue, load order, NameMesh inheritance and build-specific adapter addresses.
 - [HUD event bindings RE](../RE/HUDEventBindings.md): health ranges/context and consumer behaviour.
 - [HUD blend mode RE](../RE/HUDBlendMode.md): renderer blend state and Model3D/MeshInfo distinctions.

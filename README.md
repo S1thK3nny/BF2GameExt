@@ -19,7 +19,7 @@ A DLL extension for Star Wars Battlefront II (2005) that exposes new modding cap
 - **[Lua API](docs/user/LUA_API.md)** - functions callable from mission scripts
 - **[ODF Properties](docs/user/ODF_PROPERTIES.md)** - custom properties for soldier, weapon, ordnance and vehicle classes
 - **[Loading Screen](docs/user/LOADING_SCREEN.md)** - custom loading screen parameters
-- **[HUD System](docs/user/HUD.md)** - new HUD events, `TransformNumberMath` and `FillFrom` for `.hud` files
+- **[HUD System](docs/user/HUD.md)** - new HUD events, number transforms and `FillFrom` for `.hud` files
 - **[HUD Properties](docs/user/HUD_PROPERTIES.md)** - every event, property and transform parameter added to `.hud` files
 
 
@@ -71,7 +71,7 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Aim assist | ✅ | ✅ | ✅ |
 | Gamepad bindings and rumble | ✅ | ✅ | ✅ |
 | Loading screen system | ✅ | ✅ | ✅ |
-| HUD events, `TransformNumberMath`, `FillFrom` | ✅ | ✅ | ✅ |
+| HUD events, number transforms, `FillFrom` | ✅ | ✅ | ✅ |
 | Camera shake | ✅ | ✅ | ✅ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |

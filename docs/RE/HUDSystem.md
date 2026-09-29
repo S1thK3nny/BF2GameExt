@@ -1501,6 +1501,112 @@ the production installer guards and address table and compares them with all
 three PEs (including Modtools vtable JMP thunks). Actual game execution is still
 required to validate loading/rendering; see the [HUD testing checklist](HUDAuthoring.md#testing-and-verification).
 
+### TransformNumberLerp
+
+Built 2026-09-28 on the same adapter: a second factory, `TransformNumberLerp`, with
+its own copy of the Vector3 factory vtable whose CreateItem marks the sidecar as a
+lerp. Everything else (shell, vtable overrides, activation, publication, teardown)
+is shared with Math.
+
+A lerp has three event inputs (the 0..1 input, A and B) and the shell has two
+handlers: +1C carries `EventInput` and +40 `EventInputA`. `EventInputB` binds a
+20-byte `EventHandler` inside the sidecar through the same `Item::ReadEvent`, with
+the same callback and context. `ReadEvent` registers any handler the caller passes;
+it does not care where the handler lives.
+
+The native destructor unregisters only +1C and +40, so the wrapper unlinks the third
+handler first. `EventClass::UnregisterEventHandler` (Phantom `0060F870`) and
+`EventHandler`'s destructor (Modtools `006AD6B0`, Steam `0055DB70`, GOG `0055E8F0`,
+called by TransformNumber's destructor on +40) are the same unlink: node `{next,
+prev}` at +08, `next->prev = prev` at `next + 4`, `prev->next = next`, both only when
+next and prev are set. The destructors do not clear `mClass` (+10); the wrapper
+does. `tests/hud_number_math_abi_tests.py` checks those instruction bytes on all three
+builds, so a build with a different handler layout fails the audit.
+
+`InputRange` ends that name events bind two more sidecar handlers the same way.
+`Item::ReadEvent` (Phantom `00617E30`) reads only argument 0: it checks that the
+argument is a string offset, filters and hashes that name, finds the class and
+registers the handler. So the reader hands it a one-argument copy of the property
+holding just that end's name, and the native lookup, filtering and warnings all
+apply unchanged.
+
+`TransformNumberCompare`, built 2026-09-28, is a third factory on the same
+adapter. Its optional `EventOutputTrue` and `EventOutputFalse` are Bool classes
+(type 1) created like the Float output, sent with data 1 only when the result
+changes, and never repeated by `OutputIsAlpha`: `EventEnable` restarts an
+element's fade each time it fires.
+
+Time comes from `QueryPerformanceCounter` between `hud_number_math_update` calls,
+capped at 0.1 s. Modtools passes `UpdateFloat` a dt, but Steam and GOG dropped it
+(`UpdateVoid`), so every build measures its own for the same behaviour.
+
+### `EventAlpha` lasts one frame (read on modtools, 2026-09-28)
+
+`EventAlpha` is a group property only: the one reader that takes its hash
+(`0x41B355C1`) outside ColorBlend is the group base's `ReadData` (modtools
+`00699FA0`), which binds it to a handler at +130. Phantom has no group alpha;
+its `ElementGroupBase_data` puts `mEventRotation` at +130, which modtools moved
+to +144. The callback (modtools `0069A6E0`) takes a Float, multiplies it by 255
+and stores the byte straight into the group's `RedInterfaceElement` colour
+alpha, `mElement` (+B0) → `m_color` (+2C) byte +2F.
+
+`Element::Update` (modtools `006920F0`, called for every enabled element each
+frame) eases `m_color` toward the element's own colour and then always writes
+that alpha byte as `fader × mAlpha × 255`, `mAlpha` being the authored `Alpha`
+(+AC). So an `EventAlpha` value survives only until the next update. For the
+stock reticule fade to hold, `player1.reticule.alpha` must be re-sent every frame;
+its sender has not been traced. A GameExt transform re-sends only with
+`OutputIsAlpha(1)`, which `hud_number_math_update` honours after the element
+updates of that frame, because GameEvents::Update runs later. Without it, a
+lerp's fade shows while its value is still moving and snaps back once it settles.
+
+`PropagateAlpha` (`0x09B602B0`, a stock key the stock HUDs use throughout, already
+read by Phantom's group reader `005FC510`) sets bit 0 of the group's render
+element at +84. The per-element render (modtools `00816FA0`) passes its colour into
+the element's render, modulated channel by channel with the colour it is handed
+(`a × b / 255`, `004D0ED0`). With the flag, a group's alpha reaches the elements
+inside it. Without it, a group still tints its children's RGB.
+
+### ConfigMunge and trailing comments (tested 2026-09-28)
+
+`ConfigMunge` drops a whole-line `//` comment but keeps one that follows a
+property on the same line: every token after the `)` becomes one more argument.
+Unquoted words are hashed like names, numbers stay floats, and quoted text stays a
+string. `RiseTime(0.15) // fade out` arrives as `0.15, hash("//"), hash("fade"),
+hash("out")`. The `//` token is always `0xA2D266E3`, even straight after the `)`,
+so `Data::arguments()` ends the list there. `//fade`, with no space, is a single
+hashed word and cannot be told from an argument. Native readers read their fixed
+count and ignore the rest, which is why stock files never noticed.
+
+Unquoted `true` and `false` are hashed too (`0x4DB211E5`, `0x0B069958`, any
+case), and `PblConfig::Data::GetBoolArg` (Phantom `005F3570`) only tests the
+argument against `0.0`, so a stock flag written `false` reads as on.
+`Data::flag()` recognises both words.
+
+## Unit and weapon state events (2026-09-28)
+
+`player1.unit.state.*` and `player1.weaponN.state.*` are Float flags published by
+`render/hud_class_icons.cpp` beside the icon events, from the same reads plus:
+
+- **Soldier `mState`** at `Controllable + g_soldier->mState`, the value the stance
+  already reads (SoldierState: 3 SPRINT, 4 JUMP, 5 ROLL, 6 JET_JUMP, 7 JET_HOVER,
+  8 FALL, 9 to 13 the thrown and knocked-down states, 19 SLIDE).
+  `EntitySoldier::EnterControllable` (Phantom `0056DA20`) deactivates the soldier and
+  sets the Character's vehicle without touching `mState`, so the flags are read
+  only while `Character::mVehicle` (+14C) and `mRemote` (+150) are both empty.
+- **`Weapon::mState`** at +B0 on every build (WeaponState: 1 FIRE, 2 FIRE2, 3 CHARGE,
+  4 RELOAD, 5 OVERHEAT). Melee weapons reuse FIRE for an attack, RELOAD for a block
+  and OVERHEAT for the recovery after a swing, so a weapon whose `IsMelee` (primary
+  vtable slot 21, as `controller/aim_assist.cpp` calls it) is true maps RELOAD to
+  blocking and reports no reload, charge or overheat.
+- **`Weapon::mLastFireTime`**, stored by `SignalFire`: Modtools +11C
+  (`0061C8EF: 89 8E 1C 01 00 00`), Steam +F8 (`006796A5: F3 0F 11 8E F8 00 00 00`),
+  GOG +F8 (`0067A745`, same bytes). A change on the same weapon is a shot; a change
+  of weapon is not. A melee swing also passes through `SignalFire`.
+
+`tests/hud_class_icons_abi_tests.py` checks the store sites, the `+B0` constant and
+the shared IsMelee slot on all three builds.
+
 ## Bitmap sizing: `BitmapRect` (read on Phantom, 2026-09-26)
 
 A bitmap's size comes only from `BitmapRect`, never from its texture.

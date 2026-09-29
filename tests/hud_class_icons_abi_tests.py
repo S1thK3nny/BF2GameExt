@@ -61,6 +61,7 @@ sites = {
         # UpdateWeaponEvents: GetWeaponIndex(ch), GetWeapon(index), Weapon::mClass
         (0x006B2F0A, "FF 50 3C 33 FF 3B C7 7C 1B 8B 16 50 8B CE FF 52 40"
                      "8B D8 3B DF 89 5C 24 34 74 0F 8B 43 64"),
+        (0x0061C8EF, "89 8E 1C 01 00 00"),                 # SignalFire: mLastFireTime
     ],
     "steam": [
         (0x00561D86, "8B 41 18 83 C1 18 FF 50 1C"),
@@ -70,6 +71,7 @@ sites = {
         (0x0067B084, "89 47 6C"),
         (0x00560ADE, "8B 40 3C FF D0 8B D0 85 D2 78 1B 8B 06 8B CE 52 8B 40 40"
                      "FF D0 8B F0 89 75 F0 85 F6 74 0D 8B 46 64"),
+        (0x006796A5, "F3 0F 11 8E F8 00 00 00"),           # SignalFire: mLastFireTime
     ],
     "gog": [
         (0x00562B06, "8B 41 18 83 C1 18 FF 50 1C"),
@@ -79,8 +81,20 @@ sites = {
         (0x0067C124, "89 47 6C"),
         (0x0056185E, "8B 40 3C FF D0 8B D0 85 D2 78 1B 8B 06 8B CE 52 8B 40 40"
                      "FF D0 8B F0 89 75 F0 85 F6 74 0D 8B 46 64"),
+        (0x0067A745, "F3 0F 11 8E F8 00 00 00"),
     ],
 }
+# The state flags read Weapon::mState and mLastFireTime from layout::Weapon.
+assert re.search(r"\bkState\s*=\s*0x0B0\b", weapon_layout), "Weapon::mState"
+last_fire = {
+    "modtools": int(re.search(r"\bkLastFireTimeModtools\s*=\s*(0x[0-9A-Fa-f]+)", weapon_layout).group(1), 16),
+    "release": int(re.search(r"\bkLastFireTimeRelease\s*=\s*(0x[0-9A-Fa-f]+)", weapon_layout).group(1), 16),
+}
+assert last_fire == {"modtools": 0x11C, "release": 0xF8}, last_fire
+assert "layout::Weapon::kLastFireTimeModtools" in source and "layout::Weapon::kLastFireTimeRelease" in source
+# IsMelee is the slot aim assist already calls on every build.
+aim_assist = (ROOT / "PatcherDLL/src/controller/aim_assist.cpp").read_text()
+assert "kVt_IsMelee = 21 * 4" in source and "WEAPON_VTABLE_IS_MELEE = 21 * 4" in aim_assist
 # The mHealthTexture store's displacement must be the module's layout value.
 for build, entries in sites.items():
     assert entries[2][1].split()[-1] == "%02X" % health[build], (build, "layout")
