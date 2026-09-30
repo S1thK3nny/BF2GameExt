@@ -247,6 +247,22 @@ ground distance > `TakeoffHeight + LandedHeight`.
 | 4 | DYING |
 | 5 | DEAD |
 
+Death path in `EntityFlyer::Update` (modtools `004FC930`), taken once `Kill` has cleared
+the alive bit (Damageable+0xBC bit 3, base+0x1FC):
+
+- State 0 or 5: awards the vehicle kill (host), `CreateChunkCluster`, removes the flyer,
+  plays `ExplosionDestruct` (class+0xE3C modtools) and returns false.
+- State 1, 2 or 3: plays `ExplosionCritical` (class+0xE38), sets health 0 and goes to 4.
+  The crash timer (base+0x60C) is `0.2 + 2*rand` s when the class has chunks, otherwise
+  600 s.
+- State 4: the tumble. Gravity plus random angular kicks every frame; the timer counts
+  down and moves to 5 when it runs out. There is no ODF key that shortens it apart from
+  giving the class chunks. `GuidedMissile = 1` (class+0x1118 bit 2) takes a separate
+  explode-at-once branch, but it also blocks landing and weapons.
+
+GameExt moves a carrier from 4 to 5 right after the Update that entered 4, so it plays
+both explosions one frame apart and never tumbles.
+
 The generic flyer AI goal (`005AF000`, modtools) picks random command posts and calls
 `TakeOff` whenever the flyer isn't FLYING, including mid-descent. Unchecked, the carrier
 oscillates LANDING → TAKEOFF → LANDING and never lands.

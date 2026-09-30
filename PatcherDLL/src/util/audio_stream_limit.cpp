@@ -115,7 +115,7 @@ void __cdecl report_extension_slot(void* stream)
    if (slot >= AUDIO_STREAM_SLOTS || slot < AUDIO_STREAM_SLOTS_STOCK) return;
 
    reported_this_session = true;
-   warn_gamelog(RED_SEVERITY_INFO, SRC_FILE, __LINE__,
+   warn_gamelog(RED_SEVERITY_INFORM, SRC_FILE, __LINE__,
                 "[AudioStreamExt] Detected more than %u OpenAudioStream calls. "
                 "Please keep in mind, you will be missing ambiance without BF2GameExt.",
                 AUDIO_STREAM_SLOTS_STOCK);
