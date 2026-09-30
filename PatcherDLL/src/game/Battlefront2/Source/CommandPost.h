@@ -3,9 +3,9 @@
 #include <stdint.h>
 
 // =============================================================================
-// CommandPost, CommandPostClass and Team - what the command post strip reads.
-// Names from the Phantom PDB (CommandPost_data starts at +0x18, Team_data at
-// +0x04); every offset read off each build's own instructions:
+// CommandPost and CommandPostClass - what the command post strip reads.
+// Names from the Phantom PDB (CommandPost_data starts at +0x18); every offset
+// read off each build's own instructions:
 //
 //   field                    modtools @               Steam @ / GOG @ (same code)
 //   CommandPost
@@ -24,18 +24,13 @@
 //   +0x04 mNeutralizeTime    GetNeutralizeTime 0x00649A80  NeutralizeTime store 0x0047F1DB
 //   +0x08 mCaptureTime       GetCaptureTime 0x00649A70     CaptureTime store 0x0047F1BE
 //
-//   Team (Team::sTeams: game_addrs team_array_base, a pointer to the array)
-//   +0x1C mIcon (a PblHash)  SetTeamIcon 0x00470302        0x0058B883 / 0x0058C833
-//   +0x68 mColor[8] (RedColor, as this team sees team i)
-//                            post icons 0x006A8439         0x0055469B / 0x0055540B
-//
 //   GameObject
 //   +0x234 team, low 4 bits signed   GetCommandPostTeam 0x004730F7  0x00590035 / 0x00590FD5
 //
 // HUDIndexDisplay defaults on in CommandPostClass's constructor and is copied
 // to each post; stock ODFs turn it off for invisible posts and command vehicles.
 // A post's team is its object's team; Team::sTeams[0] is the neutral team, which
-// the engine itself dereferences for neutral posts.
+// the engine itself dereferences for neutral posts (see Team.h).
 // =============================================================================
 
 namespace layout::CommandPost {
@@ -54,11 +49,3 @@ constexpr uint32_t kClassNeutralizeTime = 0x04;
 constexpr uint32_t kClassCaptureTime    = 0x08;
 
 } // namespace layout::CommandPost
-
-namespace layout::Team {
-
-constexpr uint32_t kIcon  = 0x1C;
-constexpr uint32_t kColor = 0x68;   // RedColor[8]
-constexpr int      kColorCount = 8;
-
-} // namespace layout::Team

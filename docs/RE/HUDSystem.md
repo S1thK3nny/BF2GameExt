@@ -804,7 +804,7 @@ pointer and every `EventColor` handler dereferences it (modtools `0x00692B80`, S
 | `netOnClient` | `0x00BE14FD` | `0x01E62EAB` | `0x01E6435B` |
 | `NetGame::IsNearLocalPlayer`, cdecl(`PblVector3*`) -> bool | `0x006E3DD0` | `0x005B7470` | `0x005B8420` |
 
-Every read site is listed in `core/layout/command_post.hpp` and checked on all three
+Every read site is listed in `game/Battlefront2/Source/CommandPost.h` and checked on all three
 executables by `tests/hud_command_posts_abi_tests.py`.
 
 ---

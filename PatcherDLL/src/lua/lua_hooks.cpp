@@ -52,7 +52,7 @@
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
-#include "core/layout/character.hpp"
+#include "game/Battlefront2/Source/Character.h"
 
 #include <detours.h>
 

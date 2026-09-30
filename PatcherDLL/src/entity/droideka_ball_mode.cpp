@@ -2,7 +2,7 @@
 #include "droideka_ball_mode.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/droideka.hpp"
+#include "game/Battlefront2/Source/EntityDroideka.h"
 #include "core/resolve.hpp"
 
 #include <cstdlib>
@@ -49,7 +49,7 @@
 // =============================================================================
 
 // FSM state ids and the per-build EntityDroideka offsets, with the read sites
-// behind them, live in core/layout/droideka.hpp.
+// behind them, live in game/Battlefront2/Source/EntityDroideka.h.
 using layout::Droideka::kStateIdle;
 using layout::Droideka::kStateRollUp;
 using layout::Droideka::kStateBall;
