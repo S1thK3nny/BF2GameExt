@@ -35,7 +35,7 @@ assert const("kCtrl_Trackable") == 0x18
 assert const("kVt_GetWeaponIndex") == 0x3C
 assert const("kVt_GetWeapon") == 0x40
 assert const("kWeaponClassIcon") == 0x6C
-weapon_layout = (ROOT / "PatcherDLL/src/core/layout/weapon.hpp").read_text()
+weapon_layout = (ROOT / "PatcherDLL/src/game/Battlefront2/Source/Weapon.h").read_text()
 assert re.search(r"\bkClass\s*=\s*0x064\b", weapon_layout), "Weapon::mClass"
 health = {"modtools": layout("kModtools"), "steam": layout("kRelease"), "gog": layout("kRelease")}
 guard = re.search(r'"PblHashTableCode::_Find",\s*modtools \? "([^"]*)"\s*: "([^"]*)"', source)

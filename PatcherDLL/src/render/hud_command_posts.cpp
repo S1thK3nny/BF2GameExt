@@ -3,8 +3,9 @@
 #include "hud_command_posts_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/character.hpp"
-#include "core/layout/command_post.hpp"
+#include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/CommandPost.h"
+#include "game/Battlefront2/Source/Team.h"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
@@ -14,7 +15,7 @@
 
 // =============================================================================
 // What it reads, per build. Layouts and their read sites are in
-// core/layout/command_post.hpp; the research is in docs/RE/HUDSystem.md.
+// game/Battlefront2/Source/CommandPost.h; the research is in docs/RE/HUDSystem.md.
 //
 //   CommandPost::sPostArray and its count   game_addrs command_post_array_ptr and
 //                                           command_post_count_ptr, both pointers

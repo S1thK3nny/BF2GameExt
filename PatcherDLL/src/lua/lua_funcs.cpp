@@ -9,8 +9,8 @@
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/instance_props.hpp"
 #include "core/pbl_hash.hpp"
-#include "core/layout/character.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/Weapon.h"
 #include <detours.h>
 #include <wininet.h>
 #pragma comment(lib, "wininet.lib")

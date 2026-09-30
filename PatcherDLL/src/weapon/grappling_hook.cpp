@@ -4,7 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/pbl_hash.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <detours.h>
 #include <string.h>

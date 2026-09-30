@@ -4,8 +4,8 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
-#include "core/layout/droideka.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/EntityDroideka.h"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <detours.h>
 

@@ -3,6 +3,8 @@
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "game/Battlefront2/Source/EntityCarrier.h"
+#include "game/Battlefront2/Source/VehicleSpawn.h"
 #include "util/crash_logger.hpp"
 
 #include <cmath>
@@ -154,16 +156,8 @@ static constexpr int kVt_DeletingDtor = 3;   // scalar deleting destructor, arg 
 static constexpr int kVt_Activate     = 5;
 static constexpr int kVt_SetTeam      = 36;
 
-// VehicleSpawn fields (build-invariant; engine field names in comments).
-static constexpr uintptr_t kVS_PadTransform = 0x30;   // mMatrix
-static constexpr uintptr_t kVS_SpawnCount   = 0x7C;   // mSpawnCount
-static constexpr uintptr_t kVS_SpawnClass   = 0x90;   // mSpawnClass[8] (cargo class)
-static constexpr uintptr_t kVS_UseCarrier   = 0xD0;   // mUseCarrier[8]
-static constexpr uintptr_t kVS_ListSentinel = 0xD8;   // mTrackerList
-static constexpr uintptr_t kVS_TrackerCount = 0xE8;   // mTrackerList._iCount
-static constexpr uintptr_t kVS_CarrierPtr   = 0xEC;   // mCarrier (PblHandle ptr)
-static constexpr uintptr_t kVS_CarrierGen   = 0xF0;   // mCarrier (PblHandle id)
-static constexpr uintptr_t kVS_Team         = 0xF8;   // mSpawnTeam (1-based)
+using CargoSlot = EntityCarrier::CargoSlot;
+using CargoInfo = EntityCarrierClass::CargoInfo;
 
 static inline int&   fieldI(char* p, uintptr_t off) { return *(int*)(p + off); }
 static inline float& fieldF(char* p, uintptr_t off) { return *(float*)(p + off); }
@@ -172,13 +166,10 @@ static inline CargoSlot* cargoSlots(char* base) { return (CargoSlot*)(base + L->
 static inline int  flightState(char* base) { return fieldI(base, L->flightState); }
 static inline char* carrierClass(char* base) { return *(char**)(base + L->cls); }
 
-// Live cargo in a slot, or null.  Mirrors the engine's PblHandle test.
+// Live cargo in a slot, or null.
 static void* slotCargo(char* base, int slot)
 {
-   CargoSlot& s = cargoSlots(base)[slot];
-   if (!s.mObjectPtr) return nullptr;
-   if (*(int*)((char*)s.mObjectPtr + kHandleId) != s.mObjectGen) return nullptr;
-   return s.mObjectPtr;
+   return cargoSlots(base)[slot].mObject.Get();
 }
 
 static void setTeam(void* obj, int team)
@@ -1069,12 +1060,11 @@ static void call_original_UpdateSpawn(void* ecx, float dt)
 // UpdateSpawn exactly when trackers < mSpawnCount, i.e. in that case, after
 // UpdateLive has had its turn, so running UpdateLive's carrier block here is
 // safe to repeat and fills the gap.
-static void padCarrierUpdate(char* vs)
+static void padCarrierUpdate(VehicleSpawn* vs)
 {
    __try {
-      char* carrier = *(char**)(vs + kVS_CarrierPtr);
+      char* carrier = (char*)vs->mCarrier.Get();  // stale: the original clears it
       if (!carrier) return;
-      if (fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;  // original clears it
       if (*(void**)carrier != g_carrierVtable) return;
 
       const int state = flightState(carrier);
@@ -1086,8 +1076,7 @@ static void padCarrierUpdate(char* vs)
          trackRelease(carrier);
          typedef void(__thiscall* Dtor_t)(void*, int);
          ((Dtor_t)(*(void***)carrier)[kVt_DeletingDtor])(carrier, 1);
-         fieldI(vs, kVS_CarrierPtr) = 0;
-         fieldI(vs, kVS_CarrierGen) = 0;
+         vs->mCarrier = {};
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -1097,31 +1086,31 @@ typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
 static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
 static void*             g_VehicleTrackerPool = nullptr;
 
-static void createTracker(char* vs, void* cargo)
+static void createTracker(VehicleSpawn* vs, void* cargo)
 {
+   using VehicleTracker = VehicleSpawn::VehicleTracker;
    if (!g_MemPoolAlloc || !g_VehicleTrackerPool || !cargo) return;
-   int* tracker = (int*)g_MemPoolAlloc(g_VehicleTrackerPool, 0x1C);
+   auto* tracker = (VehicleTracker*)g_MemPoolAlloc(g_VehicleTrackerPool, sizeof(VehicleTracker));
    if (!tracker) return;
-   memset(tracker, 0, 0x1C);
+   memset(tracker, 0, sizeof(VehicleTracker));
 
-   char* sentinel = vs + kVS_ListSentinel;
-   int*  sentinelI = (int*)sentinel;
-   tracker[0] = (int)sentinel;
-   tracker[1] = (int)sentinel;
-   tracker[3] = (int)tracker;
-   tracker[4] = (int)cargo;                        // mVehicle ptr
-   tracker[5] = fieldI((char*)cargo, kHandleId);   // mVehicle id
+   PblList<VehicleTracker>& list = vs->mTrackerList;
+   tracker->_pList   = &list;
+   tracker->_pObject = tracker;
+   tracker->mVehicle = { (GameObject*)cargo, (uint32_t)fieldI((char*)cargo, kHandleId) };
 
-   tracker[2] = sentinelI[2];                      // link at head
-   sentinelI[2] = (int)tracker;
-   *(int*)(tracker[2] + 4) = (int)tracker;
-   fieldI(vs, kVS_TrackerCount) += 1;
+   // Append: insert before the sentinel.
+   tracker->_pNext         = &list._head;
+   tracker->_pPrev         = list._head._pPrev;
+   list._head._pPrev       = tracker;
+   tracker->_pPrev->_pNext = tracker;
+   list._iCount += 1;
 }
 
 // Spawn cargo for slots 1..N-1 of a multi-cargo carrier, within the pad's
 // remaining spawn budget.  Same order as vanilla: attach, team, activate,
 // tracker.
-static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, int countAfter)
+static void spawnExtraCargo(VehicleSpawn* vs, char* carrier, CarrierTrack* t, int team, int countAfter)
 {
    char* cls = carrierClass(carrier);
    if (!cls) return;
@@ -1129,19 +1118,19 @@ static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, 
    if (cargoCount <= 1) return;
 
    int slotsToFill = cargoCount;
-   const int budget = fieldI(vs, kVS_SpawnCount) - countAfter;
+   const int budget = vs->mSpawnCount - countAfter;
    if (slotsToFill > budget + 1) slotsToFill = budget + 1;
    if (slotsToFill > kMaxCargo)  slotsToFill = kMaxCargo;
    if (slotsToFill <= 1) return;
 
-   void* spawnClass = *(void**)(vs + kVS_SpawnClass + team * 4);
+   void* spawnClass = vs->mSpawnClass[team];
    if (!spawnClass) return;
    auto fn = get_gamelog();
 
    for (int slot = 1; slot < slotsToFill; slot++) {
       typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
       typedef void* (__thiscall* GetEntity_t)(void* obj);
-      void* spawned = ((SpawnEntity_t)(*(void***)spawnClass)[2])(spawnClass, vs + kVS_PadTransform);
+      void* spawned = ((SpawnEntity_t)(*(void***)spawnClass)[2])(spawnClass, &vs->mMatrix);
       if (!spawned) continue;
       void* cargo = ((GetEntity_t)(*(void***)spawned)[9])(spawned);
       if (!cargo) continue;
@@ -1180,31 +1169,30 @@ static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, 
 
 static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 {
-   char* vs = (char*)ecx;
+   auto* vs = (VehicleSpawn*)ecx;
    padCarrierUpdate(vs);
 
    int countBefore = 0;
-   __try { countBefore = fieldI(vs, kVS_TrackerCount); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+   __try { countBefore = vs->mTrackerList._iCount; } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
    call_original_UpdateSpawn(ecx, dt);
 
    __try {
-      const int countAfter = fieldI(vs, kVS_TrackerCount);
+      const int countAfter = vs->mTrackerList._iCount;
       if (countAfter <= countBefore) return;
 
-      const int team = fieldI(vs, kVS_Team);
-      if (team < 1 || team > 7 || !*(vs + kVS_UseCarrier + team)) return;
+      const int team = vs->mSpawnTeam;
+      if (team < 1 || team > 7 || !vs->mUseCarrier[team]) return;
 
-      char* carrier = *(char**)(vs + kVS_CarrierPtr);
-      if (!carrier || fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;
+      char* carrier = (char*)vs->mCarrier.Get();
+      if (!carrier) return;
       if (*(void**)carrier != g_carrierVtable) return;
 
       CarrierTrack* t = trackAcquire(carrier);
       if (t) {
-         const float* pad = (const float*)(vs + kVS_PadTransform);
-         t->padX = pad[12];
-         t->padY = pad[13];
-         t->padZ = pad[14];
+         t->padX = vs->mMatrix._41;
+         t->padY = vs->mMatrix._42;
+         t->padZ = vs->mMatrix._43;
 
          char* cls = carrierClass(carrier);
          const float landingTm = cls ? fieldF(cls, L->clsLandingTime)  : 10.0f;

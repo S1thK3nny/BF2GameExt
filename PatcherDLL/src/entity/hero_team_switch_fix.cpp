@@ -5,7 +5,7 @@
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
 #include "util/install_log.hpp"
-#include "core/layout/character.hpp"
+#include "game/Battlefront2/Source/Character.h"
 
 #include <cstring>
 
