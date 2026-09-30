@@ -2,6 +2,7 @@
 #include "command_post_overflow_fix.hpp"
 #include "core/resolve.hpp"
 #include "core/game_build.hpp"
+#include "game/Battlefront2/Source/CommandPost.h"
 
 #include <detours.h>
 
@@ -17,7 +18,6 @@ constexpr int kMaxPosts = 16;   // sPostArray is a fixed 16 entries on every bui
 uintptr_t s_hintVA     = 0;   // int, the one-shot forced index (-1 = none)
 uintptr_t s_arrayVA    = 0;   // holds the array base address
 uintptr_t s_countVA    = 0;   // holds the address of the live count
-unsigned  s_classOff   = 0;   // CommandPost -> CommandPostClass*, build-specific
 
 bool s_warned = false;        // one line per session, not per registration
 
@@ -61,15 +61,11 @@ void clamp_registration(const void* cpClass)
       //     post rather than crashing: prefer one of the same CommandPostClass,
       //     which is stock's own reuse rule minus its distance test.
       int pick = kMaxPosts - 1;
-      if (s_classOff != 0) {
-         for (int i = 0; i < kMaxPosts; ++i) {
-            const void* const post = arr[i];
-            if (!post) continue;
-            if (*reinterpret_cast<const void* const*>(
-                   reinterpret_cast<const char*>(post) + s_classOff) == cpClass) {
-               pick = i;
-               break;
-            }
+      for (int i = 0; i < kMaxPosts; ++i) {
+         const void* const post = arr[i];
+         if (post && layout::CommandPost::mClass(post) == cpClass) {
+            pick = i;
+            break;
          }
       }
       *hint() = pick;
@@ -121,7 +117,6 @@ void command_post_overflow_fix_install(uintptr_t exe_base)
    s_hintVA   = (uintptr_t)resolve(exe_base, g_addr->command_post_hint_index);
    s_arrayVA  = (uintptr_t)resolve(exe_base, g_addr->command_post_array_ptr);
    s_countVA  = (uintptr_t)resolve(exe_base, g_addr->command_post_count_ptr);
-   s_classOff = (unsigned)g_addr->command_post_class_off;
 
    void* const target = resolve(exe_base, g_addr->command_post_find_or_create);
 

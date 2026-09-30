@@ -3,6 +3,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "game/Battlefront2/Source/CommandPost.h"
 #include "game/Battlefront2/Source/VehicleSpawn.h"
 #include "util/install_log.hpp"
 
@@ -96,12 +97,7 @@ bool g_spawnVehicleListEnabled = true;
 
 // ---- layout constants -------------------------------------------------------
 
-// CommandPost
-static constexpr int kCP_Object            = 0x2C;
-static constexpr int kCP_SavedHandleId     = 0x30;
-
 // GameObject
-static constexpr int kGO_HandleId          = 0x204;
 static constexpr int kGO_TeamBitfield      = 0x234;
 
 // SpawnDisplay
@@ -166,11 +162,7 @@ static wchar_t g_text[kTextChars];
 static const uint8_t* cp_object(const uint8_t* cp)
 {
    if (!cp) return nullptr;
-   const uint8_t* obj = *(const uint8_t* const*)(cp + kCP_Object);
-   if (!obj) return nullptr;
-   if (*(const int*)(obj + kGO_HandleId) != *(const int*)(cp + kCP_SavedHandleId))
-      return nullptr;
-   return obj;
+   return (const uint8_t*)layout::CommandPost::mObject(cp).Get();
 }
 
 // GameObject::mTeam, a 4-bit signed bitfield.  Returns -1 when it is not a team

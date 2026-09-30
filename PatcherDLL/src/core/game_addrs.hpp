@@ -847,7 +847,6 @@ namespace modtools {
    constexpr uintptr_t command_post_hint_index     = 0x00AD5494;  // one-shot forced index
    constexpr uintptr_t command_post_array_ptr      = 0x00AD5498;  // holds the array base
    constexpr uintptr_t command_post_count_ptr      = 0x00AD549C;  // holds the count's address
-   constexpr uintptr_t command_post_class_off      = 0x1A54;      // CommandPost -> its class
 
 
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
@@ -2110,7 +2109,6 @@ namespace steam {
    constexpr uintptr_t command_post_hint_index     = 0x007E6318;
    constexpr uintptr_t command_post_array_ptr      = 0x007E6314;
    constexpr uintptr_t command_post_count_ptr      = 0x007E631C;
-   constexpr uintptr_t command_post_class_off      = 0x0B3C;
 
 
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
@@ -3329,7 +3327,6 @@ namespace gog {
    constexpr uintptr_t command_post_hint_index     = 0x007E7318;
    constexpr uintptr_t command_post_array_ptr      = 0x007E7314;
    constexpr uintptr_t command_post_count_ptr      = 0x007E731C;
-   constexpr uintptr_t command_post_class_off      = 0x0B3C;
 
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;

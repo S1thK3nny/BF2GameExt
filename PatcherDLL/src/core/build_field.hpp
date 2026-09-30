@@ -24,3 +24,13 @@ struct Field {
    T&       operator()(void* obj) const       { return *(T*)((char*)obj + off()); }
    const T& operator()(const void* obj) const { return *(const T*)((const char*)obj + off()); }
 };
+
+// A struct size or array stride that can differ between the two layouts.
+struct BuildSize {
+   uint32_t dbg, rel;
+
+   constexpr BuildSize(uint32_t both) : dbg(both), rel(both) {}
+   constexpr BuildSize(uint32_t d, uint32_t r) : dbg(d), rel(r) {}
+
+   uint32_t get() const { return g_layout == Layout::Release ? rel : dbg; }
+};

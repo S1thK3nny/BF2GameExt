@@ -47,7 +47,6 @@ constexpr uint32_t kEC_Type          = 0x04;
 constexpr uint32_t kEC_HandlerList   = 0x08;   // self-linked when nobody listens
 constexpr uint32_t kGO_MatrixTrans   = 0x120;  // mMatrix (+0xF0) .trans
 constexpr uint32_t kGO_Flags         = 0x1FC;  // bit 3: alive
-constexpr uint32_t kGO_HandleId      = 0x204;
 constexpr uint32_t kGO_Team          = 0x234;  // low 4 bits, signed
 constexpr uint32_t kTextureTableSize = 0x2000;
 constexpr int      kMaxPosts         = 64;     // CommandPost::sPostArray's length
@@ -69,8 +68,6 @@ using TableFind   = void*(__cdecl*)(const void* table, uint32_t size, uint32_t h
 using IsNear      = bool(__cdecl*)(const float* position);
 
 bool        s_active = false;
-uint32_t    s_flagsOffset = cp::kFlagsModtools;
-uint32_t    s_classOffset = 0;
 Find        s_find = nullptr;
 FindFast    s_findFast = nullptr;
 Create      s_create = nullptr;
@@ -200,9 +197,8 @@ bool is_client()
 // minimap requires before it draws a post.
 uint8_t* live_object(uint8_t* post)
 {
-   uint8_t* obj = *(uint8_t**)(post + cp::kObject);
-   if (!obj || *(const uint32_t*)(obj + kGO_HandleId) != *(const uint32_t*)(post + cp::kObject + 4))
-      return nullptr;
+   uint8_t* obj = (uint8_t*)cp::mObject(post).Get();
+   if (!obj) return nullptr;
    return (*(const uint32_t*)(obj + kGO_Flags) >> 3 & 1) ? obj : nullptr;
 }
 
@@ -250,14 +246,14 @@ void publish_color(Sent& sent, int slot, int which, Field field, uint32_t color)
 void publish_post(int slot, uint8_t* post, uint8_t* obj, uint8_t** teams,
                   const uint8_t* viewer, bool client)
 {
-   const uint8_t* cls = *(const uint8_t* const*)(post + s_classOffset);
+   const CommandPostClass* cls = cp::mClass(post);
    Capture c;
    c.team           = team_of(obj);
-   c.biasTeam       = valid_team(*(const int*)(post + cp::kBiasTeam), kTeams);
-   c.neutralize     = *(const float*)(post + cp::kNeutralizeTimer);
-   c.capture        = *(const float*)(post + cp::kCaptureTimer);
-   c.neutralizeTime = cls ? *(const float*)(cls + cp::kClassNeutralizeTime) : 0;
-   c.captureTime    = cls ? *(const float*)(cls + cp::kClassCaptureTime) : 0;
+   c.biasTeam       = valid_team(cp::mBiasTeam(post), kTeams);
+   c.neutralize     = cp::mNeutralizeTimer(post);
+   c.capture        = cp::mCaptureTimer(post);
+   c.neutralizeTime = cls ? layout::CommandPostClass::mNeutralizeTime(cls) : 0;
+   c.captureTime    = cls ? layout::CommandPostClass::mCaptureTime(cls) : 0;
    c.timersValid    = !client || s_isNear((const float*)(obj + kGO_MatrixTrans));
 
    Slot& s = s_slots[slot];
@@ -291,7 +287,7 @@ void hud_command_posts_resolve(uintptr_t base)
    const bool modtools = g_build == GameBuild::Modtools;
    if (!modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
    if (!g_addr->command_post_array_ptr || !g_addr->command_post_count_ptr ||
-       !g_addr->command_post_class_off || !g_addr->team_array_base ||
+       !g_addr->team_array_base ||
        !g_addr->net_in_shell || !g_addr->net_enabled || !g_addr->net_enabled_next ||
        !g_addr->net_on_client || !g_addr->net_game_is_near_local_player ||
        !g_addr->pbl_hash_table_find || !g_addr->tex_hash_table ||
@@ -313,8 +309,6 @@ void hud_command_posts_resolve(uintptr_t base)
        !guard(base, g_addr->hud_event_send, "Event::Send", "\x51\x8B\x09\xE8", "xxxx"))
       return;
 
-   s_flagsOffset = modtools ? cp::kFlagsModtools : cp::kFlagsRelease;
-   s_classOffset = (uint32_t)g_addr->command_post_class_off;
    // FindByHashID takes the hash on the stack on modtools and in ECX on retail.
    void* find = resolve(base, g_addr->hud_event_class_find);
    if (modtools) s_find     = (Find)find;
@@ -393,8 +387,8 @@ void hud_command_posts_update()
       for (int i = 0; i < count; ++i) {
          uint8_t* post = array[i];
          uint8_t* obj = post ? live_object(post) : nullptr;
-         if (!obj || !(post[s_flagsOffset] & cp::kFlagHudIndexDisplay)) continue;
-         posts[shown++] = { { *(const int*)(post + cp::kHudIndex), i }, post, obj };
+         if (!obj || !(cp::mFlags(post) & cp::kDisplayHUDIndex)) continue;
+         posts[shown++] = { { cp::mHUDPostIndex(post), i }, post, obj };
       }
       order(posts, shown, &Post::entry);
       if (shown > kSlots) shown = kSlots;
