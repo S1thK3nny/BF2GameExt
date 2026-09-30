@@ -653,6 +653,12 @@ namespace modtools {
    constexpr uintptr_t carrier_take_off             = 0x004F8B70;
    constexpr uintptr_t carrier_vtable               = 0x00A3A670;
    constexpr uintptr_t flyer_render                 = 0x004f6970;
+   // EntityFlyer::Render: 6-byte JZ that skips the render on a frustum-cull miss.
+   // EntityFlyer::Update: the downward CollisionManager::RayHit CALLs in the
+   // TAKEOFF and LANDING branches. The carrier fixes patch all three.
+   constexpr uintptr_t flyer_render_cull_jz         = 0x004F6999;
+   constexpr uintptr_t flyer_ray_hit_takeoff        = 0x004FE8CD;
+   constexpr uintptr_t flyer_ray_hit_landing        = 0x004FEAE2;
    constexpr uintptr_t turret_update_indirect       = 0x005673a0;
    constexpr uintptr_t turret_activate              = 0x00563a90;
    constexpr uintptr_t aimer_activate               = 0x005ef020;
@@ -1767,6 +1773,9 @@ namespace steam {
    constexpr uintptr_t carrier_update            = 0x004971D0;  // EntityCarrier +0x240 vtable (0x79a1bc) slot 1
    constexpr uintptr_t carrier_kill              = 0x00497110;  // EntityCarrier +0x140 vtable (0x79a470) slot 1
    constexpr uintptr_t flyer_render              = 0x004AB040;  // EntityCarrier +0x94  vtable (0x79a49c) slot 19
+   constexpr uintptr_t flyer_render_cull_jz      = 0x004AB082;
+   constexpr uintptr_t flyer_ray_hit_takeoff     = 0x004AE246;
+   constexpr uintptr_t flyer_ray_hit_landing     = 0x004AE478;
 
    // ---- Debug / Visualization ------------------------------------------------
 
@@ -3093,6 +3102,9 @@ namespace gog {
    constexpr uintptr_t carrier_update                 = 0x004971d0;
    constexpr uintptr_t carrier_kill                   = 0x00497110;
    constexpr uintptr_t flyer_render                   = 0x004ab040;
+   constexpr uintptr_t flyer_render_cull_jz           = 0x004AB082;
+   constexpr uintptr_t flyer_ray_hit_takeoff          = 0x004AE246;
+   constexpr uintptr_t flyer_ray_hit_landing          = 0x004AE478;
 
    // ---- Debug / Visualization ---------------------------------------------------
 
