@@ -38,7 +38,7 @@
 // Same on every build: Character slots unit +0x148 and vehicle +0x14C
 // (layout::Character); GameObject::IsRtti at primary slot +0x00, thiscall(hash),
 // RET 4; the soldier's mState at Controllable + g_soldier->mState and the
-// droideka's from the object start (layout::Droideka); PblHashTableCode::_Find
+// droideka's from the object start (layout::EntityDroideka); PblHashTableCode::_Find
 // cdecl(table, 0x2000, hash) on the texture table the terrain texture fix uses.
 //
 // EventBitmap's SetTexture(uint) only stores the hash. Nothing checks that the
@@ -66,10 +66,9 @@ static_assert(kSoldierRtti == 0x5E8739F4u, "the target bar's soldier RTTI hash")
 
 struct Layout {
    uint32_t classHealthTexture;  // EntityClass::mHealthTexture
-   uint32_t droidekaState;       // EntityDroideka::mState, from the object start
 };
-constexpr Layout kModtools = { 0x48, layout::Droideka::kStateModtools };
-constexpr Layout kRelease  = { 0x28, layout::Droideka::kStateRelease };  // Steam, GOG
+constexpr Layout kModtools = { 0x48 };
+constexpr Layout kRelease  = { 0x28 };  // Steam, GOG
 
 using Find         = void*(__cdecl*)(uint32_t hash);
 using FindFast     = void*(__fastcall*)(uint32_t hash);
@@ -193,13 +192,13 @@ uint32_t class_texture(uint8_t* obj)
 }
 
 // The soldier's state is read from the Controllable the Character slot holds;
-// the droideka's from the object start. See layout::Droideka.
+// the droideka's from the object start. See layout::EntityDroideka.
 uint32_t unit_stance(uint8_t* unit, uint8_t* obj)
 {
    const IsRtti is_rtti = (IsRtti)(*(void***)obj)[0];
    const uint32_t droideka = s_droidekaRtti ? *s_droidekaRtti : 0;
    if (droideka && is_rtti(obj, droideka))
-      return droideka_stance(*(const int*)(obj + s_layout.droidekaState));
+      return droideka_stance(layout::EntityDroideka::mState(obj));
    if (is_rtti(obj, kSoldierRtti))
       return soldier_stance(*(const int*)(unit + g_soldier->mState));
    return kStand;

@@ -1725,7 +1725,7 @@ What it reads, with the site each value was read at:
 | Source | modtools | Steam | GOG |
 |---|---|---|---|
 | Soldier `mState`, from the Controllable | `+0x514` | `+0x504` | `+0x504` |
-| Droideka `mState`, from the object start (`layout::Droideka`) | `+0x1A74` | `+0x1A54` | `+0x1A54` |
+| Droideka `mState`, from the object start (`layout::EntityDroideka`) | `+0x1A74` | `+0x1A54` | `+0x1A54` |
 | Droideka RTTI hash global | `0x00B7D934` | `0x01EBBC58` | `0x01EBD06C` |
 | `Trackable::GetGameObject`: vptr at Controllable `+0x18`, slot | `+0x1C` @ `0x006B48EF` | `+0x1C` @ `0x00561D8C` | `+0x1C` @ `0x00562B0C` |
 | `GameObject::GetEntityClass`: primary vptr slot | `+0x28` @ `0x006B4AE3` | `+0x28` @ `0x00561EF7` | `+0x28` @ `0x00562C77` |
