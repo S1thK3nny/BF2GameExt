@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "grappling_hook.hpp"
 #include "core/game_addrs.hpp"
+#include "core/build_field.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/pbl_hash.hpp"
@@ -190,10 +191,11 @@ static constexpr int kOrd_WeaponOffset = 0x14C;
 static constexpr int kOrd_DisplayableOff = 0x098;
 
 // EntitySoldier.  The soldier struct is shifted +4 against Phantom around mHook,
-// so these are the modtools values.
+// so these are the modtools values.  Only mHook and the handle key are read on
+// the release builds.
 static constexpr int kSol_CollObject  = 0x00C;  // CollisionObject sub-object
 static constexpr int kSol_HandleKey   = 0x204;
-static constexpr int kSol_Hook        = 0x454;  // OrdnanceGrapplingHook* mHook
+static constexpr Field<void*> kSol_Hook{0x454, 0x43C};  // OrdnanceGrapplingHook* mHook
 static constexpr int kSol_VelY        = 0x4F0;  // mVelocity.y
 static constexpr int kSol_Flags       = 0x9E4;  // bit 1 = standing on something
 
@@ -863,8 +865,7 @@ static void __fastcall hooked_Dtor(void* ecx, void* /*edx*/)
    __try {
       // The destructor skips SetGrapplingHook(NULL) when mFireWeapon is NULL,
       // which would leave mHook pointing at this ordnance after it is freed.
-      if (*(void**)((char*)soldier + kSol_Hook) == ecx)
-         *(void**)((char*)soldier + kSol_Hook) = nullptr;
+      if (kSol_Hook(soldier) == ecx) kSol_Hook(soldier) = nullptr;
 
       if (!attached) return;
 
@@ -877,12 +878,66 @@ static void __fastcall hooked_Dtor(void* ecx, void* /*edx*/)
 }
 
 // ---------------------------------------------------------------------------
+// Release builds: crash guards only
+//
+// Fix 4 and the mHook half of fix 3, for a hook fired by anything other than a
+// WeaponGrapplingHook.  The rest of the system is modtools only.
+// ---------------------------------------------------------------------------
+
+static bool g_guardsInstalled = false;
+
+static unsigned int __fastcall guard_Update(void* ecx, void* /*edx*/, float dt)
+{
+   __try {
+      if (*(void**)((char*)ecx + kOrd_FireWeapon) == nullptr) return 0;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+      return 0;
+   }
+   return original_Update(ecx, nullptr, dt);
+}
+
+static void __fastcall guard_Dtor(void* ecx, void* /*edx*/)
+{
+   void* soldier = live_soldier(ecx);
+   original_Dtor(ecx, nullptr);
+   if (!soldier) return;
+
+   __try {
+      if (kSol_Hook(soldier) == ecx) kSol_Hook(soldier) = nullptr;
+   }
+   __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+}
+
+static void grapple_guards_install(uintptr_t exe_base)
+{
+   if (!g_addr->grapple_update || !g_addr->grapple_dtor || !g_addr->grapple_rtti_hash)
+      return;
+
+   g_soldierRttiHash = (uint32_t*)resolve(exe_base, g_addr->grapple_rtti_hash);
+   original_Update   = (fn_Update_t)resolve(exe_base, g_addr->grapple_update);
+   original_Dtor     = (fn_Dtor_t)resolve(exe_base, g_addr->grapple_dtor);
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)original_Update, guard_Update);
+   DetourAttach(&(PVOID&)original_Dtor,   guard_Dtor);
+   DetourTransactionCommit();
+
+   g_guardsInstalled = true;
+}
+
+// ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
 void grapple_install(uintptr_t exe_base)
 {
-   HOOK_REQUIRE_MODTOOLS();
+   if (g_build != GameBuild::Modtools) {
+      grapple_guards_install(exe_base);
+      return;
+   }
 
    if (!g_addr->grapple_update || !g_addr->grapple_dtor ||
        !g_addr->grapple_move_soldier || !g_addr->grapple_rtti_hash ||
@@ -955,6 +1010,15 @@ void grapple_uninstall()
    if (g_collideSite) {
       protected_write(g_collideSite, kCollideOrig, sizeof(kCollideOrig));
       g_collideSite = nullptr;
+   }
+
+   if (g_guardsInstalled) {
+      DetourTransactionBegin();
+      DetourUpdateThread(GetCurrentThread());
+      DetourDetach(&(PVOID&)original_Update, guard_Update);
+      DetourDetach(&(PVOID&)original_Dtor,   guard_Dtor);
+      DetourTransactionCommit();
+      g_guardsInstalled = false;
    }
 
    if (!g_installed) return;
