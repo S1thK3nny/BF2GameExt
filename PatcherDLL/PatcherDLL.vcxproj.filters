@@ -295,6 +295,9 @@
     <ClInclude Include="src\render\scene_tree_depth_guard.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\prop_generator_fix.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\anim_textures.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -523,6 +526,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\scene_tree_depth_guard.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\prop_generator_fix.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\anim_textures.cpp">

@@ -1419,6 +1419,13 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
+
 } // namespace modtools
 
 // =============================================================================
@@ -2642,6 +2649,13 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
+
 } // namespace steam
 
 // =============================================================================
@@ -3589,6 +3603,13 @@ namespace gog {
    // 0 = not derived on this build.
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
+
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
 
 } // namespace gog
 

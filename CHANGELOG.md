@@ -96,6 +96,9 @@ Scripts can check the running version through `GameExt.version`.
   corpse. Living targets still track normally; new targets reset the cached anchor.
 - A map rotation no longer crashes when a map with `foleyfx` regions follows another
   map that has them.
+- The game no longer crashes, usually on the first spawn, on a map whose terrain
+  paints a foliage layer its props do not define when a map that did define that
+  layer was played earlier in the session.
 
 ## 1.1.0
 
