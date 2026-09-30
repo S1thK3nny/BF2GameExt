@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/pbl_hash.hpp"
+#include "game/Battlefront2/Source/VehicleSpawn.h"
 
 // =============================================================================
 // Family: VehicleSpawn
@@ -30,10 +31,6 @@
 //
 // SpawnCount is deliberately refused, see kHashSpawnCount below.
 // =============================================================================
-
-static constexpr int kNode_Next   = 0x04;
-static constexpr int kNode_Object = 0x0C;
-static constexpr int kVS_NameId   = 0x78;
 
 // A corrupt or mid-construction list must not spin forever.  A busy map runs a
 // few dozen vehicle spawns; this is a wide safety margin.
@@ -62,21 +59,22 @@ static int family_vehicle_spawn(uint32_t nameHash, uint32_t propHash,
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
 
-   uint8_t* const head = (uint8_t*)resolve(base, g_addr->vehicle_spawn_list);
-   if (!head) return 0;
+   auto* const list = (PblList<VehicleSpawn>*)resolve(base, g_addr->vehicle_spawn_list);
+   if (!list) return 0;
+   const PblList<VehicleSpawn>::Node* const head = &list->_head;
 
    auto setProperty =
       (fn_vs_set_property_t)resolve(base, g_addr->vehicle_spawn_set_property);
 
    int matched = 0;
-   uint8_t* node = *(uint8_t**)(head + kNode_Next);
+   const PblList<VehicleSpawn>::Node* node = head->_pNext;
 
    for (int guard = 0; node && node != head && guard < kMaxListWalk; ++guard) {
-      uint8_t* vs = *(uint8_t**)(node + kNode_Object);
-      node = *(uint8_t**)(node + kNode_Next);
+      VehicleSpawn* vs = node->_pObject;
+      node = node->_pNext;
       if (!vs) continue;
 
-      if (*(const uint32_t*)(vs + kVS_NameId) != nameHash) continue;
+      if (vs->mNameId != nameHash) continue;
       ++matched;
 
       if (propHash == kHashSpawnCount) continue;

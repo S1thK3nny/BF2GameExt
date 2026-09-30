@@ -2,7 +2,7 @@
 #include "lightsaber_illumination.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Weapon.h"
 #include "core/resolve.hpp"
 
 #include <detours.h>

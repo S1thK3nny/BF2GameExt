@@ -3,7 +3,7 @@
 #include "soldier_stance_flags.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <cmath>
 #include <cstdlib>

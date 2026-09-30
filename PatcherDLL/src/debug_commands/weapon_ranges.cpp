@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "weapon_ranges.hpp"
 #include "command_registry.hpp"
-#include "core/layout/character.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <detours.h>
 #include <cmath>

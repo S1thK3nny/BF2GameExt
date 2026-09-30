@@ -3,8 +3,8 @@
 #include "barrel_fire_origin.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/aimer.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Aimer.h"
+#include "game/Battlefront2/Source/Weapon.h"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
@@ -111,7 +111,7 @@ unsigned kClassFlashLength   = 0;
 unsigned kClassShotsPerSalvo = 0;
 unsigned kClassShotsPerShot  = 0;
 
-// Weapon fields shared by all builds come from core/layout/weapon.hpp; this one sits
+// Weapon fields shared by all builds come from game/Battlefront2/Source/Weapon.h; this one sits
 // past the shared range (WeaponCannon::UpdateFire, modtools 0x6274C0).
 unsigned kWeaponSalvoCount = 0; // per build: 0x144 modtools, 0x114 retail
 
