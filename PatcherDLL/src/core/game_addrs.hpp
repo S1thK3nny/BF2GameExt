@@ -653,6 +653,7 @@ namespace modtools {
    constexpr uintptr_t carrier_take_off             = 0x004F8B70;
    constexpr uintptr_t carrier_vtable               = 0x00A3A670;
    constexpr uintptr_t flyer_render                 = 0x004f6970;
+   constexpr uintptr_t flyer_client_kill            = 0x004F2D70;  // EntityFlyer::ClientKill
    // EntityFlyer::Render: 6-byte JZ that skips the render on a frustum-cull miss.
    // EntityFlyer::Update: the downward CollisionManager::RayHit CALLs in the
    // TAKEOFF and LANDING branches. The carrier fixes patch all three.
@@ -1445,6 +1446,13 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1773,6 +1781,7 @@ namespace steam {
    constexpr uintptr_t carrier_update            = 0x004971D0;  // EntityCarrier +0x240 vtable (0x79a1bc) slot 1
    constexpr uintptr_t carrier_kill              = 0x00497110;  // EntityCarrier +0x140 vtable (0x79a470) slot 1
    constexpr uintptr_t flyer_render              = 0x004AB040;  // EntityCarrier +0x94  vtable (0x79a49c) slot 19
+   constexpr uintptr_t flyer_client_kill         = 0x004AAF20;  // EntityFlyer::ClientKill
    constexpr uintptr_t flyer_render_cull_jz      = 0x004AB082;
    constexpr uintptr_t flyer_ray_hit_takeoff     = 0x004AE246;
    constexpr uintptr_t flyer_ray_hit_landing     = 0x004AE478;
@@ -1793,7 +1802,9 @@ namespace steam {
 
    // ---- Weapon / Grappling Hook ----------------------------------------------
 
+   constexpr uintptr_t grapple_update            = 0x005ff8b0;  // OrdnanceGrapplingHook::Update
    constexpr uintptr_t grapple_dtor              = 0x005ff360;  // ~OrdnanceGrapplingHook
+   constexpr uintptr_t grapple_rtti_hash         = 0x01ebc054;  // EntitySoldier RTTI hash
 
    // ---- Animation (weapon/soldier) -------------------------------------------
 
@@ -2692,6 +2703,13 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
+
 } // namespace steam
 
 // =============================================================================
@@ -3102,6 +3120,7 @@ namespace gog {
    constexpr uintptr_t carrier_update                 = 0x004971d0;
    constexpr uintptr_t carrier_kill                   = 0x00497110;
    constexpr uintptr_t flyer_render                   = 0x004ab040;
+   constexpr uintptr_t flyer_client_kill              = 0x004aaf20;
    constexpr uintptr_t flyer_render_cull_jz           = 0x004AB082;
    constexpr uintptr_t flyer_ray_hit_takeoff          = 0x004AE246;
    constexpr uintptr_t flyer_ray_hit_landing          = 0x004AE478;
@@ -3125,7 +3144,9 @@ namespace gog {
 
    // ---- Weapon / Grappling Hook -------------------------------------------------
 
+   constexpr uintptr_t grapple_update                 = 0x00600950;
    constexpr uintptr_t grapple_dtor                   = 0x00600400;
+   constexpr uintptr_t grapple_rtti_hash              = 0x01ebd558;
 
    // ---- Animation (weapon/soldier) ----------------------------------------------
 
@@ -3656,6 +3677,13 @@ namespace gog {
    // 0 = not derived on this build.
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
+
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
 
 } // namespace gog
 

@@ -38,6 +38,7 @@
 #include "util/content_census.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "render/prop_generator_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
@@ -279,9 +280,10 @@ void lua_hooks_install(uintptr_t exe_base)
 
    if (g_build == GameBuild::Modtools) {
       // These installers still target raw modtools VAs / inline patch sites.
-      grapple_install(exe_base);
       DebugCommandRegistry::install(exe_base);
    }
+
+   grapple_install(exe_base);                 // full set on modtools, crash guards elsewhere
 
    lua_events_install(exe_base);              // EventManager::Init/Cleanup detours, guards internally
    script_name_tracker_install(exe_base);     // GetMissionName() shell/mission gating
@@ -349,6 +351,7 @@ void lua_hooks_uninstall()
    voice_limit_uninstall();
    snd_engine_open_fix_uninstall();
    impact_sound_water_fix_uninstall();
+   prop_generator_fix_uninstall();
    foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();

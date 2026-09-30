@@ -101,6 +101,13 @@ Scripts can check the running version through `GameExt.version`.
   corpse. Living targets still track normally; new targets reset the cached anchor.
 - A map rotation no longer crashes when a map with `foleyfx` regions follows another
   map that has them.
+- The game no longer crashes, usually on the first spawn, on a map whose terrain
+  paints a foliage layer its props do not define when a map that did define that
+  layer was played earlier in the session.
+- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
+  has no `ExplosionDestruct` is removed.
+- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
+  fired from a weapon that is not a grappling hook weapon.
 
 ## 1.1.0
 

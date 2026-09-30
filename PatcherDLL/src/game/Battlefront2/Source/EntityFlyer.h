@@ -38,6 +38,7 @@ class ZephyrAnim;
 //   mLandingTime            0x08ec @004f5759    0x0824 @004b6882
 //   mLandedHeight           0x08f4 @004d813b    0x082c @004974cb
 //   mWeaponCount            0x0d48 @004f1bc1    0x0c80 @004aa7ad
+//   mExplosionDestruct      0x0e3c @004f2dcf    0x0d74 @004aaf85
 //   mNumPassengerSlots      0x0e14 @004f1c24    0x0d4c @004aa812
 //
 // GOG runs the same code at the same addresses as Steam; every access above is
@@ -76,6 +77,7 @@ inline constexpr Field<float>              mTakeoffSpeed{0x8E8, 0x820};
 inline constexpr Field<float>              mLandingTime{0x8EC, 0x824};
 inline constexpr Field<float>              mLandedHeight{0x8F4, 0x82C};    // -(model bbox min Y)
 inline constexpr Field<int>                mWeaponCount{0xD48, 0xC80};
+inline constexpr Field<void*>              mExplosionDestruct{0xE3C, 0xD74}; // ExplosionClass*
 inline constexpr Field<uint8_t>            mNumPassengerSlots{0xE14, 0xD4C};
 
 } // namespace layout::EntityFlyerClass
