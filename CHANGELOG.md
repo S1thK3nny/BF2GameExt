@@ -89,6 +89,8 @@ Scripts can check the running version through `GameExt.version`.
   - Carriers no longer set their vehicle down short of the pad on maps with a low flight
     ceiling.
   - Hosting a multiplayer match on a map with carriers no longer crashes the game.
+  - A carrier shot down in the air now explodes on the spot instead of spinning all the
+    way to the ground.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.

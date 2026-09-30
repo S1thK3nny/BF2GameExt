@@ -180,7 +180,7 @@ static bool want_sound_lvl()
                               || g_loadScreenCfg.transitionSoundHash;
         if (namedSounds) {
             s_sndLvlLoaded = true;   // report once per loading screen
-            warn_gamelog(RED_SEVERITY_INFO, SRC_FILE, __LINE__,
+            warn_gamelog(RED_SEVERITY_INFORM, SRC_FILE, __LINE__,
                    "[BF1Ext] This LoadConfig names sounds but has no LoadSoundLVL "
                    "entry, so they must already be registered - either in the "
                    "loading screen's own lvl, or in the stock sound\\global.lvl, "

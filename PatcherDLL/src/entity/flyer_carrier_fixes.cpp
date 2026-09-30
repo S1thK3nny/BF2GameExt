@@ -37,6 +37,8 @@
 //   - Terrain-wobble suppression (RayHit neutralised at altitude).
 //   - Pad lifecycle gaps vanilla leaves open (see padCarrierUpdate and
 //     dropStrandedCargo).
+//   - No death spin: a carrier killed in the air explodes at once instead of
+//     tumbling to the ground (skipDeathSpin).
 //   - Engine crashes carriers expose: a second CommandWalker::Kill after the
 //     carrier kills its cargo, and the multiplayer host's send-list recursion
 //     on a carrier that pilots itself.
@@ -78,7 +80,7 @@ struct CarrierLayout {
    uint32_t clsPassengerCount;   // uint8
 
    // EntityFlyer / EntityCarrier instance
-   uint32_t flightState;         // int: 0 landed, 1 takeoff, 2 flying, 3 landing
+   uint32_t flightState;         // int: 0 landed, 1 takeoff, 2 flying, 3 landing, 4 dying, 5 crashed
    uint32_t progress;            // float, takeoff/landing anim progress
    uint32_t cls;                 // EntityCarrierClass*
    uint32_t landedHeight;        // float, instance landing threshold (incl. cargo)
@@ -959,6 +961,18 @@ static void syncBoundingSphere(char* base)
    if (fieldF(base, kSphere + 12) < 80.0f) fieldF(base, kSphere + 12) = 80.0f;
 }
 
+// A flyer killed in the air plays ExplosionCritical and goes DYING (4): it
+// tumbles and falls under gravity until its crash timer runs out or it hits
+// something, then CRASHED (5) makes the next Update award the kill, break it
+// into chunks, play ExplosionDestruct and remove it.  The timer is 0.2-2.2 s
+// with chunks and 600 s without, so a chunkless carrier spins all the way to
+// the ground.  Skip straight to CRASHED so a downed carrier explodes on the
+// next frame.
+static void skipDeathSpin(char* base)
+{
+   if (flightState(base) == 4) fieldI(base, L->flightState) = 5;
+}
+
 static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 {
    char* base = (char*)ecx - kControllableBase;
@@ -998,6 +1012,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    }
 
    __try {
+      skipDeathSpin(base);
       if (t) {
          applyAscentLock(*t, base);
          updateFlight(*t, base, dt);
