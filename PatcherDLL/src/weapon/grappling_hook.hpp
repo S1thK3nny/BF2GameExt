@@ -11,8 +11,9 @@
 //   - the pull animation is driven with an invalid animation id,
 //   - the soldier can be left with no collision body.
 //
-// Modtools only.  Call grapple_install() from lua_hooks_install() and
-// grapple_uninstall() from lua_hooks_uninstall().
+// Modtools gets the full system; Steam and GOG get only the crash guards.  Call
+// grapple_install() from lua_hooks_install() and grapple_uninstall() from
+// lua_hooks_uninstall().
 // =============================================================================
 
 void grapple_install(uintptr_t exe_base);

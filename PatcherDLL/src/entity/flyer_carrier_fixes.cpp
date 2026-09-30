@@ -45,6 +45,7 @@
 //   - Engine crashes carriers expose: a second CommandWalker::Kill after the
 //     carrier kills its cargo, and the multiplayer host's send-list recursion
 //     on a carrier that pilots itself.
+//   - EntityFlyer::ClientKill on a flyer class with no ExplosionDestruct.
 //
 // Per-carrier state is keyed by (object pointer, PblHandle id at +0x204).
 // Vanilla deletes finished carriers from VehicleSpawn, not from their own
@@ -1187,6 +1188,31 @@ static void __fastcall hooked_CommandWalkerKill(void* ecx, void* edx)
 }
 
 // ---------------------------------------------------------------------------
+// EntityFlyer::ClientKill with no ExplosionDestruct (every flyer, not only carriers)
+//
+// On a multiplayer client a flyer removed while LANDED or CRASHED plays the class
+// ExplosionDestruct with no null check.  Without one, run the Kill it starts
+// with and skip the explosion.
+// ---------------------------------------------------------------------------
+
+using fn_ClientKill_t = void(__fastcall*)(void* ecx, void* edx);   // __thiscall, bare RET
+static fn_ClientKill_t original_FlyerClientKill = nullptr;
+
+static constexpr int kFlyer_Damageable = 0x140;   // sub-object whose slot 1 is Kill, all builds
+
+static void __fastcall hooked_FlyerClientKill(void* ecx, void* edx)
+{
+   void* cls = ef::mClass(ecx);
+   if (cls && efc::mExplosionDestruct(cls)) {
+      original_FlyerClientKill(ecx, edx);
+      return;
+   }
+   void*  damageable = (char*)ecx + kFlyer_Damageable;
+   void** vt = *(void***)damageable;
+   ((fn_ClientKill_t)vt[1])(damageable, nullptr);
+}
+
+// ---------------------------------------------------------------------------
 // Net send-list cycle (multiplayer host)
 //
 // The host builds each client's send list with a visitor, __cdecl(obj, depth),
@@ -1319,6 +1345,8 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    }
    if (g_addr->net_send_visitor)
       original_SendVisitor = (fn_SendVisitor_t)resolve(exe_base, g_addr->net_send_visitor);
+   if (g_addr->flyer_client_kill)
+      original_FlyerClientKill = (fn_ClientKill_t)resolve(exe_base, g_addr->flyer_client_kill);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -1338,6 +1366,8 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
       DetourAttach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
    if (original_SendVisitor)
       DetourAttach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
+   if (original_FlyerClientKill)
+      DetourAttach(&(PVOID&)original_FlyerClientKill, hooked_FlyerClientKill);
    DetourTransactionCommit();
 
    // After the Detours commit, to avoid page-protection conflicts.
@@ -1382,9 +1412,12 @@ void entity_carrier_fixes_uninstall()
       DetourDetach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
    if (original_SendVisitor)
       DetourDetach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
+   if (original_FlyerClientKill)
+      DetourDetach(&(PVOID&)original_FlyerClientKill, hooked_FlyerClientKill);
    DetourTransactionCommit();
    original_CommandWalkerKill = nullptr;
    original_SendVisitor       = nullptr;
+   original_FlyerClientKill   = nullptr;
 
    if (s_activatePhysicsSlot) {
       DWORD oldProt;

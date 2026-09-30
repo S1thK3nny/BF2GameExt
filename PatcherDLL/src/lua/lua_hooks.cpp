@@ -278,9 +278,10 @@ void lua_hooks_install(uintptr_t exe_base)
 
    if (g_build == GameBuild::Modtools) {
       // These installers still target raw modtools VAs / inline patch sites.
-      grapple_install(exe_base);
       DebugCommandRegistry::install(exe_base);
    }
+
+   grapple_install(exe_base);                 // full set on modtools, crash guards elsewhere
 
    lua_events_install(exe_base);              // EventManager::Init/Cleanup detours, guards internally
    script_name_tracker_install(exe_base);     // GetMissionName() shell/mission gating
