@@ -7,6 +7,7 @@
 #include "game/Battlefront2/Source/Weapon.h"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
 #include "util/install_log.hpp"
 
 #include <detours.h>
@@ -157,6 +158,12 @@ struct weapon_ext {
    int      lastSalvoCount = 0;
    float    lastFireTime   = 0.0f;
    unsigned pellets        = 0;
+   // Another player's gun on a client: flash end time from the host's last shot, and
+   // that shot's gun until its shoot animation has been handed to the soldier.
+   float    netFlashEnd    = 0.0f;
+   int8_t   netAnimGun     = -1;
+   bool     netStateSet    = false;   // mState is ours until the weapon has rendered
+   uint32_t netSavedState  = 0;
 };
 
 using fn_create_base_classes_t = void(__cdecl*)();
@@ -206,6 +213,21 @@ fn_get_hardpoint_t       s_getHardPoint    = nullptr;
 fn_hash_table_find_t     s_hashTableFind   = nullptr;
 fn_render_flash_t        s_renderFlashSt     = nullptr;
 fn_render_flash_retail_t s_renderFlashRetail = nullptr;
+
+// A client runs its own weapon's fire logic in more than one net turn, but
+// WeaponCannon::Fire only creates ordnance in the local turn: with netEnabled &&
+// netOnClient && !netIsLocalTurn it returns "fired" and creates nothing.  Those calls
+// must not advance the gun, or which gun a visible shot leaves depends on how many
+// invisible calls came before it.
+const uint8_t* s_netEnabled     = nullptr;
+const uint8_t* s_netOnClient    = nullptr;
+const uint8_t* s_netIsLocalTurn = nullptr;
+
+bool fire_creates_no_ordnance()
+{
+   return s_netEnabled && s_netOnClient && s_netIsLocalTurn &&
+          *s_netEnabled && *s_netOnClient && !*s_netIsLocalTurn;
+}
 
 // Naked bridge for the retail ABI.  Entry stack is [esp+4]=cls [esp+8]=pos
 // [esp+12]=dir [esp+16]=t; the callee wants ECX=cls, XMM3=t and (pos, dir) pushed
@@ -286,6 +308,115 @@ bool is_dual_weapon(void* weapon)
 {
    return weapon && *static_cast<void***>(weapon) == s_weaponVtable;
 }
+
+// Another player's gun, seen on a client.  Its Fire runs here too but creates no
+// ordnance (the owner has no local joystick); the host fires it, picks the gun and
+// sends the ordnance.  Which gun and when to flash come from that event
+// (net_build_ordnance), because the client's own replay of the weapon always
+// re-enters plain FIRE.
+using fn_get_joystick_index_t = int(__cdecl*)(int playerId);
+fn_get_joystick_index_t s_getJoystickIndex = nullptr;
+constexpr uint32_t kControllablePlayerId = 0xD4;   // what Fire passes to GetJoystickIndex
+
+bool is_remote_weapon_on_client(void* weapon)
+{
+   if (!s_getJoystickIndex || !s_netEnabled || !s_netOnClient) return false;
+   if (!*s_netEnabled || !*s_netOnClient) return false;
+   void* owner = at<void*>(weapon, layout::Weapon::kOwner);
+   if (!owner) return false;
+   return s_getJoystickIndex(at<int>(owner, kControllablePlayerId)) < 0;
+}
+
+// OrdnanceDesc, same on every build.
+constexpr unsigned kDescPosition   = 0x00;
+constexpr unsigned kDescFireWeapon = 0x44;
+
+// Weapon::mFirePointMatrix translation, baked by Weapon::Render; w = 1 once baked.
+constexpr unsigned kWeaponFirePointTrans = 0x50;
+
+// A host shot from another player's dual weapon: the gun whose fire point is nearer
+// the ordnance position fired it.
+void note_remote_shot(void* desc)
+{
+   void* weapon = at<void*>(desc, kDescFireWeapon);
+   if (!is_dual_weapon(weapon) || !is_remote_weapon_on_client(weapon)) return;
+
+   void* cls = at<void*>(weapon, layout::Weapon::kClass);
+   if (!cls) return;
+   const float* pos  = &at<float>(desc, kDescPosition);
+   const float* main = &at<float>(weapon, kWeaponFirePointTrans);
+   const bool mainBaked = main[3] == 1.0f;
+   const float now = call_mission_time();
+
+   std::lock_guard<std::mutex> lock(s_mutex);
+   weapon_ext& ext = s_weapons[weapon];
+   if (ext.offhandValid && mainBaked) {
+      float dm = 0.0f, doff = 0.0f;
+      for (int i = 0; i < 3; ++i) {
+         dm   += (pos[i] - main[i]) * (pos[i] - main[i]);
+         doff += (pos[i] - ext.offhandFirePos[i]) * (pos[i] - ext.offhandFirePos[i]);
+      }
+      ext.lastFired = doff < dm ? 1 : 0;
+   }
+   ext.netFlashEnd = now + at<float>(cls, kClassFlashLength);
+   ext.netAnimGun  = static_cast<int8_t>(ext.lastFired);
+}
+
+// EntitySoldier::Render plays shoot or shoot2 from mState when it sees mFiredFlag,
+// and the client's replay leaves other players' guns in plain FIRE.  After the
+// replay, hand the soldier the host's shots instead of the replay's.
+using fn_net_predict_t = char(__cdecl*)();
+fn_net_predict_t original_net_predict = nullptr;
+
+char __cdecl hooked_net_predict()
+{
+   const char result = original_net_predict();
+
+   std::lock_guard<std::mutex> lock(s_mutex);
+   for (auto& [weapon, ext] : s_weapons) {
+      if (!is_dual_weapon(weapon) || !is_remote_weapon_on_client(weapon)) continue;
+      uint32_t& flags = at<uint32_t>(weapon, layout::Weapon::kFlags);
+      uint32_t& state = at<uint32_t>(weapon, layout::Weapon::kState);
+      if (ext.netStateSet) {   // not drawn last frame
+         state = ext.netSavedState;
+         ext.netStateSet = false;
+      }
+      if (ext.netAnimGun < 0) {
+         flags &= ~layout::Weapon::kFlagFired;
+         continue;
+      }
+      flags |= layout::Weapon::kFlagFired;
+      ext.netSavedState = state;
+      ext.netStateSet   = true;
+      state = ext.netAnimGun == 1 ? kStateFire2 : kStateFire;
+      ext.netAnimGun = -1;
+   }
+   return result;
+}
+
+// Replaces the ordnance factory Build call in ReadNetEvent's CREATE_ORDNANCE case:
+// ECX = factory, the desc is on the stack, callee cleans it like the thiscall it stands for.
+using fn_ordnance_build_t = void*(__thiscall*)(void* factory, void* desc);
+
+void* __fastcall net_build_ordnance(void* factory, void* /*edx*/, void* desc)
+{
+   void* ordnance = (*reinterpret_cast<fn_ordnance_build_t**>(factory))[2](factory, desc);
+   note_remote_shot(desc);
+   return ordnance;
+}
+
+// Per build: the site bytes, and the setup kept in front of our CALL (LEA desc,
+// PUSH, MOV ECX,factory).  Everything after it is the vtable call we replace.
+constexpr uint8_t kBuildSiteDbg[] = {0x8D, 0x45, 0x98, 0x50, 0x8B, 0x4D, 0xF0, 0x8B, 0x11,
+                                     0x8B, 0x4D, 0xF0, 0xFF, 0x52, 0x08};
+constexpr uint8_t kBuildSetupDbg[] = {0x8D, 0x45, 0x98, 0x50, 0x8B, 0x4D, 0xF0};
+constexpr uint8_t kBuildSiteRtl[] = {0x8D, 0x8D, 0x48, 0xFF, 0xFF, 0xFF, 0x51, 0x8B, 0x55, 0xE4,
+                                     0x8B, 0x02, 0x8B, 0x4D, 0xE4, 0x8B, 0x50, 0x08, 0xFF, 0xD2};
+constexpr uint8_t kBuildSetupRtl[] = {0x8D, 0x8D, 0x48, 0xFF, 0xFF, 0xFF, 0x51, 0x8B, 0x4D, 0xE4};
+
+uint8_t*       s_buildSite     = nullptr;
+const uint8_t* s_buildSiteOrig = nullptr;
+size_t         s_buildSiteLen  = 0;
 
 // Re-resolve the offhand fire point after the model or the name changed. Mirrors
 // WeaponClass::SetProperty: GeometryName probes hp_fire quietly, FirePointName warns.
@@ -480,6 +611,8 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
    bool     hasFirePoint = false;
    float    firePointOffset[3] = {};
    uint8_t  lastFired = 0;
+   float    netFlashEnd = 0.0f;
+   const bool remote = is_remote_weapon_on_client(weapon);
    {
       std::lock_guard<std::mutex> lock(s_mutex);
       auto cls = s_classes.find(at<void*>(weapon, layout::Weapon::kRenderClass));
@@ -490,17 +623,25 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
          std::memcpy(firePointOffset, cls->second.firePointOffset, sizeof(firePointOffset));
       }
       auto w = s_weapons.find(weapon);
-      if (w != s_weapons.end()) lastFired = w->second.lastFired;
+      if (w != s_weapons.end()) {
+         lastFired   = w->second.lastFired;
+         netFlashEnd = w->second.netFlashEnd;
+         // The soldier has picked its shoot animation by now; give mState back.
+         if (w->second.netStateSet) {
+            at<uint32_t>(weapon, layout::Weapon::kState) = w->second.netSavedState;
+            w->second.netStateSet = false;
+         }
+      }
    }
 
-   const bool offhandFlash = lastFired == 1 && model && hardPoint && hasFirePoint;
+   const bool offhandFlash = !remote && lastFired == 1 && model && hardPoint && hasFirePoint;
 
-   // Keep the main gun from drawing gun 2's flash.
+   // Keep the main gun from drawing gun 2's flash.  A remote gun's flash is ours alone.
    float& flashStart = at<float>(weapon, layout::Weapon::kMuzzleFlashStartTime);
    const float savedFlashStart = flashStart;
-   if (offhandFlash) flashStart = 0.0f;
+   if (offhandFlash || remote) flashStart = 0.0f;
    s_baseRender(weapon, world, pose, color, flags, highRes);
-   if (offhandFlash) flashStart = savedFlashStart;
+   if (offhandFlash || remote) flashStart = savedFlashStart;
 
    if (hidden) return;
 
@@ -520,20 +661,23 @@ void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, voi
       ext.offhandValid = true;
    }
 
-   if (!offhandFlash) return;
+   if (!offhandFlash && !remote) return;
    void* aimer = at<void*>(weapon, layout::Weapon::kAimer);
    void* cls   = at<void*>(weapon, layout::Weapon::kClass);
    if (!aimer || !cls) return;
    const float flashLength = at<float>(cls, kClassFlashLength);
-   const float remaining   = savedFlashStart - call_mission_time();
+   const float remaining   = (remote ? netFlashEnd : savedFlashStart) - call_mission_time();
+   const float* flashPos   = (remote && lastFired == 0)
+                               ? &at<float>(weapon, kWeaponFirePointTrans) : firePos;
    if (remaining > 0.0f && flashLength > 0.0f)
-      call_render_flash(at<void*>(weapon, layout::Weapon::kRenderClass), firePos,
+      call_render_flash(at<void*>(weapon, layout::Weapon::kRenderClass), flashPos,
                         &at<float>(aimer, layout::Aimer::kDirection), remaining / flashLength);
 }
 
 bool __fastcall hooked_fire(void* weapon, void* edx)
 {
-   if (!is_dual_weapon(weapon)) return original_fire(weapon, edx);
+   if (!is_dual_weapon(weapon) || fire_creates_no_ordnance() || is_remote_weapon_on_client(weapon))
+      return original_fire(weapon, edx);
 
    void* cls = at<void*>(weapon, layout::Weapon::kClass);
    if (!cls) return original_fire(weapon, edx);
@@ -788,6 +932,14 @@ void dual_cannon_install(uintptr_t exe_base)
    s_getHardPoint  = reinterpret_cast<fn_get_hardpoint_t>(
       resolve(exe_base, g_addr->red_model_get_parent_bone_and_offset));
    s_hashTableFind = reinterpret_cast<fn_hash_table_find_t>(resolve(exe_base, g_addr->pbl_hash_table_find));
+   if (g_addr->net_enabled && g_addr->net_on_client && g_addr->net_is_local_turn) {
+      s_netEnabled     = (const uint8_t*)resolve(exe_base, g_addr->net_enabled);
+      s_netOnClient    = (const uint8_t*)resolve(exe_base, g_addr->net_on_client);
+      s_netIsLocalTurn = (const uint8_t*)resolve(exe_base, g_addr->net_is_local_turn);
+      if (g_addr->net_game_get_joystick_index)
+         s_getJoystickIndex = reinterpret_cast<fn_get_joystick_index_t>(
+            resolve(exe_base, g_addr->net_game_get_joystick_index));
+   }
    // Retail's RenderFlash takes `t` in XMM3 (RET 8); the debug build takes it on the
    // stack (RET 0xC).  Only one of these two is ever non-null, and call_render_flash
    // picks on that.
@@ -829,11 +981,62 @@ void dual_cannon_install(uintptr_t exe_base)
       return;
    }
 
+   // Other players' guns on a client follow the host's ordnance events.
+   static constexpr uint8_t kPredictPrologueDbg[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xD0, 0x00,
+                                                     0x00, 0x00, 0x56, 0x57};
+   static constexpr uint8_t kPredictPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x80, 0x00,
+                                                     0x00, 0x00, 0x56, 0x57};
+   if (g_addr->net_game_predict) {
+      void* predict = resolve(exe_base, g_addr->net_game_predict);
+      const uint8_t* want = retail ? kPredictPrologueRtl : kPredictPrologueDbg;
+      if (std::memcmp(predict, want, sizeof(kPredictPrologueDbg)) == 0) {
+         original_net_predict = reinterpret_cast<fn_net_predict_t>(predict);
+         DetourTransactionBegin();
+         DetourUpdateThread(GetCurrentThread());
+         DetourAttach(&(PVOID&)original_net_predict, hooked_net_predict);
+         if (DetourTransactionCommit() != NO_ERROR) original_net_predict = nullptr;
+      }
+      if (!original_net_predict)
+         install_log("[DualCannon] remote shoot animations follow the replay: NetGame::Predict "
+                     "%08X not hooked", (unsigned)g_addr->net_game_predict);
+   }
+   if (g_addr->net_read_event_build_call) {
+      const uint8_t* site  = retail ? kBuildSiteRtl : kBuildSiteDbg;
+      const size_t   len   = retail ? sizeof(kBuildSiteRtl) : sizeof(kBuildSiteDbg);
+      const uint8_t* setup = retail ? kBuildSetupRtl : kBuildSetupDbg;
+      const size_t   keep  = retail ? sizeof(kBuildSetupRtl) : sizeof(kBuildSetupDbg);
+      uint8_t* target = static_cast<uint8_t*>(resolve(exe_base, g_addr->net_read_event_build_call));
+      if (std::memcmp(target, site, len) == 0) {
+         uint8_t patch[32];
+         std::memcpy(patch, setup, keep);
+         x86::encode_branch(patch + keep, target + keep, x86::kCall, &net_build_ordnance,
+                            len - keep);
+         protected_write(target, patch, len);
+         s_buildSite     = target;
+         s_buildSiteOrig = site;
+         s_buildSiteLen  = len;
+      } else {
+         install_log("[DualCannon] remote guns keep the right pistol: unexpected bytes at "
+                     "ReadNetEvent %08X", (unsigned)g_addr->net_read_event_build_call);
+      }
+   }
+
    install_log("[DualCannon] installed: ClassLabel \"dualcannon\" registers on mission load");
 }
 
 void dual_cannon_uninstall()
 {
+   if (original_net_predict) {
+      DetourTransactionBegin();
+      DetourUpdateThread(GetCurrentThread());
+      DetourDetach(&(PVOID&)original_net_predict, hooked_net_predict);
+      DetourTransactionCommit();
+      original_net_predict = nullptr;
+   }
+   if (s_buildSite) {
+      protected_write(s_buildSite, s_buildSiteOrig, s_buildSiteLen);
+      s_buildSite = nullptr;
+   }
    if (!original_create_base_classes) return;
 
    DetourTransactionBegin();

@@ -58,5 +58,6 @@ constexpr uint32_t kMuzzleFlashStartTime = 0x0C4; // float mMuzzleFlashStartTime
 constexpr uint32_t kSoldierAnimationMap = 0x0C8; // MAP mSoldierAnimationMap
 
 constexpr uint32_t kFlagHideWeapon      = 0x01;   // kFlags bit 0: mHideWeapon
+constexpr uint32_t kFlagFired           = 0x02;   // kFlags bit 1: mFiredFlag
 
 } // namespace layout::Weapon

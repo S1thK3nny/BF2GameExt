@@ -964,6 +964,17 @@ namespace modtools {
    constexpr uintptr_t net_enabled                    = 0x00BE14F0;
    constexpr uintptr_t net_enabled_next               = 0x00BE14F1;
    constexpr uintptr_t net_on_client                  = 0x00BE14FD;
+   // netIsLocalTurn: a client only creates ordnance in its local turn; WeaponCannon::Fire
+   // 0x006269CD returns early ("fired", no ordnance) when netOnClient && !netIsLocalTurn.
+   constexpr uintptr_t net_is_local_turn              = 0x00BDA95D;
+   // NetGame::GetJoystickIndex, int __cdecl(int playerId), bare RET: < 0 when the player is
+   // not local.  WeaponCannon::Fire asks it of mOwner+0xD4 before a client creates ordnance.
+   constexpr uintptr_t net_game_get_joystick_index    = 0x006E3C80;
+   // ReadNetEvent CREATE_ORDNANCE: `LEA EAX,[EBP-0x68]` that sets up the ordnance
+   // factory Build call (desc at EBP-0x68, factory at EBP-0x10), 15 bytes.
+   constexpr uintptr_t net_read_event_build_call      = 0x006EC534;
+   // NetGame::Predict, char __cdecl(): the client's replay of unacknowledged turns.
+   constexpr uintptr_t net_game_predict               = 0x006E8970;
 
    // ---- Fog (SetFogRange / SetFogEnable Lua funcs) ------------------------------
    // RedRenderer::SetFogRange/SetFogEnable set the D3D render states; the
@@ -2382,6 +2393,10 @@ namespace steam {
    // CommandPost::Update makes before a client simulates a post's capture.
    constexpr uintptr_t net_game_is_near_local_player = 0x005B7470;
    constexpr uintptr_t net_on_client                = 0x01E62EAB;
+   constexpr uintptr_t net_is_local_turn            = 0x01E62F10;  // WeaponCannon::Fire 0x0067F793
+   constexpr uintptr_t net_game_get_joystick_index  = 0x005B73C0;  // __cdecl(int) wrapper, bare RET
+   constexpr uintptr_t net_read_event_build_call    = 0x005BF327;  // desc EBP-0xB8, factory EBP-0x1C, 20 bytes
+   constexpr uintptr_t net_game_predict             = 0x005BA810;  // NetGame::Predict
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
@@ -2944,6 +2959,10 @@ namespace gog {
    // CommandPost::Update makes before a client simulates a post's capture.
    constexpr uintptr_t net_game_is_near_local_player = 0x005B8420;
    constexpr uintptr_t net_on_client                = 0x01E6435B;
+   constexpr uintptr_t net_is_local_turn            = 0x01E643C0;  // WeaponCannon::Fire 0x00680813
+   constexpr uintptr_t net_game_get_joystick_index  = 0x005B8370;  // __cdecl(int) wrapper, bare RET
+   constexpr uintptr_t net_read_event_build_call    = 0x005C02B7;  // same bytes as Steam
+   constexpr uintptr_t net_game_predict             = 0x005BB7C0;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;
