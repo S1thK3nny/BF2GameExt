@@ -44,7 +44,7 @@ Scripts can check the running version through `GameExt.version`.
 - **`EnableStrafe`** - Flyer ODF property that makes the strafe controls slide the
   flyer sideways at `StrafeSpeed` instead of rolling it, leaning by `StrafeRollAngle`,
   and lets it come out of reverse as quickly as it brakes into it.
-  Off by default and inherited through `ClassParent`.
+  Off by default.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#vehicle-classes).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
