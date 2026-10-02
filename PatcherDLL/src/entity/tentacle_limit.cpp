@@ -4,6 +4,7 @@
 #include "tentacle_timing_sites.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 
@@ -218,41 +219,20 @@ void fail_pose_context(const char* reason)
 }
 
 // ---------------------------------------------------------------------------
-// Bone name hashing -- CRC-32/BZIP2, the same one PblTEMPHash uses
+// Bone name hashes (PblTEMPHash, core/pbl_hash.hpp)
 // ---------------------------------------------------------------------------
 
-uint32_t g_crcTable[256];
 uint32_t g_boneHashes[kTotalBoneHashes];
-
-void init_crc_table()
-{
-   for (int i = 0; i < 256; ++i) {
-      uint32_t crc = (uint32_t)i << 24;
-      for (int j = 0; j < 8; ++j)
-         crc = (crc & 0x80000000u) ? (crc << 1) ^ 0x04C11DB7u : (crc << 1);
-      g_crcTable[i] = crc;
-   }
-}
-
-uint32_t bone_hash(const char* str)
-{
-   uint32_t h = 0xFFFFFFFFu;
-   for (; *str; ++str)
-      h = g_crcTable[((h >> 24) ^ (uint8_t)*str) & 0xFF] ^ (h << 8);
-   return h ^ 0xFFFFFFFFu;
-}
 
 // The engine's own table holds bone_string_1..bone_string_20.  Ours extends the
 // same sequence to cover nine tentacles; entry 0 doubles as the presence guard
 // DoTentacles tests before doing any work.
 bool init_bone_hashes(const uint32_t* gameTable)
 {
-   init_crc_table();
-
    char name[32];
    for (int i = 0; i < kTotalBoneHashes; ++i) {
       sprintf_s(name, "bone_string_%d", i + 1);
-      g_boneHashes[i] = bone_hash(name);
+      g_boneHashes[i] = pbl_temp_hash(name);
    }
 
    // Every entry the engine already has must come out identical, or our hash

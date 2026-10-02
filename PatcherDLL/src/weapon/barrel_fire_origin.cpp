@@ -5,6 +5,7 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "game/Battlefront2/Source/Aimer.h"
 #include "game/Battlefront2/Source/Weapon.h"
 
 // =============================================================================
@@ -401,6 +402,45 @@ static bool aimAt(const float* from, const float* P, const float* refDir, float 
    return true;
 }
 
+// ---------------------------------------------------------------------------
+// Impact point cache, for weapons with a second muzzle (dual_cannon).
+//
+// OverrideAimer resolves P once per turn and discards it. A second muzzle firing later
+// in the same turn needs to aim at the same P, or its shot runs parallel to the
+// first and lands a gun-width off the crosshair. Keyed by aimer, invalidated at the
+// top of every OverrideAimer call and only marked valid when the origin actually
+// moved, so a read can never see a previous turn's point.
+//
+// Plain POD open addressing rather than a std container: the writer runs inside
+// __try, which cannot hold objects that need unwinding.
+// ---------------------------------------------------------------------------
+struct aim_target {
+   const void* aimer;
+   float       P[3];
+   bool        valid;
+};
+
+static const unsigned kTargetSlots = 128;
+static aim_target s_targets[kTargetSlots] = {};
+
+static aim_target* targetSlot(const void* aimer, bool create)
+{
+   const unsigned home = (unsigned)(((uintptr_t)aimer >> 4) & (kTargetSlots - 1));
+   for (unsigned n = 0, h = home; n < kTargetSlots; ++n, h = (h + 1) & (kTargetSlots - 1)) {
+      if (s_targets[h].aimer == aimer) return &s_targets[h];
+      if (!s_targets[h].aimer) {
+         if (!create) return nullptr;
+         s_targets[h].aimer = aimer;
+         return &s_targets[h];
+      }
+   }
+   if (!create) return nullptr;
+   // Full: evict the home slot. The evicted aimer only loses its point until its next turn.
+   s_targets[home].aimer = aimer;
+   s_targets[home].valid = false;
+   return &s_targets[home];
+}
+
 // Is this weapon's baked barrel position usable this turn?
 static const float* trustedBarrelPoint(void* weapon, const void* owner,
                                        const float* rootPos, const float* P)
@@ -462,19 +502,22 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
       if (!owner || !aimer) return false;
 
+      if (aim_target* cached = targetSlot(aimer, false)) cached->valid = false;
+
       // Scope texture up: hand the frame back to vanilla entirely -- no origin move,
-      // no direction correction.
+      // no direction correction.  Placed after the cache invalidation so a second
+      // muzzle cannot aim at a point resolved before the scope went up.
       if (scopeTextureVisible()) return false;
 
       // Aimer::bDirect. Aimer::SetSoldierInfo is its only writer and sets it
       // unconditionally, so it means "UpdateWeaponAndAimer authored mRootPos and
       // mDirection as a matched pair this turn". A turret or vehicle aimer never
       // carries it, which is what keeps those out of scope.
-      if (!*(const unsigned char*)((const char*)aimer + 0x29)) return false;
+      if (!*(const unsigned char*)((const char*)aimer + layout::Aimer::kDirect)) return false;
 
-      float*       dir     = (float*)((char*)aimer + 0x48);        // mDirection
-      float*       firePos = (float*)((char*)aimer + 0x88);        // mFirePos
-      const float* rootPos = (const float*)((char*)aimer + 0x70);  // mRootPos
+      float*       dir     = (float*)((char*)aimer + layout::Aimer::kDirection);
+      float*       firePos = (float*)((char*)aimer + layout::Aimer::kFirePos);
+      const float* rootPos = (const float*)((char*)aimer + layout::Aimer::kRootPos);
 
       float P[3];
       if (!aimTargetPoint(owner, rootPos, P)) return false;
@@ -489,6 +532,10 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
             // The origin move is unconditional once B is trusted -- it is purely
             // visual and nothing downstream reads mFirePos as aim state.
             firePos[0] = B[0]; firePos[1] = B[1]; firePos[2] = B[2];
+
+            aim_target* cached = targetSlot(aimer, true);
+            cached->P[0] = P[0]; cached->P[1] = P[1]; cached->P[2] = P[2];
+            cached->valid = true;
 
             // The DIRECTION is what AIUtil::DumbDown reads back as the previous
             // state of its PD loop, so a bias larger than the loop can hold has
@@ -513,6 +560,47 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    __except (EXCEPTION_EXECUTE_HANDLER) {
       return false;
    }
+}
+
+bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outDir[3])
+{
+   if (!g_useBarrelFireOrigin || !weapon || !muzzle || !outDir) return false;
+
+   void* owner = *(void**)((char*)weapon + layout::Weapon::kOwner);
+   void* aimer = *(void**)((char*)weapon + layout::Weapon::kAimer);
+   if (!owner || !aimer) return false;
+
+   const aim_target* cached = targetSlot(aimer, false);
+   if (!cached || !cached->valid) return false;
+
+   // Same body-distance sanity test trustedBarrelPoint applies to the main muzzle.
+   const float* rootPos = (const float*)((char*)aimer + layout::Aimer::kRootPos);
+   for (int i = 0; i < 3; ++i) {
+      const float d = muzzle[i] - rootPos[i];
+      if (!(d > -5.0f && d < 5.0f)) return false;   // also rejects NaN
+   }
+
+   // mDirection already holds this turn's main-muzzle direction, which is within the
+   // AI budget of vanilla, so it is the reference for this muzzle's budget too.
+   const float* dir = (const float*)((char*)aimer + layout::Aimer::kDirection);
+   float d2[3];
+   if (!aimAt(muzzle, cached->P, dir, d2)) return false;
+
+   if (*(const int*)((const char*)owner + kPlayerIdOff) < 0) {
+      const float dot = d2[0]*dir[0] + d2[1]*dir[1] + d2[2]*dir[2];
+      if (!(dot > 1.0f - 0.5f * kAiMaxCorrectionRad * kAiMaxCorrectionRad)) {
+         outDir[0] = dir[0]; outDir[1] = dir[1]; outDir[2] = dir[2];
+         return true;
+      }
+   }
+
+   outDir[0] = d2[0]; outDir[1] = d2[1]; outDir[2] = d2[2];
+   return true;
+}
+
+void barrel_fire_origin_reset_targets()
+{
+   memset(s_targets, 0, sizeof(s_targets));
 }
 
 // Swaps one vtable slot to `hook`, but only if it still holds one of the two

@@ -1,0 +1,1053 @@
+#include "pch.h"
+#include "dual_cannon.hpp"
+#include "barrel_fire_origin.hpp"
+#include "core/game_addrs.hpp"
+#include "core/game_build.hpp"
+#include "game/Battlefront2/Source/Aimer.h"
+#include "game/Battlefront2/Source/Weapon.h"
+#include "core/pbl_hash.hpp"
+#include "core/resolve.hpp"
+#include "core/x86_emit.hpp"
+#include "util/install_log.hpp"
+
+#include <detours.h>
+
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+#include <unordered_map>
+
+// =============================================================================
+// ClassLabel "dualcannon"
+//
+// A weapon ODF's ClassLabel resolves by a linear scan of Factory<Weapon>::sList for
+// a matching PblHash, so registering one more base class object is all it takes for
+// the label to load. GameState::CreateBaseWeaponClasses builds the stock list on every
+// mission load (PostStateCleanup unlinks it and resets sCounter), so we hook it and
+// append ours after the original returns.
+//
+// The object is a real WeaponCannonClass, built by the engine's own constructor, and
+// then re-pointed at a DLL-owned copy of the cannon class vtable. Every per-ODF class
+// the loader derives from it goes through our Derive, and every weapon it builds
+// through our Build, so both carry our vtables from then on while inheriting all
+// cannon behaviour.
+//
+// Derive and Build CHAIN to whatever the live cannon vtable slot held when we copied
+// it, rather than allocating themselves. held_ordnance_effect hooks Derive (and
+// SetProperty and the destructor) to keep side tables in step with class inheritance,
+// and allocating here would silently skip that. Extra per-class and per-weapon state
+// therefore lives in side tables too, never in a larger object.
+//
+// Multiplayer: the base constructor post-increments Factory::sCounter into
+// Factory::mNetIndex (+0x1C), which WriteNetEvent sends in 8 bits for CREATE_ORDNANCE
+// and ReadWeaponClass resolves back. One extra registration would shift the index of
+// every ODF class after it, so an unmodded peer would attribute kills to the wrong
+// weapon. The base class object itself is never a fire weapon, so it takes 0xFF (the
+// "no class" value, which lookups reject before scanning) and gives its counter slot
+// back. Maps that do not use dualcannon then index exactly as they would without us.
+//
+// ODF properties (on top of every cannon property):
+//   OffhandGeometryName  second model. OdfMunge adds any *GeometryName to the .req.
+//   OffhandHardPoint     skeleton hardpoint the second model hangs on, e.g. hp_weapons2
+//   OffhandFirePointName fire point on the second model (default hp_fire, as stock)
+//   AlternateMode        "shot": switch gun per trigger pull (per salvo)
+//                        "salvo": switch gun on every shot within a salvo
+//
+// Alternating fire. WeaponCannon::Fire is non-virtual but has a single caller and
+// reads Aimer::mFirePos and mDirection on every call, so a detour on it (a vptr compare
+// for every other cannon) can move each shot to the gun that fires it. Around the call
+// it also sets Weapon::mState to FIRE for gun 1 and FIRE2 for gun 2:
+// SoldierAnimatorClass::WeaponStateToAnimation maps those to shoot / shoot2 (and
+// shoot_secondary / shoot_secondary2 in the secondary slot), the first person
+// animator to its shoot states 2 / 3, and Weapon::Write already replicates mState.
+// FireAnim, which the engine uses to pick that state, is therefore ignored.
+//
+// The muzzle flash belongs to the gun that fired last: Weapon::Render draws it at the
+// main fire point, so for gun 2 the flash timer is held back around that call and the
+// flash drawn at the offhand fire point instead.
+//
+// FIRE2 makes a latent engine bug reachable. First person picks its animation from
+// FirstPerson::mAnim[weaponClass * 11 + state], and FirstPerson::Init fills it on every
+// ingame.lvl load: slots with a name are looked up, and any slot still null afterwards
+// gets humanfp_tool_idle. The shoot2 slot (state 3) has no name for the rifle, bazooka
+// and tool classes, so Init never clears it: it keeps the previous level's pointer, which
+// is freed memory by then. Stock never reaches those slots, because only a grenade
+// enters FIRE2. We clear the table before Init runs so every unnamed slot is refilled
+// from the level being loaded.
+//
+// The spawn screen preview soldier has no Weapon instance: SoldierElement draws its
+// selected weapon with the non-virtual WeaponClass::Render, which none of the vtable
+// overrides reach. A detour on it (keyed on the side table, so stock classes pass
+// straight through) draws the offhand model there too.
+// =============================================================================
+
+namespace {
+
+// PblHash("dualcannon"), from ToolsFL\bin\Hash.exe.
+constexpr uint32_t kDualCannonHash = 0x14064EC2;
+
+constexpr unsigned kClassVtableSlots  = 13;
+constexpr unsigned kWeaponVtableSlots = 61;
+constexpr unsigned kFactoryNetIndex   = 0x1C;
+constexpr uint32_t kNoNetIndex        = 0xFF;
+
+// Class vtable slots.
+constexpr unsigned kSlotDestroyClass = 0;
+constexpr unsigned kSlotDerive       = 1;
+constexpr unsigned kSlotBuild        = 2;
+constexpr unsigned kSlotSetProperty  = 6;
+
+// Weapon vtable slots.
+constexpr unsigned kSlotDestroyWeapon = 0;
+constexpr unsigned kSlotRender        = 0x8C / 4;
+
+// WeaponClass fields and the class allocation size are PER BUILD: the debug build
+// carries extra WeaponClass members, so every class-side offset below differs on
+// retail (mFlashLength 0x290 vs 0x1B8, ShotsPerSalvo 0x354 vs 0x280, ...).  Filled
+// from g_addr in dual_cannon_install; see the tables in game_addrs.hpp for how each
+// one was read out of the image.
+unsigned kCannonClassSize    = 0;
+unsigned kClassName          = 0;
+unsigned kClassFlashLength   = 0;
+unsigned kClassShotsPerSalvo = 0;
+unsigned kClassShotsPerShot  = 0;
+
+// Weapon fields shared by all builds come from game/Battlefront2/Source/Weapon.h; this one sits
+// past the shared range (WeaponCannon::UpdateFire, modtools 0x6274C0).
+unsigned kWeaponSalvoCount = 0; // per build: 0x144 modtools, 0x114 retail
+
+// Weapon::WeaponState
+constexpr uint32_t kStateFire  = 1;
+constexpr uint32_t kStateFire2 = 2;
+
+// RedPose: Weapon::Render looks hardpoints up with _Find(pose + 4, 0x100, crc).
+constexpr unsigned kPoseTable     = 4;
+constexpr int      kPoseTableSize = 0x100;
+
+// RedModel vtable +4: Render(PblMatrix* world, int, RedColor* color, uint flags, int).
+constexpr unsigned kSlotModelRender = 1;
+
+constexpr uint32_t kPropOffhandGeometry  = pbl_hash("OffhandGeometryName");
+constexpr uint32_t kPropOffhandHardPoint = pbl_hash("OffhandHardPoint");
+constexpr uint32_t kPropOffhandFirePoint = pbl_hash("OffhandFirePointName");
+constexpr uint32_t kPropAlternateMode    = pbl_hash("AlternateMode");
+constexpr uint32_t kPropFireAnim         = pbl_hash("FireAnim");
+
+// WeaponClass::SetProperty falls back to this when an ODF names no FirePointName.
+constexpr uint32_t kDefaultFirePoint = pbl_temp_hash("hp_fire");
+
+enum class alternate_mode : uint8_t { shot, salvo };
+
+struct class_ext {
+   void*          model          = nullptr; // RedModel*
+   uint32_t       hardPoint      = 0;       // pose key, 0 = unset
+   uint32_t       firePoint      = kDefaultFirePoint;
+   bool           firePointNamed = false;
+   bool           firePointFound = false;
+   float          firePointOffset[3] = {};
+   alternate_mode mode           = alternate_mode::shot;
+};
+
+struct weapon_ext {
+   uint8_t barrel     = 0;     // gun the next new shot starts from, before switching
+   uint8_t lastFired  = 0;     // gun of the most recent shot, owns the muzzle flash
+   bool    anyShot    = false;
+   bool    offhandValid = false;
+   float   offhandFirePos[3] = {};
+   // What identifies a new shot rather than another ShotsPerShot pellet of the same one.
+   int      lastSalvoCount = 0;
+   float    lastFireTime   = 0.0f;
+   unsigned pellets        = 0;
+   // Another player's gun on a client: flash end time from the host's last shot, and
+   // that shot's gun until its shoot animation has been handed to the soldier.
+   float    netFlashEnd    = 0.0f;
+   int8_t   netAnimGun     = -1;
+   bool     netStateSet    = false;   // mState is ours until the weapon has rendered
+   uint32_t netSavedState  = 0;
+};
+
+using fn_create_base_classes_t = void(__cdecl*)();
+using fn_operator_new_t        = void*(__cdecl*)(unsigned size);
+using fn_class_ctor_t          = void*(__thiscall*)(void* self, uint32_t hash);
+using fn_destroy_t             = void*(__thiscall*)(void* self, unsigned flags);
+using fn_derive_t              = void*(__thiscall*)(void* self, uint32_t hash);
+using fn_build_t               = void*(__thiscall*)(void* self, void* desc);
+using fn_set_property_t        = void(__thiscall*)(void* self, uint32_t hash, const char* value);
+using fn_render_t              = void(__thiscall*)(void* self, const float* world, void* pose,
+                                                   const uint8_t* color, uint32_t flags,
+                                                   uint32_t highRes);
+using fn_fire_t                = bool(__fastcall*)(void* self, void* edx);
+using fn_find_model_t          = void*(__cdecl*)(uint32_t hash);
+using fn_get_hardpoint_t       = uint32_t(__thiscall*)(void* model, uint32_t crc, float* out);
+using fn_hash_table_find_t     = void*(__cdecl*)(void* table, int size, uint32_t hash);
+using fn_model_render_t        = void(__thiscall*)(void* model, const float* world, int,
+                                                   const uint8_t* color, uint32_t flags, int);
+using fn_render_flash_t        = void(__thiscall*)(void* cls, const float* pos, const float* dir,
+                                                   float t);
+// Retail passes `t` in XMM3 with only pos/dir on the stack (RET 8); the debug build
+// passes all three on the stack (RET 0xC).  Same C++ source, different LTCG ABI.
+using fn_render_flash_retail_t = void(__thiscall*)(void* cls, const float* pos, const float* dir);
+using fn_mission_time_t        = float(__cdecl*)();
+// Retail returns the float in XMM0 (`MOVSS XMM0,[EBP-4]` / `XORPS XMM0,XMM0` before
+// the RET); the debug build returns it in ST(0) via `FLD`.  A `float(__cdecl*)()`
+// typedef means ST(0) to MSVC, so calling retail through it reads whatever happens
+// to be on the x87 stack.
+using fn_mission_time_xmm_t   = void(__cdecl*)();
+
+using fn_first_person_init_t   = void(__cdecl*)();
+using fn_class_render_t        = void(__fastcall*)(void* cls, void* edx, const float* world,
+                                                   void* pose, const uint8_t* color,
+                                                   uint32_t flags, uint32_t highRes);
+
+constexpr unsigned kFirstPersonAnimSlots = 48;
+
+fn_create_base_classes_t original_create_base_classes = nullptr;
+fn_fire_t                original_fire                = nullptr;
+fn_first_person_init_t   original_first_person_init   = nullptr;
+fn_class_render_t        original_class_render        = nullptr;
+void**                   s_firstPersonAnims           = nullptr;
+fn_operator_new_t        s_operatorNew     = nullptr;
+fn_class_ctor_t          s_classCtor       = nullptr;
+fn_find_model_t          s_findModel       = nullptr;
+fn_get_hardpoint_t       s_getHardPoint    = nullptr;
+fn_hash_table_find_t     s_hashTableFind   = nullptr;
+fn_render_flash_t        s_renderFlashSt     = nullptr;
+fn_render_flash_retail_t s_renderFlashRetail = nullptr;
+
+// A client runs its own weapon's fire logic in more than one net turn, but
+// WeaponCannon::Fire only creates ordnance in the local turn: with netEnabled &&
+// netOnClient && !netIsLocalTurn it returns "fired" and creates nothing.  Those calls
+// must not advance the gun, or which gun a visible shot leaves depends on how many
+// invisible calls came before it.
+const uint8_t* s_netEnabled     = nullptr;
+const uint8_t* s_netOnClient    = nullptr;
+const uint8_t* s_netIsLocalTurn = nullptr;
+
+bool fire_creates_no_ordnance()
+{
+   return s_netEnabled && s_netOnClient && s_netIsLocalTurn &&
+          *s_netEnabled && *s_netOnClient && !*s_netIsLocalTurn;
+}
+
+// Naked bridge for the retail ABI.  Entry stack is [esp+4]=cls [esp+8]=pos
+// [esp+12]=dir [esp+16]=t; the callee wants ECX=cls, XMM3=t and (pos, dir) pushed
+// right to left, and cleans those two itself (RET 8), so ESP is back where it
+// started by the time we return and our own __cdecl caller cleans all four.
+__declspec(naked) void __cdecl render_flash_retail(void* /*cls*/, const float* /*pos*/,
+                                                   const float* /*dir*/, float /*t*/)
+{
+   __asm {
+      movss xmm3, dword ptr [esp + 16]  // t
+      mov   ecx,  dword ptr [esp + 4]   // this
+      push  dword ptr [esp + 12]        // dir
+      push  dword ptr [esp + 12]        // pos (shifted by the push above)
+      call  s_renderFlashRetail
+      ret
+   }
+}
+
+void call_render_flash(void* cls, const float* pos, const float* dir, float t)
+{
+   if (s_renderFlashRetail) render_flash_retail(cls, pos, dir, t);
+   else                     s_renderFlashSt(cls, pos, dir, t);
+}
+fn_mission_time_t        s_missionTimeSt0     = nullptr;
+fn_mission_time_xmm_t    s_missionTimeXmm  = nullptr;
+
+// Moves the retail return value from XMM0 onto the x87 stack so the C++ side can
+// keep treating it as an ordinary float return.
+__declspec(naked) float __cdecl mission_time_xmm()
+{
+   __asm {
+      call  s_missionTimeXmm
+      sub   esp, 4
+      movss dword ptr [esp], xmm0
+      fld   dword ptr [esp]
+      add   esp, 4
+      ret
+   }
+}
+
+float call_mission_time()
+{
+   return s_missionTimeXmm ? mission_time_xmm() : s_missionTimeSt0();
+}
+void**                   s_cannonClassVtable  = nullptr;
+void**                   s_cannonWeaponVtable = nullptr;
+uint32_t*                s_factoryCounter     = nullptr;
+
+// DLL-owned vtables, filled from the live cannon tables on first registration. That is
+// long after every install-time vtable patch (barrel_fire_origin, held_ordnance_effect)
+// has landed, so the copies inherit those hooks.
+void* s_classVtable[kClassVtableSlots]   = {};
+void* s_weaponVtable[kWeaponVtableSlots] = {};
+bool  s_vtablesReady = false;
+
+// The implementations our overrides chain to.
+fn_destroy_t      s_baseDestroyClass  = nullptr;
+fn_derive_t       s_baseDerive        = nullptr;
+fn_build_t        s_baseBuild         = nullptr;
+fn_set_property_t s_baseSetProperty   = nullptr;
+fn_destroy_t      s_baseDestroyWeapon = nullptr;
+fn_render_t       s_baseRender        = nullptr;
+
+// Keyed by WeaponClass* and Weapon*. Cleared on every mission load, because
+// PostStateCleanup unlinks the classes without destroying them and the next state
+// reuses the addresses.
+std::unordered_map<void*, class_ext>  s_classes;
+std::unordered_map<void*, weapon_ext> s_weapons;
+std::mutex                            s_mutex;
+
+template<class T>
+T& at(void* p, unsigned offset)
+{
+   return *reinterpret_cast<T*>(static_cast<uint8_t*>(p) + offset);
+}
+
+bool is_dual_weapon(void* weapon)
+{
+   return weapon && *static_cast<void***>(weapon) == s_weaponVtable;
+}
+
+// Another player's gun, seen on a client.  Its Fire runs here too but creates no
+// ordnance (the owner has no local joystick); the host fires it, picks the gun and
+// sends the ordnance.  Which gun and when to flash come from that event
+// (net_build_ordnance), because the client's own replay of the weapon always
+// re-enters plain FIRE.
+using fn_get_joystick_index_t = int(__cdecl*)(int playerId);
+fn_get_joystick_index_t s_getJoystickIndex = nullptr;
+constexpr uint32_t kControllablePlayerId = 0xD4;   // what Fire passes to GetJoystickIndex
+
+bool is_remote_weapon_on_client(void* weapon)
+{
+   if (!s_getJoystickIndex || !s_netEnabled || !s_netOnClient) return false;
+   if (!*s_netEnabled || !*s_netOnClient) return false;
+   void* owner = at<void*>(weapon, layout::Weapon::kOwner);
+   if (!owner) return false;
+   return s_getJoystickIndex(at<int>(owner, kControllablePlayerId)) < 0;
+}
+
+// OrdnanceDesc, same on every build.
+constexpr unsigned kDescPosition   = 0x00;
+constexpr unsigned kDescFireWeapon = 0x44;
+
+// Weapon::mFirePointMatrix translation, baked by Weapon::Render; w = 1 once baked.
+constexpr unsigned kWeaponFirePointTrans = 0x50;
+
+// A host shot from another player's dual weapon: the gun whose fire point is nearer
+// the ordnance position fired it.
+void note_remote_shot(void* desc)
+{
+   void* weapon = at<void*>(desc, kDescFireWeapon);
+   if (!is_dual_weapon(weapon) || !is_remote_weapon_on_client(weapon)) return;
+
+   void* cls = at<void*>(weapon, layout::Weapon::kClass);
+   if (!cls) return;
+   const float* pos  = &at<float>(desc, kDescPosition);
+   const float* main = &at<float>(weapon, kWeaponFirePointTrans);
+   const bool mainBaked = main[3] == 1.0f;
+   const float now = call_mission_time();
+
+   std::lock_guard<std::mutex> lock(s_mutex);
+   weapon_ext& ext = s_weapons[weapon];
+   if (ext.offhandValid && mainBaked) {
+      float dm = 0.0f, doff = 0.0f;
+      for (int i = 0; i < 3; ++i) {
+         dm   += (pos[i] - main[i]) * (pos[i] - main[i]);
+         doff += (pos[i] - ext.offhandFirePos[i]) * (pos[i] - ext.offhandFirePos[i]);
+      }
+      ext.lastFired = doff < dm ? 1 : 0;
+   }
+   ext.netFlashEnd = now + at<float>(cls, kClassFlashLength);
+   ext.netAnimGun  = static_cast<int8_t>(ext.lastFired);
+}
+
+// EntitySoldier::Render plays shoot or shoot2 from mState when it sees mFiredFlag,
+// and the client's replay leaves other players' guns in plain FIRE.  After the
+// replay, hand the soldier the host's shots instead of the replay's.
+using fn_net_predict_t = char(__cdecl*)();
+fn_net_predict_t original_net_predict = nullptr;
+
+char __cdecl hooked_net_predict()
+{
+   const char result = original_net_predict();
+
+   std::lock_guard<std::mutex> lock(s_mutex);
+   for (auto& [weapon, ext] : s_weapons) {
+      if (!is_dual_weapon(weapon) || !is_remote_weapon_on_client(weapon)) continue;
+      uint32_t& flags = at<uint32_t>(weapon, layout::Weapon::kFlags);
+      uint32_t& state = at<uint32_t>(weapon, layout::Weapon::kState);
+      if (ext.netStateSet) {   // not drawn last frame
+         state = ext.netSavedState;
+         ext.netStateSet = false;
+      }
+      if (ext.netAnimGun < 0) {
+         flags &= ~layout::Weapon::kFlagFired;
+         continue;
+      }
+      flags |= layout::Weapon::kFlagFired;
+      ext.netSavedState = state;
+      ext.netStateSet   = true;
+      state = ext.netAnimGun == 1 ? kStateFire2 : kStateFire;
+      ext.netAnimGun = -1;
+   }
+   return result;
+}
+
+// Replaces the ordnance factory Build call in ReadNetEvent's CREATE_ORDNANCE case:
+// ECX = factory, the desc is on the stack, callee cleans it like the thiscall it stands for.
+using fn_ordnance_build_t = void*(__thiscall*)(void* factory, void* desc);
+
+void* __fastcall net_build_ordnance(void* factory, void* /*edx*/, void* desc)
+{
+   void* ordnance = (*reinterpret_cast<fn_ordnance_build_t**>(factory))[2](factory, desc);
+   note_remote_shot(desc);
+   return ordnance;
+}
+
+// Per build: the site bytes, and the setup kept in front of our CALL (LEA desc,
+// PUSH, MOV ECX,factory).  Everything after it is the vtable call we replace.
+constexpr uint8_t kBuildSiteDbg[] = {0x8D, 0x45, 0x98, 0x50, 0x8B, 0x4D, 0xF0, 0x8B, 0x11,
+                                     0x8B, 0x4D, 0xF0, 0xFF, 0x52, 0x08};
+constexpr uint8_t kBuildSetupDbg[] = {0x8D, 0x45, 0x98, 0x50, 0x8B, 0x4D, 0xF0};
+constexpr uint8_t kBuildSiteRtl[] = {0x8D, 0x8D, 0x48, 0xFF, 0xFF, 0xFF, 0x51, 0x8B, 0x55, 0xE4,
+                                     0x8B, 0x02, 0x8B, 0x4D, 0xE4, 0x8B, 0x50, 0x08, 0xFF, 0xD2};
+constexpr uint8_t kBuildSetupRtl[] = {0x8D, 0x8D, 0x48, 0xFF, 0xFF, 0xFF, 0x51, 0x8B, 0x4D, 0xE4};
+
+uint8_t*       s_buildSite     = nullptr;
+const uint8_t* s_buildSiteOrig = nullptr;
+size_t         s_buildSiteLen  = 0;
+
+// Re-resolve the offhand fire point after the model or the name changed. Mirrors
+// WeaponClass::SetProperty: GeometryName probes hp_fire quietly, FirePointName warns.
+// Returns false only when an explicitly named fire point is missing.
+bool resolve_fire_point(class_ext& ext)
+{
+   ext.firePointFound = false;
+   if (!ext.model) return true;
+   ext.firePointFound = s_getHardPoint(ext.model, ext.firePoint, ext.firePointOffset) != 0;
+   return ext.firePointFound || !ext.firePointNamed;
+}
+
+void __fastcall dual_set_property(void* cls, void* /*edx*/, uint32_t hash, const char* value)
+{
+   if (hash != kPropOffhandGeometry && hash != kPropOffhandHardPoint &&
+       hash != kPropOffhandFirePoint && hash != kPropAlternateMode && hash != kPropFireAnim) {
+      s_baseSetProperty(cls, hash, value);
+      return;
+   }
+   if (!cls || !value) return;
+
+   const char* warning = nullptr;
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      class_ext& ext = s_classes[cls];
+
+      if (hash == kPropFireAnim) {
+         warning = "FireAnim \"%s\" is ignored: the gun that fires picks shoot or shoot2";
+      }
+      else if (hash == kPropOffhandGeometry) {
+         ext.model = *value ? s_findModel(pbl_hash(value)) : nullptr;
+         if (*value && !ext.model)
+            warning = "OffhandGeometryName model \"%s\" is not loaded";
+         else if (!resolve_fire_point(ext))
+            warning = "OffhandFirePointName not found on OffhandGeometryName \"%s\"";
+      }
+      else if (hash == kPropOffhandHardPoint) {
+         ext.hardPoint = *value ? pbl_temp_hash(value) : 0;
+      }
+      else if (hash == kPropOffhandFirePoint) {
+         ext.firePointNamed = *value != 0;
+         ext.firePoint      = *value ? pbl_temp_hash(value) : kDefaultFirePoint;
+         if (!resolve_fire_point(ext))
+            warning = "OffhandFirePointName \"%s\" does not exist on the offhand model";
+      }
+      else if (_stricmp(value, "shot") == 0) {
+         ext.mode = alternate_mode::shot;
+      }
+      else if (_stricmp(value, "salvo") == 0) {
+         ext.mode = alternate_mode::salvo;
+      }
+      else {
+         warning = "AlternateMode \"%s\" is not \"shot\" or \"salvo\", using \"shot\"";
+         ext.mode = alternate_mode::shot;
+      }
+   }
+
+   if (warning) {
+      char message[256];
+      _snprintf_s(message, sizeof(message), _TRUNCATE, warning, value);
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__, "[DualCannon] '%s' %s\n",
+                   &at<char>(cls, kClassName), message);
+   }
+}
+
+void* __fastcall dual_destroy_class(void* cls, void* /*edx*/, unsigned flags)
+{
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      s_classes.erase(cls);
+   }
+   return s_baseDestroyClass(cls, flags);
+}
+
+void* __fastcall dual_derive(void* self, void* /*edx*/, uint32_t hash)
+{
+   void* derived = s_baseDerive(self, hash);
+   if (!derived) return derived;
+
+   *static_cast<void***>(derived) = s_classVtable;
+
+   // The native copy constructor inherits every stock field; do the same for ours.
+   std::lock_guard<std::mutex> lock(s_mutex);
+   auto parent = s_classes.find(self);
+   if (parent != s_classes.end())
+      s_classes[derived] = parent->second;
+   else
+      s_classes.erase(derived);
+   return derived;
+}
+
+void* __fastcall dual_build(void* self, void* /*edx*/, void* desc)
+{
+   void* weapon = s_baseBuild(self, desc);
+   if (weapon) *static_cast<void***>(weapon) = s_weaponVtable;
+   return weapon;
+}
+
+void* __fastcall dual_destroy_weapon(void* weapon, void* /*edx*/, unsigned flags)
+{
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      s_weapons.erase(weapon);
+   }
+   return s_baseDestroyWeapon(weapon, flags);
+}
+
+// D3DXMatrixMultiply(out, a, b): out = a * b, row-major.
+void matrix_multiply(float* out, const float* a, const float* b)
+{
+   for (unsigned r = 0; r != 4; ++r)
+      for (unsigned c = 0; c != 4; ++c)
+         out[r * 4 + c] = a[r * 4 + 0] * b[0 * 4 + c] + a[r * 4 + 1] * b[1 * 4 + c] +
+                          a[r * 4 + 2] * b[2 * 4 + c] + a[r * 4 + 3] * b[3 * 4 + c];
+}
+
+// D3DXVec3TransformCoord for an affine row-major matrix.
+void transform_coord(float* out, const float* v, const float* m)
+{
+   for (unsigned c = 0; c != 3; ++c)
+      out[c] = v[0] * m[0 * 4 + c] + v[1] * m[1 * 4 + c] + v[2] * m[2 * 4 + c] + m[3 * 4 + c];
+}
+
+bool matrix_is_mirrored(const float* m)
+{
+   const float det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) +
+                     m[2] * (m[4] * m[9] - m[5] * m[8]);
+   return det < 0.0f;
+}
+
+// Draw the offhand model the way the engine draws the main one: hardpoint matrix * world,
+// then the model's own Render. `outWorld` receives the offhand world matrix.
+bool draw_offhand(void* model, uint32_t hardPoint, const float* world, void* pose,
+                  const uint8_t* color, uint32_t flags, float* outWorld)
+{
+   if (!model || !hardPoint || !world || !pose || !color) return false;
+
+   const auto* node = static_cast<const float*>(
+      s_hashTableFind(static_cast<uint8_t*>(pose) + kPoseTable, kPoseTableSize, hardPoint));
+   if (!node) return false;
+
+   matrix_multiply(outWorld, node, world);
+
+   const auto render =
+      reinterpret_cast<fn_model_render_t>((*static_cast<void***>(model))[kSlotModelRender]);
+   render(model, outWorld, 0, color, flags, 0);
+   return true;
+}
+
+// The spawn screen preview: WeaponClass::Render has drawn the main model (or bailed on
+// an invisible colour or a missing hp_weapons), so add the offhand under the same rules.
+void __fastcall hooked_class_render(void* cls, void* edx, const float* world, void* pose,
+                                    const uint8_t* color, uint32_t flags, uint32_t highRes)
+{
+   original_class_render(cls, edx, world, pose, color, flags, highRes);
+
+   // WeaponClass::Render's own gates: a transparent draw or no pose draws nothing.
+   if (!cls || !color || color[3] == 0 || !pose) return;
+
+   void*    model     = nullptr;
+   uint32_t hardPoint = 0;
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      auto it = s_classes.find(cls);
+      if (it == s_classes.end()) return;
+      model     = it->second.model;
+      hardPoint = it->second.hardPoint;
+   }
+
+   // WeaponClass::Render substitutes a constant for the model's flags on retail
+   // instead of forwarding its own, so the offhand draw has to match or it renders
+   // with the wrong state.  Weapon::Render (dual_render) forwards on every build.
+   const uint32_t modelFlags = g_addr->weapon_class_render_model_flags
+                                  ? (uint32_t)g_addr->weapon_class_render_model_flags
+                                  : flags;
+
+   float offhandWorld[16];
+   draw_offhand(model, hardPoint, world, pose, color, modelFlags, offhandWorld);
+}
+
+// Weapon::Render draws the main gun at hp_weapons, the muzzle flash, and writes
+// mFirePointMatrix. After it, draw the offhand model at the class's OffhandHardPoint
+// the same way (hardpoint matrix * world, then the model's own Render), remember where
+// its fire point landed, and draw the flash there when gun 2 fired last.
+void __fastcall dual_render(void* weapon, void* /*edx*/, const float* world, void* pose,
+                            const uint8_t* color, uint32_t flags, uint32_t highRes)
+{
+   const bool hidden = (at<uint32_t>(weapon, layout::Weapon::kFlags) & layout::Weapon::kFlagHideWeapon) != 0;
+
+   void*    model     = nullptr;
+   uint32_t hardPoint = 0;
+   bool     hasFirePoint = false;
+   float    firePointOffset[3] = {};
+   uint8_t  lastFired = 0;
+   float    netFlashEnd = 0.0f;
+   const bool remote = is_remote_weapon_on_client(weapon);
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      auto cls = s_classes.find(at<void*>(weapon, layout::Weapon::kRenderClass));
+      if (cls != s_classes.end()) {
+         model        = cls->second.model;
+         hardPoint    = cls->second.hardPoint;
+         hasFirePoint = cls->second.firePointFound;
+         std::memcpy(firePointOffset, cls->second.firePointOffset, sizeof(firePointOffset));
+      }
+      auto w = s_weapons.find(weapon);
+      if (w != s_weapons.end()) {
+         lastFired   = w->second.lastFired;
+         netFlashEnd = w->second.netFlashEnd;
+         // The soldier has picked its shoot animation by now; give mState back.
+         if (w->second.netStateSet) {
+            at<uint32_t>(weapon, layout::Weapon::kState) = w->second.netSavedState;
+            w->second.netStateSet = false;
+         }
+      }
+   }
+
+   const bool offhandFlash = !remote && lastFired == 1 && model && hardPoint && hasFirePoint;
+
+   // Keep the main gun from drawing gun 2's flash.  A remote gun's flash is ours alone.
+   float& flashStart = at<float>(weapon, layout::Weapon::kMuzzleFlashStartTime);
+   const float savedFlashStart = flashStart;
+   if (offhandFlash || remote) flashStart = 0.0f;
+   s_baseRender(weapon, world, pose, color, flags, highRes);
+   if (offhandFlash || remote) flashStart = savedFlashStart;
+
+   if (hidden) return;
+
+   float offhandWorld[16];
+   if (!draw_offhand(model, hardPoint, world, pose, color, flags, offhandWorld)) return;
+
+   // Same bake conditions as Weapon::Render: invisible draws leave the fire point alone,
+   // and a reflection region's mirrored duplicate must not overwrite the real one.
+   if (color[3] == 0 || !hasFirePoint || matrix_is_mirrored(offhandWorld)) return;
+
+   float firePos[3];
+   transform_coord(firePos, firePointOffset, offhandWorld);
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      weapon_ext& ext = s_weapons[weapon];
+      std::memcpy(ext.offhandFirePos, firePos, sizeof(firePos));
+      ext.offhandValid = true;
+   }
+
+   if (!offhandFlash && !remote) return;
+   void* aimer = at<void*>(weapon, layout::Weapon::kAimer);
+   void* cls   = at<void*>(weapon, layout::Weapon::kClass);
+   if (!aimer || !cls) return;
+   const float flashLength = at<float>(cls, kClassFlashLength);
+   const float remaining   = (remote ? netFlashEnd : savedFlashStart) - call_mission_time();
+   const float* flashPos   = (remote && lastFired == 0)
+                               ? &at<float>(weapon, kWeaponFirePointTrans) : firePos;
+   if (remaining > 0.0f && flashLength > 0.0f)
+      call_render_flash(at<void*>(weapon, layout::Weapon::kRenderClass), flashPos,
+                        &at<float>(aimer, layout::Aimer::kDirection), remaining / flashLength);
+}
+
+bool __fastcall hooked_fire(void* weapon, void* edx)
+{
+   if (!is_dual_weapon(weapon) || fire_creates_no_ordnance() || is_remote_weapon_on_client(weapon))
+      return original_fire(weapon, edx);
+
+   void* cls = at<void*>(weapon, layout::Weapon::kClass);
+   if (!cls) return original_fire(weapon, edx);
+
+   const float now        = call_mission_time();
+   const int   salvoCount = at<int>(weapon, kWeaponSalvoCount);
+   const int   perSalvo   = at<int>(cls, kClassShotsPerSalvo);
+   const int   perShotRaw = at<int>(cls, kClassShotsPerShot);
+   const unsigned perShot = perShotRaw > 0 ? static_cast<unsigned>(perShotRaw) : 1u;
+
+   uint8_t barrel = 0;
+   bool    offhandValid = false;
+   float   offhandPos[3] = {};
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      alternate_mode mode = alternate_mode::shot;
+      auto c = s_classes.find(cls);
+      if (c != s_classes.end()) mode = c->second.mode;
+
+      weapon_ext& ext = s_weapons[weapon];
+
+      // UpdateFire calls Fire once per ShotsPerShot pellet, all in the same call and
+      // with mSalvoCount unchanged; a new shot differs in time, in salvo count, or has
+      // already had all its pellets.
+      const bool newShot = !ext.anyShot || now != ext.lastFireTime ||
+                           salvoCount != ext.lastSalvoCount || ext.pellets >= perShot;
+      if (newShot) {
+         // mSalvoCount is reset to ShotsPerSalvo when a salvo starts, then counts down.
+         const bool newSalvo = salvoCount == perSalvo;
+         if (ext.anyShot &&
+             (mode == alternate_mode::salvo || (mode == alternate_mode::shot && newSalvo)))
+            ext.barrel ^= 1;
+         ext.pellets = 0;
+         ext.anyShot = true;
+      }
+      ++ext.pellets;
+      ext.lastFireTime   = now;
+      ext.lastSalvoCount = salvoCount;
+      ext.lastFired      = ext.barrel;
+
+      barrel       = ext.barrel;
+      offhandValid = ext.offhandValid;
+      std::memcpy(offhandPos, ext.offhandFirePos, sizeof(offhandPos));
+   }
+
+   // Pick shoot or shoot2. Only ever FIRE <-> FIRE2, which every consumer treats alike.
+   uint32_t& state = at<uint32_t>(weapon, layout::Weapon::kState);
+   if (state == kStateFire || state == kStateFire2)
+      state = barrel == 1 ? kStateFire2 : kStateFire;
+
+   void* aimer = at<void*>(weapon, layout::Weapon::kAimer);
+   float newDir[3];
+   const bool moveOrigin = barrel == 1 && offhandValid && aimer &&
+                           barrel_fire_origin_aim_from(weapon, offhandPos, newDir);
+   if (!moveOrigin) return original_fire(weapon, edx);
+
+   // The next shot of this turn may be gun 1 again, so put the main muzzle back after.
+   float* firePos = &at<float>(aimer, layout::Aimer::kFirePos);
+   float* dir     = &at<float>(aimer, layout::Aimer::kDirection);
+   float savedPos[3], savedDir[3];
+   std::memcpy(savedPos, firePos, sizeof(savedPos));
+   std::memcpy(savedDir, dir, sizeof(savedDir));
+
+   std::memcpy(firePos, offhandPos, sizeof(offhandPos));
+   std::memcpy(dir, newDir, sizeof(newDir));
+   const bool fired = original_fire(weapon, edx);
+   std::memcpy(firePos, savedPos, sizeof(savedPos));
+   std::memcpy(dir, savedDir, sizeof(savedDir));
+   return fired;
+}
+
+void __cdecl hooked_first_person_init()
+{
+   // See the header comment. Every slot Init leaves alone afterwards is refilled with
+   // this level's humanfp_tool_idle, or stays null, which ZephyrAnimInst::SetAnim skips.
+   std::memset(s_firstPersonAnims, 0, kFirstPersonAnimSlots * sizeof(void*));
+   original_first_person_init();
+}
+
+void build_vtables()
+{
+   std::memcpy(s_classVtable, s_cannonClassVtable, sizeof(s_classVtable));
+   std::memcpy(s_weaponVtable, s_cannonWeaponVtable, sizeof(s_weaponVtable));
+
+   s_baseDestroyClass  = reinterpret_cast<fn_destroy_t>(s_classVtable[kSlotDestroyClass]);
+   s_baseDerive        = reinterpret_cast<fn_derive_t>(s_classVtable[kSlotDerive]);
+   s_baseBuild         = reinterpret_cast<fn_build_t>(s_classVtable[kSlotBuild]);
+   s_baseSetProperty   = reinterpret_cast<fn_set_property_t>(s_classVtable[kSlotSetProperty]);
+   s_baseDestroyWeapon = reinterpret_cast<fn_destroy_t>(s_weaponVtable[kSlotDestroyWeapon]);
+   s_baseRender        = reinterpret_cast<fn_render_t>(s_weaponVtable[kSlotRender]);
+
+   s_classVtable[kSlotDestroyClass]   = reinterpret_cast<void*>(&dual_destroy_class);
+   s_classVtable[kSlotDerive]         = reinterpret_cast<void*>(&dual_derive);
+   s_classVtable[kSlotBuild]          = reinterpret_cast<void*>(&dual_build);
+   s_classVtable[kSlotSetProperty]    = reinterpret_cast<void*>(&dual_set_property);
+   s_weaponVtable[kSlotDestroyWeapon] = reinterpret_cast<void*>(&dual_destroy_weapon);
+   s_weaponVtable[kSlotRender]        = reinterpret_cast<void*>(&dual_render);
+
+   s_vtablesReady = true;
+}
+
+void __cdecl hooked_create_base_classes()
+{
+   original_create_base_classes();
+
+   if (!s_vtablesReady) build_vtables();
+
+   {
+      std::lock_guard<std::mutex> lock(s_mutex);
+      s_classes.clear();
+      s_weapons.clear();
+   }
+   barrel_fire_origin_reset_targets();
+
+   void* cls = s_operatorNew(kCannonClassSize);
+   if (!cls) {
+      get_gamelog()("[DualCannon] out of memory registering ClassLabel \"dualcannon\"\n");
+      return;
+   }
+
+   s_classCtor(cls, kDualCannonHash);
+   *static_cast<void***>(cls) = s_classVtable;
+
+   // Give the counter slot back; see the header comment.
+   at<uint32_t>(cls, kFactoryNetIndex) = kNoNetIndex;
+   --*s_factoryCounter;
+
+   get_gamelog()("[DualCannon] ClassLabel \"dualcannon\" registered, net index %u, sCounter %u\n",
+                 kNoNetIndex, *s_factoryCounter);
+}
+
+} // namespace
+
+void dual_cannon_install(uintptr_t exe_base)
+{
+   if (!g_addr->game_state_create_base_weapon_classes || !g_addr->engine_operator_new ||
+       !g_addr->weapon_cannon_class_ctor || !g_addr->weapon_cannon_class_vftable ||
+       !g_addr->weapon_cannon_vftable || !g_addr->weapon_class_factory_counter ||
+       !g_addr->red_model_find || !g_addr->red_model_get_parent_bone_and_offset ||
+       !g_addr->pbl_hash_table_find || !g_addr->weapon_cannon_fire ||
+       !g_addr->weapon_class_render_flash || !g_addr->game_loop_get_mission_time ||
+       !g_addr->first_person_init || !g_addr->fp_anim_array || !g_addr->weapon_class_render) {
+      install_log("[DualCannon] NOT installed: addresses unknown for this build");
+      return;
+   }
+
+   // A mismatch in a prologue means the address is wrong for this exe, and detouring
+   // it would be a guess.  The debug and retail builds compile these four with
+   // different frames, so the expected bytes are per build.
+   //
+   // modtools                       retail (Steam and GOG are byte-identical here)
+   //   Create  PUSH ECX/ESI/0x3DC     PUSH EBP / MOV EBP,ESP / PUSH -1 / PUSH <SEH>
+   //   Fire    PUSH EBP ... SUB 0xC4  ... AND ESP,-16 / MOV EAX,FS:[0] / PUSH -1
+   //   FPInit  CALL rel32 / TEST AL   PUSH EBP / MOV EBP,ESP / PUSH -1 / PUSH <SEH>
+   //   Render  PUSH EBP ... SUB 0x84  ... AND ESP,-16 / SUB ESP,0x88 / PUSH ESI/EDI
+   //
+   // The SEH handler pointer differs per build, so it is left out of the guard.
+   // That makes the retail Create and FPInit guards identical, which on its own
+   // would only prove "some __ehhandler function lives here" -- so FPInit also has
+   // to reference fp_anim_array, which is what actually identifies it.
+   const bool retail = (g_build != GameBuild::Modtools);
+
+   static constexpr uint8_t kCreatePrologueDbg[] = {0x51, 0x56, 0x68, 0xDC, 0x03, 0x00, 0x00};
+   static constexpr uint8_t kCreatePrologueRtl[] = {0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68};
+
+   static constexpr uint8_t kFirePrologueDbg[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                  0x81, 0xEC, 0xC4, 0x00, 0x00, 0x00};
+   static constexpr uint8_t kFirePrologueRtl[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                  0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x6A, 0xFF};
+
+   static constexpr uint8_t kFirstPersonInitPrologueDbg[] = {0xE8, 0x00, 0x5B, 0xF6, 0xFF,
+                                                             0x84, 0xC0, 0x0F, 0x84};
+   static constexpr uint8_t kFirstPersonInitPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68};
+
+   static constexpr uint8_t kClassRenderPrologueDbg[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                         0x81, 0xEC, 0x84, 0x00, 0x00, 0x00};
+   static constexpr uint8_t kClassRenderPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0,
+                                                         0x81, 0xEC, 0x88, 0x00, 0x00, 0x00,
+                                                         0x56, 0x57};
+
+   struct guard {
+      const char*    what;
+      uintptr_t      addr;
+      const uint8_t* bytes;
+      size_t         size;
+   };
+
+   void* createTarget      = resolve(exe_base, g_addr->game_state_create_base_weapon_classes);
+   void* fireTarget        = resolve(exe_base, g_addr->weapon_cannon_fire);
+   void* fpInitTarget      = resolve(exe_base, g_addr->first_person_init);
+   void* classRenderTarget = resolve(exe_base, g_addr->weapon_class_render);
+
+   const guard guards[] = {
+      {"CreateBaseWeaponClasses", g_addr->game_state_create_base_weapon_classes,
+       retail ? kCreatePrologueRtl : kCreatePrologueDbg,
+       retail ? sizeof(kCreatePrologueRtl) : sizeof(kCreatePrologueDbg)},
+      {"WeaponCannon::Fire", g_addr->weapon_cannon_fire,
+       retail ? kFirePrologueRtl : kFirePrologueDbg,
+       retail ? sizeof(kFirePrologueRtl) : sizeof(kFirePrologueDbg)},
+      {"FirstPerson::Init", g_addr->first_person_init,
+       retail ? kFirstPersonInitPrologueRtl : kFirstPersonInitPrologueDbg,
+       retail ? sizeof(kFirstPersonInitPrologueRtl) : sizeof(kFirstPersonInitPrologueDbg)},
+      {"WeaponClass::Render", g_addr->weapon_class_render,
+       retail ? kClassRenderPrologueRtl : kClassRenderPrologueDbg,
+       retail ? sizeof(kClassRenderPrologueRtl) : sizeof(kClassRenderPrologueDbg)},
+   };
+
+   void* const targets[] = {createTarget, fireTarget, fpInitTarget, classRenderTarget};
+
+   for (int i = 0; i < 4; ++i) {
+      if (std::memcmp(targets[i], guards[i].bytes, guards[i].size) != 0) {
+         install_log("[DualCannon] NOT installed: unexpected bytes at %s %08X",
+                     guards[i].what, (unsigned)guards[i].addr);
+         return;
+      }
+   }
+
+   if (retail) {
+      // FirstPerson::Init must actually touch the animation table it is hooked for.
+      // The operand in the loaded image is RELOCATED, so this has to compare against
+      // the resolved address, not the table's unrelocated VA. Steam/GOG do not load
+      // at their preferred base (observed delta +0x6E0000), so comparing the raw VA
+      // never matched and the whole set silently refused to install.
+      const uint32_t wanted =
+         (uint32_t)(uintptr_t)resolve(exe_base, g_addr->fp_anim_array);
+      const uint8_t* body   = static_cast<const uint8_t*>(fpInitTarget);
+      bool           found  = false;
+      for (size_t i = 0; i + sizeof(uint32_t) <= 0x120 && !found; ++i) {
+         uint32_t v;
+         std::memcpy(&v, body + i, sizeof(v));
+         found = (v == wanted);
+      }
+      if (!found) {
+         install_log("[DualCannon] NOT installed: FirstPerson::Init %08X does not reference "
+                     "fp_anim_array %08X",
+                     (unsigned)g_addr->first_person_init, (unsigned)g_addr->fp_anim_array);
+         return;
+      }
+   }
+
+   // Per-build struct offsets and the class allocation size.
+   kCannonClassSize    = (unsigned)g_addr->weapon_cannon_class_size;
+   kClassName          = (unsigned)g_addr->weapon_class_name_off;
+   kClassFlashLength   = (unsigned)g_addr->weapon_class_flash_length_off;
+   kClassShotsPerSalvo = (unsigned)g_addr->weapon_class_shots_per_salvo_off;
+   kClassShotsPerShot  = (unsigned)g_addr->weapon_class_shots_per_shot_off;
+   kWeaponSalvoCount   = (unsigned)g_addr->weapon_salvo_count_off;
+
+   s_operatorNew   = reinterpret_cast<fn_operator_new_t>(resolve(exe_base, g_addr->engine_operator_new));
+   s_classCtor     = reinterpret_cast<fn_class_ctor_t>(resolve(exe_base, g_addr->weapon_cannon_class_ctor));
+   s_findModel     = reinterpret_cast<fn_find_model_t>(resolve(exe_base, g_addr->red_model_find));
+   s_getHardPoint  = reinterpret_cast<fn_get_hardpoint_t>(
+      resolve(exe_base, g_addr->red_model_get_parent_bone_and_offset));
+   s_hashTableFind = reinterpret_cast<fn_hash_table_find_t>(resolve(exe_base, g_addr->pbl_hash_table_find));
+   if (g_addr->net_enabled && g_addr->net_on_client && g_addr->net_is_local_turn) {
+      s_netEnabled     = (const uint8_t*)resolve(exe_base, g_addr->net_enabled);
+      s_netOnClient    = (const uint8_t*)resolve(exe_base, g_addr->net_on_client);
+      s_netIsLocalTurn = (const uint8_t*)resolve(exe_base, g_addr->net_is_local_turn);
+      if (g_addr->net_game_get_joystick_index)
+         s_getJoystickIndex = reinterpret_cast<fn_get_joystick_index_t>(
+            resolve(exe_base, g_addr->net_game_get_joystick_index));
+   }
+   // Retail's RenderFlash takes `t` in XMM3 (RET 8); the debug build takes it on the
+   // stack (RET 0xC).  Only one of these two is ever non-null, and call_render_flash
+   // picks on that.
+   if (retail)
+      s_renderFlashRetail = reinterpret_cast<fn_render_flash_retail_t>(
+         resolve(exe_base, g_addr->weapon_class_render_flash));
+   else
+      s_renderFlashSt = reinterpret_cast<fn_render_flash_t>(
+         resolve(exe_base, g_addr->weapon_class_render_flash));
+   if (retail)
+      s_missionTimeXmm = reinterpret_cast<fn_mission_time_xmm_t>(
+         resolve(exe_base, g_addr->game_loop_get_mission_time));
+   else
+      s_missionTimeSt0 = reinterpret_cast<fn_mission_time_t>(
+         resolve(exe_base, g_addr->game_loop_get_mission_time));
+   s_cannonClassVtable  = static_cast<void**>(resolve(exe_base, g_addr->weapon_cannon_class_vftable));
+   s_cannonWeaponVtable = static_cast<void**>(resolve(exe_base, g_addr->weapon_cannon_vftable));
+   s_factoryCounter =
+      static_cast<uint32_t*>(resolve(exe_base, g_addr->weapon_class_factory_counter));
+
+   original_create_base_classes = reinterpret_cast<fn_create_base_classes_t>(createTarget);
+   original_fire                = reinterpret_cast<fn_fire_t>(fireTarget);
+   original_first_person_init   = reinterpret_cast<fn_first_person_init_t>(fpInitTarget);
+   original_class_render        = reinterpret_cast<fn_class_render_t>(classRenderTarget);
+   s_firstPersonAnims = static_cast<void**>(resolve(exe_base, g_addr->fp_anim_array));
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
+   DetourAttach(&(PVOID&)original_fire, hooked_fire);
+   DetourAttach(&(PVOID&)original_first_person_init, hooked_first_person_init);
+   DetourAttach(&(PVOID&)original_class_render, hooked_class_render);
+   if (DetourTransactionCommit() != NO_ERROR) {
+      original_create_base_classes = nullptr;
+      original_fire                = nullptr;
+      original_first_person_init   = nullptr;
+      original_class_render        = nullptr;
+      install_log("[DualCannon] NOT installed: detours failed");
+      return;
+   }
+
+   // Other players' guns on a client follow the host's ordnance events.
+   static constexpr uint8_t kPredictPrologueDbg[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xD0, 0x00,
+                                                     0x00, 0x00, 0x56, 0x57};
+   static constexpr uint8_t kPredictPrologueRtl[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x80, 0x00,
+                                                     0x00, 0x00, 0x56, 0x57};
+   if (g_addr->net_game_predict) {
+      void* predict = resolve(exe_base, g_addr->net_game_predict);
+      const uint8_t* want = retail ? kPredictPrologueRtl : kPredictPrologueDbg;
+      if (std::memcmp(predict, want, sizeof(kPredictPrologueDbg)) == 0) {
+         original_net_predict = reinterpret_cast<fn_net_predict_t>(predict);
+         DetourTransactionBegin();
+         DetourUpdateThread(GetCurrentThread());
+         DetourAttach(&(PVOID&)original_net_predict, hooked_net_predict);
+         if (DetourTransactionCommit() != NO_ERROR) original_net_predict = nullptr;
+      }
+      if (!original_net_predict)
+         install_log("[DualCannon] remote shoot animations follow the replay: NetGame::Predict "
+                     "%08X not hooked", (unsigned)g_addr->net_game_predict);
+   }
+   if (g_addr->net_read_event_build_call) {
+      const uint8_t* site  = retail ? kBuildSiteRtl : kBuildSiteDbg;
+      const size_t   len   = retail ? sizeof(kBuildSiteRtl) : sizeof(kBuildSiteDbg);
+      const uint8_t* setup = retail ? kBuildSetupRtl : kBuildSetupDbg;
+      const size_t   keep  = retail ? sizeof(kBuildSetupRtl) : sizeof(kBuildSetupDbg);
+      uint8_t* target = static_cast<uint8_t*>(resolve(exe_base, g_addr->net_read_event_build_call));
+      if (std::memcmp(target, site, len) == 0) {
+         uint8_t patch[32];
+         std::memcpy(patch, setup, keep);
+         x86::encode_branch(patch + keep, target + keep, x86::kCall, &net_build_ordnance,
+                            len - keep);
+         protected_write(target, patch, len);
+         s_buildSite     = target;
+         s_buildSiteOrig = site;
+         s_buildSiteLen  = len;
+      } else {
+         install_log("[DualCannon] remote guns keep the right pistol: unexpected bytes at "
+                     "ReadNetEvent %08X", (unsigned)g_addr->net_read_event_build_call);
+      }
+   }
+
+   install_log("[DualCannon] installed: ClassLabel \"dualcannon\" registers on mission load");
+}
+
+void dual_cannon_uninstall()
+{
+   if (original_net_predict) {
+      DetourTransactionBegin();
+      DetourUpdateThread(GetCurrentThread());
+      DetourDetach(&(PVOID&)original_net_predict, hooked_net_predict);
+      DetourTransactionCommit();
+      original_net_predict = nullptr;
+   }
+   if (s_buildSite) {
+      protected_write(s_buildSite, s_buildSiteOrig, s_buildSiteLen);
+      s_buildSite = nullptr;
+   }
+   if (!original_create_base_classes) return;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourDetach(&(PVOID&)original_create_base_classes, hooked_create_base_classes);
+   DetourDetach(&(PVOID&)original_fire, hooked_fire);
+   DetourDetach(&(PVOID&)original_first_person_init, hooked_first_person_init);
+   DetourDetach(&(PVOID&)original_class_render, hooked_class_render);
+   DetourTransactionCommit();
+   original_create_base_classes = nullptr;
+   original_fire                = nullptr;
+   original_first_person_init   = nullptr;
+   original_class_render        = nullptr;
+}

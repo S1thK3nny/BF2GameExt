@@ -64,18 +64,6 @@ using derive_method = void*(__thiscall*)(void*, uint32_t);
 
 constexpr uint32_t kBoneProperty = pbl_hash("HeldOrdnanceEffectBone");
 
-// Same case-sensitive CRC-32/BZIP2 as PblTEMPHash and tentacle bone names.
-uint32_t bone_hash(const char* text)
-{
-   uint32_t hash = 0xFFFFFFFF;
-   for (; *text; ++text) {
-      hash ^= static_cast<uint32_t>(static_cast<uint8_t>(*text)) << 24;
-      for (unsigned bit = 0; bit != 8; ++bit)
-         hash = (hash << 1) ^ ((hash & 0x80000000u) ? 0x04C11DB7u : 0);
-   }
-   return hash ^ 0xFFFFFFFF;
-}
-
 struct effect_handle {
    void* pointer = nullptr;
    uint32_t generation = 0;
@@ -152,7 +140,7 @@ void __fastcall set_property(void* cls, void*, uint32_t hash, const char* value)
    std::lock_guard<std::recursive_mutex> lock(g_mutex);
    if (!cls || !value || g_shuttingDown) return;
    if (*value)
-      g_bones[cls] = bone_hash(value);
+      g_bones[cls] = pbl_temp_hash(value);
    else
       g_bones.erase(cls); // A child can explicitly disable the inherited value.
 }

@@ -106,6 +106,9 @@
     <ClInclude Include="src\weapon\held_ordnance_effect_sites.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
+    <ClInclude Include="src\weapon\dual_cannon.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\shield_channel_fix.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -370,6 +373,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\held_ordnance_effect.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\dual_cannon.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\shield_channel_fix.cpp">

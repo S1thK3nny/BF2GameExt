@@ -1,0 +1,18 @@
+[WeaponClass]
+ClassParent         = "com_weap_inf_dualpistol"
+GeometryName        = "rep_weap_inf_pistol.msh"
+
+[Properties]
+
+GeometryName        = "rep_weap_inf_pistol"
+HighResGeometry         = "rep_1st_weap_inf_pistol"
+OrdnanceName        = "rep_weap_inf_pistol_ord"
+
+// ***********************************************
+// ************* DUAL CANNON ASPECTS  ************
+// ***********************************************
+
+OffhandFirePointName        = "hp_fire"
+OffhandGeometryName         = "rep_weap_inf_pistol"
+OffhandHardPoint            = "hp_weapons_2"
+AlternateMode               = "shot"

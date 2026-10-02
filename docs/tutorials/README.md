@@ -19,12 +19,14 @@ and run the Load munge.
 |--------|---------|
 | [`LoadingScreen-TeamModels`](../../GameAssets/Examples/LoadingScreen-TeamModels) | [Custom loading screens](loading-screen.md), step 4 |
 | [`LoadingScreen-BF1`](../../GameAssets/Examples/LoadingScreen-BF1) | [Custom loading screens](loading-screen.md), step 5 |
+| [`DualCannon`](../../GameAssets/Examples/DualCannon) | [dualcannon](../user/classlabels/dualcannon.md): dual pistol ODFs, a common parent plus the Republic child. Copy both into a side's `odf` folder. |
 
 ## Reference pages
 
 - [Features](../user/FEATURES.md) - everything the extension adds and fixes
 - [Lua API](../user/LUA_API.md) - functions callable from mission scripts
 - [ODF Properties](../user/ODF_PROPERTIES.md) - custom properties for soldier, weapon, ordnance and vehicle classes
+- [Class Labels](../user/classlabels/README.md) - new `ClassLabel` values, one page each
 - [Loading Screen](../user/LOADING_SCREEN.md) - every loading screen parameter
 - [HUD System](../user/HUD.md) - new HUD events, `TransformNumberMath` and `FillFrom`
 - [HUD Properties](../user/HUD_PROPERTIES.md) - every `.hud` event, property and transform parameter
