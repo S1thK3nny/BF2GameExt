@@ -1,26 +1,12 @@
-# Weapon Class Factory — adding a `ClassLabel`
+# Weapon Class Factory and the `dualcannon` ClassLabel
 
-How BF2 turns `ClassLabel = "cannon"` in a weapon ODF into a live C++ class, and what
-it would actually cost to register a new one (`dualcannon`, say) from the DLL.
+How BF2 turns `ClassLabel = "cannon"` in a weapon ODF into a live C++ class, how
+GameExt registers a new label from the DLL, and how the first one, `dualcannon`, is
+built on top of that. User documentation: [docs/user/classlabels/](../user/classlabels/README.md).
 
-All addresses are **Phantom** (`Battlefront2_Phantom.exe`, the named-PDB reference
-build) unless stated otherwise. See [Porting checklist](#porting-checklist) for what
-has to be derived per build before any of this can be implemented.
-
----
-
-## Verdict
-
-| Goal | Cost |
-|------|------|
-| A new `ClassLabel` that behaves exactly like an existing one | One allocation and one constructor call. Trivial. |
-| A new `ClassLabel` with its own ODF properties and its own fire behaviour | Two synthesized vtables and four overridden virtuals. Moderate, and bounded. |
-| Extra per-instance state on the new weapon | Free — we own every allocation of our own type. |
-
-There is no engine resistance here. The factory was written to be extended, the
-extension points are two pure virtuals, and nothing about the design is hostile to
-doing it from outside the exe. The hard part of any feature that wants a new
-ClassLabel is the feature, not the class plumbing.
+Addresses are unrelocated (imagebase `0x400000`) and modtools unless a column says
+otherwise. The full per-build list is in [Address reference](#address-reference).
+Code: `PatcherDLL/src/weapon/dual_cannon.cpp`.
 
 ---
 
@@ -28,296 +14,344 @@ ClassLabel is the feature, not the class plumbing.
 
 ### Registration
 
-`GameState::CreateBaseWeaponClasses` (`0x5DE580`) is a flat list of twenty
-allocations, one per stock ClassLabel:
+`GameState::CreateBaseWeaponClasses` (`0x0044C960`, `__cdecl`, plain `RET`) is a flat
+list of twenty allocations, one per stock label:
 
 ```cpp
-new WeaponCannonClass(PblHash("cannon"));       // operator new 0x3DC
-new WeaponLauncherClass(PblHash("launcher"));   //             0x3E4
-new WeaponMeleeClass(PblHash("melee"));         //             0x408
+new WeaponCannonClass(PblHash("cannon"));
+new WeaponLauncherClass(PblHash("launcher"));
+new WeaponMeleeClass(PblHash("melee"));
 ...
 ```
 
-The base constructor `WeaponClass::WeaponClass(uint hash)` (`0x7AC140`) does the
-registering itself. `WeaponClass` derives from `Factory<Weapon,WeaponClass,WeaponDesc>`,
-and the Factory sub-object is what carries the identity:
+The base `WeaponClass` constructor registers the object itself. `WeaponClass` derives
+from `Factory<Weapon,WeaponClass,WeaponDesc>`, and that sub-object carries the identity:
 
 | Offset | Field | Notes |
 |--------|-------|-------|
-| +0x00 | vptr | Factory vtable `0xA1C42C` during base construction, then the concrete class's |
-| +0x04 | `Node mNode` | intrusive list node, linked into `sList` |
+| +0x00 | vptr | |
+| +0x04 | `Node mNode` | intrusive list node, linked into `sList` (`0x00AD43BC`) |
 | +0x18 | `uint mId` | **the ClassLabel hash** |
-| +0x1C | `uint mIndex` | from `sCounter`, post-incremented |
+| +0x1C | `uint mNetIndex` | post-incremented from `sCounter` (`0x00B91BE8`) |
 
-Globals:
+Both the hash constructor and the copy constructor register and take an index, so
+**every ODF-derived weapon class consumes an index too**, not just the twenty base
+classes. `sCounter` warns above 254.
 
-| Item | Address |
-|------|---------|
-| `Factory<Weapon,WeaponClass,WeaponDesc>::sList._head` | `0xA9D0F4` |
-| ↳ `_head._pNext` (iteration start) | `0xA9D0F8` |
-| ↳ `_head._pPrev` | `0xA9D0FC` |
-| ↳ `_iCount` | `0xA9D104` |
-| `Factory<...>::sCounter` | `0xC73B90` |
+### Lifetime: per game state
 
-Both the hash constructor (`0x7AC140`) and the copy constructor (`0x7AC790`) register
-and take an index, so **every ODF-derived weapon class consumes an index too**, not
-just the twenty base classes.
+`CreateBaseWeaponClasses` has one caller, `GameState::PreStateInit` (call site
+`0x0044F1B7`), so the base classes are rebuilt on every mission load.
+`GameState::PostStateCleanup` unlinks `sList` and resets `sCounter`; on modtools it
+does not free the class objects. **Registration has to happen every time**, not once
+at DLL load. The hook point is `CreateBaseWeaponClasses` itself: call the original,
+then register. That re-runs per state and puts the new class at a fixed position.
+
+Class objects must come from the engine's `operator new` (`0x007E34A0`), never the
+DLL's CRT allocator.
 
 ### The ODF load path
 
-`WeaponClass::Read(PblFileChunk*)` (`0x7AE540`) is the munged-ODF reader and the only
-consumer of the registry. It walks the chunks:
+`WeaponClass::Read(PblFileChunk*)` is the munged-ODF reader and the only consumer of
+the registry:
 
 | Chunk | ASCII | What it does |
 |-------|-------|--------------|
-| `0x45534142` | `BASE` | reads the **ClassLabel** string, hashes it, and does a **linear scan of `sList` for a matching `mId`**. Miss → `RedWarning "Weapon base class \"%s\" not found"` (Weapon.cpp:0x644) |
-| `0x45505954` | `TYPE` | reads the weapon's own name, hashes it, scans `sList` to reject a duplicate, then calls **`base->Derive(nameHash)`** (vtable `+0x04`) to mint the per-ODF class. Stores the name in `StringDB` and resolves the localized label. |
-| `0x504f5250` | `PROP` | reads a **pre-hashed uint property id** plus its value string and calls **`derived->SetProperty(id, value)`** (vtable `+0x18`) |
+| `0x45534142` | `BASE` | reads the ClassLabel string, hashes it, **linear scan of `sList` for a matching `mId`**. Miss: `RedWarning "Weapon base class \"%s\" not found"` |
+| `0x45505954` | `TYPE` | reads the weapon's own name, scans `sList` to reject a duplicate (two ODFs with one name keep the first), then calls **`base->Derive(nameHash)`** (vtable `+0x04`) to mint the per-ODF class |
+| `0x504f5250` | `PROP` | reads a **pre-hashed** property id plus its value string and calls **`derived->SetProperty(id, value)`** (vtable `+0x18`) |
 
-Then it walks the charge chain calling `PostReadInit()` (vtable `+0x1C`).
+Consequences:
 
-Two consequences worth being explicit about:
+- **Registering one base object with the right `PblHash` is all a new label needs**
+  to resolve. Nothing is baked into a static table.
+- **Every per-ODF class comes from the base's `Derive`**, so it inherits whatever
+  vtable the base carries. There is no second registration step.
+- OdfMunge passes unknown ClassLabels and unknown property names straight through,
+  hashed. PblHash is FNV-1a over `(c | 0x20)`; `ToolsFL\bin\Hash.exe` is ground truth.
+- OdfMunge adds any property ending in `GeometryName` to the `.req`, so a new
+  `*GeometryName` property gets its model packed for free.
 
-- **Registering a base object with `PblHash("dualcannon")` is genuinely all it takes**
-  for `ClassLabel = "dualcannon"` to resolve in an ODF. The lookup is a hash compare
-  against a linked list, nothing is baked into a static table.
-- **The per-ODF class comes from our own `Derive`**, so every class the loader derives
-  from ours inherits our vtable automatically. There is no second registration step.
+### Multiplayer: `mNetIndex` is on the wire
 
-Property ids arrive **already hashed** from the munge, so a new ODF property name needs
-its PblHash computed up front. PblHash is FNV-1a over `(c | 0x20)`, not raw bytes —
-`ToolsFL\bin\Hash.exe <str>` is ground truth (see `docs/RE/` notes on PblHash).
+`mNetIndex` is sent in 8 bits in `NET_EVENT_CREATE_ORDNANCE` and resolved back by
+`ReadWeaponClass` (damage owner weapon, tow cable and melee throw type checks). One
+extra registration shifts the index of every class after it, so a peer without it
+would resolve the wrong class.
 
----
+The fix: a base class object is never itself a fire weapon, so after registering it
+takes `mNetIndex = 0xFF` (the "no class" value, which lookups reject before scanning)
+and gives its counter slot back (`sCounter--`). Maps that do not use the label then
+index exactly as stock. Classes derived from it take normal indices.
 
-## The vtable
+**A stock game crashes** loading a level that contains an ODF with a GameExt label:
+without our registration the `BASE` lookup finds no class for it. Tested with
+`dualcannon`, also when only a `WeaponName@GameExt` line references it, since the
+munge packs the weapon either way. Nothing on the DLL side can help, because stock
+never runs our code, so a mod that uses a GameExt label requires the extension.
 
-`WeaponClass` vtable `0xA1C440`; `WeaponCannonClass` vtable `0xA1CC6C`. Twelve slots:
+### Class objects and instances
 
-| Slot | Method | Needed for a new class? |
-|------|--------|--------------------------|
-| +0x00 | `scalar deleting destructor` | inherit |
-| +0x04 | **`Derive(uint hash) -> WeaponClass*`** | **override** — mints the per-ODF class; we choose the allocation size |
-| +0x08 | **`Build(WeaponDesc*) -> Weapon*`** | **override** — mints the instance; we choose the type and size |
-| +0x0C | `IsRtti(uint)` | inherit — keeps existing `IsRtti(WeaponCannon)` checks passing |
-| +0x10 | `GetDerivedRtti()` | inherit |
-| +0x14 | `GetDerivedRttiName()` | inherit |
-| +0x18 | **`SetProperty(uint nameHash, char* value)`** | **override** — new ODF properties, chain to the original for the rest |
-| +0x1C | `PostReadInit()` | inherit unless the new props need cross-validation |
-| +0x20 | `PostLoadInit()` | inherit |
-| +0x24 | `GetHeatPerSalvo()` | inherit |
-| +0x28 | `GetShotsPerSalvo()` | inherit |
-| +0x2C | `GetBarrageMin()` | inherit |
+| Class | modtools | Steam / GOG |
+|-------|----------|-------------|
+| `WeaponCannonClass` object | `0x3DC` | `0x2E0` |
 
-`Derive` and `Build` are the two pure virtuals on the `Factory` base — the Factory
-vtable is `{ scalar_deleting_destructor, _purecall, _purecall }`, so those two slots
-are the entire contract a concrete class has to satisfy.
+The size differs because the debug build carries extra `WeaponClass` members, so every
+**class-side** field offset differs between modtools and retail. `Weapon` and `Aimer`
+offsets match on all three builds, except `WeaponCannon::mSalvoCount`.
 
-Both are one-liners in every stock class:
-
-```cpp
-// WeaponCannonClass::Derive  (0x40EE12 thunk)
-WeaponCannonClass* Derive(uint hash) {
-    void* p = operator new(0x3DC);
-    return p ? WeaponCannonClass(p, this, hash) : nullptr;   // copy ctor
-}
-
-// WeaponCannonClass::Build  (0x4127EC thunk -> 0x7B52A0)
-WeaponCannon* Build(WeaponDesc* d) {
-    PostLoadInit();                                          // vtable +0x20
-    void* p = MemoryPool::Allocate(&Weapon::sMemoryPool, 0x1C0);
-    return p ? WeaponCannon(p, this, d) : nullptr;
-}
-```
-
-Synthesizing both vtables from the DLL is routine: `memcpy` `WeaponCannonClass`'s
-twelve slots and `WeaponCannon`'s into DLL-owned arrays, swap the slots we want, point
-our objects at them. Same technique `weapon/barrel_fire_origin.cpp` already uses,
-except allocating a fresh table instead of editing the engine's in place.
+Instances come from `Weapon::sMemoryPool` (`0x00B91C10`), a fixed-stride pool that only
+**warns** when a request exceeds its stride. A larger weapon object would mean raising
+the pool size before it is first used. GameExt avoids that entirely: extra state lives
+in side tables (below), so objects keep their stock size.
 
 ---
 
-## Allocation and sizes
+## Registering a new label from the DLL
 
-### Class objects
+What `dual_cannon.cpp` does, and what the next label should copy.
 
-Ours, entirely. `Derive` picks the size, so extra class-level fields (new ODF
-properties) just extend the object.
+1. **Hook `CreateBaseWeaponClasses`.** After the original returns, engine-`new` a
+   `WeaponCannonClass`-sized object and run the engine's own hash constructor
+   (`0x00625A10`, `__thiscall`, `RET 4`) with the new label's PblHash. Apply the
+   `mNetIndex = 0xFF` / `sCounter--` fix.
+2. **Re-point it at a DLL-owned copy of the class vtable** (13 slots, `0x00A525F4`).
+   Copy it lazily at the first registration, which is long after every install-time
+   vtable patch has landed (`barrel_fire_origin`, `held_ordnance_effect`), so the copy
+   inherits those hooks.
+3. **Override `Derive` and `Build` by chaining**, not allocating. Each calls the slot
+   it replaced, then re-points the new object's vptr at our class or instance vtable
+   (a DLL copy of the 61-slot `WeaponCannon` table, `0x00A52468`).
+   `held_ordnance_effect` hooks `Derive`, `SetProperty` and the destructor to keep its
+   own side tables in step with class inheritance; allocating in our `Derive` would
+   silently skip that.
+4. **Extra state goes in side tables**, keyed by `WeaponClass*` and `Weapon*`, never
+   in a larger object. `Derive` copies the parent's entry so properties inherit through
+   `ClassParent`. Both destructors erase their entry, and both tables are cleared on
+   every mission load, because the next state reuses the addresses.
+5. **`SetProperty` handles the new hashes** and forwards everything else to the slot
+   it replaced.
+6. **Instance behaviour** through instance vtable slots where the engine calls them
+   virtually, and detours (gated on our vptr, so every other weapon passes straight
+   through) where it does not.
 
-**But the engine frees it.** `GameState::PostStateCleanup` (`0x5DF0D0`) destroys every
-registered class, so the class object must come from the **engine's `operator new`**
-(`0x403BF7`), never the DLL's CRT allocator. Pairing our `malloc` with the engine's
-`operator delete` would corrupt the heap on mission teardown.
-
-| Class | Size |
-|-------|------|
-| `WeaponClass` | 0x304 |
-| `WeaponCannonClass` | 0x3DC |
-| `WeaponLauncherClass` | 0x3E4 |
-| `WeaponMeleeClass` | 0x408 |
-| `WeaponShieldClass` | 0x4A4 |
-
-### Instances
-
-`Build` allocates from `Weapon::sMemoryPool` (`0xC73BB8`), a shared fixed-stride pool.
-`MemoryPool::Allocate` strides its free list by `mSize`, and only **warns** when the
-requested size exceeds it — so overrunning `mSize` is silent heap corruption, not a
-failed allocation.
-
-The pool is declared with the *base* `Weapon` size (`MemoryPool(&pool, "Weapon", 0x140)`),
-which is smaller than most weapons. It gets raised at startup by a pass at `0x5CC620`
-that, for each weapon class size, does:
-
-```asm
-mov eax, [Weapon::sMemoryPool.mSize]
-cmp eax, <size>
-jae  skip
-push <size>
-mov  ecx, offset Weapon::sMemoryPool
-call MemoryPool::SetSize
-```
-
-Sizes fed to that pass: `0x140, 0x150, 0x160, 0x180, 0x190, 0x1C0, 0x1D0, 0x1E0,
-0x200` — so the pool settles at **0x200 (512)**, and `WeaponCannon` at `0x1C0` has
-headroom below that. (One `Build` site allocates `0x1A0` without a matching entry in
-the pass; harmless, since it is under the maximum, but it means the pass is a
-hand-maintained list rather than something generated, so a new class has to add
-itself.)
-
-`MemoryPool::SetSize` (`0x8B1FD0`) is public and refuses only once `mPool` is non-null,
-i.e. once the pool has actually been created (lazily, on the first `Allocate`). So a
-new weapon subclass **can** be larger than any stock weapon: call `SetSize` at
-registration time, exactly the way the engine's own pass does. A second ammo pool, a
-channel index, an alternation timer — all free.
-
-Pool count, separately, comes from mission Lua (`SetMemoryPoolSize("Weapon", n)` →
-`MemoryPool::SetCount`), which also drags `AmmoCounter` and `EnergyBar` up to match.
+Class vtable slots used: `+0x00` destructor, `+0x04` `Derive`, `+0x08` `Build`,
+`+0x18` `SetProperty`. Instance slots used: `+0x00` destructor, `+0x8C` `Render`.
 
 ---
 
-## Lifetime — this is per game state, not per process
+## `dualcannon`
 
-`GameState::CreateBaseWeaponClasses` has exactly one caller:
-`GameState::PreStateInit(bool)` (`0x5DF6D0`, call site `0x5DF97A`). The matching
-teardown is `GameState::PostStateCleanup(bool)` (`0x5DF0D0`), which destroys the
-registered classes and **resets `sCounter` to zero**.
+One weapon instance (one ammo pool) that draws a second model and alternates fire
+origin, muzzle flash and shoot animation between the two. A design with two real child
+weapons was rejected: a weapon outside the soldier's `Weapon*[8]` array gets no update,
+HUD, net or animation handling.
 
-So base weapon classes are built and torn down around every mission load.
-**Registration has to happen every time**, not once at DLL load.
+### Properties
 
-The clean hook is `CreateBaseWeaponClasses` itself: call the original, then register
-ours. That gets the timing right by construction, re-runs per state automatically, and
-puts our class at a deterministic position in the list every time.
+| Property | Hash | Stored as |
+|----------|------|-----------|
+| `OffhandGeometryName` | `pbl_hash` | `RedModel*` from `FindModel` (`0x00448670`, `__cdecl(PblHash)`) |
+| `OffhandHardPoint` | `pbl_hash` | `PblTEMPHash` of the name: a key into the soldier's `RedPose` |
+| `OffhandFirePointName` | `pbl_hash` | `PblTEMPHash`, default `hp_fire`, resolved to an offset with `RedModel::GetParentBoneAndOffset` (`0x007F9E50`, `__thiscall(crc, out)`, `RET 8`) |
+| `AlternateMode` | `pbl_hash` | `shot` (default) or `salvo` |
+| `FireAnim` | `pbl_hash` | swallowed with a warning: the gun that fires picks the state |
+
+The fire point is re-resolved whenever the model or the name changes, so the property
+order in the ODF does not matter. `Offhand*` names are safe on other classes: only
+`WeaponMelee::SetProperty` parses names like these, and a cannon falls through.
+
+### Drawing the second gun
+
+`Weapon::Render` (instance `+0x8C`) draws the main gun at `hp_weapons`, the muzzle
+flash, and bakes `mFirePointMatrix` (`+0x20`, translation at `+0x50`). After it, our
+override looks `OffhandHardPoint` up in the pose with
+`pbl_hash_table_find(pose + 4, 0x100, crc)`, multiplies that matrix by the world
+matrix and calls the offhand model's own `Render` (model vtable `+0x04`). It then bakes
+the offhand fire position into the weapon's side table under the same conditions
+`Weapon::Render` uses for the main one: not for an invisible draw (`color.a == 0`), and
+not for a mirrored matrix (negative determinant), so a reflection region's duplicate
+cannot overwrite the real position. A hidden weapon (`+0xAC` bit 0) skips the offhand.
+
+The engine's own dual wield (`OffhandWeapon` prop, `WeaponClass` flag, draws at
+`bone_l_hand`) is a two-channel system and is not used.
+
+**Spawn screen.** The preview soldier has no `Weapon` instance:
+`SoldierElement::RenderUsingContext` draws the selected weapon with the non-virtual
+`WeaponClass::Render` (`0x0061D170`, `__thiscall`, `RET 0x14`, sole caller
+`0x00674F0E`). A detour on it draws the offhand model with the same helper. Stock
+classes are not in the side table and pass straight through.
+
+### Alternating fire
+
+`WeaponCannon::Fire` (`0x00626490`) is non-virtual, has one caller
+(`WeaponCannon::UpdateFire`, `0x006276F5`), and builds the `OrdnanceDesc` from
+`Aimer::mFirePos` (`+0x88`) and `mDirection` (`+0x48`) on every call. `UpdateFire`
+calls it once per `ShotsPerShot` pellet and can call it several times a frame, so a
+per-shot origin needs a detour on `Fire`. (`UpdateFire` also calls `Weapon::EnterFire`
+directly between continuous salvos, so the `EnterFire` slot would miss salvos.)
+
+The detour decides the gun per call:
+
+- A **new shot** differs from the last call in mission time, in `mSalvoCount`, or has
+  already had all its `ShotsPerShot` pellets. Pellets of one shot keep the gun.
+- A **new salvo** is `mSalvoCount == ShotsPerSalvo`: the engine resets the count when
+  a salvo starts and counts it down.
+- `shot` mode switches gun on a new salvo; `salvo` mode on every new shot.
+
+For gun 2 it swaps `mFirePos` and `mDirection` for the offhand fire position and a
+direction from `barrel_fire_origin_aim_from` (the barrel fix's per-aimer impact point,
+so both guns converge on the crosshair), calls the original, and restores them,
+because the next call in the same frame may be gun 1.
+
+### Shoot animations
+
+Around the call the detour sets `Weapon::mState` (`+0xB0`) to `FIRE` (1) for gun 1
+and `FIRE2` (2) for gun 2, only ever swapping between those two, which every consumer
+treats alike. `SoldierAnimatorClass::WeaponStateToAnimation` maps them to `SHOOT` /
+`SHOOT2`, or `SHOOT_SECONDARY` / `SHOOT_SECONDARY2` in the secondary slot. The engine
+normally enters fire as `(FireAnim & 3) + FIRE`, which is why `FireAnim` is ignored.
+
+A bank with no `shoot2` clip falls back up the bank and weapon chain like any missing
+animation. An animation `.msh` exported without its animation chunks is dropped from
+the `.anims` list by the munge with no message.
+
+### Muzzle flash
+
+The flash belongs to the gun that fired last. `Weapon::Render` draws it at the main
+fire point via `WeaponClass::RenderFlash` (`0x0061CA80`), timed by
+`mMuzzleFlashStartTime` (`+0xC4`). For gun 2 the override zeroes that timer around the
+base `Render`, then calls `RenderFlash` itself at the offhand fire position with
+`t = (start - now) / mFlashLength`. `FlashLightColor` / `FlashLightRadius` /
+`FlashLightDuration` have no consumer in any build, so there is no flash light to move.
+
+### First person: stale `shoot2` slots
+
+`FIRE2` makes a latent engine bug reachable. First person picks its animation from
+`FirstPerson::mAnim[weaponClass * 11 + state]` (48 slots), filled by
+`FirstPerson::Init` (`0x004AB590`) on every `ingame.lvl` load: named slots are looked
+up, and slots still null afterwards get `humanfp_tool_idle`. The `shoot2` slot (state
+3) has no name for the rifle, bazooka and tool classes, so `Init` never touches it and
+it keeps the previous level's pointer, freed by then. Stock never reaches those slots
+because only a grenade enters `FIRE2`. The crash was an access violation in
+`ZephyrAnimInst<32>::SetAnim` from `FirstPersonRenderable::SetAnimation`. A detour on
+`Init` clears all 48 slots first, so every unnamed slot is refilled from the level
+being loaded.
+
+First person draws only `HighResGeometry`; the offhand model is third person only.
+
+### Multiplayer
+
+The host creates every bolt and sends its **position** in the create ordnance event,
+so the host's choice of gun replicates for free. Three client-side problems needed
+work, all without new data on the wire.
+
+**1. A client fires its own weapon in several net turns.** `WeaponCannon::Fire` only
+creates ordnance in the local turn: with `netEnabled && netOnClient && !netIsLocalTurn`
+(`0x00BDA95D`, test at `0x006269CD`) it returns "fired" and creates nothing. Those calls
+must not advance the gun.
+
+**2. Client prediction replays turns.** `NetGame::Predict` (`0x006E8970`) rewinds to
+the host snapshot every frame and re-simulates every unacknowledged turn.
+`WeaponCannon::Read` restores `mSalvoCount`, so the salvo-start turn replays with
+`mSalvoCount == ShotsPerSalvo` and a gun switch would run once per replay. With a
+steady ping that is the same number of flips per shot, so the same gun fires every
+time. Gate 1 covers this too, because only the newest turn is the local turn.
+
+**3. Other players' guns on a client.** A weapon is remote when
+`NetGame::GetJoystickIndex(owner->mPlayerId)` (`0x006E3C80`, owner `+0xD4`) is
+negative, the same test `Fire` uses. The detour leaves remote weapons alone. The
+client's replay re-enters plain `FIRE`, so the replicated `mState` never survives to
+render and cannot pick the gun. Instead:
+
+- **Gun and flash** come from the event. The ordnance factory `Build` call in
+  `ReadNetEvent`'s create ordnance case (`0x006EC534`, 15 bytes, byte-guarded) is
+  rewritten to `net_build_ordnance`, which calls the factory, then picks the gun whose
+  fire point is nearer the event's position (`OrdnanceDesc +0x00`, firing weapon at
+  `+0x44`) and starts the remote flash.
+- **Shoot animation**: `EntitySoldier::Render` plays shoot / shoot2 from `mState` when
+  the weapon's fired flag (`+0xAC` bit 1) is set, and with networking on it substitutes
+  `FIRE` / `FIRE2` from the weapon slot when `mState` is neither. That choice comes
+  before the weapon renders, so our `Render` is too late. Frame order is events, then
+  `Predict`, then render, so a detour on `Predict` runs after the replay: for remote
+  dual weapons it clears the fired flag unless a host event is pending, and otherwise
+  sets the flag and `mState = FIRE / FIRE2`. Our `Render` restores `mState` afterwards.
+
+Tested with a modded host and client: both guns, flash and shoot animations match the
+host on every machine (the remote animation can be off for the first few seconds).
+
+**Open:** other players' bolts are white on a client. Laser colour is the ordnance
+class `mGlowColor` times `Ordnance::mRenderColor` (white unless a team bonus applies),
+and `CreateOrdnance` is the same `mOrdnanceClass->Build` call on both sides. Suspect:
+the event's 8-bit ordnance index resolving to another class on the client. Not yet
+known whether stock weapons do it. Tracked in `ROADMAP.md`.
+
+### Retail differences
+
+Steam and GOG are not a table fill. On top of the per-build addresses:
+
+- **`WeaponClass::RenderFlash` takes `t` in XMM3** (call site Steam `0x006794D4`),
+  `RET 8` with only pos and dir on the stack. Modtools is `RET 0xC` with three stack
+  args. Bridged by a naked thunk (`render_flash_retail`).
+- **`GameLoop::GetMissionTime` returns in XMM0** on retail (`MOVSS XMM0,[EBP-4]` at
+  Steam `0x00530EBC`), ST(0) on modtools. A `float(__cdecl*)()` typedef reads ST(0), so
+  a second thunk (`mission_time_xmm`) moves the value. Any float-returning engine
+  function needs this check on retail.
+- **`WeaponClass::Render` substitutes a constant `0x04000000`** for the model's render
+  flags on retail (Steam `0x0067BFA6`, GOG `0x0067D046`) instead of forwarding its own.
+  The spawn screen offhand draw must match it. `Weapon::Render` forwards on every build.
+- **Class-side offsets differ** (table below). `ShotsPerShot` has no key of its own
+  (`PblHash("ShotsPerShot")` has zero sites, the field has two alias keys) and was read
+  from `UpdateFire`'s `CMP EAX,[ECX+0x27C]` (Steam `0x0067ED96`).
+
+Each pair of raw function pointers (`*St0` / `*Xmm`, `*St` / `*Retail`) is reachable
+only through its `call_*` wrapper, so a missed call site cannot jump through a null.
 
 ---
 
-## Constraints and risks
+## Address reference
 
-**Verified:**
+Unrelocated. GOG came from `tools/port_gog.py` off Steam (every entry score 1.00) and
+the offsets were re-read out of the GOG image.
 
-- **`sCounter` warns above 254** (`Factory.h:0x1D`, `"Factory::sCounter=%lu"`). It counts
-  *every* weapon class, including one per ODF, so a level with many weapons is already
-  consuming most of the range. A new base class costs exactly one.
-- **`operator new` / `operator delete` must be the engine's** (see above).
-- **`WeaponClass::Read` rejects a duplicate `TYPE` hash**, so two ODFs with the same
-  weapon name silently keep the first. Not new, but relevant when testing.
-- **The `BASE` lookup is a linear scan**, so registration order does not affect
-  correctness of the lookup, only `mIndex`.
+| Item | Modtools | Steam | GOG |
+|------|----------|-------|-----|
+| `GameState::CreateBaseWeaponClasses` | `0x0044C960` | `0x00539AA0` | `0x0053A810` |
+| engine `operator new` | `0x007E34A0` | `0x006C3540` | `0x006C45D0` |
+| `WeaponCannonClass(uint hash)` | `0x00625A10` | `0x00680050` | `0x006810D0` |
+| `WeaponCannonClass` vtable (13 slots) | `0x00A525F4` | `0x007B0674` | `0x007B15EC` |
+| `WeaponCannon` vtable (61 slots) | `0x00A52468` | `0x007B057C` | `0x007B14F4` |
+| `Factory<Weapon,...>::sCounter` | `0x00B91BE8` | `0x01FAA758` | `0x01FABC08` |
+| `FindModel(PblHash)` | `0x00448670` | `0x00411C50` | `0x00411C50` |
+| `RedModel::GetParentBoneAndOffset` | `0x007F9E50` | `0x006C41E0` | `0x006C5270` |
+| `WeaponCannon::Fire` | `0x00626490` | `0x0067F320` | `0x006803A0` |
+| `WeaponClass::RenderFlash` | `0x0061CA80` | `0x0067BD30` | `0x0067CDD0` |
+| `GameLoop::GetMissionTime` | `0x00732E60` | `0x00530EA0` | `0x00531BF0` |
+| `FirstPerson::Init` | `0x004AB590` | `0x00521000` | `0x00521000` |
+| `WeaponClass::Render` | `0x0061D170` | `0x0067BF00` | `0x0067CFA0` |
+| `netIsLocalTurn` | `0x00BDA95D` | `0x01E62F10` | `0x01E643C0` |
+| `NetGame::GetJoystickIndex` | `0x006E3C80` | `0x005B73C0` | `0x005B8370` |
+| `ReadNetEvent` ordnance `Build` site | `0x006EC534` (15 B) | `0x005BF327` (20 B) | `0x005C02B7` (20 B) |
+| `NetGame::Predict` | `0x006E8970` | `0x005BA810` | `0x005BB7C0` |
 
-**Not verified — needs checking before shipping, not after:**
+| Offset | Modtools | Steam / GOG |
+|--------|----------|-------------|
+| `WeaponClass` `mFlashLength` | `0x290` | `0x1B8` |
+| `WeaponClass` `ShotsPerSalvo` | `0x354` | `0x280` |
+| `WeaponClass` `ShotsPerShot` | `0x358` | `0x27C` |
+| `WeaponCannon` `mSalvoCount` | `0x144` | `0x114` |
+| `WeaponCannonClass` size | `0x3DC` | `0x2E0` |
 
-- **What consumes `Factory::mIndex` (+0x1C).** The 254 cap implies a byte-wide consumer
-  somewhere. `Weapon::Write(NetPktGroup*)` (`0x6E2880`) does **not** write a class index
-  — it writes state, ammo, energy, zoom and aimer data only — so the obvious MP theory
-  is unconfirmed. Until the consumer is found, assume index stability matters and keep
-  registration at a fixed point in the order.
-- **Mixed modded / unmodded MP.** If `mIndex` does reach the wire anywhere, a client
-  without the extra class disagrees with one that has it from the first ODF onward.
-- **Save games.** Untraced. If anything persists a class index rather than a hash, the
-  same concern applies.
-
----
-
-## What a `dualcannon` would actually take
-
-1. Hook `GameState::CreateBaseWeaponClasses`; after the original returns, engine-`new`
-   a `WeaponCannonClass`-sized (or larger) object and run the hash constructor with
-   `PblHash("dualcannon")`.
-2. Point it at a DLL-owned copy of the `WeaponCannonClass` vtable with `Derive`,
-   `Build` and `SetProperty` replaced.
-3. `Derive` allocates our size and chains the `WeaponCannonClass` copy constructor, then
-   re-points the vptr at our table.
-4. `Build` raises the pool item size if needed, allocates, chains the `WeaponCannon`
-   constructor, re-points the instance vptr at a DLL-owned copy of the `WeaponCannon`
-   vtable.
-5. `SetProperty` handles the new hashes (`OffhandHardPoint`, alternation mode, …) and
-   forwards everything else to the original.
-6. Override whichever of `Fire` / `UpdateFire` / `CheckFire` the behaviour needs.
-
-Steps 1–5 are plumbing and are the part this document says is cheap. Step 6 is the
-feature.
-
----
-
-## Address reference (Phantom, base 0x400000)
-
-| Item | Address |
-|------|---------|
-| `GameState::PreStateInit(bool)` | `0x5DF6D0` (calls the below at `0x5DF97A`) |
-| `GameState::CreateBaseWeaponClasses` | `0x5DE580` |
-| `GameState::PostStateCleanup(bool)` | `0x5DF0D0` |
-| `WeaponClass::WeaponClass(uint hash)` | `0x7AC140` |
-| `WeaponClass::WeaponClass(const WeaponClass*, uint hash)` | `0x7AC790` |
-| `WeaponCannonClass::WeaponCannonClass(uint hash)` | `0x7B4C90` (thunk `0x411A5E`) |
-| `WeaponCannonClass::WeaponCannonClass(const WeaponCannonClass*, uint hash)` | `0x7B4EC0` (thunk `0x41002D`) |
-| `WeaponClass::Read(PblFileChunk*)` | `0x7AE540` |
-| `WeaponClass::Derive` / `Build` | thunks `0x4197C7` / `0x41794F` |
-| `WeaponCannonClass::Derive` / `Build` | thunks `0x40EE12` / `0x4127EC` (Build body `0x7B52A0`) |
-| `Weapon::Render` | `0x7AE8C0` (see [barrel-fire-origin.md](barrel-fire-origin.md)) |
-| `Weapon::Write(NetPktGroup*)` | `0x6E2880` (thunk `0x40998F`) |
-| Factory vtable | `0xA1C42C` |
-| `WeaponClass` vtable | `0xA1C440` |
-| `WeaponCannonClass` vtable | `0xA1CC6C` |
-| `Weapon` vtable | `0xA1C30C` |
-| `Factory<Weapon,WeaponClass,WeaponDesc>::sList._head` | `0xA9D0F4` |
-| `Factory<Weapon,WeaponClass,WeaponDesc>::sCounter` | `0xC73B90` |
-| `Weapon::sMemoryPool` | `0xC73BB8` |
-| ↳ pool item-size raise pass | `0x5CC620` |
-| `MemoryPool::MemoryPool(char* name, int size)` | `0x8B1710` (thunk `0x4179C7`) |
-| `MemoryPool::Allocate(uint size)` | `0x8B1820` (thunk `0x4188B8`) |
-| `MemoryPool::SetSize(uint)` | `0x8B1FD0` (thunk `0x418179`) |
-| `MemoryPool::Setup(count, size, grow)` | `0x410807` |
-| `operator new` | `0x403BF7` |
-| `PblHash::PblHash(char*)` | `0x404AED` |
-
-### Porting checklist
-
-Nothing here is implemented, so nothing has been ported yet. A proof of life needs
-these derived for modtools, Steam and GOG:
-
-- `GameState::CreateBaseWeaponClasses` (the hook point)
-- `WeaponCannonClass` hash constructor and copy constructor
-- `WeaponCannon` constructor
-- `WeaponCannonClass` and `WeaponCannon` vtables (for the memcpy source)
-- `operator new`
-- `Weapon::sMemoryPool` and `MemoryPool::SetSize`
-- `PblHash::PblHash` (or reuse the existing `hash_string` entry in `game_addrs.hpp`)
-
-Code addresses port with `tools/port_gog.py code` from Steam; Steam comes off the
-modtools→Steam pass in `docs/RE/` (see `project_steam_hook_porting`). Vtables and
-globals are data addresses — port them through a referencing instruction, or read the
-vtable out of the class constructor's `mov [reg], imm32`, which is how the barrel fix's
-slots were confirmed.
+Shared `Weapon` fields (all builds): `mOwner +0x6C`, `mClass +0x64`,
+`mRenderClass +0x68`, `mAimer +0x70`, flags `+0xAC` (bit 0 hide, bit 1 fired),
+`mState +0xB0`, `mMuzzleFlashStartTime +0xC4`, `mFirePointMatrix +0x20`.
+`Aimer`: `mDirection +0x48`, `mFirePos +0x88`.
 
 ---
 
 ## Related
 
-- [barrel-fire-origin.md](barrel-fire-origin.md) — vtable patching of `WeaponCannon` /
-  `WeaponLauncher` in practice, including the `__thiscall`-under-LTCG check that any new
-  virtual override will need repeating.
-- `ROADMAP.md` → Soldiers → **Improved dual pistols**, the feature this was scoped for.
-  The open design question there (real second `Weapon` instance vs one weapon
-  alternating its fire origin, and whether to extend the engine's existing dual-wield
-  notion of "channel 1 on the reload trigger") is unaffected by anything in this
-  document and is the decision that actually needs making first.
+- [barrel-fire-origin.md](barrel-fire-origin.md): vtable patching of `WeaponCannon` /
+  `WeaponLauncher`, and the per-aimer impact point the second gun aims with.
+- [FirstPersonAnimationSystem.md](FirstPersonAnimationSystem.md): the first person
+  animation table.

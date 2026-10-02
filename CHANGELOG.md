@@ -45,6 +45,12 @@ Scripts can check the running version through `GameExt.version`.
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#soldier-classes).
+- **`dualcannon` weapon class** - A `cannon` with a second gun in the soldier's other
+  hand (`OffhandGeometryName`, `OffhandHardPoint`, `OffhandFirePointName`) that fires
+  from each gun in turn, per trigger pull or within a salvo (`AlternateMode`). Each gun
+  has its own muzzle flash and plays `shoot` or `shoot2`. Works in multiplayer. A game
+  without BF2GameExt crashes loading a level that contains one.
+  See [dualcannon](docs/user/classlabels/dualcannon.md).
 - **`player1.reticule.horizonRotation`** - A camera-driven HUD rotation event for
   world-up reticules, including banked and inverted views. Bind `EventRotation`
   on an unscaled pivot with artwork sizing in a child group; position and native

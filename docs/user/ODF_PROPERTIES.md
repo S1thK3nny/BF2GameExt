@@ -32,7 +32,15 @@ WeaponAmmo         = 6
 
 Only slot 1 changes. The other slots are untouched, and no extra weapon is added.
 
-**What it cannot do.** `ClassLabel` is decided before any property is read, so `ClassLabel@GameExt` does nothing: a GameExt-only class still needs its own ODF. `[InstanceProperties]` and world layer overrides are also not covered.
+**What it cannot do.** `ClassLabel` is decided before any property is read, so `ClassLabel@GameExt` does nothing: a GameExt-only class still needs its own ODF. Pointing an `@GameExt` line at such an ODF does not keep it away from a stock game either: the ODF is packed into the level all the same, and a game without the extension crashes loading it (see [Class Labels](classlabels/README.md)). `[InstanceProperties]` and world layer overrides are also not covered.
+
+## New Class Labels
+
+Whole new `ClassLabel` values, each with its own properties, are listed in **[Class Labels](classlabels/README.md)**, one page per label.
+
+| ClassLabel | Description | Since |
+|------------|-------------|-------|
+| [`dualcannon`](classlabels/dualcannon.md) | A `cannon` with a second gun in the other hand, firing from each in turn. | 1.1.0 |
 
 ## Soldier Classes
 
