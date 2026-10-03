@@ -411,6 +411,10 @@ Walkers (`walker` and `commandwalker` classes) take five shakes. Each follows wh
 | `BoostShake` | While the walker boosts, which only a class with a `BoostSpeed` above its `MaxSpeed` can. In full while it is still speeding up, then `Steady` of that. | The walker's speed, as for `StepShake`. | `"MaxSpeed BoostSpeed"` |
 
 - **Which way a step rolls:** `StepShakeRoll` sets how far; the shake tips the view toward the foot that landed, left for a left foot and right for a right one. BF2 numbers the feet in the order the ODF gives `TerrainLeft` and `TerrainRight`, left first in every stock walker; a class that lists a right foot first rolls the other way. A step landing both sides at once picks a side at random.
+- **Steps that never come:** `StepShake` plays only for the steps BF2 counts, the same ones that play the stomp effect and footstep sound.
+  - Each `TerrainLeft` and `TerrainRight` must name a collision primitive exactly as the model spells it (`p_-tbv-sphere_foot1`, not `p_-tbv_sphere_foot1`). BF2 silently drops a foot whose name the model lacks, and a walker with none never lands a step.
+  - With `StompDetectionType = "1"`, a foot counts a step only when it comes down fast enough. Stock BF2 asks for more than 0.1 m in a single frame, so the higher the frame rate, the fewer steps count. `[Fixes] WalkerStompFix` (on by default) makes that 3 m/s at any frame rate. The default, type 0, does not depend on the frame rate.
+  - `[Diagnostic] WalkerFootDiag=1` logs each foot's steps, how fast it came down and whether the step counted.
 - **Speeds:** a walker has `MaxSpeed` and `BoostSpeed`. It has no `MinSpeed`, which reads as `0`, and no cruising speed, so `MidSpeed` reads as `MaxSpeed`.
 - **Steady:** a walker's `BoostShakeSteady` defaults to `1`, so the sway lasts for the whole boost.
 - **Dying walkers** stop stepping and swaying; the stock death shake plays through `BlastShake` as before.

@@ -1035,6 +1035,20 @@ namespace modtools {
    // than %.1f energy", "WeaponMelee: hit pObj[%p] ... DEFLECTED").
    constexpr uintptr_t weapon_melee_update_fire     = 0x00639020;
    constexpr uintptr_t weapon_melee_deflect         = 0x00637670;
+   // EntityWalker::DoFootImpactEffects: thiscall(), plain RET. Counts each
+   // foot's landing (its mFootState bit, the stomp effect, the footstep sound).
+   // Its one caller is EntityWalker::UpdateState, once per update, at
+   // 0x0055BC98 through the thunk at 0x0040C329. The walker foot diagnostic
+   // detours it (entity/walker_foot_diag.cpp).
+   constexpr uintptr_t walker_do_foot_impact_effects = 0x00555B60;
+   // EntityWalker::UpdateState: thiscall(float dt, float, float, float*, float),
+   // RET 0x14, reached through the walker vtables (via the thunk at 0x004022B1);
+   // dt is the update's length. Inside DoFootImpactEffects, StompDetectionType
+   // 1's one compare with 0.1: FCOMP dword [0x00A2C074]. The walker stomp fix
+   // detours the first and points the second at its own value
+   // (entity/walker_stomp_fix.cpp).
+   constexpr uintptr_t walker_update_state          = 0x0055B3C0;
+   constexpr uintptr_t walker_stomp_drop_site       = 0x00555D0F;
    constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
@@ -2287,6 +2301,16 @@ namespace steam {
    // of the one Weapon vtable (0x007B1578) whose IsMelee (+0x54) returns true.
    constexpr uintptr_t weapon_melee_update_fire     = 0x0068C230;
    constexpr uintptr_t weapon_melee_deflect         = 0x0068A550;
+   // EntityWalker::DoFootImpactEffects, as on modtools; UpdateState calls it
+   // at 0x00503214.
+   constexpr uintptr_t walker_do_foot_impact_effects = 0x00500710;
+   // EntityWalker::UpdateState, as on modtools (vtable slot +0x12C). Type 1's
+   // two reads of 0.1: COMISS XMM0,[0x007B1F60] re-arms a foot, MOVSS
+   // XMM1,[0x007B1F60] lands it. UpdateState compares another field with the
+   // same constant (0x005028DA), so only these operands move.
+   constexpr uintptr_t walker_update_state          = 0x00502890;
+   constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
+   constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
@@ -2866,6 +2890,14 @@ namespace gog {
    // of the one Weapon vtable (0x007B24F0) whose IsMelee (+0x54) returns true.
    constexpr uintptr_t weapon_melee_update_fire     = 0x0068D2C0;
    constexpr uintptr_t weapon_melee_deflect         = 0x0068B5E0;
+   // EntityWalker::DoFootImpactEffects, at Steam's address; UpdateState calls
+   // it at 0x00503214.
+   constexpr uintptr_t walker_do_foot_impact_effects = 0x00500710;
+   // EntityWalker::UpdateState and type 1's two reads of 0.1, at Steam's
+   // addresses; the constant here is at 0x007B2ED8.
+   constexpr uintptr_t walker_update_state          = 0x00502890;
+   constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
+   constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;

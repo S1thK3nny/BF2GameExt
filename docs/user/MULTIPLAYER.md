@@ -150,6 +150,7 @@ Labels answer one question: **what happens if only some machines have it.**
 | BlurDownsizeClamp | **SAFE** | Local post-process only. |
 | ErrorDialogFix | **SAFE** | Local only. Note it can mask a real fault on a headless host — keep logging on if you suppress dialogs. |
 | FlyerRollThrottleFix | **UNTESTED** | Changes a pilot's own throttle and roll in `PlayerController::Update`, on whichever machine runs their controller, before the flyer reads them. Whether a client's uploaded pad state carries the full throttle to the host, or a vanilla host caps it again (the client would then mispredict through every roll and be pulled back), has not been checked. Set 0 to fly exactly like vanilla peers until it is tested. |
+| WalkerStompFix | **SAFE** | Local presentation: which walker steps play their stomp effect, footstep sound and rumble, on each machine for what it draws. The landed bits it changes feed nothing else (`DoFootImpactEffects` sets them, `UpdateState` clears them, and a modtools debug overlay reads them); nothing on the wire. |
 
 ### LimitIncreases
 
@@ -180,6 +181,7 @@ Labels answer one question: **what happens if only some machines have it.**
 | ContentCensusNames | **SAFE** | Read-only; adds name resolution to the above. |
 | AIUpdateDiag | **SAFE** | Read-only; host-side only in practice since clients run no AI. |
 | PoolGrowthDiag | **SAFE** | Read-only; the fastest way to find which pool an unpatched client would have overrun. |
+| WalkerFootDiag | **SAFE** | Read-only; logs only the walker the local player drives. |
 
 ---
 
@@ -194,7 +196,7 @@ Labels answer one question: **what happens if only some machines have it.**
 ### Ban / leave off, on the host
 - **AimAssist — hard off.** With a controller plugged into the host it applies to and transmits assist for every remote player. Off until the local-player gate is added to `hooked_PCUpdate`.
 - **Prone — off unless you control the client population.** It is the only feature that transmits a posture value to peers whose handling of it was never verified.
-- **Diagnostics off** in production (SoundDiagnostic, BranchRegionDebug, ContentCensus\*, AIUpdateDiag, PoolGrowthDiag, GameLogging). Enable them on a test host, not a live one.
+- **Diagnostics off** in production (SoundDiagnostic, BranchRegionDebug, ContentCensus\*, AIUpdateDiag, PoolGrowthDiag, WalkerFootDiag, GameLogging). Enable them on a test host, not a live one.
 - **Do not ship a map over 1024 named instances or 254 entity classes** unless you require the DLL in your join rules. Run ContentCensus first.
 
 ### Tell joiners

@@ -65,6 +65,13 @@ multiplayer. Fly a GameExt client on a vanilla host and on a GameExt host, and r
 throttle held: the flyer should keep its speed without rubber-banding. If the host caps a remote
 pilot's input again, keep the fix to the host's own pilot (or off for clients).
 
+**Per-walker stomp speed** - `[Fixes] WalkerStompFix` lands a `StompDetectionType = "1"`
+walker's step once its foot comes down faster than 3 m/s, the same for every walker. A
+slow-footed walker's steps can still go unlanded: the AT-TE's first steps from a standstill
+come down at 2.6 to 2.8 m/s. Add an ODF property (for example `StompDetectionSpeed`, in m/s,
+inheriting through `ClassParent`) that sets the speed per class, read where the fix sets the
+test for each walker's update.
+
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
 The fix is to add an additional check to the AI spawning code to check if the CommandFlyer is flying, and if so, 

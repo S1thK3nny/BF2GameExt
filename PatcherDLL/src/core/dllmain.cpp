@@ -38,6 +38,8 @@
 #include "entity/command_post_overflow_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
+#include "entity/walker_foot_diag.hpp"
+#include "entity/walker_stomp_fix.hpp"
 #include "util/sound_diag.hpp"
 #include "util/game_log_lock.hpp"
 #include "util/voice_limit.hpp"
@@ -291,6 +293,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_mpSpawnDelay              = cfg.get_float("Features", "MPSpawnDelay", 15.0f);
       g_impactSoundWaterFix       = cfg.get_bool("Fixes", "ImpactSoundWaterFix", true);
       g_flyerRollThrottleFix      = cfg.get_bool("Fixes", "FlyerRollThrottleFix", true);
+      g_walkerStompFix            = cfg.get_bool("Fixes", "WalkerStompFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
@@ -298,6 +301,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
+      g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
       g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
@@ -377,6 +381,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
    camera_shake_install(exe_base);            // after odf_gameext_props: its ODF listeners
+   walker_stomp_fix_install(exe_base);        // Detours .text and moves two operands — needs the RW window
+   walker_foot_diag_install(exe_base);        // Detours .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);

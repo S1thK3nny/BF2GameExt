@@ -168,6 +168,9 @@
     <ClInclude Include="src\entity\award_disable.hpp" />
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
     <ClInclude Include="src\entity\flyer_roll_throttle_fix.hpp" />
+    <ClInclude Include="src\entity\walker_foot_diag.hpp" />
+    <ClInclude Include="src\entity\walker_foot_diag_core.hpp" />
+    <ClInclude Include="src\entity\walker_stomp_fix.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\entity\attached_effects_cleanup.hpp" />
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
@@ -257,6 +260,8 @@
     <ClCompile Include="src\entity\award_disable.cpp" />
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
     <ClCompile Include="src\entity\flyer_roll_throttle_fix.cpp" />
+    <ClCompile Include="src\entity\walker_foot_diag.cpp" />
+    <ClCompile Include="src\entity\walker_stomp_fix.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\attached_effects_cleanup.cpp" />
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />

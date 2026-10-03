@@ -554,16 +554,54 @@ share the walker code at the same addresses. Field offsets and the sites they we
 are in `core/layout/walker.hpp`; the ABI audit checks them.
 
 - **Steps.** `EntityWalker::DoFootImpactEffects` (Phantom `0x00595470`) walks the feet
-  (`mNumFeet`, class data `+0x676`). When one lands (by height against `StompThreshold`, or
-  for `StompDetectionType = "1"` by a 0.1 band) it sets the controllers' stomp rumble
+  (`mNumFeet`, class data `+0x676`). When one lands it sets the controllers' stomp rumble
   (`StompRumbleLight`/`Heavy` and durations), plays the FoleyFX and `FootstepSound`, attaches
   `StompEffect`, and sets that foot's bit in `mFootState`; a foot that did not land has its
   bit cleared. The bit is on for exactly the update the foot lands in, so a bit coming on is
   a step. `StepShake` plays once for all the feet that came on together.
+- **When a foot lands.** Each update takes the foot's height over the walker's origin
+  (world y less the walker's) and compares it with the height it had last update
+  (`mLastFootHeight`) and the lowest it has ever been (`mMinFootHeight`, never reset):
+  - `StompDetectionType` 0, the default: the update the foot, coming down, passes below
+    its lowest plus `StompThreshold` (0.15 unless the ODF sets it). This does not depend on
+    the frame rate, but since the lowest is never reset, a foot that once sat low (on a
+    slope or in a dip) can stop landing on flat ground.
+  - `StompDetectionType` 1: an armed foot lands the first update it drops less than 0.1,
+    and landing disarms it (`mFootState` bit 24 + its number). A disarmed foot is re-armed
+    only by a drop of more than 0.1 in a single update. So a foot lands only if it comes
+    down faster than 0.1 per update: 3 m/s at 30 updates a second, 6 at 60, 14.4 at 144.
+    The faster the frame rate, the fewer feet land.
+  - `[Diagnostic] WalkerFootDiag` (`entity/walker_foot_diag.cpp`) detours the function
+    (modtools `0x00555B60`, Steam and GOG `0x00500710`; its one caller is `UpdateState`,
+    once per update) and logs, for the walker the player drives, each foot's descents with
+    their biggest single-update drop and whether they landed.
+  - Measured with it on modtools at about 60 fps (2026-10-03), the user's AT-TE (type 1)
+    brings its feet down at 4 to 5.5 m/s when walking, 0.06 to 0.09 an update, and most of
+    those steps never landed; boosting, at 7 to 12 m/s, every step landed.
+  - `[Fixes] WalkerStompFix` (`entity/walker_stomp_fix.cpp`) makes type 1's test a speed:
+    BF2's 0.1 at 30 updates a second, 3 m/s, at any frame rate. `EntityWalker::UpdateState`
+    (modtools `0x0055B3C0`, Steam and GOG `0x00502890`; thiscall, RET 0x14, through the
+    walker vtables) takes the update's length as its first argument, the one it adds to
+    `m_fGroundedTimer`. Its detour sets GameExt's value to 3 x that length before the call,
+    and type 1's reads of the 0.1 (modtools' one FCOMP at `0x00555D0F`; retail's COMISS at
+    `0x00500888` and MOVSS at `0x0050089D`) are pointed at it. The constant stays: retail
+    `UpdateState` compares another field with it (`0x005028DA`). The landed bits feed only
+    the stomp presentation (`DoFootImpactEffects` sets them, `UpdateState` zeroes them on a
+    state change, and a modtools debug overlay at `0x00755E30` prints them), so the fix is
+    local to each machine.
 - **Foot order.** `EntityWalkerClass::SetProperty` appends each `TerrainLeft` (hash
   `0x21322ADB`) and `TerrainRight` (`0xB62DEB24`) body to `mFootPrimitives` as it reads it,
   so the feet run in ODF order: left, right for each leg pair in every stock walker. Even
   feet are left and odd feet right, which is all `StepShake`'s roll uses.
+- **A name the model lacks loses that foot.** That append (Phantom `0x00599D10`, modtools
+  `0x0055CEB9` and `0x0055DF9C`) looks the name up with `CollisionModel::GetMaskId`, the
+  index of the collision body whose name hash matches, and skips the foot, without a
+  warning, when there is none. The class's bodies are the model's collision primitives,
+  added on `GeometryName` (`EntityGeometryClass::SetProperty`, Phantom `0x00538E80`) from
+  the `prim` chunk's `NAME` strings, so `TerrainLeft` must spell the primitive exactly as
+  the munged model does. The user's AT-TE named them `p_-tbv_sphere_foot1` where the
+  model has `p_-tbv-sphere_foot1`, and so had no feet at all: `mNumFeet` (class data
+  `+0x676`) 0, and no stomp, footstep sound or step from any foot.
 - **Jumps and landings.** `EntityWalker::Jump` (Phantom `0x00596660`; `JumpHeight` sets
   `mJumpVerticalSpeed` = √(19.6 x `JumpHeight`)) adds the vertical speed, zeroes
   `m_fGroundedTimer`, clears flag `0x40` and sets `0x80`. `CollisionCallback` sets `0x40` on
@@ -602,6 +640,13 @@ are in `core/layout/walker.hpp`; the ABI audit checks them.
   No bounce has been reported since the hand-back. The surge replaying after a roll
   is settled by `SpeedUp` (see Rolling, under Flyers), built 2026-10-02 and not yet
   played.
+- With `StompDetectionType = "1"`, the AT-TE landed only its middle right foot in play
+  (2026-10-02), so `StepShake` played for that foot alone. Its Terrain names did not match
+  its model (see Walkers), which may be why; the old model is gone, so it cannot be
+  checked. Once the names matched, `WalkerFootDiag` measured the single-update rule
+  costing most walking steps at 60 fps (Walkers). `WalkerStompFix`, built 2026-10-03, is
+  confirmed in play the same day: the AT-TE lands its walking steps. A per-class speed is
+  on the ROADMAP (Vehicles).
 - BF2's own follow still depends a little on the frame rate (`v / T - v * dt / 2`
   behind, and a lurch on a slow frame). Following exactly at any frame rate would mean
   replacing its easing, per axis, with the exact step for a moving target: keep

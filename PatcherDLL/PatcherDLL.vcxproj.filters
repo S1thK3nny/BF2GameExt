@@ -187,6 +187,15 @@
     <ClInclude Include="src\entity\flyer_roll_throttle_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\walker_foot_diag.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\walker_foot_diag_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\walker_stomp_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -460,6 +469,12 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_roll_throttle_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\walker_foot_diag.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\walker_stomp_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">

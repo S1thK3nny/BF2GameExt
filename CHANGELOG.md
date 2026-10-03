@@ -127,6 +127,11 @@ Scripts can check the running version through `GameExt.version`.
   gate what it loads on a minimum version in one line:
   `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
   See [Lua API](docs/user/LUA_API.md#detection).
+- **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
+  foot of the walker you drive: how far it came down, the biggest drop in a single
+  update, and whether BF2 counted the landing, which is what plays the stomp effect,
+  the footstep sound and `StepShake`. Off by default.
+  See [Features](docs/user/FEATURES.md#diagnostics).
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
@@ -152,6 +157,12 @@ Scripts can check the running version through `GameExt.version`.
   BF2 read the two as one stick and scaled both to 71%, the rule meant to stop soldiers
   running faster diagonally. `[Fixes] FlyerRollThrottleFix`, on by default; not yet
   tested online.
+- Walkers with `StompDetectionType = "1"` land their steps at any frame rate. BF2
+  counted a step only after a foot dropped more than 0.1 m in a single frame, so the
+  higher the frame rate, the fewer steps played their stomp effect and footstep sound:
+  at 60 fps most of an AT-TE's walking steps never landed. The test is now the foot's
+  speed, 3 m/s, which is the stock test at 30 fps. `[Fixes] WalkerStompFix`, on by
+  default.
 
 ## 1.1.0
 

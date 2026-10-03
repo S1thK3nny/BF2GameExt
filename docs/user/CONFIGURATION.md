@@ -107,6 +107,7 @@ Read-only instrumentation, all off by default. These only write to `BF2GameExt.l
 | `ContentCensusNames` | `0` | List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers "what did I actually put in this map". Needs ContentCensus to be on, and names are only stored on the modtools build |
 | `AIUpdateDiag` | `0` | Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising |
 | `PoolGrowthDiag` | `0` | Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs |
+| `WalkerFootDiag` | `0` | For the walker you drive, log each step of each foot: how far it came down, the biggest drop in a single update and whether BF2 counted the landing. The stomp effect, footstep sound and StepShake come from that count. StompDetectionType 1 counts a step only after a fast enough drop: 3 m/s with WalkerStompFix, otherwise more than 0.1 m in one update |
 
 ## Fixes
 
@@ -119,6 +120,7 @@ Bug fixes for engine defects. On by default. Each one is guarded by a byte check
 | `SkyObjectLimit` | `1` | Raise the SkyObjectClass instance limit (PrismaticFlower's fix) |
 | `SaberBlockFix` | `1` | Let lightsabers block other lightsabers from any direction. In stock BF2 a saber block only registers while you happen to be aiming at the centre of the map. Set 0 for stock |
 | `BranchRegionFix` | `1` | Make EntityPath branch regions work; in stock BF2 they never trigger at all. Name the region "entitypathbranch <id>" and write BranchRegion("<id>") in the path node. Set 0 for stock |
+| `WalkerStompFix` | `1` | Walkers with StompDetectionType 1 land their steps at any frame rate. Stock BF2 needs a foot to drop more than 0.1 m in a single frame, so the higher the frame rate, the fewer steps play their stomp effect and footstep sound: at 60 fps most of an AT-TE's walking steps never landed. The fix tests the foot's speed instead, 3 m/s, which is the stock test at 30 fps. Set 0 for stock |
 | `ImpactSoundWaterFix` | `1` | Impact sounds play below world height 0. On a map with no water, anything happening under Y=0 was silent. Maps that do have water still go quiet under the surface. Set 0 for stock |
 | `TerrainTextureFix` | `1` | Re-resolve terrain detail/white textures each map (fixes playlist crash; PrismaticFlower's fix) |
 | `BarrelFireOriginFix` | `1` | Shots leave the barrel instead of the soldier's head, and land on the crosshair at every range. Stock BF2 drifts its own shots off the crosshair past about 65 units, wider the further you shoot. Set 0 for stock |
