@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "game_build.hpp"
+#include "build_field.hpp"
 
 namespace {
 #include "game_addrs_data.inc" // defines: constexpr GameAddrs kAddrsModtools / kAddrsSteam / kAddrsGOG
@@ -12,14 +13,15 @@ GameBuild g_build = GameBuild::Unknown;
 // unidentified build) keeps the historical behaviour.
 const GameAddrs*    g_addr    = &kAddrsModtools;
 const SoldierLayout* g_soldier = &kSoldierModtools;
+Layout               g_layout  = Layout::Debug;
 
 void game_build_select(GameBuild build)
 {
    g_build = build;
    switch (build) {
-   case GameBuild::Steam: g_addr = &kAddrsSteam; g_soldier = &kSoldierRelease; break;
-   case GameBuild::GOG:   g_addr = &kAddrsGOG;   g_soldier = &kSoldierRelease; break;
+   case GameBuild::Steam: g_addr = &kAddrsSteam; g_soldier = &kSoldierRelease; g_layout = Layout::Release; break;
+   case GameBuild::GOG:   g_addr = &kAddrsGOG;   g_soldier = &kSoldierRelease; g_layout = Layout::Release; break;
    case GameBuild::Modtools:
-   default:               g_addr = &kAddrsModtools; g_soldier = &kSoldierModtools; break;
+   default:               g_addr = &kAddrsModtools; g_soldier = &kSoldierModtools; g_layout = Layout::Debug; break;
    }
 }

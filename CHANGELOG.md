@@ -97,6 +97,12 @@ Scripts can check the running version through `GameExt.version`.
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#soldier-classes).
+- **`dualcannon` weapon class** - A `cannon` with a second gun in the soldier's other
+  hand (`OffhandGeometryName`, `OffhandHardPoint`, `OffhandFirePointName`) that fires
+  from each gun in turn, per trigger pull or within a salvo (`AlternateMode`). Each gun
+  has its own muzzle flash and plays `shoot` or `shoot2`. Works in multiplayer. A game
+  without BF2GameExt crashes loading a level that contains one.
+  See [dualcannon](docs/user/classlabels/dualcannon.md).
 - **`player1.reticule.horizonRotation`** - A camera-driven HUD rotation event for
   world-up reticules, including banked and inverted views. Bind `EventRotation`
   on an unscaled pivot with artwork sizing in a child group; position and native
@@ -145,6 +151,15 @@ Scripts can check the running version through `GameExt.version`.
   - Extra vehicles on multi-cargo carriers now get their team back when dropped.
   - Carriers no longer look skewed while climbing away.
   - Carrier turrets keep cooling down and reloading while searching for a target.
+  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
+    hovering over the pad.
+  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
+    longer crashes the game.
+  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
+    ceiling.
+  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
+  - A carrier shot down in the air now explodes on the spot instead of spinning all the
+    way to the ground.
 - Floating target bars keep their last screen position when a target dies or is
   removed, allowing the existing HUD fade to finish without dropping onto the
   corpse. Living targets still track normally; new targets reset the cached anchor.
@@ -163,6 +178,13 @@ Scripts can check the running version through `GameExt.version`.
   at 60 fps most of an AT-TE's walking steps never landed. The test is now the foot's
   speed, 3 m/s, which is the stock test at 30 fps. `[Fixes] WalkerStompFix`, on by
   default.
+- The game no longer crashes, usually on the first spawn, on a map whose terrain
+  paints a foliage layer its props do not define when a map that did define that
+  layer was played earlier in the session.
+- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
+  has no `ExplosionDestruct` is removed.
+- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
+  fired from a weapon that is not a grappling hook weapon.
 
 ## 1.1.0
 

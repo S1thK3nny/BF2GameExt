@@ -49,3 +49,34 @@ static_assert(pbl_hash("hp_fire") == 0xFDD110D2u);
 static_assert(pbl_hash("a\xE9" "b") == 0xF4E78CC7u); // non-ASCII: sign extension
 static_assert(pbl_hash("") == 0 && pbl_hash(nullptr) == 0);
 static_assert(pbl_hash_append(pbl_hash("hp_"), "fire") == pbl_hash("hp_fire"));
+
+// =============================================================================
+// PblTEMPHash - the hardpoint and bone name hash (model hardpoints, pose joints,
+// FirePointName, tentacle bones).
+//
+// CRC-32/BZIP2 (poly 0x04C11DB7, MSB first, init and xorout 0xFFFFFFFF) over the
+// name with A-Z LOWERCASED first; every other byte goes in unchanged. Read off
+// all builds (table-driven there, bit-by-bit here):
+//     modtools 0x007E1C10: CMP CL,0x5A / JA / CMP CL,0x41 / JB / ADD CL,0x20
+//     Steam    0x00726D80, GOG 0x00727E50:
+//         LEA ECX,[EBX-0x41] / CMP CL,0x19 / JA / ADD BL,0x20
+// A null or empty string hashes to 0, as on the engine (NOT of the -1 seed).
+// =============================================================================
+
+constexpr uint32_t pbl_temp_hash(const char* s)
+{
+   uint32_t h = 0xFFFFFFFFu;
+   for (; s && *s; ++s) {
+      uint8_t c = (uint8_t)*s;
+      if (c >= 'A' && c <= 'Z') c += 0x20;
+      h ^= (uint32_t)c << 24;
+      for (int bit = 0; bit < 8; ++bit)
+         h = (h << 1) ^ ((h & 0x80000000u) ? 0x04C11DB7u : 0u);
+   }
+   return ~h;
+}
+
+static_assert(pbl_temp_hash("123456789") == 0xFC891918u);  // CRC-32/BZIP2 check value
+static_assert(pbl_temp_hash("hp_weapons") == 0x2B960099u); // Weapon::Render immediate, Steam 0x006793AA
+static_assert(pbl_temp_hash("HP_Weapons") == pbl_temp_hash("hp_weapons"));
+static_assert(pbl_temp_hash("") == 0 && pbl_temp_hash(nullptr) == 0);

@@ -450,9 +450,11 @@ misfired twice in this file already — the `bit 3` test missed SniperScope weap
 and the raw `Tracker+0x14` read ignores the class camera-mode override — so the
 hook reads the engine's own answer instead.
 
-History: `deaea67` added the early-out, `664561c` (crosshair convergence) deleted it by
-accident, and it was re-added on 2026-09-17. Do not revert `664561c` to restore it - that
-commit's move of the convergence ray onto the crosshair line was a separate real fix.
+The early-out sits right after the dual-muzzle target cache is invalidated, so a second
+muzzle cannot reuse a point resolved before the scope went up. History: `deaea67` added
+it, `664561c` (crosshair convergence) deleted it by accident, and it was re-added on
+2026-09-17. Do not revert `664561c` to restore it - that commit's move of the convergence
+ray onto the crosshair line was a separate real fix.
 
 | Build | `ScopeDisplay*` global | Visible flag | Hide |
 |-------|------------------------|--------------|------|

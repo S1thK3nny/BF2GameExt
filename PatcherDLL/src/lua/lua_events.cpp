@@ -4,7 +4,7 @@
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/character.hpp"
+#include "game/Battlefront2/Source/Character.h"
 
 #include <detours.h>
 

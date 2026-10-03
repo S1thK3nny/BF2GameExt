@@ -20,11 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "render" / "camera_shake.cpp").read_text()
 core = (SRC / "render" / "camera_shake_core.hpp").read_text()
-chase = (SRC / "core" / "layout" / "chase_camera.hpp").read_text()
-flyer = (SRC / "core" / "layout" / "flyer.hpp").read_text()
-walker = (SRC / "core" / "layout" / "walker.hpp").read_text()
-red_camera = (SRC / "core" / "layout" / "red_camera.hpp").read_text()
-weapon = (SRC / "core" / "layout" / "weapon.hpp").read_text()
+GAME = SRC / "game" / "Battlefront2" / "Source"
+chase = (GAME / "ChaseCamera.h").read_text()
+flyer = (GAME / "EntityFlyer.h").read_text()
+walker = (GAME / "EntityWalker.h").read_text()
+red_camera = (GAME / "RedCamera.h").read_text()
+weapon = (GAME / "Weapon.h").read_text()
 odf = (SRC / "entity" / "odf_gameext_props.cpp").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
@@ -35,14 +36,24 @@ def const(text, name):
     return int(match.group(1), 0)
 
 
+def fields(text, namespace):
+    """A namespace's Field<> members: name -> (modtools, release); one offset is both."""
+    body = re.search(r"namespace " + re.escape(namespace) + r"\s*\{(.*?)\n\}\s*//\s*namespace "
+                     + re.escape(namespace) + r"\b", text, re.S).group(1)
+    out = {}
+    for m in re.finditer(r"Field<[^;]*?>\s+(\w+)\{(0x[0-9A-Fa-f]+|\d+)(?:,\s*(0x[0-9A-Fa-f]+|\d+))?\}", body):
+        dbg = int(m.group(2), 0)
+        out[m.group(1)] = (dbg, int(m.group(3), 0) if m.group(3) else dbg)
+    return out
+
+
 expected = {
     (chase, "kOwner"): 0x0C, (chase, "kMatrix"): 0x10, (chase, "kPreShakeMatrix"): 0x50,
     (chase, "kShake"): 0x94, (chase, "kShakeSuppressUntil"): 0x98,
     (chase, "kShakeCount"): 0x9C, (chase, "kShakeAmount"): 0xA0, (chase, "kShakeSlots"): 4,
     (chase, "kTrackableTracker"): 0x1C,
     (red_camera, "kZoom"): 0x140, (red_camera, "kMatrixInverse"): 0x70,
-    (flyer, "kStateLanded"): 0, (flyer, "kStateTakeoff"): 1, (flyer, "kStateFlying"): 2,
-    (flyer, "kStateLanding"): 3,
+    (flyer, "kLanded"): 0, (flyer, "kTakeoff"): 1, (flyer, "kFlying"): 2, (flyer, "kLanding"): 3,
     (flyer, "kFlagRoll"): 0x01, (flyer, "kFlagFlip"): 0x02, (flyer, "kFlagBoost"): 0x04,
     # EntityWalker::sStateTable's states (Phantom 0x00A8F0B0) and its flag bits.
     (walker, "kStateTurnLeft"): 1, (walker, "kStateTurnRight"): 2, (walker, "kStateDying"): 3,
@@ -76,26 +87,32 @@ assert "s == 0 || s == 1 || s == 2 || s == 3 || s == 5 || s == 19" in module, "g
 for (text, name), value in expected.items():
     assert const(text, name) == value, name
 
-# velocity, state, flags, trick, cls, speed, forward, classSpeeds, classTurnRates, move,
-# landing, roll (0: not read yet)
-flyer_offsets = {
-    "modtools": (0x580, 0x5A4, 0x5F4, 0x610, 0x66C, 0x5F8, 0x110, 0x88C, 0x8A0, 0x2C0, 0x5FC, 0x2C4),
-    "release": (0x540, 0x564, 0x5B4, 0x5D0, 0x62C, 0, 0, 0, 0, 0, 0, 0),
+# The flyer and walker fields camera shake reads, (modtools, release); a release 0
+# is a field not read on Steam and GOG yet. The sites below are where each was read.
+expected_fields = {
+    ("layout::EntityFlyer", flyer): {
+        "mMatrix_forward": (0x110, 0), "mControlMove": (0x2C0, 0), "mControlStrafe": (0x2C4, 0),
+        "mVelocity": (0x580, 0x540), "mState": (0x5A4, 0x564), "mFlags": (0x5F4, 0x5B4),
+        "mGetSpeedSpeed": (0x5F8, 0), "mInLandingRegionFactor": (0x5FC, 0), "mTrick": (0x610, 0x5D0),
+        "mClass": (0x66C, 0x62C),
+    },
+    ("layout::EntityFlyerClass", flyer): {
+        "mMinSpeed": (0x88C, 0), "mMidSpeed": (0x890, 0), "mMaxSpeed": (0x894, 0), "mBoostSpeed": (0x898, 0),
+        "mPitchRate": (0x8A0, 0), "mTurnRate": (0x8A4, 0),
+    },
+    ("layout::EntityWalker", walker): {
+        "mClass": (0x498, 0x460), "mVelocity": (0x4A0, 0x468), "mFlags": (0x2060, 0x2020),
+        "mFootState": (0x20A4, 0x2064), "m_fGroundedTimer": (0x20B4, 0x2074), "mState": (0x20B8, 0x2078),
+        "mBoost": (0x212C, 0x20EC),
+    },
+    ("layout::EntityWalkerClass", walker): {
+        "mMaxSpeed": (0x768, 0x6A0), "mBoostSpeed": (0x76C, 0x6A4), "mNumFeet": (0xD22, 0xC5A),
+    },
 }
-for name, want in (("kModtools", flyer_offsets["modtools"]), ("kRelease", flyer_offsets["release"])):
-    got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", flyer).group(1)
-    assert tuple(int(v, 0) for v in got.split(",")) == want, name
-
-# cls, velocity, flags, footState, airTime, state, boost, classMaxSpeed, classNumFeet,
-# footHeight, classStompType, classStompThreshold (the last three: the walker foot
-# diagnostic, audited in tests/walker_foot_diag_abi_tests.py)
-walker_offsets = {
-    "modtools": (0x498, 0x4A0, 0x2060, 0x20A4, 0x20B4, 0x20B8, 0x212C, 0x768, 0xD22, 0x2074, 0xD21, 0xD3C),
-    "release": (0x460, 0x468, 0x2020, 0x2064, 0x2074, 0x2078, 0x20EC, 0x6A0, 0xC5A, 0x2034, 0xC59, 0xC74),
-}
-for name, want in (("kModtools", walker_offsets["modtools"]), ("kRelease", walker_offsets["release"])):
-    got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", walker).group(1)
-    assert tuple(int(v, 0) for v in got.split(",")) == want, name
+for (namespace, text), want in expected_fields.items():
+    got = fields(text, namespace)
+    for name, offsets in want.items():
+        assert got.get(name) == offsets, (namespace, name, got.get(name))
 
 
 def guards():

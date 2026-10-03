@@ -22,6 +22,7 @@
 #include "weapon/grappling_hook.hpp"
 #include "weapon/barrel_fire_origin.hpp"
 #include "weapon/held_ordnance_effect.hpp"
+#include "weapon/dual_cannon.hpp"
 #include "debug_commands/command_registry.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "render/particle_batch_spill.hpp"
@@ -40,6 +41,7 @@
 #include "entity/flyer_roll_throttle_fix.hpp"
 #include "entity/walker_foot_diag.hpp"
 #include "entity/walker_stomp_fix.hpp"
+#include "render/prop_generator_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
@@ -55,7 +57,7 @@
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/aim_assist.hpp"
-#include "core/layout/character.hpp"
+#include "game/Battlefront2/Source/Character.h"
 
 #include <detours.h>
 
@@ -280,9 +282,10 @@ void lua_hooks_install(uintptr_t exe_base)
 
    if (g_build == GameBuild::Modtools) {
       // These installers still target raw modtools VAs / inline patch sites.
-      grapple_install(exe_base);
       DebugCommandRegistry::install(exe_base);
    }
+
+   grapple_install(exe_base);                 // full set on modtools, crash guards elsewhere
 
    lua_events_install(exe_base);              // EventManager::Init/Cleanup detours, guards internally
    script_name_tracker_install(exe_base);     // GetMissionName() shell/mission gating
@@ -326,6 +329,7 @@ void lua_hooks_uninstall()
    aim_assist_uninstall();
    game_logging_uninstall();
    terrain_texture_fix_uninstall();
+   dual_cannon_uninstall();
    held_ordnance_effect_uninstall();
    barrel_fire_origin_uninstall();
    land_on_arrival_uninstall();
@@ -352,6 +356,7 @@ void lua_hooks_uninstall()
    flyer_roll_throttle_fix_uninstall();
    walker_foot_diag_uninstall();
    walker_stomp_fix_uninstall();
+   prop_generator_fix_uninstall();
    foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();

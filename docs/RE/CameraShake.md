@@ -332,9 +332,9 @@ every build: a `GameObject` has its `Damageable` part at `+0x140` (Phantom PDB),
 
 Where the fields live:
 - **Same on every build:** the chase camera's fields and its queue
-  (`core/layout/chase_camera.hpp`), and the render camera's zoom
-  (`core/layout/red_camera.hpp`).
-- **Per build:** the flyer's fields (`core/layout/flyer.hpp`), pinned at `DoTrick` and
+  (`game/Battlefront2/Source/ChaseCamera.h`), and the render camera's zoom
+  (`game/Battlefront2/Source/RedCamera.h`).
+- **Per build:** the flyer's fields (`game/Battlefront2/Source/EntityFlyer.h`), pinned at `DoTrick` and
   `RecalculateSpeed` (modtools `0x004F2F80`, Steam and GOG `0x004ABC70`). The ones added
   for the flyer rework (`mGetSpeedSpeed`, the forward axis, the class's speeds and turn
   rates, `mControlMove`, `mInLandingRegionFactor`) are read
@@ -549,9 +549,9 @@ Vanilla saber-against-saber blocking passes `Deflect` its two vectors swapped. G
 
 Walkers (`EntityWalker`, and `CommandWalker`, whose `IsRtti` answers `EntityWalker` too;
 `EntityDroideka`'s does not) need no hooks: every shake reads what BF2 has already
-recorded, once a frame, through `layout::Walker`. All three builds are read; Steam and GOG
+recorded, once a frame, through `layout::EntityWalker`. All three builds are read; Steam and GOG
 share the walker code at the same addresses. Field offsets and the sites they were read at
-are in `core/layout/walker.hpp`; the ABI audit checks them.
+are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
 
 - **Steps.** `EntityWalker::DoFootImpactEffects` (Phantom `0x00595470`) walks the feet
   (`mNumFeet`, class data `+0x676`). When one lands it sets the controllers' stomp rumble

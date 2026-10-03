@@ -4,11 +4,11 @@
 #include "core/entity_layout.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/chase_camera.hpp"
-#include "core/layout/flyer.hpp"
-#include "core/layout/red_camera.hpp"
-#include "core/layout/walker.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/ChaseCamera.h"
+#include "game/Battlefront2/Source/EntityFlyer.h"
+#include "game/Battlefront2/Source/EntityWalker.h"
+#include "game/Battlefront2/Source/RedCamera.h"
+#include "game/Battlefront2/Source/Weapon.h"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "entity/odf_gameext_props.hpp"
@@ -58,9 +58,9 @@
 // Controllable + g_soldier->mState; a GameObject's mTeam bits at +0x234; the
 // Weapon vtable's IsMelee (+0x54). WeaponMelee's list of what a swing struck
 // moves between modtools and retail (layout::WeaponMelee). The flyer fields are per build
-// (layout::Flyer); those not yet read on Steam and GOG are 0 there, and so are
-// the collision sites, so what needs them stays off on those builds. The
-// walker fields are per build too (layout::Walker), read on all three.
+// (layout::EntityFlyer); those not yet read on Steam and GOG are 0 there, and so
+// are the collision sites, so what needs them stays off on those builds. The
+// walker fields are per build too (layout::EntityWalker), read on all three.
 //
 // How the shake gets drawn: SetupCamera builds mMatrix, turns it by the stock
 // shake unless mission time is past mShakeSuppressUntil, and hands it to
@@ -85,6 +85,10 @@
 namespace {
 using namespace camera_shake;
 namespace cam = layout::ChaseCamera;
+namespace fly = layout::EntityFlyer;
+namespace fly_class = layout::EntityFlyerClass;
+namespace walk = layout::EntityWalker;
+namespace walk_class = layout::EntityWalkerClass;
 
 // The ODF-driven shakes. Always on; off only if the ODF reader had no
 // listener slot left for their properties, when just the blast is drawn.
@@ -153,8 +157,6 @@ ReticleUpdateFn s_reticleUpdate = nullptr;
 ApplyShakeFn    s_applyShake    = nullptr;
 MeleeUpdateFn   s_meleeUpdate   = nullptr;
 MeleeDeflectFn  s_meleeDeflect  = nullptr;
-layout::Flyer::Offsets s_flyer  = layout::Flyer::kModtools;
-layout::Walker::Offsets s_walker = layout::Walker::kModtools;
 uint32_t        s_meleeHits     = layout::WeaponMelee::kDamageDataModtools;
 
 template<class T> T& at(uint8_t* p, uint32_t offset) { return *reinterpret_cast<T*>(p + offset); }
@@ -452,12 +454,11 @@ void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, bool firstPe
 FlyerSpeeds class_speeds(void* cls)
 {
    FlyerSpeeds s;
-   if (!cls || !s_flyer.classSpeeds) return s;
-   const float* v = &at<float>(cls, s_flyer.classSpeeds);
-   s.min = v[0];
-   s.mid = v[1];
-   s.max = v[2];
-   s.boost = v[3];
+   if (!cls || !fly_class::mMinSpeed.off()) return s;
+   s.min = fly_class::mMinSpeed(cls);
+   s.mid = fly_class::mMidSpeed(cls);
+   s.max = fly_class::mMaxSpeed(cls);
+   s.boost = fly_class::mBoostSpeed(cls);
    s.known = std::isfinite(s.min) && std::isfinite(s.mid) && std::isfinite(s.max) && std::isfinite(s.boost);
    return s;
 }
@@ -487,12 +488,12 @@ struct HeldTargets {
 // landing. Tricks come from the DoTrick detour below.
 void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out)
 {
-   const float* v = &at<float>(obj, s_flyer.velocity);
+   const float* v = fly::mVelocity(obj);
    const float speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
    // Its speed along its nose, which is what BF2 and the class's speeds mean by
    // speed; plain speed where this build's field is not read yet.
-   const float forward = s_flyer.speed ? at<float>(obj, s_flyer.speed) : speed;
-   const FlyerSpeeds speeds = class_speeds(at<void*>(obj, s_flyer.cls));
+   const float forward = fly::mGetSpeedSpeed.off() ? fly::mGetSpeedSpeed(obj) : speed;
+   const FlyerSpeeds speeds = class_speeds(fly::mClass(obj));
 
    // A bump is sized by how much it changed the velocity since the last frame,
    // or failing that by BF2's own figure. Its frame is left out of speeding up
@@ -514,8 +515,8 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
 
    // How fast the nose swings round, every frame so a take-off starts from
    // where it points.
-   if (s_flyer.forward) {
-      const float* nose = &at<float>(obj, s_flyer.forward);
+   if (fly::mMatrix_forward.off()) {
+      const float* nose = fly::mMatrix_forward(obj);
       const float rate = s_view.haveNose ? nose_turn_rate(s_view.prevNose, nose, dt) : 0.0f;
       std::memcpy(s_view.prevNose, nose, sizeof s_view.prevNose);
       s_view.haveNose = true;
@@ -532,15 +533,15 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
       s_view.prevForward = forward;
    }
 
-   const int state = at<int>(obj, s_flyer.state);
+   const int state = fly::mState(obj);
    const int prev = s_view.flyerState;
    s_view.flyerState = state;
-   if (state == layout::Flyer::kStateTakeoff && prev == layout::Flyer::kStateLanded)
+   if (state == fly::kTakeoff && prev == fly::kLanded)
       play(s_takeoffKick, cs, kShakeTakeoff, defaults::kTakeoff);
-   if (state == layout::Flyer::kStateLanded &&
-       (prev == layout::Flyer::kStateLanding || prev == layout::Flyer::kStateFlying))
+   if (state == fly::kLanded &&
+       (prev == fly::kLanding || prev == fly::kFlying))
       play(s_landingKick, cs, kShakeLanding, defaults::kLanding);
-   if (state != layout::Flyer::kStateFlying) {
+   if (state != fly::kFlying) {
       s_view.turn.reset();
       s_view.speedUp.reset();
       return;
@@ -556,11 +557,11 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
    // Braking is slowing down with the brake held: easing back to cruise after
    // the throttle is let go does not count.
    bool speedingUp, slowingDown, braking;
-   if (s_flyer.move && s_flyer.landing && speeds.known) {
-      const float move = at<float>(obj, s_flyer.move);
-      const float roll = s_flyer.roll ? at<float>(obj, s_flyer.roll) : 0.0f;
-      const bool boosting = (at<uint8_t>(obj, s_flyer.flags) & layout::Flyer::kFlagBoost) != 0;
-      const bool landing = at<float>(obj, s_flyer.landing) != 0.0f;
+   if (fly::mControlMove.off() && fly::mInLandingRegionFactor.off() && speeds.known) {
+      const float move = fly::mControlMove(obj);
+      const float roll = fly::mControlStrafe.off() ? fly::mControlStrafe(obj) : 0.0f;
+      const bool boosting = (fly::mFlags(obj) & fly::kFlagBoost) != 0;
+      const bool landing = fly::mInLandingRegionFactor(obj) != 0.0f;
       const float target = throttle_target(speeds, move, boosting, landing);
       const float asked = throttle_target(speeds, throttle_intent(move, roll), boosting, landing);
       const float margin = heading_margin(speeds);
@@ -582,13 +583,13 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
       s_boostShape = shape;
       out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, forward), heading, shape.steady);
    }
-   if (s_flyer.forward && s_flyer.classTurnRates) {
+   if (fly::mMatrix_forward.off() && fly_class::mPitchRate.off()) {
       // Turning hard: the nose swinging round near what the class can turn,
       // whether by stick or mouse. A trick's flip is not a turn.
-      const float* rates = &at<float>(at<void*>(obj, s_flyer.cls), s_flyer.classTurnRates);   // pitch, turn
-      const bool tricking = (at<uint8_t>(obj, s_flyer.flags) &
-                             (layout::Flyer::kFlagRoll | layout::Flyer::kFlagFlip)) != 0;
-      s_view.turn.update(!tricking && s_view.noseRate.level >= hard_turn_rate(rates[0], rates[1]), dt);
+      const EntityFlyerClass* cls = fly::mClass(obj);
+      const float hard = hard_turn_rate(fly_class::mPitchRate(cls), fly_class::mTurnRate(cls));
+      const bool tricking = (fly::mFlags(obj) & (fly::kFlagRoll | fly::kFlagFlip)) != 0;
+      s_view.turn.update(!tricking && s_view.noseRate.level >= hard, dt);
       if (shape_for(cs, kShakeTurn, defaults::kTurn, false, shape, scale)) {
          // Harder the faster it goes, up to the class's MaxSpeed.
          const float pace = speeds.known && speeds.max > 0.0f ? clamp01(forward / speeds.max) : 1.0f;
@@ -625,16 +626,16 @@ void play_step(const ClassShake* cs, const FlyerSpeeds& speeds, float speed, uin
 // footstep sound and jump play.
 void update_walker(uint8_t* obj, const ClassShake* cs, HeldTargets& out)
 {
-   uint8_t* cls = at<uint8_t*>(obj, s_walker.cls);
-   const float* classSpeeds = cls ? &at<float>(cls, s_walker.classMaxSpeed) : nullptr;
-   const FlyerSpeeds speeds = classSpeeds ? walker_speeds(classSpeeds[0], classSpeeds[1]) : FlyerSpeeds{};
-   const float* v = &at<float>(obj, s_walker.velocity);
+   const EntityWalkerClass* cls = walk::mClass(obj);
+   const FlyerSpeeds speeds = cls ? walker_speeds(walk_class::mMaxSpeed(cls), walk_class::mBoostSpeed(cls))
+                                  : FlyerSpeeds{};
+   const float* v = walk::mVelocity(obj);
    const float speed = std::sqrt(v[0] * v[0] + v[2] * v[2]);   // along the ground
-   const int state = at<int>(obj, s_walker.state);
-   const bool jumping = (at<uint32_t>(obj, s_walker.flags) & layout::Walker::kFlagJumping) != 0;
-   const int feet = cls ? at<uint8_t>(cls, s_walker.classNumFeet) : 0;
-   const uint32_t down = at<uint32_t>(obj, s_walker.footState) & feet_mask(feet);
-   const float came = s_view.walkerAir.update(at<float>(obj, s_walker.airTime), v[1]);
+   const int state = walk::mState(obj);
+   const bool jumping = (walk::mFlags(obj) & walk::kFlagJumping) != 0;
+   const int feet = cls ? walk_class::mNumFeet(cls) : 0;
+   const uint32_t down = walk::mFootState(obj) & feet_mask(feet);
+   const float came = s_view.walkerAir.update(walk::m_fGroundedTimer(obj), v[1]);
 
    const bool first = !s_view.haveWalker;
    const uint32_t landed = first ? 0 : feet_landed(s_view.walkerFeet, down);
@@ -642,7 +643,7 @@ void update_walker(uint8_t* obj, const ClassShake* cs, HeldTargets& out)
    s_view.walkerFeet = down;
    s_view.walkerJumping = jumping;
    s_view.haveWalker = true;
-   if (state == layout::Walker::kStateDying || state == layout::Walker::kStateDead) return;
+   if (state == walk::kStateDying || state == walk::kStateDead) return;
 
    if (landed) play_step(cs, speeds, speed, landed);
    if (jumped) play(s_jumpKick, cs, kShakeJump, defaults::kJump);
@@ -653,12 +654,12 @@ void update_walker(uint8_t* obj, const ClassShake* cs, HeldTargets& out)
       if (size > 0.0f) s_landKick.trigger(make_kick(shape, scale * size, s_rng), s_time, shape.limit);
    }
 
-   if ((state == layout::Walker::kStateTurnLeft || state == layout::Walker::kStateTurnRight) &&
+   if ((state == walk::kStateTurnLeft || state == walk::kStateTurnRight) &&
        shape_for(cs, kShakeTurn, defaults::kTurnWalker, false, shape, scale)) {
       s_turnShape = shape;
       out.turn = scale;
    }
-   if ((at<uint8_t>(obj, s_walker.boost) & layout::Walker::kBoosting) &&
+   if ((walk::mBoost(obj) & walk::kBoosting) &&
        shape_for(cs, kShakeBoost, defaults::kBoostWalker, false, shape, scale)) {
       // Full while it is still speeding up to BoostSpeed, then Steady of that.
       const bool heading = speeds.boost - speed > heading_margin(speeds);
@@ -730,9 +731,9 @@ void shake_view(uint8_t* self, void* camera, float dt)
    const bool walker = obj && !flyer && is_rtti(obj, kWalkerRtti);
    const ClassShake* cs = nullptr;
    if (obj && !s_classes.empty())
-      cs = find_class(flyer    ? at<void*>(obj, s_flyer.cls)
-                      : walker ? at<void*>(obj, s_walker.cls)
-                               : vcall_object(obj, kVt_GetEntityClass));
+      cs = find_class(flyer    ? static_cast<const void*>(fly::mClass(obj))
+                      : walker ? static_cast<const void*>(walk::mClass(obj))
+                               : static_cast<const void*>(vcall_object(obj, kVt_GetEntityClass)));
    const bool firstPerson = first_person(owner);
 
    float sprintTarget = 0.0f;
@@ -1012,8 +1013,8 @@ bool __fastcall hooked_MeleeDeflect(uint8_t* self, void* edx, void* ordnance, co
 void shake_for_trick(uint8_t* self)
 {
    __try {
-      const ClassShake* cs = find_class(at<void*>(self, s_flyer.cls));
-      if (at<uint8_t>(self, s_flyer.flags) & layout::Flyer::kFlagFlip)
+      const ClassShake* cs = find_class(fly::mClass(self));
+      if (fly::mFlags(self) & fly::kFlagFlip)
          play(s_trickFlipKick, cs, kShakeTrickFlip, defaults::kTrickFlip);
       else
          play(s_trickRollKick, cs, kShakeTrickRoll, defaults::kTrickRoll);
@@ -1028,7 +1029,7 @@ void shake_for_trick(uint8_t* self)
 void __fastcall hooked_DoTrick(uint8_t* self, void* edx, int trick)
 {
    const bool watch = self && self == s_view.obj;
-   float* mTrick = watch ? &at<float>(self, s_flyer.trick) : nullptr;
+   float* mTrick = watch ? &fly::mTrick(self) : nullptr;
    const float before = mTrick ? *mTrick : 0.0f;
    if (mTrick) *mTrick = kTrickUnset;
 
@@ -1229,8 +1230,6 @@ void camera_shake_install(uintptr_t base)
               modtools ? "xxxxxxxxxxxx" : "xxxxxxxxxxxx", true))
       return;
 
-   s_flyer = modtools ? layout::Flyer::kModtools : layout::Flyer::kRelease;
-   s_walker = modtools ? layout::Walker::kModtools : layout::Walker::kRelease;
    s_setupCamera   = reinterpret_cast<SetupCameraFn>(resolve(base, g_addr->chase_camera_setup_camera));
    s_setMatrix     = reinterpret_cast<SetMatrixFn>(resolve(base, g_addr->red_camera_set_matrix));
    s_isFirstPerson = reinterpret_cast<IsFirstPersonFn>(resolve(base, g_addr->tracker_is_first_person_view));
@@ -1262,8 +1261,9 @@ void camera_shake_install(uintptr_t base)
    if (ok && s_odfShakes) install_bumps(base);
    if (ok && s_odfShakes) install_melee(base, modtools);
    if (ok && s_odfShakes &&
-       (!s_flyer.speed || !s_flyer.forward || !s_flyer.classSpeeds || !s_flyer.classTurnRates ||
-        !s_flyer.move || !s_flyer.landing || !s_flyer.roll))
+       (!fly::mGetSpeedSpeed.off() || !fly::mMatrix_forward.off() || !fly_class::mMinSpeed.off() ||
+        !fly_class::mPitchRate.off() || !fly::mControlMove.off() || !fly::mInLandingRegionFactor.off() ||
+        !fly::mControlStrafe.off()))
       install_log("[CameraShake] TurnShake, speed names in a Threshold and throttle-led boost and brake "
                   "shakes are not on this build yet");
 }

@@ -3,8 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
-#include "core/layout/character.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <detours.h>
 

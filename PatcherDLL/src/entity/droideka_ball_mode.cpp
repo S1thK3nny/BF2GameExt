@@ -2,7 +2,7 @@
 #include "droideka_ball_mode.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/droideka.hpp"
+#include "game/Battlefront2/Source/EntityDroideka.h"
 #include "core/resolve.hpp"
 
 #include <cstdlib>
@@ -48,23 +48,13 @@
 // previewed as a ball.
 // =============================================================================
 
-// FSM state ids and the per-build EntityDroideka offsets, with the read sites
-// behind them, live in core/layout/droideka.hpp.
-using layout::Droideka::kStateIdle;
-using layout::Droideka::kStateRollUp;
-using layout::Droideka::kStateBall;
-using layout::Droideka::kStateUnroll;
-
-struct DroidekaLayout {
-   int mClass;
-   int mState;
-};
-static constexpr DroidekaLayout kLayoutModtools = {layout::Droideka::kClassModtools,
-                                                   layout::Droideka::kStateModtools};
-static constexpr DroidekaLayout kLayoutRelease  = {layout::Droideka::kClassRelease,
-                                                   layout::Droideka::kStateRelease};
-
-static DroidekaLayout s_layout = kLayoutModtools;
+// FSM state ids and the EntityDroideka fields, with the read sites behind them,
+// live in game/Battlefront2/Source/EntityDroideka.h.
+namespace dka = layout::EntityDroideka;
+using dka::kStateIdle;
+using dka::kStateRollUp;
+using dka::kStateBall;
+using dka::kStateUnroll;
 
 // ---------------------------------------------------------------------------
 // DroidekaElement field offsets - build-invariant
@@ -198,9 +188,9 @@ static void* __fastcall hooked_Derive(void* ecx, void* /*edx*/, unsigned int has
 static void __fastcall hooked_UpdatePilot(void* ecx, void* /*edx*/)
 {
    if (g_disabledCount > 0 && ecx) {
-      void* cls = *(void**)((uintptr_t)ecx + s_layout.mClass);
+      void* cls = dka::mClass(ecx);
       if (cls && isDisabled(cls)) {
-         const int state = *(int*)((uintptr_t)ecx + s_layout.mState);
+         const int state = dka::mState(ecx);
          // Upright: the only thing the original would do is request the roll.
          if (state != kStateRollUp && state != kStateBall && state != kStateUnroll)
             return;
@@ -267,12 +257,7 @@ static void __cdecl hooked_init_state()
 
 void droideka_ball_mode_install(uintptr_t exe_base)
 {
-   switch (g_build) {
-   case GameBuild::Modtools: s_layout = kLayoutModtools; break;
-   case GameBuild::Steam:
-   case GameBuild::GOG:      s_layout = kLayoutRelease;  break;
-   default: return; // unknown build
-   }
+   if (g_build == GameBuild::Unknown) return;
 
    if (g_addr->hash_string == 0 || g_addr->droideka_class_set_property == 0 ||
        g_addr->droideka_update_pilot == 0 || g_addr->droideka_class_derive == 0)

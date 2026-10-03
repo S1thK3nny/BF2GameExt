@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "entity" / "walker_stomp_fix.cpp").read_text()
 header = (SRC / "entity" / "walker_stomp_fix.hpp").read_text()
-walker = (SRC / "core" / "layout" / "walker.hpp").read_text()
+walker = (SRC / "game" / "Battlefront2" / "Source" / "EntityWalker.h").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
 assert re.search(r"kWalkerStompSpeed\s*=\s*3\.0f;", header), "the speed: 0.1 an update at 30 a second"
@@ -57,12 +57,20 @@ GUARDS = guards()
 assert set(GUARDS) == {"walker_update_state"}, GUARDS
 
 
-def offsets(name):
-    got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", walker).group(1)
-    return tuple(int(v, 0) for v in got.split(","))
+def fields(text, namespace):
+    """A namespace's Field<> members: name -> (modtools, release); one offset is both."""
+    body = re.search(r"namespace " + re.escape(namespace) + r"\s*\{(.*?)\n\}\s*//\s*namespace "
+                     + re.escape(namespace) + r"\b", text, re.S).group(1)
+    out = {}
+    for m in re.finditer(r"Field<[^;]*?>\s+(\w+)\{(0x[0-9A-Fa-f]+|\d+)(?:,\s*(0x[0-9A-Fa-f]+|\d+))?\}", body):
+        dbg = int(m.group(2), 0)
+        out[m.group(1)] = (dbg, int(m.group(3), 0) if m.group(3) else dbg)
+    return out
 
 
-LAYOUT = {"modtools": offsets("kModtools"), "release": offsets("kRelease")}
+W = fields(walker, "layout::EntityWalker")
+LAYOUT = {kind: {"footState": W["mFootState"][i], "timer": W["m_fGroundedTimer"][i]}
+          for kind, i in (("modtools", 0), ("release", 1))}
 
 # Per build: UpdateState's one RET, the vtable slots that hold it (modtools
 # through a thunk), its call of DoFootImpactEffects, and the constant.
@@ -78,7 +86,7 @@ facts = {
 
 def code_sites(build, layout):
     """(address, [(mnemonic, operands)]); {c} is this build's 0.1, {fn} DoFootImpactEffects."""
-    foot_state, timer = hex(layout[3]), hex(layout[4])
+    foot_state, timer = hex(layout["footState"]), hex(layout["timer"])
     if build == "modtools":
         return {
             # UpdateState: 0x3C of locals and four pushes put its first argument

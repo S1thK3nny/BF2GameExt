@@ -106,6 +106,9 @@
     <ClInclude Include="src\weapon\held_ordnance_effect_sites.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
+    <ClInclude Include="src\weapon\dual_cannon.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\shield_channel_fix.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -319,6 +322,9 @@
     <ClInclude Include="src\render\scene_tree_depth_guard.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\prop_generator_fix.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\weapon\anim_textures.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
@@ -388,6 +394,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\held_ordnance_effect.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\dual_cannon.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\shield_channel_fix.cpp">
@@ -562,6 +571,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\scene_tree_depth_guard.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\prop_generator_fix.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\anim_textures.cpp">

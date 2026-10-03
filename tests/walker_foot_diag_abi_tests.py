@@ -1,7 +1,7 @@
 """Read-only audit of the walker foot diagnostic against all three game PEs.
 
 Usage: python tests/walker_foot_diag_abi_tests.py PATH_TO_GAMEDATA
-Requires pefile and capstone. Reads the walker layout (core/layout/walker.hpp),
+Requires pefile and capstone. Reads the walker fields (game/Battlefront2/Source/EntityWalker.h),
 the addresses (game_addrs.hpp) and the prologues the install checks
 (entity/walker_foot_diag.cpp), and checks them, and the instructions the
 diagnostic's reading of BF2's foot records rests on, against each executable.
@@ -19,25 +19,40 @@ import pefile
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "entity" / "walker_foot_diag.cpp").read_text()
-walker = (SRC / "core" / "layout" / "walker.hpp").read_text()
-character = (SRC / "core" / "layout" / "character.hpp").read_text()
+GAME = SRC / "game" / "Battlefront2" / "Source"
+walker = (GAME / "EntityWalker.h").read_text()
+character = (GAME / "Character.h").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
 # The constants the reading rests on: mMinFootHeight after mLastFootHeight, the
 # type 1 disarm bits, its 0.1, six feet at most; the player's vehicle slot and
 # the Trackable call that turns it into the walker, as camera_shake.cpp makes it.
-assert re.search(r"kMinFootHeight\s*=\s*0x18;", walker)
 assert re.search(r"kFootDownBit\s*=\s*24;", walker)
 assert re.search(r"kStompDrop\s*=\s*0\.1f;", walker)
 assert re.search(r"kMaxFeet\s*=\s*6;", walker)
 assert re.search(r"kVehicle\s*=\s*0x14C;", character)
 assert "kCtrl_Trackable   = 0x18" in module and "kVt_GetGameObject = 0x1C" in module
 
+def fields(text, namespace):
+    """A namespace's Field<> members: name -> (modtools, release); one offset is both."""
+    body = re.search(r"namespace " + re.escape(namespace) + r"\s*\{(.*?)\n\}\s*//\s*namespace "
+                     + re.escape(namespace) + r"\b", text, re.S).group(1)
+    out = {}
+    for m in re.finditer(r"Field<[^;]*?>\s+(\w+)\{(0x[0-9A-Fa-f]+|\d+)(?:,\s*(0x[0-9A-Fa-f]+|\d+))?\}", body):
+        dbg = int(m.group(2), 0)
+        out[m.group(1)] = (dbg, int(m.group(3), 0) if m.group(3) else dbg)
+    return out
+
+
+W = fields(walker, "layout::EntityWalker")
+WC = fields(walker, "layout::EntityWalkerClass")
+# mMinFootHeight[6] right after mLastFootHeight[6], on both layouts.
+assert all(W["mMinFootHeight"][i] - W["mLastFootHeight"][i] == 0x18 for i in (0, 1))
 layouts = {}
-for name in ("kModtools", "kRelease"):
-    got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", walker).group(1)
-    layouts[name] = tuple(int(v, 0) for v in got.split(","))
-    assert len(layouts[name]) == 12, name
+for name, i in (("kModtools", 0), ("kRelease", 1)):
+    layouts[name] = {"cls": W["mClass"][i], "footState": W["mFootState"][i], "numFeet": WC["mNumFeet"][i],
+                     "footHeight": W["mLastFootHeight"][i], "stompType": WC["mStompDetectionType"][i],
+                     "threshold": WC["mStompThreshold"][i]}
 
 
 def guards():
@@ -62,7 +77,8 @@ one_tenth = {"modtools": 0x00A2C074, "steam": 0x007B1F60, "gog": 0x007B2ED8}
 
 def sites(build, o):
     """(address, [(mnemonic, operands)]) the diagnostic's reading rests on; {fn} is the hooked function."""
-    cls, foot_state, num_feet, height, stomp_type, threshold = o[0], o[3], o[8], o[9], o[10], o[11]
+    cls, foot_state, num_feet = o["cls"], o["footState"], o["numFeet"]
+    height, stomp_type, threshold = o["footHeight"], o["stompType"], o["threshold"]
     tenth = hex(one_tenth[build])
     if build == "modtools":
         return {

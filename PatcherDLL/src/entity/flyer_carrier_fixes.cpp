@@ -3,6 +3,9 @@
 #include "flyer_boost_animation.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "game/Battlefront2/Source/EntityCarrier.h"
+#include "game/Battlefront2/Source/EntityFlyer.h"
+#include "game/Battlefront2/Source/VehicleSpawn.h"
 #include "util/crash_logger.hpp"
 
 #include <cmath>
@@ -37,6 +40,12 @@
 //   - Terrain-wobble suppression (RayHit neutralised at altitude).
 //   - Pad lifecycle gaps vanilla leaves open (see padCarrierUpdate and
 //     dropStrandedCargo).
+//   - No death spin: a carrier killed in the air explodes at once instead of
+//     tumbling to the ground (skipDeathSpin).
+//   - Engine crashes carriers expose: a second CommandWalker::Kill after the
+//     carrier kills its cargo, and the multiplayer host's send-list recursion
+//     on a carrier that pilots itself.
+//   - EntityFlyer::ClientKill on a flyer class with no ExplosionDestruct.
 //
 // Per-carrier state is keyed by (object pointer, PblHandle id at +0x204).
 // Vanilla deletes finished carriers from VehicleSpawn, not from their own
@@ -50,83 +59,29 @@
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Per-build layout
+// Per-build calling conventions
 //
-// Steam and GOG share one release layout; modtools is a debug build.  Instance
-// fields of EntityFlyer/EntityCarrier in the 0x5xx..0x1Dxx range sit 0x40 lower
-// on release, EntityFlyerClass fields 0xC8 lower, EntityCarrierClass cargo
-// fields 0xE0 lower.  Every value here was read out of each build's own
-// disassembly (see project memory "carrier-steam-port-status" for the sites).
-// All instance offsets are from the object base (the pointer AttachCargo,
-// DetachCargo and TakeOff receive; Update receives base+0x240).
+// Struct offsets live in game/Battlefront2/Source/EntityFlyer.h and
+// EntityCarrier.h, code sites in game_addrs. What is left is how the release
+// build (LTCG) compiled particular functions.
 // ---------------------------------------------------------------------------
 
-struct CarrierLayout {
-   // EntityCarrierClass
-   uint32_t clsCargoNodes;       // CargoInfo[4]
-   uint32_t clsCargoCount;       // int, directly after entry 3 (so entry 4 == the count)
-
-   // EntityFlyerClass
-   uint32_t clsTakeoffAnim;      // ZephyrAnim* ("takeoff"), nFrames at +8
-   uint32_t clsTakeoffSpeed;     // TakeoffSpeed
-   uint32_t clsLandingTime;      // LandingTime
-   uint32_t clsLandedHeight;     // -(model bbox min Y)
-   uint32_t clsWeaponCount;      // int, aimer count used by ActivatePhysics
-   uint32_t clsPassengerCount;   // uint8
-
-   // EntityFlyer / EntityCarrier instance
-   uint32_t flightState;         // int: 0 landed, 1 takeoff, 2 flying, 3 landing
-   uint32_t progress;            // float, takeoff/landing anim progress
-   uint32_t cls;                 // EntityCarrierClass*
-   uint32_t landedHeight;        // float, instance landing threshold (incl. cargo)
-   uint32_t passengers;          // PassengerSlot*[]
-   uint32_t turrets;             // MountedTurret*[8]
-   uint32_t turretCount;         // int8
-   uint32_t aimers;              // Aimer*[]
-   uint32_t postCollision;       // embedded sub-object activated with (-15, 2)
-   uint32_t animRef;             // ZephyrAnim* the render reads nFrames from
-   uint32_t netAnimDelta;        // float, net-interpolated anim delta
-   uint32_t cargoSlots;          // CargoSlot[4]
-
-   // Code sites (unrelocated), identical VAs on Steam and GOG
-   uintptr_t visJz;              // 6-byte JZ that skips the render on a cull miss
-   uintptr_t rayHit1;            // CALL CollisionManager::RayHit, TAKEOFF branch
-   uintptr_t rayHit2;            // CALL CollisionManager::RayHit, LANDING branch
-
-   // Convention differences
+struct CarrierCodegen {
    bool attachSlotIsIndex;       // AttachCargo honours its slot argument
    bool updateSpawnRegcall;      // UpdateSpawn takes dt in XMM1 + bare RET
    bool fireStateMachineHasDt;   // trigger state machine takes (dt, fire)
    bool rayHitSse;               // RayHit returns its fraction in XMM0
 };
 
-static constexpr CarrierLayout kCarrierModtools = {
-   /* clsCargoNodes */ 0x1180, /* clsCargoCount */ 0x11C0,
-   /* clsTakeoffAnim */ 0x87C, /* clsTakeoffSpeed */ 0x8E8, /* clsLandingTime */ 0x8EC,
-   /* clsLandedHeight */ 0x8F4, /* clsWeaponCount */ 0xD48, /* clsPassengerCount */ 0xE14,
-   /* flightState */ 0x5A4, /* progress */ 0x5A8, /* cls */ 0x66C, /* landedHeight */ 0x600,
-   /* passengers */ 0x670, /* turrets */ 0x680, /* turretCount */ 0x6A0, /* aimers */ 0x6A8,
-   /* postCollision */ 0x1D10, /* animRef */ 0x1870, /* netAnimDelta */ 0x1D00,
-   /* cargoSlots */ 0x1DD0,
-   /* visJz */ 0x004F6999, /* rayHit1 */ 0x004FE8CD, /* rayHit2 */ 0x004FEAE2,
-   /* attachSlotIsIndex */ true, /* updateSpawnRegcall */ false,
-   /* fireStateMachineHasDt */ true, /* rayHitSse */ false,
-};
+static constexpr CarrierCodegen kCodegenModtools = { true,  false, true,  false };
+static constexpr CarrierCodegen kCodegenRelease  = { false, true,  false, true  };
 
-static constexpr CarrierLayout kCarrierRelease = {
-   /* clsCargoNodes */ 0x10A0, /* clsCargoCount */ 0x10E0,
-   /* clsTakeoffAnim */ 0x7B4, /* clsTakeoffSpeed */ 0x820, /* clsLandingTime */ 0x824,
-   /* clsLandedHeight */ 0x82C, /* clsWeaponCount */ 0xC80, /* clsPassengerCount */ 0xD4C,
-   /* flightState */ 0x564, /* progress */ 0x568, /* cls */ 0x62C, /* landedHeight */ 0x5C0,
-   /* passengers */ 0x630, /* turrets */ 0x640, /* turretCount */ 0x660, /* aimers */ 0x668,
-   /* postCollision */ 0x1CD0, /* animRef */ 0x1830, /* netAnimDelta */ 0x1CC0,
-   /* cargoSlots */ 0x1D90,
-   /* visJz */ 0x004AB082, /* rayHit1 */ 0x004AE246, /* rayHit2 */ 0x004AE478,
-   /* attachSlotIsIndex */ false, /* updateSpawnRegcall */ true,
-   /* fireStateMachineHasDt */ false, /* rayHitSse */ true,
-};
+static const CarrierCodegen* s_codegen = nullptr;
 
-static const CarrierLayout* L = nullptr;
+namespace ef  = layout::EntityFlyer;
+namespace efc = layout::EntityFlyerClass;
+namespace ec  = layout::EntityCarrier;
+namespace ecc = layout::EntityCarrierClass;
 
 // Build-invariant offsets (all verified on both layouts).
 static constexpr uintptr_t kControllableBase = 0x240;  // Update's `this`
@@ -149,31 +104,20 @@ static constexpr int kVt_DeletingDtor = 3;   // scalar deleting destructor, arg 
 static constexpr int kVt_Activate     = 5;
 static constexpr int kVt_SetTeam      = 36;
 
-// VehicleSpawn fields (build-invariant; engine field names in comments).
-static constexpr uintptr_t kVS_PadTransform = 0x30;   // mMatrix
-static constexpr uintptr_t kVS_SpawnCount   = 0x7C;   // mSpawnCount
-static constexpr uintptr_t kVS_SpawnClass   = 0x90;   // mSpawnClass[8] (cargo class)
-static constexpr uintptr_t kVS_UseCarrier   = 0xD0;   // mUseCarrier[8]
-static constexpr uintptr_t kVS_ListSentinel = 0xD8;   // mTrackerList
-static constexpr uintptr_t kVS_TrackerCount = 0xE8;   // mTrackerList._iCount
-static constexpr uintptr_t kVS_CarrierPtr   = 0xEC;   // mCarrier (PblHandle ptr)
-static constexpr uintptr_t kVS_CarrierGen   = 0xF0;   // mCarrier (PblHandle id)
-static constexpr uintptr_t kVS_Team         = 0xF8;   // mSpawnTeam (1-based)
+using CargoSlot = EntityCarrier::CargoSlot;
+using CargoInfo = EntityCarrierClass::CargoInfo;
 
 static inline int&   fieldI(char* p, uintptr_t off) { return *(int*)(p + off); }
 static inline float& fieldF(char* p, uintptr_t off) { return *(float*)(p + off); }
 
-static inline CargoSlot* cargoSlots(char* base) { return (CargoSlot*)(base + L->cargoSlots); }
-static inline int  flightState(char* base) { return fieldI(base, L->flightState); }
-static inline char* carrierClass(char* base) { return *(char**)(base + L->cls); }
+static inline CargoSlot* cargoSlots(char* base) { return ec::mCargoArray(base); }
+static inline int  flightState(char* base) { return ef::mState(base); }
+static inline char* carrierClass(char* base) { return (char*)ef::mClass(base); }
 
-// Live cargo in a slot, or null.  Mirrors the engine's PblHandle test.
+// Live cargo in a slot, or null.
 static void* slotCargo(char* base, int slot)
 {
-   CargoSlot& s = cargoSlots(base)[slot];
-   if (!s.mObjectPtr) return nullptr;
-   if (*(int*)((char*)s.mObjectPtr + kHandleId) != s.mObjectGen) return nullptr;
-   return s.mObjectPtr;
+   return cargoSlots(base)[slot].mObject.Get();
 }
 
 static void setTeam(void* obj, int team)
@@ -197,7 +141,6 @@ struct CarrierTrack {
    float    padX, padY, padZ;
    float    descentDuration;    // LandingTime (clamped)
    float    forwardSpeed;       // TakeoffSpeed (clamped)
-   float    landedHt;           // class LandedHeight
    int      savedCargoTeam[kMaxCargo];  // -1 = nothing saved
 
    int      lastState;
@@ -310,7 +253,7 @@ static fn_SetProperty_t original_SetProperty = nullptr;
 static void __fastcall hooked_SetProperty(void* ecx, void* /*edx*/, unsigned int hash, const char* value)
 {
    if (hash == kCargoNodeName_Hash || hash == kCargoNodeOffset_Hash) {
-      if (fieldI((char*)ecx, L->clsCargoCount) >= kMaxCargo) return;
+      if (ecc::mCargoCount(ecx) >= kMaxCargo) return;
    }
    original_SetProperty(ecx, nullptr, hash, value);
 }
@@ -330,7 +273,7 @@ static fn_AttachCargo_t original_AttachCargo = nullptr;
 
 static bool __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/, int slot, void* cargo)
 {
-   if (L->attachSlotIsIndex && (unsigned)slot >= (unsigned)kMaxCargo) return false;
+   if (s_codegen->attachSlotIsIndex && (unsigned)slot >= (unsigned)kMaxCargo) return false;
    if (!cargo) return false;
    return original_AttachCargo(ecx, nullptr, slot, cargo);
 }
@@ -342,7 +285,7 @@ static bool __fastcall hooked_AttachCargo(void* ecx, void* /*edx*/, int slot, vo
 // type, so the restore runs on the exception path too.
 static bool attachCargoToSlot(char* base, int slot, void* cargo)
 {
-   if (L->attachSlotIsIndex || slot == 0)
+   if (s_codegen->attachSlotIsIndex || slot == 0)
       return original_AttachCargo(base, nullptr, slot, cargo);
    if ((unsigned)slot >= (unsigned)kMaxCargo) return false;
 
@@ -350,7 +293,7 @@ static bool attachCargoToSlot(char* base, int slot, void* cargo)
    __try {
       char* cls = carrierClass(base);
       if (cls) {
-         CargoInfo* nodes = (CargoInfo*)(cls + L->clsCargoNodes);
+         CargoInfo* nodes = ecc::mCargoInfo(cls);
          CargoSlot* slots = cargoSlots(base);
          CargoInfo savedNode = nodes[0];
          CargoSlot savedSlot = slots[0];
@@ -387,7 +330,7 @@ static void startDropAnimation(CarrierTrack& t, char* base)
    float dur = 3.0f;
    __try {
       char* cls = carrierClass(base);
-      void* anim = cls ? *(void**)(cls + L->clsTakeoffAnim) : nullptr;
+      const void* anim = cls ? efc::mAnimTakeoff(cls) : nullptr;
       if (anim) {
          unsigned short nFrames = *(unsigned short*)((char*)anim + 8);
          if (nFrames > 0) dur = (float)nFrames / 30.0f;
@@ -477,15 +420,15 @@ static __declspec(naked) void rayHitStub_sse()
 
 static void codePatchesInit()
 {
-   s_visJz = codeSite(L->visJz);
+   s_visJz = codeSite(g_addr->flyer_render_cull_jz);
    if (s_visJz) memcpy(s_visJzOrig, s_visJz, 6);
 
-   const uintptr_t vas[2] = { L->rayHit1, L->rayHit2 };
+   const uintptr_t vas[2] = { g_addr->flyer_ray_hit_takeoff, g_addr->flyer_ray_hit_landing };
    for (int i = 0; i < 2; i++) {
       s_rayHit[i] = codeSite(vas[i]);
       if (!s_rayHit[i]) continue;
       memcpy(s_rayHitOrig[i], s_rayHit[i], 5);
-      if (L->rayHitSse) {
+      if (s_codegen->rayHitSse) {
          x86::encode_branch(s_rayHitPatch[i], s_rayHit[i], x86::kCall, &rayHitStub_sse);
       } else {
          const unsigned char fld1[5] = { 0xD9, 0xE8, 0x90, 0x90, 0x90 };
@@ -531,9 +474,9 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/, unsigned int
       return;
    }
 
-   float* progSlot     = &fieldF(base, L->progress);
-   float* netDeltaSlot = &fieldF(base, L->netAnimDelta);
-   void** animRefSlot  = (void**)(base + L->animRef);
+   float* progSlot     = &ef::mFlightRatio(base);
+   float* netDeltaSlot = &ef::mTotalUpdateDt(base);
+   void** animRefSlot  = (void**)&ef::mZephyrPoseDyn_pkAnim(base);
    const float savedProg     = *progSlot;
    const float savedNetDelta = *netDeltaSlot;
    void* const savedAnimRef  = *animRefSlot;
@@ -551,7 +494,7 @@ static void __fastcall hooked_FlyerRender(void* ecx, void* /*edx*/, unsigned int
       // The render may be pointed at another clip (e.g. landing): force the
       // takeoff clip so nFrames matches the progress we drive.
       char* cls = carrierClass(base);
-      void* takeoff = cls ? *(void**)(cls + L->clsTakeoffAnim) : nullptr;
+      void* takeoff = cls ? (void*)efc::mAnimTakeoff(cls) : nullptr;
       if (takeoff) *animRefSlot = takeoff;
 
       renderUncalled(ecx, 0, p3, p4);   // LOD 0: the skinned mesh
@@ -617,7 +560,7 @@ static void turretFireInstall()
    s_turretFireLen      = len;
    s_turretFireAllow    = (uintptr_t)resolve(g_addr->turret_fire_allow);
    s_turretFireBlock    = (uintptr_t)resolve(g_addr->turret_fire_block);
-   s_turretFireStateOff = L->flightState;
+   s_turretFireStateOff = ef::mState.off();
 
    unsigned char patch[kTurretFirePatch_max];
    x86::encode_branch(patch, s_turretFireSite, x86::kJmp, &turretFire_cave, sizeof(patch));
@@ -707,7 +650,7 @@ static void* g_FireStateMachine = nullptr;
 
 static void fireStateMachine(void* trigger, float dt, char fire)
 {
-   if (L->fireStateMachineHasDt)
+   if (s_codegen->fireStateMachineHasDt)
       ((fn_FireStateMachine_t)g_FireStateMachine)(trigger, nullptr, dt, fire);
    else
       ((fn_FireStateMachineNoDt_t)g_FireStateMachine)(trigger, nullptr, fire);
@@ -795,24 +738,24 @@ static void __fastcall carrier_ActivatePhysics(void* ecx, void* /*edx*/)
 {
    char* base = (char*)ecx;
    activateSubObject(base + kControllableBase, -1);
-   activateSubObject(base + L->postCollision, -15);
+   activateSubObject((char*)&ef::mPostCollision(base), -15);
 
    char* cls = carrierClass(base);
    if (cls) {
-      int n = fieldI(cls, L->clsWeaponCount);
-      void** aimers = (void**)(base + L->aimers);
+      int n = efc::mWeaponCount(cls);
+      void** aimers = (void**)ef::mAimer(base);
       for (int i = 0; i < n; i++)
          if (aimers[i]) g_AimerActivate(aimers[i], nullptr);
    }
 
-   int turretCount = *(signed char*)(base + L->turretCount);
-   void** turrets = (void**)(base + L->turrets);
+   int turretCount = ef::mNumTurrets(base);
+   void** turrets = (void**)ef::mTurret(base);
    for (int i = 0; i < turretCount; i++)
       if (turrets[i]) g_TurretActivate(turrets[i], nullptr);
 
    if (cls) {
-      int n = *(unsigned char*)(cls + L->clsPassengerCount);
-      void** passengers = (void**)(base + L->passengers);
+      int n = efc::mNumPassengerSlots(cls);
+      void** passengers = (void**)ef::mPassengerSlots(base);
       for (int i = 0; i < n; i++)
          if (passengers[i]) g_PassengerActivate(passengers[i], nullptr);
    }
@@ -884,6 +827,10 @@ static void applyAscentLock(CarrierTrack& t, char* base)
    fieldF(base, kPosZ) = t.snapZ + t.fwdDirZ * dist;
 }
 
+// During LANDING the ground rays stay off until the carrier is this close to the
+// pad horizontally (see hooked_CarrierUpdate).
+static constexpr float kOverPadRadius = 2.0f;
+
 // Descent: from wherever LANDING starts, smoothstep X/Y/Z onto the pad over
 // LandingTime.  Y targets padY + instance LandedHeight - 1 so vanilla's own
 // ground check (groundDistance < LandedHeight) fires directly over the pad.
@@ -898,7 +845,7 @@ static void updateFlight(CarrierTrack& t, char* base, float dt)
       t.landStartY  = fieldF(base, kPosY);
       t.landStartZ  = fieldF(base, kPosZ);
       t.landElapsed = 0.0f;
-      t.landTargetY = t.padY + fieldF(base, L->landedHeight) - 1.0f;
+      t.landTargetY = t.padY + ef::mLandedHeight(base) - 1.0f;
       t.landActive  = true;
    }
 
@@ -919,7 +866,7 @@ static void updateFlight(CarrierTrack& t, char* base, float dt)
 
    if (t.ascentActive) {
       if (state == 3) {                         // no re-landing after the drop
-         fieldI(base, L->flightState) = 1;
+         ef::mState(base) = 1;
          state = 1;
       }
       if (state == 1) t.ascentElapsed += dt;
@@ -953,6 +900,18 @@ static void syncBoundingSphere(char* base)
    if (fieldF(base, kSphere + 12) < 80.0f) fieldF(base, kSphere + 12) = 80.0f;
 }
 
+// A flyer killed in the air plays ExplosionCritical and goes DYING (4): it
+// tumbles and falls under gravity until its crash timer runs out or it hits
+// something, then CRASHED (5) makes the next Update award the kill, break it
+// into chunks, play ExplosionDestruct and remove it.  The timer is 0.2-2.2 s
+// with chunks and 600 s without, so a chunkless carrier spins all the way to
+// the ground.  Skip straight to CRASHED so a downed carrier explodes on the
+// next frame.
+static void skipDeathSpin(char* base)
+{
+   if (flightState(base) == 4) ef::mState(base) = 5;
+}
+
 static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
 {
    char* base = (char*)ecx - kControllableBase;
@@ -962,8 +921,21 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    __try {
       if (t) {
          applyAscentLock(*t, base);
-         const float threshold = (t->landedHt * 2.0f > 10.0f) ? t->landedHt * 2.0f : 10.0f;
-         if (fieldF(base, kPosY) - t->padY > threshold) {
+         // Instance landed height, which includes the cargo.  The descent
+         // parks the carrier at padY + landedHeight - 1, so the rays must be
+         // live there or the landing check never passes (tall cargo such as
+         // an AT-AT would hover over the pad forever).  While LANDING they also
+         // stay off until the carrier is over the pad, so vanilla's landing
+         // check cannot pass over terrain the approach crosses (a low
+         // SetMaxFlyHeight keeps the whole approach within the height
+         // threshold, and the cargo was set down short of the pad).
+         const float landedHt  = ef::mLandedHeight(base);
+         const float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
+         const float dx = fieldF(base, kPosX) - t->padX;
+         const float dz = fieldF(base, kPosZ) - t->padZ;
+         const bool  approaching = flightState(base) == 3 &&
+                                   dx * dx + dz * dz > kOverPadRadius * kOverPadRadius;
+         if (approaching || fieldF(base, kPosY) - t->padY > threshold) {
             rayHitSet(true);
             neutralised = true;
          }
@@ -979,6 +951,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    }
 
    __try {
+      skipDeathSpin(base);
       if (t) {
          applyAscentLock(*t, base);
          updateFlight(*t, base, dt);
@@ -1023,7 +996,7 @@ static __declspec(naked) void __fastcall call_orig_UpdateSpawn_regcall(void*, vo
 
 static void call_original_UpdateSpawn(void* ecx, float dt)
 {
-   if (L->updateSpawnRegcall) call_orig_UpdateSpawn_regcall(ecx, nullptr, dt);
+   if (s_codegen->updateSpawnRegcall) call_orig_UpdateSpawn_regcall(ecx, nullptr, dt);
    else                       original_UpdateSpawn(ecx, nullptr, dt);
 }
 
@@ -1035,12 +1008,11 @@ static void call_original_UpdateSpawn(void* ecx, float dt)
 // UpdateSpawn exactly when trackers < mSpawnCount, i.e. in that case, after
 // UpdateLive has had its turn, so running UpdateLive's carrier block here is
 // safe to repeat and fills the gap.
-static void padCarrierUpdate(char* vs)
+static void padCarrierUpdate(VehicleSpawn* vs)
 {
    __try {
-      char* carrier = *(char**)(vs + kVS_CarrierPtr);
+      char* carrier = (char*)vs->mCarrier.Get();  // stale: the original clears it
       if (!carrier) return;
-      if (fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;  // original clears it
       if (*(void**)carrier != g_carrierVtable) return;
 
       const int state = flightState(carrier);
@@ -1052,8 +1024,7 @@ static void padCarrierUpdate(char* vs)
          trackRelease(carrier);
          typedef void(__thiscall* Dtor_t)(void*, int);
          ((Dtor_t)(*(void***)carrier)[kVt_DeletingDtor])(carrier, 1);
-         fieldI(vs, kVS_CarrierPtr) = 0;
-         fieldI(vs, kVS_CarrierGen) = 0;
+         vs->mCarrier = {};
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -1063,51 +1034,51 @@ typedef void* (__thiscall* fn_MemPoolAlloc_t)(void* pool, unsigned int size);
 static fn_MemPoolAlloc_t g_MemPoolAlloc = nullptr;
 static void*             g_VehicleTrackerPool = nullptr;
 
-static void createTracker(char* vs, void* cargo)
+static void createTracker(VehicleSpawn* vs, void* cargo)
 {
+   using VehicleTracker = VehicleSpawn::VehicleTracker;
    if (!g_MemPoolAlloc || !g_VehicleTrackerPool || !cargo) return;
-   int* tracker = (int*)g_MemPoolAlloc(g_VehicleTrackerPool, 0x1C);
+   auto* tracker = (VehicleTracker*)g_MemPoolAlloc(g_VehicleTrackerPool, sizeof(VehicleTracker));
    if (!tracker) return;
-   memset(tracker, 0, 0x1C);
+   memset(tracker, 0, sizeof(VehicleTracker));
 
-   char* sentinel = vs + kVS_ListSentinel;
-   int*  sentinelI = (int*)sentinel;
-   tracker[0] = (int)sentinel;
-   tracker[1] = (int)sentinel;
-   tracker[3] = (int)tracker;
-   tracker[4] = (int)cargo;                        // mVehicle ptr
-   tracker[5] = fieldI((char*)cargo, kHandleId);   // mVehicle id
+   PblList<VehicleTracker>& list = vs->mTrackerList;
+   tracker->_pList   = &list;
+   tracker->_pObject = tracker;
+   tracker->mVehicle = { (GameObject*)cargo, (uint32_t)fieldI((char*)cargo, kHandleId) };
 
-   tracker[2] = sentinelI[2];                      // link at head
-   sentinelI[2] = (int)tracker;
-   *(int*)(tracker[2] + 4) = (int)tracker;
-   fieldI(vs, kVS_TrackerCount) += 1;
+   // Append: insert before the sentinel.
+   tracker->_pNext         = &list._head;
+   tracker->_pPrev         = list._head._pPrev;
+   list._head._pPrev       = tracker;
+   tracker->_pPrev->_pNext = tracker;
+   list._iCount += 1;
 }
 
 // Spawn cargo for slots 1..N-1 of a multi-cargo carrier, within the pad's
 // remaining spawn budget.  Same order as vanilla: attach, team, activate,
 // tracker.
-static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, int countAfter)
+static void spawnExtraCargo(VehicleSpawn* vs, char* carrier, CarrierTrack* t, int team, int countAfter)
 {
    char* cls = carrierClass(carrier);
    if (!cls) return;
-   const int cargoCount = fieldI(cls, L->clsCargoCount);
+   const int cargoCount = ecc::mCargoCount(cls);
    if (cargoCount <= 1) return;
 
    int slotsToFill = cargoCount;
-   const int budget = fieldI(vs, kVS_SpawnCount) - countAfter;
+   const int budget = vs->mSpawnCount - countAfter;
    if (slotsToFill > budget + 1) slotsToFill = budget + 1;
    if (slotsToFill > kMaxCargo)  slotsToFill = kMaxCargo;
    if (slotsToFill <= 1) return;
 
-   void* spawnClass = *(void**)(vs + kVS_SpawnClass + team * 4);
+   void* spawnClass = vs->mSpawnClass[team];
    if (!spawnClass) return;
    auto fn = get_gamelog();
 
    for (int slot = 1; slot < slotsToFill; slot++) {
       typedef void* (__thiscall* SpawnEntity_t)(void* cls, void* transform);
       typedef void* (__thiscall* GetEntity_t)(void* obj);
-      void* spawned = ((SpawnEntity_t)(*(void***)spawnClass)[2])(spawnClass, vs + kVS_PadTransform);
+      void* spawned = ((SpawnEntity_t)(*(void***)spawnClass)[2])(spawnClass, &vs->mMatrix);
       if (!spawned) continue;
       void* cargo = ((GetEntity_t)(*(void***)spawned)[9])(spawned);
       if (!cargo) continue;
@@ -1146,38 +1117,36 @@ static void spawnExtraCargo(char* vs, char* carrier, CarrierTrack* t, int team, 
 
 static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 {
-   char* vs = (char*)ecx;
+   auto* vs = (VehicleSpawn*)ecx;
    padCarrierUpdate(vs);
 
    int countBefore = 0;
-   __try { countBefore = fieldI(vs, kVS_TrackerCount); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+   __try { countBefore = vs->mTrackerList._iCount; } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
    call_original_UpdateSpawn(ecx, dt);
 
    __try {
-      const int countAfter = fieldI(vs, kVS_TrackerCount);
+      const int countAfter = vs->mTrackerList._iCount;
       if (countAfter <= countBefore) return;
 
-      const int team = fieldI(vs, kVS_Team);
-      if (team < 1 || team > 7 || !*(vs + kVS_UseCarrier + team)) return;
+      const int team = vs->mSpawnTeam;
+      if (team < 1 || team > 7 || !vs->mUseCarrier[team]) return;
 
-      char* carrier = *(char**)(vs + kVS_CarrierPtr);
-      if (!carrier || fieldI(carrier, kHandleId) != fieldI(vs, kVS_CarrierGen)) return;
+      char* carrier = (char*)vs->mCarrier.Get();
+      if (!carrier) return;
       if (*(void**)carrier != g_carrierVtable) return;
 
       CarrierTrack* t = trackAcquire(carrier);
       if (t) {
-         const float* pad = (const float*)(vs + kVS_PadTransform);
-         t->padX = pad[12];
-         t->padY = pad[13];
-         t->padZ = pad[14];
+         t->padX = vs->mMatrix._41;
+         t->padY = vs->mMatrix._42;
+         t->padZ = vs->mMatrix._43;
 
          char* cls = carrierClass(carrier);
-         const float landingTm = cls ? fieldF(cls, L->clsLandingTime)  : 10.0f;
-         const float speed     = cls ? fieldF(cls, L->clsTakeoffSpeed) : 20.0f;
+         const float landingTm = cls ? efc::mLandingTime(cls)  : 10.0f;
+         const float speed     = cls ? efc::mTakeoffSpeed(cls) : 20.0f;
          t->descentDuration = (landingTm > 2.0f) ? landingTm : 2.0f;
          t->forwardSpeed    = (speed > 1.0f) ? speed : 1.0f;
-         t->landedHt        = cls ? fieldF(cls, L->clsLandedHeight) : 5.0f;
 
          // Slot 0 was attached inside the original, before we tracked it.
          if (void* cargo0 = slotCargo(carrier, 0)) saveCargoTeam(*t, 0, cargo0);
@@ -1186,6 +1155,132 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
       spawnExtraCargo(vs, carrier, t, team, countAfter);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       if (auto fn = get_gamelog()) fn("[Carrier] exception after UpdateSpawn\n");
+   }
+}
+
+// ---------------------------------------------------------------------------
+// CommandWalker::Kill double call
+//
+// EntityCarrier::Kill kills every attached cargo directly (cargo vtable +0x6C
+// returns the Controllable, whose slot 5 is a thunk to the Damageable Kill).
+// EntityWalker::Kill clears the alive bit (Damageable+0xBC bit 3) but only
+// EntityWalker::Update's own death branch follows with Die(), which sets the
+// dead flag, so the walker's next Update runs Kill() again, then Die().
+// CommandWalker::Kill kills its mobile command post and zeroes the pointer with
+// no null check (the destructor has one), so the second call reads NULL
+// (modtools AV at 0x0064BB26).  Lua KillObject is the same kind of direct Kill.
+//
+// The post is built in the constructor and BuildPost always returns a slot, so
+// a NULL post means Kill already ran: the second call becomes a no-op and
+// Update's Die() still finishes the death.  CommandHover and the command
+// buildings never zero their post, and the post-kill function returns early on
+// an inactive post, so they are safe as they are.
+// ---------------------------------------------------------------------------
+
+using fn_WalkerKill_t = void(__fastcall*)(void* ecx, void* edx);   // __thiscall, bare RET
+static fn_WalkerKill_t original_CommandWalkerKill = nullptr;
+static uintptr_t       s_walkerPostOff = 0;                        // Damageable -> post
+
+static void __fastcall hooked_CommandWalkerKill(void* ecx, void* edx)
+{
+   if (ecx && *(void**)((char*)ecx + s_walkerPostOff) == nullptr) return;  // already killed
+   original_CommandWalkerKill(ecx, edx);
+}
+
+// ---------------------------------------------------------------------------
+// EntityFlyer::ClientKill with no ExplosionDestruct (every flyer, not only carriers)
+//
+// On a multiplayer client a flyer removed while LANDED or CRASHED plays the class
+// ExplosionDestruct with no null check.  Without one, run the Kill it starts
+// with and skip the explosion.
+// ---------------------------------------------------------------------------
+
+using fn_ClientKill_t = void(__fastcall*)(void* ecx, void* edx);   // __thiscall, bare RET
+static fn_ClientKill_t original_FlyerClientKill = nullptr;
+
+static constexpr int kFlyer_Damageable = 0x140;   // sub-object whose slot 1 is Kill, all builds
+
+static void __fastcall hooked_FlyerClientKill(void* ecx, void* edx)
+{
+   void* cls = ef::mClass(ecx);
+   if (cls && efc::mExplosionDestruct(cls)) {
+      original_FlyerClientKill(ecx, edx);
+      return;
+   }
+   void*  damageable = (char*)ecx + kFlyer_Damageable;
+   void** vt = *(void***)damageable;
+   ((fn_ClientKill_t)vt[1])(damageable, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Net send-list cycle (multiplayer host)
+//
+// The host builds each client's send list with a visitor, __cdecl(obj, depth),
+// that skips obj when it is already in list[0 .. depth-1], otherwise inserts it
+// at `depth` and calls obj->AddSends(visitor, depth) (vtable +0x10C).
+// EntityFlyer::AddSends sends mPilot->GetGameObject() at the SAME depth with no
+// PILOT_SELF guard, and a carrier's pilot can resolve to the carrier itself
+// (seen in a Steam MP test).  The entry the visitor just wrote sits at index
+// `depth`, outside the range the dedupe scans, so the carrier is re-inserted at
+// the same depth until the stack overflows (GOG: STACK_OVERFLOW at 0x005BE545).
+//
+// The hook tracks the objects whose AddSends is running and returns early when
+// one comes around again, which breaks any loop shape; the object is already in
+// the list at that point.  The visitor passes its own address as the callback,
+// so hooking its entry covers every nested call.  Logs the chain once.
+// ---------------------------------------------------------------------------
+
+using fn_SendVisitor_t = void(__cdecl*)(void* obj, int depth);
+static fn_SendVisitor_t original_SendVisitor = nullptr;
+static uintptr_t        s_exeBase = 0;
+
+static constexpr int kMaxSendNesting = 128;   // the list itself holds 64 entries
+static void* s_sendActive[kMaxSendNesting];
+static int   s_sendTop = 0;
+static bool  s_sendReported = false;
+
+static uintptr_t unrelocatedVtable(void* obj)
+{
+   uintptr_t vt = 0;
+   __try { vt = *(uintptr_t*)obj; } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+   return vt ? vt - s_exeBase + 0x400000 : 0;
+}
+
+static void reportSendCycle(const char* what, void* obj, int depth)
+{
+   if (s_sendReported) return;
+   s_sendReported = true;
+
+   char chain[512] = {};
+   int  len = 0;
+   for (int i = 0; i < s_sendTop && len < (int)sizeof(chain) - 24; ++i)
+      len += sprintf_s(chain + len, sizeof(chain) - len, " %p(vt %08X)",
+                       s_sendActive[i], (unsigned)unrelocatedVtable(s_sendActive[i]));
+
+   warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                "[NetSendCycleFix] %s: object %p (vt %08X) at depth %d; skipped instead of "
+                "recursing forever. Expansion chain:%s\n",
+                what, obj, (unsigned)unrelocatedVtable(obj), depth, chain);
+}
+
+static void __cdecl hooked_SendVisitor(void* obj, int depth)
+{
+   for (int i = 0; i < s_sendTop; ++i) {
+      if (s_sendActive[i] == obj) {
+         reportSendCycle("send-list cycle", obj, depth);
+         return;
+      }
+   }
+   if (s_sendTop >= kMaxSendNesting) {
+      reportSendCycle("send-list nesting cap", obj, depth);
+      return;
+   }
+
+   s_sendActive[s_sendTop++] = obj;
+   __try {
+      original_SendVisitor(obj, depth);
+   } __finally {
+      --s_sendTop;
    }
 }
 
@@ -1200,8 +1295,8 @@ static void*  s_updateSpawnDetour   = nullptr;
 
 void entity_carrier_fixes_install(uintptr_t exe_base)
 {
-   if (g_build == GameBuild::Modtools)                              L = &kCarrierModtools;
-   else if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) L = &kCarrierRelease;
+   if (g_build == GameBuild::Modtools)                              s_codegen = &kCodegenModtools;
+   else if (g_build == GameBuild::Steam || g_build == GameBuild::GOG) s_codegen = &kCodegenRelease;
    else return;
 
    if (!g_addr->carrier_set_property || !g_addr->carrier_attach_cargo ||
@@ -1240,8 +1335,18 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
       g_FireStateMachine = resolve(exe_base, g_addr->trigger_update);
    }
 
-   s_updateSpawnDetour = L->updateSpawnRegcall ? (void*)hooked_UpdateSpawn_regcall
+   s_updateSpawnDetour = s_codegen->updateSpawnRegcall ? (void*)hooked_UpdateSpawn_regcall
                                                : (void*)hooked_UpdateSpawn;
+
+   s_exeBase = exe_base;
+   if (g_addr->command_walker_kill && g_addr->command_walker_post_off) {
+      original_CommandWalkerKill = (fn_WalkerKill_t)resolve(exe_base, g_addr->command_walker_kill);
+      s_walkerPostOff            = g_addr->command_walker_post_off;
+   }
+   if (g_addr->net_send_visitor)
+      original_SendVisitor = (fn_SendVisitor_t)resolve(exe_base, g_addr->net_send_visitor);
+   if (g_addr->flyer_client_kill)
+      original_FlyerClientKill = (fn_ClientKill_t)resolve(exe_base, g_addr->flyer_client_kill);
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
@@ -1257,6 +1362,12 @@ void entity_carrier_fixes_install(uintptr_t exe_base)
    }
    if (s_turretAIHooked)
       DetourAttach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
+   if (original_CommandWalkerKill)
+      DetourAttach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
+   if (original_SendVisitor)
+      DetourAttach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
+   if (original_FlyerClientKill)
+      DetourAttach(&(PVOID&)original_FlyerClientKill, hooked_FlyerClientKill);
    DetourTransactionCommit();
 
    // After the Detours commit, to avoid page-protection conflicts.
@@ -1297,7 +1408,16 @@ void entity_carrier_fixes_uninstall()
    }
    if (s_turretAIHooked)
       DetourDetach(&(PVOID&)original_TurretUpdateIndirect, hooked_TurretUpdateIndirect);
+   if (original_CommandWalkerKill)
+      DetourDetach(&(PVOID&)original_CommandWalkerKill, hooked_CommandWalkerKill);
+   if (original_SendVisitor)
+      DetourDetach(&(PVOID&)original_SendVisitor, hooked_SendVisitor);
+   if (original_FlyerClientKill)
+      DetourDetach(&(PVOID&)original_FlyerClientKill, hooked_FlyerClientKill);
    DetourTransactionCommit();
+   original_CommandWalkerKill = nullptr;
+   original_SendVisitor       = nullptr;
+   original_FlyerClientKill   = nullptr;
 
    if (s_activatePhysicsSlot) {
       DWORD oldProt;

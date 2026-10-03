@@ -139,6 +139,85 @@ namespace modtools {
    // cdecl, result in ST(0).  ILT thunk 0x407581.
    constexpr uintptr_t collision_manager_ray_hit = 0x0042E230;
 
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
+   //
+   // void __cdecl GameState::CreateBaseWeaponClasses() - one `new XClass(PblHash(label))`
+   // per stock label, plain RET. Sole caller GameState::PreStateInit (0x0044F1B7), so
+   // it runs on every mission load. See docs/RE/WeaponClassFactory.md.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x0044C960;
+
+   // void* __cdecl operator new(uint) - allocates from RedCurrHeap. Class objects must
+   // come from here: PostStateCleanup only unlinks Factory::sList, never frees them.
+   constexpr uintptr_t engine_operator_new = 0x007E34A0;
+
+   // WeaponCannonClass::WeaponCannonClass(uint hash), __thiscall RET 4 (thunk 0x413156).
+   // Object size 0x3DC. Self-registers into Factory<Weapon,...>::sList (0x00AD43BC).
+   constexpr uintptr_t weapon_cannon_class_ctor = 0x00625A10;
+
+   // WeaponCannonClass vtable, 13 slots, no RTTI locator. +0x04 Derive (0x4142D1),
+   // +0x08 Build (0x40A8D0), +0x18 SetProperty, +0x20 PostLoadInit.
+   constexpr uintptr_t weapon_cannon_class_vftable = 0x00A525F4;
+
+   // WeaponCannon instance vtable, 61 slots (same order as Phantom 0xA1CB40).
+   constexpr uintptr_t weapon_cannon_vftable = 0x00A52468;
+
+   // Factory<Weapon,WeaponClass,WeaponDesc>::sCounter. Post-incremented into
+   // Factory::mNetIndex (+0x1C), which goes over the wire in 8 bits.
+   constexpr uintptr_t weapon_class_factory_counter = 0x00B91BE8;
+
+   // RedModel* __cdecl FindModel(uint pblHash) (thunk 0x41050A). What WeaponClass::SetProperty
+   // uses for GeometryName: a lookup in the loaded-model table 0xD4D964, marks it used.
+   constexpr uintptr_t red_model_find = 0x00448670;
+
+   // uint __thiscall RedModel::GetParentBoneAndOffset(uint crc, PblVector3* out), RET 8.
+   // Hardpoint name CRC (PblTEMPHash) -> offset; returns the parent bone hash or 0 on a miss.
+   // FirePointName stores `out` in WeaponClass::mFirePointOffset (+0x24).
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x007F9E50;
+
+   // bool __thiscall WeaponCannon::Fire(), plain RET. Non-virtual; sole caller
+   // WeaponCannon::UpdateFire (0x006276F5, via thunk 0x4109C9, a call site
+   // held_ordnance_effect rewrites). Builds the OrdnanceDesc from Aimer::mFirePos (+0x88)
+   // and mDirection (+0x48) on every call, one call per ShotsPerShot pellet.
+   constexpr uintptr_t weapon_cannon_fire = 0x00626490;
+
+   // void __thiscall WeaponClass::RenderFlash(PblVector3* pos, PblVector3* dir, float t),
+   // RET 0xC (thunk 0x408D7D). Weapon::Render calls it on mRenderClass with
+   // pos = mFirePointMatrix.trans, dir = Aimer::mDirection,
+   // t = (mMuzzleFlashStartTime - now) / mClass->mFlashLength, while t > 0.
+   constexpr uintptr_t weapon_class_render_flash = 0x0061CA80;
+
+   // float __cdecl GameLoop::GetMissionTime(), result in ST(0) (thunk 0x40DCD3).
+   constexpr uintptr_t game_loop_get_mission_time = 0x00732E60;
+
+   // void __cdecl FirstPerson::Init(), plain RET, runs on every ingame.lvl load. The ONLY
+   // writer of FirstPerson::mAnim[48] (fp_anim_array). A slot whose FirstPersonAnimName
+   // entry is null is skipped by the lookup and only refilled with humanfp_tool_idle while
+   // it is still null, so from the second level on it keeps the previous level's freed
+   // pointer. See weapon/dual_cannon.cpp.
+   constexpr uintptr_t first_person_init = 0x004AB590;
+
+   // void __thiscall WeaponClass::Render(PblMatrix* world, RedPose* pose, RedColor* color,
+   //     uint flags, bool highRes), RET 0x14 (thunk 0x401E01). Draws the class model at
+   //     hp_weapons with no Weapon instance. Sole caller SoldierElement::RenderUsingContext
+   //     (0x00674F0E), the spawn screen preview soldier.
+   constexpr uintptr_t weapon_class_render = 0x0061D170;
+
+   // WeaponClass/Weapon field offsets for the dualcannon set.  These were inline
+   // constants in dual_cannon.cpp until the retail port; the debug build carries
+   // extra WeaponClass members, so the class-side ones do NOT match Steam/GOG.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x290;
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x354;
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x358;
+   constexpr uintptr_t weapon_salvo_count_off           = 0x144;
+   constexpr uintptr_t weapon_cannon_class_size         = 0x3DC;
+   // Flags WeaponClass::Render hands the model's own Render (vtable slot 1).
+   // 0 means "forward whatever this function was called with", which is what the
+   // debug build does (`MOV ECX,[EBP+0x14]` / `PUSH ECX` at 0x0061D200).
+   constexpr uintptr_t weapon_class_render_model_flags = 0;
+
+   // Weapon::Render looks the weapon hardpoint up in a RedPose with
+   // pbl_hash_table_find(pose + 4, 0x100, crc); that entry lives under Hashing below.
+
    // ---- Loading Screen (LoadDisplay) -----------------------------------------
 
    constexpr uintptr_t load_data_file_real       = 0x0067e2b0;
@@ -627,6 +706,13 @@ namespace modtools {
    constexpr uintptr_t carrier_take_off             = 0x004F8B70;
    constexpr uintptr_t carrier_vtable               = 0x00A3A670;
    constexpr uintptr_t flyer_render                 = 0x004f6970;
+   constexpr uintptr_t flyer_client_kill            = 0x004F2D70;  // EntityFlyer::ClientKill
+   // EntityFlyer::Render: 6-byte JZ that skips the render on a frustum-cull miss.
+   // EntityFlyer::Update: the downward CollisionManager::RayHit CALLs in the
+   // TAKEOFF and LANDING branches. The carrier fixes patch all three.
+   constexpr uintptr_t flyer_render_cull_jz         = 0x004F6999;
+   constexpr uintptr_t flyer_ray_hit_takeoff        = 0x004FE8CD;
+   constexpr uintptr_t flyer_ray_hit_landing        = 0x004FEAE2;
    constexpr uintptr_t turret_update_indirect       = 0x005673a0;
    constexpr uintptr_t turret_activate              = 0x00563a90;
    constexpr uintptr_t aimer_activate               = 0x005ef020;
@@ -798,6 +884,19 @@ namespace modtools {
    // non-CommandPost entity can produce; see entity/command_post_null_fix.cpp.
    constexpr uintptr_t command_post_set_team        = 0x0064FBC0;
 
+   // CommandWalker::Kill -- __thiscall on the Damageable sub-object (base+0x140),
+   // bare RET.  Kills the mobile command post at [this+0x2000] and then zeroes it,
+   // with no null check (the destructor has one).  Detoured so a second Kill is a
+   // no-op; see entity/flyer_carrier_fixes.cpp.
+   constexpr uintptr_t command_walker_kill          = 0x006508B0;
+   constexpr uintptr_t command_walker_post_off      = 0x2000;      // Damageable -> post
+
+   // Net send-list visitor, __cdecl(GameObject* obj, int depth), bare RET.  Passes
+   // itself to obj->AddSends (vtable +0x10C).  Detoured to break pilot cycles that
+   // recurse at constant depth until the stack overflows; see
+   // entity/flyer_carrier_fixes.cpp.
+   constexpr uintptr_t net_send_visitor             = 0x00703750;
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0064FDF0, __cdecl(entity, CommandPostClass*).  sPostArray is a fixed 16
    // entries and the append path has no capacity check, so the 17th registration
@@ -808,7 +907,6 @@ namespace modtools {
    constexpr uintptr_t command_post_hint_index     = 0x00AD5494;  // one-shot forced index
    constexpr uintptr_t command_post_array_ptr      = 0x00AD5498;  // holds the array base
    constexpr uintptr_t command_post_count_ptr      = 0x00AD549C;  // holds the count's address
-   constexpr uintptr_t command_post_class_off      = 0x1A54;      // CommandPost -> its class
 
 
    // ---- Particle / Renderer Cache (BSS globals) --------------------------------
@@ -869,6 +967,17 @@ namespace modtools {
    constexpr uintptr_t net_enabled                    = 0x00BE14F0;
    constexpr uintptr_t net_enabled_next               = 0x00BE14F1;
    constexpr uintptr_t net_on_client                  = 0x00BE14FD;
+   // netIsLocalTurn: a client only creates ordnance in its local turn; WeaponCannon::Fire
+   // 0x006269CD returns early ("fired", no ordnance) when netOnClient && !netIsLocalTurn.
+   constexpr uintptr_t net_is_local_turn              = 0x00BDA95D;
+   // NetGame::GetJoystickIndex, int __cdecl(int playerId), bare RET: < 0 when the player is
+   // not local.  WeaponCannon::Fire asks it of mOwner+0xD4 before a client creates ordnance.
+   constexpr uintptr_t net_game_get_joystick_index    = 0x006E3C80;
+   // ReadNetEvent CREATE_ORDNANCE: `LEA EAX,[EBP-0x68]` that sets up the ordnance
+   // factory Build call (desc at EBP-0x68, factory at EBP-0x10), 15 bytes.
+   constexpr uintptr_t net_read_event_build_call      = 0x006EC534;
+   // NetGame::Predict, char __cdecl(): the client's replay of unacknowledged turns.
+   constexpr uintptr_t net_game_predict               = 0x006E8970;
 
    // ---- Fog (SetFogRange / SetFogEnable Lua funcs) ------------------------------
    // RedRenderer::SetFogRange/SetFogEnable set the D3D render states; the
@@ -1459,6 +1568,13 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
+
 } // namespace modtools
 
 // =============================================================================
@@ -1490,6 +1606,46 @@ namespace steam {
    constexpr uintptr_t lua_settop        = 0x69c400;
    constexpr uintptr_t lua_insert        = 0x69bc00;
    constexpr uintptr_t lua_newtable      = 0x69bdb0;
+
+
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
+   //
+   // Derived 2026-09-17 against this exe; see docs/RE/WeaponClassFactory.md.  Every
+   // return convention below was read off the epilogue, not assumed from modtools,
+   // because this build folds argument passing under LTCG.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x00539AA0; // RET 0
+   constexpr uintptr_t engine_operator_new = 0x006C3540;                   // __cdecl, RET 0
+   constexpr uintptr_t weapon_cannon_class_ctor = 0x00680050;              // __thiscall(uint), RET 4
+                                                                           // (0x00680210 is the copy ctor)
+   constexpr uintptr_t weapon_cannon_class_vftable = 0x007B0674;           // 13 slots; `MOV [ESI],0x7b0674`
+   constexpr uintptr_t weapon_cannon_vftable = 0x007B057C;                 // 61 slots, ends exactly at the class vftable
+   constexpr uintptr_t weapon_class_factory_counter = 0x01FAA758;          // Factory ctor 0x0067BFE0: read -> +0x1C, INC, store
+   constexpr uintptr_t red_model_find = 0x00411C50;                        // __cdecl(hash), RET 0; table 0x93EBDC, 0x800 buckets
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x006C41E0;  // __thiscall(crc, out), RET 8
+   constexpr uintptr_t weapon_cannon_fire = 0x0067F320;                    // __fastcall(this), RET 0; sole caller UpdateFire 0x0067EDF8
+   constexpr uintptr_t weapon_class_render_flash = 0x0067BD30;             // __thiscall(pos, dir), RET 8 -- `t` arrives in XMM3,
+                                                                           // NOT on the stack (call site 0x006794D4).  Modtools is
+                                                                           // RET 0xC with three stack args; dual_cannon.cpp bridges
+                                                                           // the two with a naked thunk.
+   constexpr uintptr_t game_loop_get_mission_time = 0x00530EA0;            // RET 0, result in ST(0)
+   constexpr uintptr_t first_person_init = 0x00521000;                     // RET 0; sole writer of fp_anim_array 0x01E55E30
+   constexpr uintptr_t weapon_class_render = 0x0067BF00;                   // __thiscall, RET 0x14; sole caller
+                                                                           // SoldierElement::RenderUsingContext 0x0048E36E
+
+   // WeaponClass/Weapon field offsets.  Weapon and Aimer match modtools exactly
+   // (re-verified in asm); WeaponClass does NOT, because the debug build carries
+   // extra members.  WeaponClass_data starts at object+0x20 here, confirmed three
+   // ways: mFirePointOffset 0x24, mModel 0x64, mNameHash 0x54.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x1B8; // `DIVSS XMM0,[EAX+0x1b8]` at 0x006794BA
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x280; // key 0x03B38558, `LEA EAX,[EDI+0x280]` at 0x006804BF
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x27C; // `CMP EAX,[ECX+0x27c]` at 0x0067ED96 (two alias keys)
+   constexpr uintptr_t weapon_salvo_count_off           = 0x114; // `MOV [ESI+0x114],EAX` at 0x0067ED64
+   constexpr uintptr_t weapon_cannon_class_size         = 0x2E0; // operator_new(0x2e0) in CreateBaseWeaponClasses
+   // WeaponClass::Render does NOT forward its caller's flags to the model here --
+   // it substitutes a constant (`PUSH 0x4000000` at 0x0067BFA6 Steam / 0x0067D046
+   // GOG).  Weapon::Render on the same build still forwards (`PUSH [EBP+0x14]`),
+   // so this applies to the spawn-screen path only.
+   constexpr uintptr_t weapon_class_render_model_flags = 0x04000000;
 
    // ---- Aimer / Weapon -------------------------------------------------------
 
@@ -1763,6 +1919,10 @@ namespace steam {
    constexpr uintptr_t carrier_update            = 0x004971D0;  // EntityCarrier +0x240 vtable (0x79a1bc) slot 1
    constexpr uintptr_t carrier_kill              = 0x00497110;  // EntityCarrier +0x140 vtable (0x79a470) slot 1
    constexpr uintptr_t flyer_render              = 0x004AB040;  // EntityCarrier +0x94  vtable (0x79a49c) slot 19
+   constexpr uintptr_t flyer_client_kill         = 0x004AAF20;  // EntityFlyer::ClientKill
+   constexpr uintptr_t flyer_render_cull_jz      = 0x004AB082;
+   constexpr uintptr_t flyer_ray_hit_takeoff     = 0x004AE246;
+   constexpr uintptr_t flyer_ray_hit_landing     = 0x004AE478;
 
    // ---- Debug / Visualization ------------------------------------------------
 
@@ -1780,7 +1940,9 @@ namespace steam {
 
    // ---- Weapon / Grappling Hook ----------------------------------------------
 
+   constexpr uintptr_t grapple_update            = 0x005ff8b0;  // OrdnanceGrapplingHook::Update
    constexpr uintptr_t grapple_dtor              = 0x005ff360;  // ~OrdnanceGrapplingHook
+   constexpr uintptr_t grapple_rtti_hash         = 0x01ebc054;  // EntitySoldier RTTI hash
 
    // ---- Animation (weapon/soldier) -------------------------------------------
 
@@ -2084,6 +2246,17 @@ namespace steam {
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
 
+   // CommandWalker::Kill -- Damageable vtable slot 1 (vtable 0x00798974, set by the
+   // ctor at 0x0047FE70).  Same body as modtools: PUSH ESI / MOV ESI,ECX / CALL
+   // EntityWalker::Kill / kill [ESI+0x1FC0] with no null check / zero it / bare RET.
+   // The post sits 0x40 lower than modtools, like the rest of the walker fields.
+   constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
+   constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
+
+   // Net send-list visitor -- same body as modtools (PUSH 0x005BD590 as its own
+   // callback, list at [0x01FA65B4], count 0x01FA87A4 capped at 0x40), bare RET.
+   constexpr uintptr_t net_send_visitor            = 0x005BD590;
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // FUN_0047AC80, __fastcall(ECX = entity, EDX = CommandPostClass*) -- a DIFFERENT
    // convention from modtools' __cdecl, read from this build's own prologue.
@@ -2095,7 +2268,6 @@ namespace steam {
    constexpr uintptr_t command_post_hint_index     = 0x007E6318;
    constexpr uintptr_t command_post_array_ptr      = 0x007E6314;
    constexpr uintptr_t command_post_count_ptr      = 0x007E631C;
-   constexpr uintptr_t command_post_class_off      = 0x0B3C;
 
 
    // ---- Snd::Properties field offsets (NOT addresses) --------------------------
@@ -2313,6 +2485,10 @@ namespace steam {
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
+   constexpr uintptr_t net_is_local_turn            = 0x01E62F10;  // WeaponCannon::Fire 0x0067F793
+   constexpr uintptr_t net_game_get_joystick_index  = 0x005B73C0;  // __cdecl(int) wrapper, bare RET
+   constexpr uintptr_t net_read_event_build_call    = 0x005BF327;  // desc EBP-0xB8, factory EBP-0x1C, 20 bytes
+   constexpr uintptr_t net_game_predict             = 0x005BA810;  // NetGame::Predict
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
    constexpr uintptr_t hud_game_events_update       = 0x00562BE0;
    constexpr uintptr_t hud_player_data              = 0x01EC6290;
@@ -2703,6 +2879,13 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
+
 } // namespace steam
 
 // =============================================================================
@@ -2900,6 +3083,10 @@ namespace gog {
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
+   constexpr uintptr_t net_is_local_turn            = 0x01E643C0;  // WeaponCannon::Fire 0x00680813
+   constexpr uintptr_t net_game_get_joystick_index  = 0x005B8370;  // __cdecl(int) wrapper, bare RET
+   constexpr uintptr_t net_read_event_build_call    = 0x005C02B7;  // same bytes as Steam
+   constexpr uintptr_t net_game_predict             = 0x005BB7C0;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
    constexpr uintptr_t hud_game_events_update       = 0x00563960;
    constexpr uintptr_t hud_player_data              = 0x01EC7740;
@@ -2962,6 +3149,43 @@ namespace gog {
    constexpr uintptr_t lua_settop                     = 0x0069d490;
    constexpr uintptr_t lua_insert                     = 0x0069cc90;
    constexpr uintptr_t lua_newtable                   = 0x0069ce40;
+
+
+   // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ------------------
+   //
+   // Ported from the Steam list with tools/port_gog.py, every entry score 1.00.
+   // The three data addresses came back with independent votes (the class vftable
+   // with 3), and fp_anim_array / weapon_cannon_vftable re-derived to the values
+   // already in this namespace, which cross-checks the shift map.
+   constexpr uintptr_t game_state_create_base_weapon_classes = 0x0053A810; // steam 0x539aa0, shift +0xd70
+   constexpr uintptr_t engine_operator_new            = 0x006C45D0;        // steam 0x6c3540, shift +0x1090
+   constexpr uintptr_t weapon_cannon_class_ctor       = 0x006810D0;        // steam 0x680050, shift +0x1080
+   constexpr uintptr_t weapon_cannon_class_vftable    = 0x007B15EC;        // 3 votes
+   constexpr uintptr_t weapon_cannon_vftable          = 0x007B14F4;        // agrees with the existing entry above
+   constexpr uintptr_t weapon_class_factory_counter   = 0x01FABC08;
+   constexpr uintptr_t red_model_find                 = 0x00411C50;        // shift +0 here
+   constexpr uintptr_t red_model_get_parent_bone_and_offset = 0x006C5270;
+   constexpr uintptr_t weapon_cannon_fire             = 0x006803A0;
+   constexpr uintptr_t weapon_class_render_flash      = 0x0067CDD0;        // RET 8, `t` in XMM3 -- same as Steam,
+                                                                           // confirmed at call site 0x0067A574
+   constexpr uintptr_t game_loop_get_mission_time     = 0x00531BF0;
+   constexpr uintptr_t first_person_init              = 0x00521000;
+   constexpr uintptr_t weapon_class_render            = 0x0067CFA0;        // RET 0x14
+
+   // Identical to Steam, and not assumed -- re-read out of this image:
+   // `DIVSS XMM0,[EAX+0x1b8]` 0x0067A55A, `LEA EAX,[EDI+0x280]` 0x0068153F,
+   // `CMP EAX,[ECX+0x27c]` / `MOV EBX,[ECX+0x280]` / `MOV [ESI+0x114]` 0x0067FE10,
+   // and `PUSH 0x2e0` in CreateBaseWeaponClasses at 0x0053A82C.
+   constexpr uintptr_t weapon_class_flash_length_off    = 0x1B8;
+   constexpr uintptr_t weapon_class_shots_per_salvo_off = 0x280;
+   constexpr uintptr_t weapon_class_shots_per_shot_off  = 0x27C;
+   constexpr uintptr_t weapon_salvo_count_off           = 0x114;
+   constexpr uintptr_t weapon_cannon_class_size         = 0x2E0;
+   // WeaponClass::Render does NOT forward its caller's flags to the model here --
+   // it substitutes a constant (`PUSH 0x4000000` at 0x0067BFA6 Steam / 0x0067D046
+   // GOG).  Weapon::Render on the same build still forwards (`PUSH [EBP+0x14]`),
+   // so this applies to the spawn-screen path only.
+   constexpr uintptr_t weapon_class_render_model_flags = 0x04000000;
 
    // ---- Aimer / Weapon ----------------------------------------------------------
 
@@ -3128,6 +3352,10 @@ namespace gog {
    constexpr uintptr_t carrier_update                 = 0x004971d0;
    constexpr uintptr_t carrier_kill                   = 0x00497110;
    constexpr uintptr_t flyer_render                   = 0x004ab040;
+   constexpr uintptr_t flyer_client_kill              = 0x004aaf20;
+   constexpr uintptr_t flyer_render_cull_jz           = 0x004AB082;
+   constexpr uintptr_t flyer_ray_hit_takeoff          = 0x004AE246;
+   constexpr uintptr_t flyer_ray_hit_landing          = 0x004AE478;
 
    // ---- Debug / Visualization ---------------------------------------------------
 
@@ -3148,7 +3376,9 @@ namespace gog {
 
    // ---- Weapon / Grappling Hook -------------------------------------------------
 
+   constexpr uintptr_t grapple_update                 = 0x00600950;
    constexpr uintptr_t grapple_dtor                   = 0x00600400;
+   constexpr uintptr_t grapple_rtti_hash              = 0x01ebd558;
 
    // ---- Animation (weapon/soldier) ----------------------------------------------
 
@@ -3343,6 +3573,14 @@ namespace gog {
    // JMP would split `8B 5D 0C` and leave a stray `5D 0C` (POP EBP; OR AL,imm8).
    constexpr uintptr_t command_post_set_team       = 0x0047E2B0;
 
+   // CommandWalker::Kill -- same VA as Steam (tools/port_gog.py code: score 1.00,
+   // shift 0), same layout.
+   constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
+   constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
+
+   // Net send-list visitor -- tools/port_gog.py code: score 1.00, shift +0xFA0.
+   constexpr uintptr_t net_send_visitor            = 0x005BE530;
+
    // ---- Command post registration overflow (entity/command_post_overflow_fix.cpp)
    // Same VA as Steam and byte-identical: tools/port_gog.py `deep` compares the
    // registration function 23/23 instructions with 0 differences, so the
@@ -3354,7 +3592,6 @@ namespace gog {
    constexpr uintptr_t command_post_hint_index     = 0x007E7318;
    constexpr uintptr_t command_post_array_ptr      = 0x007E7314;
    constexpr uintptr_t command_post_count_ptr      = 0x007E731C;
-   constexpr uintptr_t command_post_class_off      = 0x0B3C;
 
    constexpr uintptr_t carrier_update_landed_ht       = 0x004974b0;
    constexpr uintptr_t disguise_drop                  = 0x00684100;
@@ -3672,6 +3909,13 @@ namespace gog {
    // 0 = not derived on this build.
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
+
+   // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
+
+   // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
+   // (ECX = layer).  The reset clears the mesh count but not the layer's
+   // RedLodData* at +0x90.
+   constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
 
 } // namespace gog
 

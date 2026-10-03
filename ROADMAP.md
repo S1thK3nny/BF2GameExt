@@ -146,10 +146,12 @@ target. It changes the stock camera for every unit. Details in
 
 ## Weapons
 
-**Dual pistols (`dualcannon`)** - Done on `feature/classlabel-dualcannon`: a new `dualcannon`
-weapon class that draws a second model on its own hardpoint and alternates fire between the
-two guns, per trigger pull or within a salvo. Still needs a multiplayer test and user docs
-before it merges. Design notes in [docs/RE/WeaponClassFactory.md](docs/RE/WeaponClassFactory.md).
+**Other players' bolts are white on a multiplayer client** - The host sees every bolt in its
+colour, and so does a client for its own shots, but a client sees other players' bolts white.
+A client builds those from the host's create ordnance event, which picks the ordnance class by
+an 8 bit net index, so the first thing to check is whether that index resolves to a different
+class on the client than the firing weapon's own ordnance class. Not yet known whether stock
+weapons do it too or only `dualcannon` ([docs](docs/user/classlabels/dualcannon.md)).
 
 **Force pushable grenades** - Force push moves units but ignores thrown grenades. Goal is to let
 a push catch a live grenade and send it back. Needs tracing first: what the push picks up as

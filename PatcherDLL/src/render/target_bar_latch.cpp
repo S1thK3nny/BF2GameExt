@@ -15,7 +15,7 @@
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 #include "core/pbl_hash.hpp"
-#include "core/layout/character.hpp"
+#include "game/Battlefront2/Source/Character.h"
 
 #include <detours.h>
 

@@ -21,7 +21,7 @@
 // client simulates it, near the local player, as the engine does.
 //
 // Inert unless a .hud binds one of the events; no INI setting. Modtools, Steam
-// and GOG. Addresses are in core/layout/command_post.hpp and docs/RE/HUDSystem.md.
+// and GOG. Addresses are in game/Battlefront2/Source/CommandPost.h and docs/RE/HUDSystem.md.
 void hud_command_posts_resolve(uintptr_t exe_base);
 void hud_command_posts_open();
 void hud_command_posts_update();

@@ -17,9 +17,11 @@ import pefile
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "render" / "hud_command_posts.cpp").read_text()
-layout = (SRC / "core" / "layout" / "command_post.hpp").read_text()
-character = (SRC / "core" / "layout" / "character.hpp").read_text()
-camera = (SRC / "core" / "layout" / "red_camera.hpp").read_text()
+GAME = SRC / "game" / "Battlefront2" / "Source"
+layout = (GAME / "CommandPost.h").read_text()
+team = (GAME / "Team.h").read_text()
+character = (GAME / "Character.h").read_text()
+camera = (GAME / "RedCamera.h").read_text() + (GAME / "CameraManager.h").read_text()
 latch = (SRC / "render" / "target_bar_latch.cpp").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
@@ -30,16 +32,30 @@ def const(text, name):
     return int(match.group(1), 0)
 
 
+def field(text, name):
+    """(debug, release) offsets of a Field<T> name{dbg[, rel]} declaration."""
+    match = re.search(r"\b" + name + r"\{(0x[0-9a-fA-F]+)(?:,\s*(0x[0-9a-fA-F]+))?\}", text)
+    assert match, name
+    dbg = int(match.group(1), 16)
+    return dbg, int(match.group(2), 16) if match.group(2) else dbg
+
+
 # The offsets the module reads, as the audit expects them.
+fields = {
+    "mHUDPostIndex": (0x1C, 0x1C), "mObject": (0x2C, 0x2C), "mHoldTeam": (0x40, 0x40),
+    "mBiasTeam": (0x78, 0x78), "mNeutralizeTimer": (0xA0, 0xA0),
+    "mCaptureTimer": (0xA4, 0xA4), "mClass": (0x1A54, 0xB3C), "mFlags": (0x1A58, 0x0B40),
+    "mNeutralizeTime": (0x04, 0x04), "mCaptureTime": (0x08, 0x08),
+}
+for name, value in fields.items():
+    assert field(layout, name) == value, name
+cls_off = dict(zip(("modtools", "release"), field(layout, "mClass")))
+
 expected = {
-    (layout, "kHudIndex"): 0x1C, (layout, "kObject"): 0x2C, (layout, "kHoldTeam"): 0x40,
-    (layout, "kBiasTeam"): 0x78, (layout, "kNeutralizeTimer"): 0xA0,
-    (layout, "kCaptureTimer"): 0xA4, (layout, "kFlagsModtools"): 0x1A58,
-    (layout, "kFlagsRelease"): 0x0B40, (layout, "kFlagHudIndexDisplay"): 0x02,
-    (layout, "kClassNeutralizeTime"): 0x04, (layout, "kClassCaptureTime"): 0x08,
-    (layout, "kIcon"): 0x1C, (layout, "kColor"): 0x68, (character, "kTeam"): 0x134,
+    (layout, "kDisplayHUDIndex"): 0x02,
+    (team, "kIcon"): 0x1C, (team, "kColor"): 0x68, (character, "kTeam"): 0x134,
     (module, "kGO_MatrixTrans"): 0x120, (module, "kGO_Flags"): 0x1FC,
-    (module, "kGO_HandleId"): 0x204, (module, "kGO_Team"): 0x234,
+    (module, "kGO_Team"): 0x234,
     (module, "kTypeColor"): 7, (module, "kTypeFloat"): 4, (module, "kTypeUint"): 3,
     (module, "kTypeVector3"): 9,
     # The markers: the stock objective anchor's reads (sites below), the camera
@@ -166,6 +182,7 @@ decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 for build, filename in builds:
     addrs = table(build)
     names = {name: hex(value) for name, value in addrs.items()}
+    names["command_post_class_off"] = hex(cls_off["modtools" if build == "modtools" else "release"])
     pe = pefile.PE(str(Path(sys.argv[1]) / filename))
     try:
         image = pe.get_memory_mapped_image()

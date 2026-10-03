@@ -3,6 +3,8 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "game/Battlefront2/Source/CommandPost.h"
+#include "game/Battlefront2/Source/VehicleSpawn.h"
 #include "util/install_log.hpp"
 
 #include <detours.h>
@@ -95,21 +97,7 @@ bool g_spawnVehicleListEnabled = true;
 
 // ---- layout constants -------------------------------------------------------
 
-// PblList / Node
-static constexpr int kNode_Next            = 0x04;
-static constexpr int kNode_Object          = 0x0C;
-
-// VehicleSpawn
-static constexpr int kVS_CommandPost       = 0x74;
-static constexpr int kVS_SpawnClass        = 0x90;
-static constexpr int kVS_FlyerClass        = 0xB0;
-
-// CommandPost
-static constexpr int kCP_Object            = 0x2C;
-static constexpr int kCP_SavedHandleId     = 0x30;
-
 // GameObject
-static constexpr int kGO_HandleId          = 0x204;
 static constexpr int kGO_TeamBitfield      = 0x234;
 
 // SpawnDisplay
@@ -141,7 +129,7 @@ using fn_event_send_t = void(__fastcall*)(void* ecx, void* edx);
 
 static fn_update_t     original_Update     = nullptr;
 static fn_event_send_t g_eventSend         = nullptr;
-static void**          g_vehicleSpawnList  = nullptr;
+static PblList<VehicleSpawn>* g_vehicleSpawnList = nullptr;
 static void**          g_vehicleEventArray = nullptr;
 static bool            g_installed         = false;
 
@@ -174,11 +162,7 @@ static wchar_t g_text[kTextChars];
 static const uint8_t* cp_object(const uint8_t* cp)
 {
    if (!cp) return nullptr;
-   const uint8_t* obj = *(const uint8_t* const*)(cp + kCP_Object);
-   if (!obj) return nullptr;
-   if (*(const int*)(obj + kGO_HandleId) != *(const int*)(cp + kCP_SavedHandleId))
-      return nullptr;
-   return obj;
+   return (const uint8_t*)layout::CommandPost::mObject(cp).Get();
 }
 
 // GameObject::mTeam, a 4-bit signed bitfield.  Returns -1 when it is not a team
@@ -234,19 +218,19 @@ static void build_text(const uint8_t* cp, int team)
    const void* shown[kMaxShown];
    int         shownCount = 0;
 
-   uint8_t* const head = (uint8_t*)g_vehicleSpawnList;
-   uint8_t*       node = *(uint8_t**)(head + kNode_Next);
+   const PblList<VehicleSpawn>::Node* const head = &g_vehicleSpawnList->_head;
+   const PblList<VehicleSpawn>::Node*       node = head->_pNext;
 
    for (int guard = 0; node && node != head && guard < kMaxListWalk; ++guard) {
-      uint8_t* vs = *(uint8_t**)(node + kNode_Object);
-      node = *(uint8_t**)(node + kNode_Next);
+      const VehicleSpawn* vs = node->_pObject;
+      node = node->_pNext;
       if (!vs) continue;
 
-      if (*(const uint8_t* const*)(vs + kVS_CommandPost) != cp) continue;
+      if ((const uint8_t*)vs->mCommandPost != cp) continue;
 
       const uint8_t* entries[2] = {
-         *(const uint8_t* const*)(vs + kVS_SpawnClass + team * 4),
-         *(const uint8_t* const*)(vs + kVS_FlyerClass + team * 4),
+         (const uint8_t*)vs->mSpawnClass[team],
+         (const uint8_t*)vs->mFlyerClass[team],
       };
 
       for (const uint8_t* cls : entries) {
@@ -376,7 +360,7 @@ void spawn_vehicle_list_install(uintptr_t exe_base)
 
    g_eventSend         = (fn_event_send_t)resolve(exe_base, g_addr->hud_event_send);
    g_vehicleEventArray = (void**)resolve(exe_base, g_addr->hud_event_spawn_vehicle);
-   g_vehicleSpawnList  = (void**)resolve(exe_base, g_addr->vehicle_spawn_list);
+   g_vehicleSpawnList  = (PblList<VehicleSpawn>*)resolve(exe_base, g_addr->vehicle_spawn_list);
 
    original_Update = (fn_update_t)update;
 

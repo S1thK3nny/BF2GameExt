@@ -4,8 +4,8 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
-#include "core/layout/droideka.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/EntityDroideka.h"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <detours.h>
 
@@ -133,7 +133,9 @@ bool g_droidekaDeathAnimEnabled = true;
 // MSVC inline asm can only reference operands with storage.
 #define kStateDying 3
 
-// EntityDroideka::mState offset, per build (debug vs release layout).
+namespace dka = layout::EntityDroideka;
+
+// dka::mState's offset for the asm thunk, which cannot call Field::off().
 static uint32_t s_mStateOff = 0;
 
 // ---------------------------------------------------------------------------
@@ -225,25 +227,19 @@ static void __fastcall hooked_ShieldUpdate(void* ecx, void* /*edx*/, float dt)
 
 void droideka_shield_tracker_install(uintptr_t exe_base)
 {
-   // Deliberately does NOT depend on droideka_death_anim_install having run:
-   // lua_hooks_install (our caller) is dllmain.cpp:215, that one is :239.
-   // Deriving s_mStateOff here keeps this independent of call order.
    uintptr_t updVA = 0;
    switch (g_build) {
    case GameBuild::Modtools:
       updVA = game_addrs::modtools::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::modtools::entity_droideka_rtti_hash);
-      s_mStateOff   = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       updVA = game_addrs::steam::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::steam::entity_droideka_rtti_hash);
-      s_mStateOff   = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       updVA = game_addrs::gog::weapon_shield_update;
       s_rttiHashPtr = (uintptr_t)resolve(exe_base, game_addrs::gog::entity_droideka_rtti_hash);
-      s_mStateOff   = layout::Droideka::kStateRelease; // same release layout as Steam
       break;
    default:
       return; // unknown build
@@ -260,13 +256,7 @@ void droideka_shield_tracker_install(uintptr_t exe_base)
 
 // ---------------------------------------------------------------------------
 // Steering lock while dying.
-//
-// mTurnOffset (a PblAngle: {cos, sin}) sits immediately after mState and
-// mDirection in every build -- modtools +0x1a7c against mState +0x1a74,
-// Steam/GOG +0x1a5c against +0x1a54 -- so it needs no address of its own.
 // ---------------------------------------------------------------------------
-
-static constexpr uint32_t kTurnOffsetFromState = 8;
 
 typedef void(__thiscall* fn_DroidekaUpdateState_t)(void* ecx, float dt, float moveX,
                                                    float moveZ, float turn);
@@ -275,9 +265,7 @@ static fn_DroidekaUpdateState_t s_origUpdateState = nullptr;
 static void __fastcall hooked_DroidekaUpdateState(void* ecx, void* /*edx*/, float dt,
                                                   float moveX, float moveZ, float turn)
 {
-   const uintptr_t ent = (uintptr_t)ecx;
-
-   if (*(int*)(ent + s_mStateOff) != kStateDying) {
+   if (dka::mState(ecx) != kStateDying) {
       s_origUpdateState(ecx, dt, moveX, moveZ, turn);
       return;
    }
@@ -287,14 +275,9 @@ static void __fastcall hooked_DroidekaUpdateState(void* ecx, void* /*edx*/, floa
    // restoring mTurnOffset undoes the residual rotation the body block applies
    // anyway when the movement control is zero (it aims the body at the entity's
    // own forward).  Everything else in the function runs untouched.
-   float turnOffset[2];
-   std::memcpy(turnOffset, (const void*)(ent + s_mStateOff + kTurnOffsetFromState),
-               sizeof(turnOffset));
-
+   const PblAngle turnOffset = dka::mTurnOffset(ecx);
    s_origUpdateState(ecx, dt, 0.0f, 0.0f, 0.0f);
-
-   std::memcpy((void*)(ent + s_mStateOff + kTurnOffsetFromState), turnOffset,
-               sizeof(turnOffset));
+   dka::mTurnOffset(ecx) = turnOffset;
 }
 
 // Called from the naked thunk below with the dying entity, before the state
@@ -316,7 +299,7 @@ static void __fastcall hooked_DroidekaUpdateState(void* ecx, void* /*edx*/, floa
 static void __cdecl droideka_die_handler(uintptr_t ent)
 {
    __try {
-      if (*(int*)(ent + s_mStateOff) == kStateDying) return;  // already dying
+      if (dka::mState((void*)ent) == kStateDying) return;  // already dying
       if (!s_origShieldUpdate) return;
 
       DkaShield* const slot = dka_find(ent);
@@ -394,14 +377,12 @@ void droideka_death_anim_install(uintptr_t exe_base)
       updStateVA = game_addrs::modtools::droideka_update_state;
       kSite = kSiteModtools; kPrev = kPrevModtools;
       kUpdState = kUpdStateModtools; kUpdStateLen = sizeof(kUpdStateModtools);
-      s_mStateOff = layout::Droideka::kStateModtools;
       break;
    case GameBuild::Steam:
       siteVA = game_addrs::steam::droideka_update_nextstate_call;
       updStateVA = game_addrs::steam::droideka_update_state;
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    case GameBuild::GOG:
       siteVA = game_addrs::gog::droideka_update_nextstate_call;
@@ -410,12 +391,12 @@ void droideka_death_anim_install(uintptr_t exe_base)
       // (verified against the exe).
       kSite = kSiteSteam; kPrev = kPrevSteam;
       kUpdState = kUpdStateRetail; kUpdStateLen = sizeof(kUpdStateRetail);
-      s_mStateOff = layout::Droideka::kStateRelease;
       break;
    default:
       return; // unknown build
    }
    if (siteVA == 0) return;
+   s_mStateOff = dka::mState.off();
 
    uint8_t* site = (uint8_t*)resolve(exe_base, siteVA);
    if (std::memcmp(site, kSite, sizeof(kSiteModtools)) != 0) return;

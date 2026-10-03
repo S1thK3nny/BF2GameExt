@@ -4,8 +4,8 @@
 #include "walker_stomp_fix.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
-#include "core/layout/character.hpp"
-#include "core/layout/walker.hpp"
+#include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/EntityWalker.h"
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 
@@ -26,7 +26,7 @@
 //   NetGame::GetLocalPlayer             game_addrs net_game_get_local_player  called
 //     cdecl(uint localIndex) -> Character*
 //
-// The walker's fields are layout::Walker's. The player's walker is the
+// The walker's fields are layout::EntityWalker's. The player's walker is the
 // Controllable in Character::mVehicle (layout::Character), whose Trackable
 // part (+0x18) answers GetGameObject (+0x1C), as camera_shake.cpp finds a
 // weapon's owner. In one of a walker's gun seats, the seat is there instead.
@@ -41,7 +41,8 @@ bool g_walkerFootDiag = false;
 namespace {
 
 using namespace walker_foot_diag;
-namespace walker = layout::Walker;
+namespace walk = layout::EntityWalker;
+namespace walk_class = layout::EntityWalkerClass;
 
 using FootFxFn      = void(__fastcall*)(uint8_t* self, void* edx);
 using LocalPlayerFn = uint8_t*(__cdecl*)(uint32_t localIndex);
@@ -58,7 +59,6 @@ constexpr int kMaxLines = 5000;
 
 FootFxFn        s_footFx      = nullptr;
 LocalPlayerFn   s_localPlayer = nullptr;
-walker::Offsets s_walker      = walker::kModtools;
 uint32_t        s_nameOffset  = 0;   // a class's ODF name: only modtools keeps it
 
 template<class T> T& at(uint8_t* p, uint32_t offset) { return *reinterpret_cast<T*>(p + offset); }
@@ -136,9 +136,9 @@ struct Driven {
    int           type      = 0;         // StompDetectionType
    float         threshold = 0.0f;      // StompThreshold
    char          name[64]  = {};
-   FootTracker   foot[walker::kMaxFeet];
-   int           steps[walker::kMaxFeet]   = {};
-   int           counted[walker::kMaxFeet] = {};
+   FootTracker   foot[walk::kMaxFeet];
+   int           steps[walk::kMaxFeet]   = {};
+   int           counted[walk::kMaxFeet] = {};
 };
 Driven s_driven;
 
@@ -199,17 +199,17 @@ void enter(uint8_t* self)
    leave();
    s_driven.walker = self;
    __try {
-      uint8_t* cls = at<uint8_t*>(self, s_walker.cls);
+      uint8_t* cls = reinterpret_cast<uint8_t*>(walk::mClass(self));
       if (!cls) return;
-      const int feet = at<uint8_t>(cls, s_walker.classNumFeet);
-      s_driven.type = at<uint8_t>(cls, s_walker.classStompType);
-      s_driven.threshold = at<float>(cls, s_walker.classStompThreshold);
+      const int feet = walk_class::mNumFeet(cls);
+      s_driven.type = walk_class::mStompDetectionType(cls);
+      s_driven.threshold = walk_class::mStompThreshold(cls);
       if (s_nameOffset) {
          const char* src = reinterpret_cast<const char*>(cls + s_nameOffset);
          for (size_t i = 0; i + 1 < sizeof s_driven.name && src[i]; ++i)
             s_driven.name[i] = src[i] >= 0x20 && src[i] <= 0x7E ? src[i] : '?';
       }
-      s_driven.feet = feet < walker::kMaxFeet ? feet : walker::kMaxFeet;
+      s_driven.feet = feet < walk::kMaxFeet ? feet : walk::kMaxFeet;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       s_driven.feet = 0;
    }
@@ -249,8 +249,8 @@ void log_step(int i)
                   "was not re-armed", kWalkerStompSpeed);
    else if (s_driven.type)
       _snprintf_s(verdict, sizeof verdict, _TRUNCATE, "NO, type 1 needs more than %.3f m in one update "
-                  "(%.1f m/s at %.1f ms an update)", walker::kStompDrop,
-                  each > 0.0f ? walker::kStompDrop / each : 0.0f, 1000.0f * each);
+                  "(%.1f m/s at %.1f ms an update)", walk::kStompDrop,
+                  each > 0.0f ? walk::kStompDrop / each : 0.0f, 1000.0f * each);
    else if (s.top <= s.line)
       _snprintf_s(verdict, sizeof verdict, _TRUNCATE, "NO, it started below %.3f m (its lowest plus "
                   "StompThreshold), so it could not come down past it", s.line);
@@ -273,20 +273,21 @@ void log_stray(int i, const FootUpdate& u)
 }
 
 struct FeetBefore {
-   float    height[walker::kMaxFeet];
-   float    lowest[walker::kMaxFeet];
+   float    height[walk::kMaxFeet];
+   float    lowest[walk::kMaxFeet];
    uint32_t state;
 };
 
 bool read_feet(uint8_t* self, FeetBefore& out)
 {
    __try {
-      const float* height = &at<float>(self, s_walker.footHeight);
+      const float* height = walk::mLastFootHeight(self);
+      const float* lowest = walk::mMinFootHeight(self);
       for (int i = 0; i < s_driven.feet; ++i) {
          out.height[i] = height[i];
-         out.lowest[i] = height[i + walker::kMinFootHeight / 4];
+         out.lowest[i] = lowest[i];
       }
-      out.state = at<uint32_t>(self, s_walker.footState);
+      out.state = walk::mFootState(self);
       return true;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return false;
@@ -304,7 +305,7 @@ void measure(uint8_t* self, const FeetBefore& before, float seconds)
       u.lowest  = before.lowest[i];
       u.seconds = seconds;
       u.counted = ((after.state >> i) & 1u) != 0;
-      const uint32_t disarmed = 1u << (walker::kFootDownBit + i);
+      const uint32_t disarmed = 1u << (walk::kFootDownBit + i);
       u.rearmed = s_driven.type != 0 && (before.state & disarmed) && !(after.state & disarmed);
       switch (s_driven.foot[i].update(u, s_driven.threshold)) {
       case Event::kStep:       log_step(i);     break;
@@ -374,7 +375,6 @@ void walker_foot_diag_install(uintptr_t base)
               modtools ? "xxxxxxxxxxx" : "xxxx????xxxx"))
       return;
 
-   s_walker      = modtools ? walker::kModtools : walker::kRelease;
    s_nameOffset  = static_cast<uint32_t>(g_addr->entity_class_name_off);
    s_localPlayer = reinterpret_cast<LocalPlayerFn>(resolve(base, g_addr->net_game_get_local_player));
    s_footFx      = reinterpret_cast<FootFxFn>(resolve(base, g_addr->walker_do_foot_impact_effects));

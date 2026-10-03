@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "disguise_model_override.hpp"
 #include "core/resolve.hpp"
-#include "core/layout/weapon.hpp"
+#include "game/Battlefront2/Source/Weapon.h"
 
 #include <cstring>
 #include <detours.h>
