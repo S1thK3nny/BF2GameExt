@@ -2027,6 +2027,68 @@ A `SubPixel(1)` property covering one element and everything inside it would nee
   the count is zero, and GameExt's position events could stop rounding altogether, as
   the draw rounds an unmarked element anyway.
 
+## Colour gradients (researched 2026-09-30)
+
+Every element is drawn in one colour, its tint, so an icon or bar only shows a gradient
+baked into its own texture. Read on Phantom (P); nothing here is ported or built.
+
+### How an element's colour reaches the screen
+
+- A `RedBitmapElement` keeps four `BitmapVertexT` {x, y, z, u0, v0, u1, v1}, 28 bytes
+  each, and a `pcInterfaceShader*` of its own (`RedBitmapElement_data` +18 and +88). There
+  is no colour per corner. `SetTexture` (P `008C8EE0`) writes the hash into that shader,
+  creating it through the virtual `Init` if it is missing, so each bitmap owns its shader.
+  `RenderUsingContext` (P `008C8CB0`) copies the four vertices into a strip for
+  `RedRenderer::pcRenderPrimitive` (P `00882870`), which keeps the tint as the render
+  item's `tweakColor`.
+- `pcInterfaceShader` holds `m_textureHash`, `m_bitmapMaskHash`, `m_shadowEnable`,
+  `m_mode` and `m_materialFlags`, and has two pipelines (`_InitPipelineFuncArray`,
+  P `008F34D0`): fixed function and Prog1. The Prog1 render (P thunk `0040C7DE`) uploads
+  the tint as pixel shader constant c0, one value for the whole draw, and loads the vertex
+  format for the mode.
+- The modes, as the fixed-function render (P thunk `00405362`) spells them out:
+
+| Mode | Result | Vertex |
+|---|---|---|
+| Bitmap | tint, or tint × texture | position, UV |
+| Masked bitmap | tint × texture × mask (stage 1 at u1/v1), colour and alpha | position, two UVs |
+| Vector | tint × the vertex's colour, blended across the shape | position, colour |
+
+- Vertex format bits (`pcRedVertexFormat::CreateVertexDeclaration`, P `008ED270`): 0x2
+  position, 0x20 normal, 0x40 tangents, 0x80 colour (D3DCOLOR), 0x100 a second colour,
+  0x200 to 0x600 one to three UV sets. A vector point is 0x82, 16 bytes.
+- Both samplers clamp and filter bilinearly (`Begin_Prog1`, P thunk `00411982`).
+
+### What stock can do
+
+- `BitmapMasked` (`Mask`, `MaskTexCoords`) gives tint × texture × mask, so a gradient
+  mask texture tints an icon without baking the gradient into the icon. No stock HUD uses
+  it.
+- A `BarBitmap` draws through a plain `RedBitmapElement` (+B0) in bitmap mode, so a bar
+  cannot take a mask.
+- Vector mode has a colour per corner but no texture.
+- `ZOrder`: `SetZOrder` (P `00891EE0`) keeps a group's children highest first, and the
+  group draws from the head, so a higher ZOrder draws first, underneath.
+
+### Designs
+
+1. **Masked mode with a runtime gradient.** Switch the element's own shader to masked mode,
+   with a gradient texture GameExt makes from the colours (rebuilt when an event colour
+   changes) as the mask, and set u1/v1 per corner from the gradient's direction across the
+   element's full rectangle, so any angle works. For a bar, recompute u1/v1 as the fill
+   moves, so the gradient stays fixed to the full bar; the FillFrom `SetValue` hook
+   already has the full rectangle. One pass per element. Needs a way to create a
+   `RedTexture` and register it in `RedTexture::s_textureHashTable`, where the render looks
+   the mask up by hash.
+2. **Strips.** Draw the element as N strips, each with its own tint and slice of UVs,
+   clipped to a bar's fill. No texture and any number of colours, but N draws per element
+   and visible bands at small N.
+3. Not viable: a colour per corner on a textured element in one pass needs a new shader,
+   and Shader Patch replaces the game's shaders.
+
+Not determined: how to create a `RedTexture` at runtime, and whether Shader Patch accepts
+one; Shader Patch's masked and vector states; the modtools and retail addresses.
+
 ## Lua and the HUD (researched 2026-09-28)
 
 Addresses are Phantom (P) unless a build is named. Nothing here is built.

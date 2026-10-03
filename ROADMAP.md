@@ -265,6 +265,11 @@ Add a `SubPixel(1)` property covering an element and everything inside it; the r
 a spare flag bit and the draw are in
 [pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).
 
+**Colour gradients** - An element is drawn in one tint, so an icon or bar can only show a
+gradient baked into its texture. Add a `Gradient` property for bitmaps and bars that draws
+them through the engine's masked-bitmap mode with a gradient texture GameExt builds from
+the colours, kept on a bar's full length as it fills. Details in
+[colour gradients](docs/RE/HUDSystem.md#colour-gradients-researched-2026-09-30).
 
 **Repeated HUD blocks** - A `.hud` must write out a command post slot or marker, and its
 transforms, once per slot: `EventNameFilter` only renumbers by camera, once on PC. Add a
