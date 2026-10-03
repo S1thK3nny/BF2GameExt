@@ -148,6 +148,10 @@ Scripts can check the running version through `GameExt.version`.
 - `GameExtContentCensus()`, the name the documentation gives for the content budget
   report, did not exist: the report was registered for Lua as `ContentCensus()`. Both
   names now work.
+- Holding the throttle while rolling no longer slows a flyer down or weakens its roll.
+  BF2 read the two as one stick and scaled both to 71%, the rule meant to stop soldiers
+  running faster diagonally. `[Fixes] FlyerRollThrottleFix`, on by default; not yet
+  tested online.
 
 ## 1.1.0
 

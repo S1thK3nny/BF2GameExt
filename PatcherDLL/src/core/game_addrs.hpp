@@ -835,6 +835,9 @@ namespace modtools {
    // ---- Aim Assist ---------------------------------------------------------------
 
    constexpr uintptr_t player_controller_update       = 0x0059B460;
+   // Inside it: the compare that scales the throttle and the sideways input
+   // down together past the stick's rim (flyer_roll_throttle_fix).
+   constexpr uintptr_t player_controller_input_cap    = 0x0059BB37;
    constexpr uintptr_t apply_damage                   = 0x004CF900;
    constexpr uintptr_t lockon_mgr_array               = 0x00B30698;
    constexpr uintptr_t get_cur_wpn                    = 0x00413782;
@@ -1920,6 +1923,7 @@ namespace steam {
    // ---- Aim Assist ---------------------------------------------------------------
 
    constexpr uintptr_t player_controller_update       = 0x0061A2B0;
+   constexpr uintptr_t player_controller_input_cap    = 0x0061A81F;
    constexpr uintptr_t apply_damage                   = 0x00489340;
    constexpr uintptr_t lockon_mgr_array               = 0x01E57400;
    constexpr uintptr_t get_cur_wpn                    = 0x00484310;
@@ -2705,6 +2709,7 @@ namespace gog {
    // ---- Aim Assist ---------------------------------------------------------------
 
    constexpr uintptr_t player_controller_update       = 0x0061B320;
+   constexpr uintptr_t player_controller_input_cap    = 0x0061B88F;
    constexpr uintptr_t apply_damage                   = 0x00489340;
    constexpr uintptr_t lockon_mgr_array               = 0x01E588B0;
    constexpr uintptr_t get_cur_wpn                    = 0x00484310;

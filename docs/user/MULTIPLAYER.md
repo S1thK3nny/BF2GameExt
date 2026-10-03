@@ -149,6 +149,7 @@ Labels answer one question: **what happens if only some machines have it.**
 | TerrainTextureFix | **SAFE** | Local render only. |
 | BlurDownsizeClamp | **SAFE** | Local post-process only. |
 | ErrorDialogFix | **SAFE** | Local only. Note it can mask a real fault on a headless host — keep logging on if you suppress dialogs. |
+| FlyerRollThrottleFix | **UNTESTED** | Changes a pilot's own throttle and roll in `PlayerController::Update`, on whichever machine runs their controller, before the flyer reads them. Whether a client's uploaded pad state carries the full throttle to the host, or a vanilla host caps it again (the client would then mispredict through every roll and be pulled back), has not been checked. Set 0 to fly exactly like vanilla peers until it is tested. |
 
 ### LimitIncreases
 
@@ -273,6 +274,7 @@ The source comments in `patch_table.cpp`, the INI description and the FEATURES e
 - **The camera shake does not perturb the aimer.** The shake `Explosion VisibleRadius` unlocks only rotates the matrix handed to the renderer, after the aim point and the first-person aimer have been built from the unshaken camera track ([CameraShake.md](../RE/CameraShake.md)). Read on Phantom; not re-read on a shipping build.
 
 ### UNKNOWN — say so plainly
+- **FlyerRollThrottleFix online.** Whether `SubmitMove`'s pad state is taken before or after `PlayerController::Update` caps the throttle and the roll. To test: a GameExt pilot on a vanilla host and on a GameExt host, rolling with the throttle held, watching for speed held and no rubber-banding.
 - **What a vanilla client does when it receives `mState = 2` (prone).** It fits the field and it does arrive. Whether it plays, ignores, or faults on an animation it does not have was never established. **This is the highest-value open item in the whole answer** and the only reason Prone is not simply SAFE-on-host.
 - **Whether combo-animation indices ever reach the wire**, and whether an overflowing combo state changes sim-RNG draw count relative to a peer that plays it.
 - **The client damage stub.** `Damageable::ApplyNetClientDamage` is not present by name on any shipping build; the "client computes no damage" conclusion is supported by `SetCurHealth`'s clamp and the replicated health fields, not by reading the stub.

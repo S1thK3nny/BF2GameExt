@@ -449,7 +449,10 @@ target and never faster than a fixed rate, so measuring the speed's change says 
   (`SpeedUp`); arriving is still judged against BF2's own target. Regaining speed after
   a roll or turn does not count, and neither does the climb to cruise after take-off.
   It needs `mControlMove` and `mControlStrafe`, which retail does not read yet; there
-  the shake still measures the speed change.
+  the shake still measures the speed change. `[Fixes] FlyerRollThrottleFix` (on by
+  default, all three builds; `entity/flyer_roll_throttle_fix.hpp`) now skips the cap
+  for a flyer, so a roll no longer costs speed at all and retail loses the replay too;
+  `throttle_intent` still covers the fix being off on modtools.
 - **Braking** is slowing down with `mControlMove` at -0.1 or below: the brake or reverse
   input. Letting go of the throttle at `MaxSpeed` or after a boost also slows the flyer,
   back to `MidSpeed`, but with the input at 0, so it is not braking.

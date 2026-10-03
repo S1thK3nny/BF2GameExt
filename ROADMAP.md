@@ -60,6 +60,11 @@ AI already produces a strafe value from `StrafeSpeed` (stock gunships and the MA
 in vanilla ends up as roll; in strafe mode it would strafe as the AI code intended. Whether that
 flies well needs a play test. Patch sites are mapped for modtools, Steam and GOG.
 
+**Test the flyer roll throttle fix online** - `[Fixes] FlyerRollThrottleFix` is untested in
+multiplayer. Fly a GameExt client on a vanilla host and on a GameExt host, and roll with the
+throttle held: the flyer should keep its speed without rubber-banding. If the host caps a remote
+pilot's input again, keep the fix to the host's own pilot (or off for clients).
+
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
 The fix is to add an additional check to the AI spawning code to check if the CommandFlyer is flying, and if so, 
@@ -252,6 +257,7 @@ own choice, so a mod cannot ship gliding markers without softening still text as
 Add a `SubPixel(1)` property covering an element and everything inside it; the reader,
 a spare flag bit and the draw are in
 [pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).
+
 
 **Repeated HUD blocks** - A `.hud` must write out a command post slot or marker, and its
 transforms, once per slot: `EventNameFilter` only renumbers by camera, once on PC. Add a

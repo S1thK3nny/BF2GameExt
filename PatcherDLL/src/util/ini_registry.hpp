@@ -115,6 +115,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Fixes", "DroidekaDeathAnimation", "1", "Let droidekas play their death animation (death01) instead of exploding instantly; banks without one are unaffected"),
    INI_ENTRY("Fixes", "ReticleCorrection", "-1", "HUD widescreen reticle vertical alignment: -1 auto (scales with aspect ratio), 0 to disable, or a manual strength 0..1 (full letterbox undo at 1)"),
    INI_ENTRY("Fixes", "WeaponIconFix", "1", "Two mods that each add HUD icons for their custom weapons used to cancel out when both were loaded, leaving a stray second icon beside the right one. Each mod's icons now work with the others present"),
+   INI_ENTRY("Fixes", "FlyerRollThrottleFix", "1", "Flyers keep full throttle and full roll while you hold both. Stock BF2 reads the throttle and the roll as one stick, the rule that stops soldiers running faster diagonally, so holding both scales each down to 71%: the flyer slows and rolls more slowly until you stop rolling. Not yet tested online. Set 0 for stock"),
 
    // [LimitIncreases] - engine limit patches.
    //

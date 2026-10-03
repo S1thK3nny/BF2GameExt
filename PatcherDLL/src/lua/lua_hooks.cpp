@@ -37,6 +37,7 @@
 #include "util/content_census.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "entity/flyer_roll_throttle_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
@@ -346,6 +347,7 @@ void lua_hooks_uninstall()
    voice_limit_uninstall();
    snd_engine_open_fix_uninstall();
    impact_sound_water_fix_uninstall();
+   flyer_roll_throttle_fix_uninstall();
    foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();

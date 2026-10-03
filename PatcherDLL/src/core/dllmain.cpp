@@ -22,6 +22,7 @@
 #include "entity/droideka_death_anim_fix.hpp"
 #include "entity/award_disable.hpp"
 #include "entity/flyer_sound_fix.hpp"
+#include "entity/flyer_roll_throttle_fix.hpp"
 #include "entity/soldier_prone.hpp"
 #include "entity/prone_lvl_load.hpp"
 #include "entity/terrain_texture_fix.hpp"
@@ -289,6 +290,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_voiceLimit                = cfg.get_int("LimitIncreases", "VoiceLimit", 0);
       g_mpSpawnDelay              = cfg.get_float("Features", "MPSpawnDelay", 15.0f);
       g_impactSoundWaterFix       = cfg.get_bool("Fixes", "ImpactSoundWaterFix", true);
+      g_flyerRollThrottleFix      = cfg.get_bool("Fixes", "FlyerRollThrottleFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
@@ -401,6 +403,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    cloth_collision_fix_install(exe_base);
    ai_fairness_install(exe_base);
    impact_sound_water_fix_install(exe_base); // rewrites a CALL rel32 - needs the RW window
+   flyer_roll_throttle_fix_install(exe_base); // jumps to a shim mid-function - needs the RW window
    foleyfx_region_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
