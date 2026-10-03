@@ -35,6 +35,24 @@
     <Filter Include="render">
       <UniqueIdentifier>{B8C9D0E1-F2A3-4567-BCDE-678901234567}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ai">
+      <UniqueIdentifier>{A720E4A6-A3EA-49F6-99F8-A361A2810EB0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="game">
+      <UniqueIdentifier>{AFFB7045-E790-4B65-A9C7-008ACAC8C7A5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="game\Battlefront2">
+      <UniqueIdentifier>{DE40FDBF-6794-4F20-BC79-5DDB67A7150C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="game\Battlefront2\Source">
+      <UniqueIdentifier>{686C612B-BEC9-41A1-B544-F37AAF3BF1A1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="game\PebbleFL">
+      <UniqueIdentifier>{240E2192-3146-4D15-ABBF-7DE69D3AEBB0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="game\PebbleFL\Common">
+      <UniqueIdentifier>{502DD8DA-6D67-4037-8B86-0DCD88CBC667}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
@@ -340,6 +358,171 @@
     <ClInclude Include="src\util\ini_registry.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\lvl_read.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\instance_props.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\hero_team_switch_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\command_post_overflow_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\branch_region_debug.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\branch_region_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\jetpack_fp_sound_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\attached_effects_cleanup.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\odf_gameext_props.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\sound_diag.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\game_log_lock.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\voice_limit.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\memory_pool_heap_fix.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\light_projected_texture_fix.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_decision_rate.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_fairness.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_update_budget.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\reservation_pool.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\build_field.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\entity_layout.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\game_build.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\pbl_hash.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\resolve.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\x86_emit.hpp">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\debug_commands\debug_command.hpp">
+      <Filter>debug_commands</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\terrain_texture_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\Aimer.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\CameraManager.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\Character.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\ChaseCamera.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\CommandPost.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\EntityCarrier.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\EntityDroideka.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\EntityFlyer.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\EntityWalker.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\GameMusic.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\GameObject.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\GameSound.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\GameSoundStream.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\RedCamera.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\Team.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\VehicleSpawn.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\Weapon.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\PebbleFL\Common\PblHandle.h">
+      <Filter>game\PebbleFL\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\PebbleFL\Common\PblList.h">
+      <Filter>game\PebbleFL\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\PebbleFL\Common\PblMath.h">
+      <Filter>game\PebbleFL\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\PebbleFL\Common\PblMatrix.h">
+      <Filter>game\PebbleFL\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\PebbleFL\Common\PblVector.h">
+      <Filter>game\PebbleFL\Common</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\content_census.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\crash_logger.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\game_logging.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\install_log.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\shader_patch_detect.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\weapon\impact_sound_water_fix.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -590,6 +773,81 @@
     </ClCompile>
     <ClCompile Include="src\controller\aim_assist.cpp">
       <Filter>controller</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\game_build.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\lvl_read.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\ai_fairness.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\ai_decision_rate.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\reservation_pool.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\content_census.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\game_log_lock.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\ai_update_budget.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\instance_props.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\attached_effects_cleanup.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\odf_gameext_props.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\hero_team_switch_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\command_post_overflow_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\branch_region_debug.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\branch_region_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\jetpack_fp_sound_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\terrain_texture_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\impact_sound_water_fix.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\crash_logger.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\sound_diag.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\voice_limit.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\memory_pool_heap_fix.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\game_logging.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\light_projected_texture_fix.cpp">
+      <Filter>render</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
