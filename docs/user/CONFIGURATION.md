@@ -55,23 +55,6 @@ Rendering and lighting for lightsaber blades. On by default. Radius and intensit
 | `LightsaberLightRadius` | `4.0` | How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights |
 | `LightsaberLightIntensity` | `1.0` | Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored |
 
-## CameraShake
-
-Camera shake. `Smooth` redraws the stock shake from explosions, walker deaths and flyer crashes as a smooth blast; `Enabled` adds shake for firing, being hit, landing, rolls, sprints and flyer manoeuvres, set per class in the ODFs (see [ODF Properties](ODF_PROPERTIES.md#camera-shake)). Each shake has its own strength as well as the overall one. Only the view moves: the aim is taken before the shake is applied, so shots land where you point.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `Enabled` | `1` | Camera shake set per class in the ODFs: FireShake on weapons; HitShake, LandShake, RollShake and SprintShake on soldiers and flyers (on a flyer, sprinting is boosting and a roll is a trick); BrakeShake on flyers; BlastShake to reshape explosions for a unit. Each does nothing until an ODF sets it, apart from BlastShake. Only the view moves; shots still land where you aim. Set 0 to turn them all off |
-| `Smooth` | `1` | Draw the stock camera shake (explosions, walker deaths, flyer crashes) as a blast: a slow roll and sway that fades out, sized by the strongest shake running rather than their sum, and smaller while zoomed in. Set 0 for the stock random jolt every frame |
-| `Strength` | `1.0` | Multiplier on every shake GameExt draws, including the stock shake while Smooth is on. 0 turns them off, up to 5 |
-| `FireStrength` | `1.0` | Multiplier on FireShake, the shake when you fire. 0 turns it off, up to 5 |
-| `HitStrength` | `1.0` | Multiplier on HitShake, the shake when you take damage. 0 turns it off, up to 5 |
-| `LandStrength` | `1.0` | Multiplier on LandShake, the shake when you land or touch down. 0 turns it off, up to 5 |
-| `RollStrength` | `1.0` | Multiplier on RollShake, soldier rolls and flyer tricks. 0 turns it off, up to 5 |
-| `SprintStrength` | `1.0` | Multiplier on SprintShake, sprinting and flyer boost. 0 turns it off, up to 5 |
-| `BrakeStrength` | `1.0` | Multiplier on BrakeShake, flyer braking. 0 turns it off, up to 5 |
-| `BlastStrength` | `1.0` | Multiplier on the stock shake while Smooth is on: explosions, walker deaths and flyer crashes. 0 turns it off, up to 5 |
-
 ## AI
 
 Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone.

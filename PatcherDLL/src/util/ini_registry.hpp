@@ -64,18 +64,6 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Lightsaber", "LightsaberLightRadius", "4.0", "How far the lightsaber light reaches, in metres at full blade extension (it grows as the blade ignites). Brightness is unaffected by this, so it only changes reach - but a larger radius evicts more of the map's own lights"),
    INI_ENTRY("Lightsaber", "LightsaberLightIntensity", "1.0", "Multiplier on the lightsaber light colour. 1.0 uses the blade colour as authored"),
 
-   // [CameraShake] — the stock shake drawn smoothly, plus shake set per class in the ODFs
-   INI_ENTRY("CameraShake", "Enabled",  "1",   "Camera shake set per class in the ODFs: FireShake on weapons; HitShake, LandShake, RollShake and SprintShake on soldiers and flyers (on a flyer, sprinting is boosting and a roll is a trick); BrakeShake on flyers; BlastShake to reshape explosions for a unit. Each does nothing until an ODF sets it, apart from BlastShake. Only the view moves; shots still land where you aim. Set 0 to turn them all off"),
-   INI_ENTRY("CameraShake", "Smooth",   "1",   "Draw the stock camera shake (explosions, walker deaths, flyer crashes) as a blast: a slow roll and sway that fades out, sized by the strongest shake running rather than their sum, and smaller while zoomed in. Set 0 for the stock random jolt every frame"),
-   INI_ENTRY("CameraShake", "Strength", "1.0", "Multiplier on every shake GameExt draws, including the stock shake while Smooth is on. 0 turns them off, up to 5"),
-   INI_ENTRY("CameraShake", "FireStrength",   "1.0", "Multiplier on FireShake, the shake when you fire. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "HitStrength",    "1.0", "Multiplier on HitShake, the shake when you take damage. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "LandStrength",   "1.0", "Multiplier on LandShake, the shake when you land or touch down. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "RollStrength",   "1.0", "Multiplier on RollShake, soldier rolls and flyer tricks. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "SprintStrength", "1.0", "Multiplier on SprintShake, sprinting and flyer boost. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "BrakeStrength",  "1.0", "Multiplier on BrakeShake, flyer braking. 0 turns it off, up to 5"),
-   INI_ENTRY("CameraShake", "BlastStrength",  "1.0", "Multiplier on the stock shake while Smooth is on: explosions, walker deaths and flyer crashes. 0 turns it off, up to 5"),
-
    // [AI] — AI behaviour tuning
    INI_ENTRY("AI", "AIDecisionRate", "1.0", "How often AI away from a player make a new decision, as a multiple of stock. Distant AI look like they are standing around because stock BF2 only lets them think every two to four seconds. 2.0 makes them think twice as often; below 1.0 slows them down to buy frame time back. AI next to you are unaffected. Range 0.25 to 4.0"),
    INI_ENTRY("AI", "AIUpdateBudget", "0", "How many AI may make a new decision each turn. 0 keeps the stock 10. A unit that misses its turn keeps walking and shooting but never picks a new goal, which is what standing around looks like. Raising this costs frame time and only helps if the budget is what is actually holding them back, so check with AIUpdateDiag before changing it. Range 10 to 127"),

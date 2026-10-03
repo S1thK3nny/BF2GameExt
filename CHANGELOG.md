@@ -13,13 +13,24 @@ Scripts can check the running version through `GameExt.version`.
 - **Camera shake** - The stock shake from explosions, walker deaths and flyer crashes
   is drawn as a blast, a smooth roll and sway that follows the strongest explosion
   running and shrinks while zoomed in, instead of a new random jolt every frame. ODFs
-  can shake the local player's view per class: `FireShake` on weapons, `HitShake`,
-  `LandShake`, `RollShake` and `SprintShake` on soldiers and flyers, `BrakeShake` on
-  flyers and `BlastShake` to reshape explosions for a unit. Each takes `Pitch`, `Yaw`,
-  `Roll`, `Push`, `Length`, `Rise`, `Rate` and `Limit` detail properties, and all
-  inherit through `ClassParent`. Only the view moves: the aim is taken before the
-  shake, and the reticle holds still rather than chasing it. INI:
-  `[CameraShake]` `Enabled`, `Smooth`, `Strength` and a strength per shake. See
+  can shake the local player's view per class: `FireShake` on weapons, `SwingShake`,
+  `StrikeShake`, `SwingBlockedShake`, `BlockShake` and `DeflectShake` on melee weapons,
+  `HitShake` on any unit, `LandShake`, `RollShake` and `SprintShake` on soldiers,
+  `BoostShake`, `TurnShake`, `BrakeShake`, `CollisionShake`, `TrickRollShake`,
+  `TrickFlipShake`, `TakeoffShake` and `LandingShake` on flyers, `StepShake`,
+  `JumpShake`, `LandShake`, `TurnShake` and `BoostShake` on walkers (each step rolls the
+  view toward the foot that landed), and `BlastShake` to reshape explosions for a unit. Each takes `Pitch`, `Yaw`, `Roll`, `Push`, `Length`,
+  `Rise`, `Rate`, `Limit`, `Threshold`, `Steady`, `PushOnce` and `Teammates` detail
+  properties, and all inherit through `ClassParent`. A flyer's `Threshold` sets when its boost, turn, brake and
+  collision shakes play, with speeds given as numbers or by the class's own `MinSpeed`,
+  `MidSpeed`, `MaxSpeed` and `BoostSpeed`; the boost shake plays when the throttle or a
+  boost raises the speed, not when a flyer regains speed a roll or turn bled off. Only
+  the view moves: the aim is taken
+  before the shake, and the reticle holds still rather than chasing it. Shots add
+  together, up to eight at once, so rapid fire keeps its kick. In first person a shake
+  only turns the view; `Push` is for third person. A shake is drawn on
+  top of the game's camera without feeding into how it follows the unit, so it looks
+  the same at any frame rate. There are no INI settings: the ODFs decide. See
   [ODF properties](docs/user/ODF_PROPERTIES.md#camera-shake).
 - **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
   `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,

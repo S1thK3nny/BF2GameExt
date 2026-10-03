@@ -72,14 +72,6 @@ SECTION_BLURBS = OrderedDict([
      "Rendering and lighting for lightsaber blades. On by default. Radius and intensity are "
      "independent: radius changes how far the light reaches, intensity changes "
      "how bright it is, and changing one does not affect the other."),
-    ("CameraShake",
-     "Camera shake. `Smooth` redraws the stock shake from explosions, walker "
-     "deaths and flyer crashes as a smooth blast; `Enabled` adds shake for "
-     "firing, being hit, landing, rolls, sprints and flyer manoeuvres, set per "
-     "class in the ODFs (see [ODF Properties](ODF_PROPERTIES.md#camera-shake)). "
-     "Each shake has its own strength as well as the overall one. Only the view "
-     "moves: the aim is taken before the shake is applied, so shots land where "
-     "you point."),
     ("AI",
      "Removes hardcoded biases that make BF2's AI single out the human player. "
      "SWBF1 has no player term anywhere in its target selection, which is why "

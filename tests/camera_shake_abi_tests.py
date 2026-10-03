@@ -9,6 +9,7 @@ or executes the game. Not an in-game behaviour test.
 """
 import codecs
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -18,9 +19,12 @@ import pefile
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL" / "src"
 module = (SRC / "render" / "camera_shake.cpp").read_text()
+core = (SRC / "render" / "camera_shake_core.hpp").read_text()
 chase = (SRC / "core" / "layout" / "chase_camera.hpp").read_text()
 flyer = (SRC / "core" / "layout" / "flyer.hpp").read_text()
+walker = (SRC / "core" / "layout" / "walker.hpp").read_text()
 red_camera = (SRC / "core" / "layout" / "red_camera.hpp").read_text()
+weapon = (SRC / "core" / "layout" / "weapon.hpp").read_text()
 odf = (SRC / "entity" / "odf_gameext_props.cpp").read_text()
 addresses = (SRC / "core" / "game_addrs.hpp").read_text()
 
@@ -37,8 +41,13 @@ expected = {
     (chase, "kShakeCount"): 0x9C, (chase, "kShakeAmount"): 0xA0, (chase, "kShakeSlots"): 4,
     (chase, "kTrackableTracker"): 0x1C,
     (red_camera, "kZoom"): 0x140, (red_camera, "kMatrixInverse"): 0x70,
-    (flyer, "kStateLanded"): 0, (flyer, "kStateFlying"): 2, (flyer, "kStateLanding"): 3,
-    (flyer, "kFlagBoost"): 0x04,
+    (flyer, "kStateLanded"): 0, (flyer, "kStateTakeoff"): 1, (flyer, "kStateFlying"): 2,
+    (flyer, "kStateLanding"): 3,
+    (flyer, "kFlagRoll"): 0x01, (flyer, "kFlagFlip"): 0x02, (flyer, "kFlagBoost"): 0x04,
+    # EntityWalker::sStateTable's states (Phantom 0x00A8F0B0) and its flag bits.
+    (walker, "kStateTurnLeft"): 1, (walker, "kStateTurnRight"): 2, (walker, "kStateDying"): 3,
+    (walker, "kStateDead"): 4, (walker, "kFlagJumping"): 0x80, (walker, "kBoosting"): 0x01,
+    (walker, "kMaxFeet"): 6,
     (module, "kVt_GetGameObject"): 0x1C, (module, "kVt_GetControllable"): 0x28,
     (module, "kCtrl_Trackable"): 0x18, (module, "kVt_IsRtti"): 0x00,
     (module, "kVt_GetEntityClass"): 0x28,
@@ -46,7 +55,17 @@ expected = {
     # the offsets controller_rumble.cpp (Damageable + 4 / + 8) and aim_assist.cpp read.
     (module, "kObj_Health"): 0x144, (module, "kObj_MaxHealth"): 0x148,
     (module, "kSoldierSprint"): 3, (module, "kSoldierRoll"): 5,
+    # GameObject::mTeam's bits, as spawn_vehicle_list.cpp reads them.
+    (module, "kObj_Team"): 0x234,
+    # Melee: the Weapon vtable slots and WeaponMelee's list of what a swing struck.
+    (weapon, "kVt_Deflect"): 0x48, (weapon, "kVt_SignalFire"): 0x4C, (weapon, "kVt_IsMelee"): 0x54,
+    (weapon, "kVt_UpdateFire"): 0xA4,
+    (weapon, "kDamageDataModtools"): 0x1D8, (weapon, "kDamageDataRelease"): 0x1A8,
+    (weapon, "kHitCount"): 0x08, (weapon, "kHitObjects"): 0x0C, (weapon, "kHitNext"): 0x2C,
+    (weapon, "kHitMax"): 8,
 }
+spawn_list = (SRC / "render" / "spawn_vehicle_list.cpp").read_text()
+assert const(spawn_list, "kGO_TeamBitfield") == 0x234, "the team bits moved"
 rumble = (SRC / "controller" / "controller_rumble.cpp").read_text()
 assert const(rumble, "kDamageable_offset") + const(rumble, "kDmg_mCurHealth") == 0x144
 assert const(rumble, "kDmg_mMaxHealth") + const(rumble, "kDamageable_offset") == 0x148
@@ -57,13 +76,25 @@ assert "s == 0 || s == 1 || s == 2 || s == 3 || s == 5 || s == 19" in module, "g
 for (text, name), value in expected.items():
     assert const(text, name) == value, name
 
-# velocity, state, flags, trick, cls
+# velocity, state, flags, trick, cls, speed, forward, classSpeeds, classTurnRates, move,
+# landing, roll (0: not read yet)
 flyer_offsets = {
-    "modtools": (0x580, 0x5A4, 0x5F4, 0x610, 0x66C),
-    "release": (0x540, 0x564, 0x5B4, 0x5D0, 0x62C),
+    "modtools": (0x580, 0x5A4, 0x5F4, 0x610, 0x66C, 0x5F8, 0x110, 0x88C, 0x8A0, 0x2C0, 0x5FC, 0x2C4),
+    "release": (0x540, 0x564, 0x5B4, 0x5D0, 0x62C, 0, 0, 0, 0, 0, 0, 0),
 }
 for name, want in (("kModtools", flyer_offsets["modtools"]), ("kRelease", flyer_offsets["release"])):
     got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", flyer).group(1)
+    assert tuple(int(v, 0) for v in got.split(",")) == want, name
+
+# cls, velocity, flags, footState, airTime, state, boost, classMaxSpeed, classNumFeet,
+# footHeight, classStompType, classStompThreshold (the last three: the walker foot
+# diagnostic, audited in tests/walker_foot_diag_abi_tests.py)
+walker_offsets = {
+    "modtools": (0x498, 0x4A0, 0x2060, 0x20A4, 0x20B4, 0x20B8, 0x212C, 0x768, 0xD22, 0x2074, 0xD21, 0xD3C),
+    "release": (0x460, 0x468, 0x2020, 0x2064, 0x2074, 0x2078, 0x20EC, 0x6A0, 0xC5A, 0x2034, 0xC59, 0xC74),
+}
+for name, want in (("kModtools", walker_offsets["modtools"]), ("kRelease", walker_offsets["release"])):
+    got = re.search(r"Offsets " + name + r"\s*=\s*\{([^}]*)\}", walker).group(1)
     assert tuple(int(v, 0) for v in got.split(",")) == want, name
 
 
@@ -89,7 +120,11 @@ def guards():
 GUARDS = guards()
 assert set(GUARDS) == {"chase_camera_setup_camera", "red_camera_set_matrix",
                        "tracker_is_first_person_view", "flyer_do_trick", "weapon_signal_fire",
-                       "reticle_display_update"}, GUARDS
+                       "reticle_display_update", "camera_manager_apply_shake",
+                       "weapon_melee_update_fire", "weapon_melee_deflect"}, GUARDS
+# Read on modtools only so far: a build without the address skips the guard.
+MODTOOLS_ONLY = {"camera_manager_apply_shake", "flyer_post_collision_shake_call",
+                 "flyer_collision_shake_call"}
 
 # The Derive sites and the bytes the patcher expects, by reader and build kind.
 derive_bytes = {
@@ -129,6 +164,31 @@ retail_flyer = {
     0x004ABD0F: [("mulss", "xmm0, dword ptr [ecx + 0x540]")],               # mVelocity.x
     0x00402AD0: [("push", "{flyer_rtti_name}")],                            # rttiHashEntityFlyer
 }
+# EntityWalker on Steam and GOG, which have it at the same addresses.
+retail_walker = {
+    # UpdateState: mClass and its MaxSpeed; the flags, then ground contact (0x40)
+    # zeroing m_fGroundedTimer and ending a jump (0x80); BoostSpeed over MaxSpeed;
+    # the boost bit.
+    0x005029FD: [("mov", "eax, dword ptr [edi + 0x460]"), ("movss", "xmm0, dword ptr [eax + 0x6a0]"),
+                 ("mov", "eax, dword ptr [edi + 0x2020]")],
+    0x00502A17: [("test", "al, 0x40"), ("je", "0x502a32"), ("and", "eax, 0xffffff7f"),
+                 ("mov", "dword ptr [edi + 0x2074], 0"), ("mov", "dword ptr [edi + 0x2020], eax")],
+    0x00502AF1: [("movss", "xmm0, dword ptr [eax + 0x6a4]"), ("comiss", "xmm0, dword ptr [eax + 0x6a0]")],
+    0x00502B46: [("test", "byte ptr [edi + 0x20ec], 1")],
+    0x005034D8: [("cmp", "dword ptr [edi + 0x2078], 3")],                  # mState == dying
+    # DoFootImpactEffects: the class's mNumFeet, mVelocity for the sounds, and
+    # the bit of the foot that landed set in mFootState.
+    0x00500736: [("movzx", "eax, byte ptr [eax + 0xc5a]")],
+    0x00500905: [("lea", "eax, [edi + 0x468]")],
+    0x0050091E: [("or", "dword ptr [edi + 0x2064], eax")],
+    # Jump, from the Controllable part (the walker + 0x240): mClass, JumpVerticalSpeed,
+    # then the flags (jumping, no ground contact) and m_fGroundedTimer.
+    0x00500D57: [("mov", "eax, dword ptr [edx + 0x220]")],
+    0x00500D65: [("movss", "xmm0, dword ptr [eax + 0x6a8]")],
+    0x00500DFC: [("mov", "eax, dword ptr [edx + 0x1de0]"), ("and", "eax, 0xffffffbf"),
+                 ("mov", "dword ptr [edx + 0x1e34], 0"), ("or", "eax, 0x80"),
+                 ("mov", "dword ptr [edx + 0x1de0], eax")],
+}
 sites = {
     "modtools": {
         0x004A244F: [("mov", "eax, dword ptr [ebx + 0xc]")],                # mOwner
@@ -154,6 +214,49 @@ sites = {
         0x004F304A: [("fld", "dword ptr [edx + 0x588]")],                   # mVelocity.z
         0x004F306A: [("fmul", "dword ptr [edx + 0x580]")],                  # mVelocity.x
         0x00A168C0: [("push", "{flyer_rtti_name}")],                        # rttiHashEntityFlyer
+        0x004F3072: [("fstp", "dword ptr [edx + 0x5f8]")],                  # mGetSpeedSpeed
+        0x004F3AE2: [("or", "byte ptr [ecx + 0x5f4], 2")],                  # FlipAdd: flipping
+        # The class's MinSpeed, MidSpeed, MaxSpeed (GetFlyer*Speed) and BoostSpeed
+        0x004F0A31: [("fmul", "dword ptr [eax + 0x88c]")],
+        0x004F09CB: [("fld", "dword ptr [eax + 0x890]")],
+        0x004F096B: [("fld", "dword ptr [eax + 0x894]")],
+        0x004F2FDA: [("fld", "dword ptr [ecx + 0x898]")],
+        # Inside a landing region (mInLandingRegionFactor, flyer + 0x5FC, non-zero)
+        # the three are capped by land_speed_max, _mid, _min and _min_mult.
+        0x004F0956: [("fld", "dword ptr [ecx + 0x5fc]")],
+        0x004F0971: [("fcom", "dword ptr [0xacdc60]")],
+        0x004F09D1: [("fcom", "dword ptr [0xacdc64]")],
+        0x004F0A2B: [("fld", "dword ptr [0xacdc6c]"), ("fmul", "dword ptr [eax + 0x88c]"),
+                     ("fcom", "dword ptr [0xacdc68]")],
+        # EntityFlyer::Update works from the flyer's Controllable part, the flyer +
+        # 0x240, and reads the class's PitchRate and TurnRate.
+        0x004FD86D: [("lea", "ecx, [ebx - 0x240]")],
+        0x004FD752: [("fld", "dword ptr [edx + 0x8a0]"), ("fld", "dword ptr [edx + 0x8a4]")],
+        # RecalculateSpeed takes mVelocity along the matrix's forward axis, + 0x110.
+        0x004F3050: [("fmul", "dword ptr [edx + 0x118]")],
+        0x004F305C: [("fmul", "dword ptr [edx + 0x114]")],
+        0x004F3064: [("fld", "dword ptr [edx + 0x110]")],
+        # The speed it steers toward, into mSetSpeed (flyer + 0x598): BoostSpeed
+        # while boosting with one, else from mControlMove (Controllable + 0x80).
+        0x004FD376: [("mov", "eax, dword ptr [ebx + 0x80]")],
+        # The roll input next, mControlStrafe (Controllable + 0x84), with its 0.3
+        # dead zone.
+        0x004FD39D: [("fld", "dword ptr [ebx + 0x84]")],
+        0x004FD3AB: [("fld", "st(0)"), ("fabs", ""), ("fcomp", "dword ptr [0xa2c65c]")],
+        0x004FECF9: [("fld", "dword ptr [esi + 0x898]")],
+        0x004FED08: [("mov", "ecx, dword ptr [esi + 0x898]"), ("mov", "dword ptr [ebx + 0x358], ecx")],
+        0x004FED19: [("fld", "dword ptr [esp + 0x78]")],
+        0x004FED7E: [("fstp", "dword ptr [ebx + 0x358]")],
+        # The flyer's two collision shakes: ApplyShake(impact x 0.8, impact x 0.7)
+        # for the flyer the chase camera follows, through the thunk.
+        0x004F7F20: [("fmul", "dword ptr [0xa2c664]")],
+        0x004F7F31: [("fmul", "dword ptr [0xa2a9b4]"), ("fstp", "dword ptr [esp]"),
+                     ("call", "0x4162d4")],
+        0x00503216: [("fmul", "dword ptr [0xa2c664]")],
+        0x00503227: [("fmul", "dword ptr [0xa2a9b4]"), ("fstp", "dword ptr [esp]"),
+                     ("call", "0x4162d4")],
+        0x004162D4: [("jmp", "{camera_manager_apply_shake}")],
+        0x004A06C4: [("ret", "8")],
         # ChaseCamera::Update: the shake queue
         0x004A2D7E: [("mov", "eax, dword ptr [ebp + 0x9c]")],               # mShakeCount
         0x004A2D9C: [("lea", "edx, [ebp + 0xa0]"), ("lea", "edi, [ebp + 0xb0]")],  # amounts, decays
@@ -165,8 +268,43 @@ sites = {
         0x00413B24: [("jmp", "0x678520")],
         0x0067852B: [("lea", "eax, [esi + 0x70]")],
         0x00683584: [("ret", "4")],
+        # WeaponMelee::UpdateFire: a new attack goes on the front of m_pDamageData;
+        # each object struck is listed (eight at most) before the object is asked
+        # to block (+0xD4, Deflect).
+        0x00639350: [("mov", "ecx, dword ptr [ebx + 0x1d8]"), ("mov", "dword ptr [eax + 0x2c], ecx"),
+                     ("mov", "dword ptr [ebx + 0x1d8], eax")],
+        0x00639EA5: [("cmp", "ecx, 8")],
+        0x00639EB2: [("mov", "dword ptr [eax + ecx*4 + 0xc], ebx")],
+        0x00639FBD: [("call", "dword ptr [eax + 0xd4]"), ("test", "al, al")],
+        0x0063A1ED: [("ret", "4")],
+        # WeaponMelee::Deflect: the owner, and both returns
+        0x0063767F: [("mov", "eax, dword ptr [ebx + 0x6c]")],
+        0x006378FD: [("ret", "0xc")],
+        0x00638AB7: [("ret", "0xc")],
+        # EntityWalker, as on retail: UpdateState's mClass, MaxSpeed, flags, ground
+        # contact and m_fGroundedTimer, BoostSpeed over MaxSpeed and the boost bit.
+        0x0055B540: [("mov", "edx, dword ptr [esi + 0x498]"), ("mov", "eax, dword ptr [edx + 0x768]")],
+        0x0055B550: [("mov", "eax, dword ptr [esi + 0x2060]"), ("test", "al, 0x40")],
+        0x0055B562: [("and", "eax, 0xffffff7f"), ("mov", "dword ptr [esi + 0x20b4], edi"),
+                     ("mov", "dword ptr [esi + 0x2060], eax")],
+        0x0055B579: [("fadd", "dword ptr [esi + 0x20b4]"), ("fstp", "dword ptr [esi + 0x20b4]")],
+        0x0055B618: [("fld", "dword ptr [eax + 0x76c]"), ("fcomp", "dword ptr [eax + 0x768]")],
+        0x0055B674: [("test", "byte ptr [esi + 0x212c], 1")],
+        0x0054F340: [("test", "byte ptr [ecx + 0x2060], 2")],
+        0x0054F349: [("cmp", "dword ptr [ecx + 0x20b8], 4")],             # mState == dead
+        # DoFootImpactEffects: mNumFeet, mVelocity, and the landed foot's bit.
+        0x00555B76: [("movzx", "eax, byte ptr [eax + 0xd22]")],
+        0x00555E2A: [("lea", "edx, [esi + 0x4a0]")],
+        0x0055604D: [("mov", "edx, dword ptr [esi + 0x20a4]"), ("mov", "ecx, edi"), ("mov", "eax, 1"),
+                     ("shl", "eax, cl"), ("mov", "ecx, dword ptr [esi + 0x498]"), ("or", "edx, eax"),
+                     ("mov", "dword ptr [esi + 0x20a4], edx")],
+        # Jump, from the Controllable part (the walker + 0x240).
+        0x0054F776: [("mov", "ecx, dword ptr [esi + 0x258]"), ("fld", "dword ptr [ecx + 0x770]")],
+        0x0054F7DC: [("mov", "eax, dword ptr [esi + 0x1e20]"), ("and", "eax, 0xffffffbf"), ("pop", "edi"),
+                     ("or", "eax, 0x80"), ("mov", "dword ptr [esi + 0x1e20], eax")],
+        0x0054F7F2: [("mov", "dword ptr [esi + 0x1e74], 0")],
     },
-    "steam": {**retail_flyer, **{
+    "steam": {**retail_flyer, **retail_walker, **{
         0x00453D14: [("cmp", "dword ptr [esi + 0xc], 0"), ("lea", "eax, [esi + 0x10]")],
         0x00453D21: [("call", "{red_camera_set_matrix}")],
         0x00453D3B: [("ret", "8")],
@@ -181,8 +319,18 @@ sites = {
         0x00630883: [("lea", "eax, [esi + 0x70]"), ("push", "eax")],        # reticule: _MatrixInverse
         0x006308A9: [("call", "0x6cbfe0")],                                  # to projection space
         0x0063098B: [("ret", "4")],
+        # WeaponMelee::UpdateFire and Deflect, as on modtools
+        0x0068C537: [("mov", "ecx, dword ptr [edi + 0x1a8]"), ("mov", "dword ptr [edx + 0x2c], ecx"),
+                     ("mov", "dword ptr [edi + 0x1a8], edx")],
+        0x0068CF18: [("mov", "dword ptr [edx + eax*4 + 0xc], esi")],
+        0x0068CF37: [("inc", "dword ptr [edx + 8]")],
+        0x0068CFAD: [("mov", "eax, dword ptr [esi]"), ("mov", "eax, dword ptr [eax + 0xd4]"),
+                     ("call", "eax"), ("test", "al, al")],
+        0x0068D178: [("ret", "4")],
+        0x0068A6C9: [("ret", "0xc")],
+        0x0068B0F8: [("ret", "0xc")],
     }},
-    "gog": {**retail_flyer, **{
+    "gog": {**retail_flyer, **retail_walker, **{
         0x00453CF4: [("cmp", "dword ptr [esi + 0xc], 0"), ("lea", "eax, [esi + 0x10]")],
         0x00453D01: [("call", "{red_camera_set_matrix}")],
         0x00453D1B: [("ret", "8")],
@@ -196,8 +344,21 @@ sites = {
         0x006CCDA2: [("movss", "xmm0, dword ptr [edx + 0x138]")],
         0x00631923: [("lea", "eax, [esi + 0x70]"), ("push", "eax")],
         0x00631A2B: [("ret", "4")],
+        0x0068D5C7: [("mov", "ecx, dword ptr [edi + 0x1a8]"), ("mov", "dword ptr [edx + 0x2c], ecx"),
+                     ("mov", "dword ptr [edi + 0x1a8], edx")],
+        0x0068DFA8: [("mov", "dword ptr [edx + eax*4 + 0xc], esi")],
+        0x0068DFC7: [("inc", "dword ptr [edx + 8]")],
+        0x0068E03D: [("mov", "eax, dword ptr [esi]"), ("mov", "eax, dword ptr [eax + 0xd4]"),
+                     ("call", "eax"), ("test", "al, al")],
+        0x0068E208: [("ret", "4")],
+        0x0068B759: [("ret", "0xc")],
+        0x0068C188: [("ret", "0xc")],
     }},
 }
+
+# WeaponMelee's vtable: Deflect (+0x48) and UpdateFire (+0xA4) are the hooked
+# functions, and IsMelee (+0x54) answers true. modtools goes through thunks.
+melee_vtables = {"modtools": 0x00A54210, "steam": 0x007B1578, "gog": 0x007B24F0}
 
 # ChaseCamera's vtable: Update (+0x04) sits in the slot before SetupCamera (+0x08),
 # which ties the queue sites above to the class. modtools goes through thunks.
@@ -246,6 +407,8 @@ for build, filename in builds:
         names["flyer_rtti_name"] = hex(name_va)
 
         for address_name, per_kind in GUARDS.items():
+            if address_name in MODTOOLS_ONLY and address_name not in addrs:
+                continue
             raw, mask = per_kind[kind]
             want = codecs.decode(raw, "unicode_escape").encode("latin1")
             assert len(want) == len(mask), (build, address_name, "guard length")
@@ -279,6 +442,40 @@ for build, filename in builds:
         queue_sites = [a for a in sites[build] if update <= a < update + 0x100]
         assert len(queue_sites) == 2, (build, "the queue sites must sit in ChaseCamera::Update")
 
+        def slot_target(table_va, offset):
+            va = dword(table_va + offset)
+            ins = list(decoder.disasm(image[va - base:va - base + 5], va, count=1))[0]
+            return int(ins.op_str, 16) if ins.mnemonic == "jmp" else va
+
+        melee = melee_vtables[build]
+        assert slot_target(melee, 0x48) == addrs["weapon_melee_deflect"], (build, "WeaponMelee vtable: Deflect")
+        assert slot_target(melee, 0xA4) == addrs["weapon_melee_update_fire"], (build, "WeaponMelee vtable: UpdateFire")
+        is_melee = slot_target(melee, 0x54)
+        assert image[is_melee - base:is_melee - base + 3] == b"\xb0\x01\xc3", (build, "WeaponMelee::IsMelee")
+        assert slot_target(melee, 0x4C) == addrs["weapon_signal_fire"], (build, "WeaponMelee uses Weapon::SignalFire")
+
+        # The collision sites and ApplyShake, where this build has them, and the
+        # stock amount and duration factors the bump is read back with.
+        present = MODTOOLS_ONLY & set(addrs)
+        assert present in (set(), MODTOOLS_ONLY), (build, "collision addresses: all or none", present)
+        if present:
+            for name in ("flyer_post_collision_shake_call", "flyer_collision_shake_call"):
+                ins = list(decoder.disasm(image[addrs[name] - base:addrs[name] - base + 5], addrs[name]))[0]
+                assert ins.mnemonic == "call" and jmp_target(int(ins.op_str, 16)) == \
+                    addrs["camera_manager_apply_shake"], (build, name)
+            floats = {va: struct.unpack("<f", image[va - base:va - base + 4])[0] for va in (0xA2A9B4, 0xA2C664)}
+            assert abs(floats[0xA2A9B4] - 0.8) < 1e-6 and abs(floats[0xA2C664] - 0.7) < 1e-6, floats
+            assert "constexpr float kStockBumpAmount = 0.8f;" in core, "the stock amount factor"
+
+        # The landing-region caps camera_shake_core.hpp mirrors.
+        if build == "modtools":
+            caps = {va: struct.unpack("<f", image[va - base:va - base + 4])[0]
+                    for va in (0xACDC60, 0xACDC64, 0xACDC68, 0xACDC6C)}
+            assert [round(caps[va], 6) for va in sorted(caps)] == [60.0, 20.0, 10.0, 0.2], caps
+            for name, value in (("kLandSpeedMax", "60.0f"), ("kLandSpeedMid", "20.0f"),
+                                ("kLandSpeedMin", "10.0f"), ("kLandSpeedMinMult", "0.2f")):
+                assert re.search(r"constexpr float " + name + r"\s*=\s*" + re.escape(value), core), name
+
         for reader in ("entity", "weapon"):
             va = addrs[reader + "_class_read_derive_site"]
             want = bytes.fromhex(derive_bytes[(kind, reader)])
@@ -289,7 +486,8 @@ for build, filename in builds:
                       if va < t < va + 8}
             assert not inside, (build, reader, "a branch lands inside the Derive site", inside)
 
-        print(f"{build}: {len(GUARDS)} guards, {len(sites[build])} camera shake sites and "
-              f"2 Derive sites passed")
+        guarded = sum(1 for name in GUARDS if name not in MODTOOLS_ONLY or name in addrs)
+        print(f"{build}: {guarded} guards, {len(sites[build])} camera shake sites and "
+              f"2 Derive sites passed{'' if present else ' (collision sites not read yet)'}")
     finally:
         pe.close()

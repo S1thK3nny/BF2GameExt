@@ -52,4 +52,40 @@ constexpr uint32_t kSoldierAnimationMap = 0x0C8; // MAP mSoldierAnimationMap
 constexpr uint32_t kLastFireTimeModtools = 0x11C; // float mLastFireTime
 constexpr uint32_t kLastFireTimeRelease  = 0x0F8; // Steam, GOG
 
+// Weapon's primary vtable, the same slots on every build. IsMelee: thiscall(),
+// bool in AL, plain RET; only WeaponMelee answers true (modtools 0x00633B70,
+// Steam 0x00687C40, GOG 0x00688CB0: MOV AL,1 / RET), so it is how a WeaponMelee
+// is told apart, and how its vtable was found on Steam and GOG.
+constexpr uint32_t kVt_Deflect    = 0x48;
+constexpr uint32_t kVt_SignalFire = 0x4C;
+constexpr uint32_t kVt_IsMelee    = 0x54;
+constexpr uint32_t kVt_UpdateFire = 0xA4;
+
 } // namespace layout::Weapon
+
+// =============================================================================
+// WeaponMelee - a lightsaber or other melee weapon (Phantom PDB names).
+//
+// m_pDamageData heads a list of DamageData, one per attack of the swing under
+// way. WeaponMelee::UpdateFire lists each object an attack's blade reaches, once,
+// before it asks the object to block (its vtable +0xD4, Deflect), so the list
+// holds what was struck whether it blocked or not. A new DamageData goes on the
+// front of the list (node->pNext = head; head = node):
+//   modtools 0x1D8  MOV ECX,[EBX+0x1D8] / MOV [EAX+0x2C],ECX / MOV [EBX+0x1D8],EAX @00639350
+//   Steam    0x1A8  MOV ECX,[EDI+0x1A8] / MOV [EDX+0x2C],ECX / MOV [EDI+0x1A8],EDX @0068C537
+//   GOG      0x1A8  the same bytes                                                @0068D5C7
+// DamageData is 0x30 bytes on every build: iNumObjects +0x08, apObject[8] +0x0C
+// (written MOV [reg+reg*4+0xC] after a CMP with 8), pNext +0x2C.
+// =============================================================================
+
+namespace layout::WeaponMelee {
+
+constexpr uint32_t kDamageDataModtools = 0x1D8; // DamageData* m_pDamageData
+constexpr uint32_t kDamageDataRelease  = 0x1A8; // Steam, GOG
+
+constexpr uint32_t kHitCount   = 0x08; // DamageData::iNumObjects
+constexpr uint32_t kHitObjects = 0x0C; // DamageData::apObject[8], GameObject*
+constexpr uint32_t kHitNext    = 0x2C; // DamageData::pNext
+constexpr int      kHitMax     = 8;
+
+} // namespace layout::WeaponMelee

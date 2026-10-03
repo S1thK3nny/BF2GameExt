@@ -308,16 +308,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
       g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
       g_hudSubPixel = cfg.get_bool("Features", "HudSubPixel", false);
-      g_cameraShakeEnabled  = cfg.get_bool("CameraShake", "Enabled", true);
-      g_cameraShakeSmooth   = cfg.get_bool("CameraShake", "Smooth", true);
-      g_cameraShakeStrength = cfg.get_float("CameraShake", "Strength", 1.0f);
-      g_cameraShakeChannel[kShakeFire]   = cfg.get_float("CameraShake", "FireStrength", 1.0f);
-      g_cameraShakeChannel[kShakeHit]    = cfg.get_float("CameraShake", "HitStrength", 1.0f);
-      g_cameraShakeChannel[kShakeLand]   = cfg.get_float("CameraShake", "LandStrength", 1.0f);
-      g_cameraShakeChannel[kShakeRoll]   = cfg.get_float("CameraShake", "RollStrength", 1.0f);
-      g_cameraShakeChannel[kShakeSprint] = cfg.get_float("CameraShake", "SprintStrength", 1.0f);
-      g_cameraShakeChannel[kShakeBrake]  = cfg.get_float("CameraShake", "BrakeStrength", 1.0f);
-      g_cameraShakeChannel[kShakeBlast]  = cfg.get_float("CameraShake", "BlastStrength", 1.0f);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);

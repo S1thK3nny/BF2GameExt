@@ -7,6 +7,7 @@
 #include "core/layout/chase_camera.hpp"
 #include "core/layout/flyer.hpp"
 #include "core/layout/red_camera.hpp"
+#include "core/layout/walker.hpp"
 #include "core/layout/weapon.hpp"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
@@ -36,6 +37,16 @@
 //     thiscall(), RET; controller rumble detours it too
 //   ReticuleDisplay::Update       0x00683270   0x00630650   0x006316F0   detoured
 //     thiscall(float dt), bool in AL, RET 4; the widescreen fix detours it too
+//   CameraManager::ApplyShake     0x004A0690   -            -            called
+//     thiscall(float amount, float duration), RET 8
+//   its CALL in EntityFlyer::     0x004F7F3A   -            -            retargeted
+//     PostCollisionUpdate, and in
+//     CollisionCallback           0x00503230   -            -            retargeted
+//     both through the thunk at 0x004162D4
+//   WeaponMelee::UpdateFire       0x00639020   0x0068C230   0x0068D2C0   detoured
+//     thiscall(float dt), bool in AL, RET 4
+//   WeaponMelee::Deflect          0x00637670   0x0068A550   0x0068B5E0   detoured
+//     thiscall(Ordnance*, const PblVector3*, const PblVector3*), bool in AL, RET 0xC
 //
 // Same on every build: the chase camera fields and its shake queue
 // (layout::ChaseCamera); the render camera's zoom (layout::RedCamera); the
@@ -44,15 +55,26 @@
 // +0x18; GameObject::IsRtti (+0x00, thiscall(hash), RET 4) and GetEntityClass
 // (+0x28), as in hud_class_icons.cpp; a GameObject's Damageable at +0x140, as
 // controller_rumble.cpp and aim_assist.cpp read it; the soldier's mState at
-// Controllable + g_soldier->mState. The flyer fields are per build
-// (layout::Flyer).
+// Controllable + g_soldier->mState; a GameObject's mTeam bits at +0x234; the
+// Weapon vtable's IsMelee (+0x54). WeaponMelee's list of what a swing struck
+// moves between modtools and retail (layout::WeaponMelee). The flyer fields are per build
+// (layout::Flyer); those not yet read on Steam and GOG are 0 there, and so are
+// the collision sites, so what needs them stays off on those builds. The
+// walker fields are per build too (layout::Walker), read on all three.
 //
 // How the shake gets drawn: SetupCamera builds mMatrix, turns it by the stock
 // shake unless mission time is past mShakeSuppressUntil, and hands it to
-// RedCamera::SetMatrix. With Smooth on, the hook holds mShakeSuppressUntil at
-// FLT_MAX for the call, so the stock turn is skipped; either way it then moves
-// and turns mMatrix by its own offset and sets the camera again. The aim never
+// RedCamera::SetMatrix. The hook holds mShakeSuppressUntil at FLT_MAX for the
+// call, so the stock turn is skipped, then moves and turns mMatrix by its own
+// offset, the stock queue drawn as a blast included, and sets the camera again. The aim never
 // reads mMatrix (docs/RE/CameraShake.md), so shots are unaffected.
+//
+// SetupCamera builds mMatrix from the one it left last frame: the owner's
+// SetupCameraTrackMatrix eases the camera from there toward where it should be
+// (CameraTrackSetting::SetupCameraTrackMatrix), and ChaseCamera blends from
+// there too while it settles. So before calling it, the hook puts back the
+// matrix SetupCamera made last frame in place of the shaken one (LeftShake),
+// and a shake never feeds BF2's easing (docs/RE/CameraShake.md).
 //
 // The reticule is the one thing that would follow the shake: ReticuleDisplay::
 // Update places it by projecting the aim point through the render camera's
@@ -60,14 +82,13 @@
 // puts the unshaken inverse back for that call only, so the reticule holds still.
 // =============================================================================
 
-bool  g_cameraShakeEnabled  = true;
-bool  g_cameraShakeSmooth   = true;
-float g_cameraShakeStrength = 1.0f;
-float g_cameraShakeChannel[kCameraShakeChannels] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
-
 namespace {
 using namespace camera_shake;
 namespace cam = layout::ChaseCamera;
+
+// The ODF-driven shakes. Always on; off only if the ODF reader had no
+// listener slot left for their properties, when just the blast is drawn.
+bool s_odfShakes = true;
 
 constexpr uint32_t kVt_GetGameObject   = 0x1C;  // Trackable vtable
 constexpr uint32_t kVt_GetControllable = 0x28;  // Trackable vtable
@@ -79,11 +100,16 @@ constexpr uint32_t kVt_GetEntityClass  = 0x28;  // GameObject primary vtable
 // Damageable_data from +0x144), on every build.
 constexpr uint32_t kObj_Health    = 0x144;  // Damageable::mCurHealth
 constexpr uint32_t kObj_MaxHealth = 0x148;  // Damageable::mMaxHealth
+// GameObject::mTeam, a 4-bit signed field in the low bits, on every build (as
+// spawn_vehicle_list.cpp reads it; WeaponMelee::UpdateFire takes the owner's
+// team the same way, SHL 0x1C / SAR 0x1C).
+constexpr uint32_t kObj_Team      = 0x234;
 
 // RTTI hashes are PblHash of the class name, hashed by each class's static
 // initialiser (EntityFlyer: modtools 0x00A168C0, Steam 0x00402AD0).
 constexpr uint32_t kSoldierRtti = pbl_hash("EntitySoldier");
 constexpr uint32_t kFlyerRtti   = pbl_hash("EntityFlyer");
+constexpr uint32_t kWalkerRtti  = pbl_hash("EntityWalker");   // CommandWalker answers it too
 static_assert(kSoldierRtti == 0x5E8739F4u, "the target bar's soldier RTTI hash");
 
 // SoldierState (PDB enum), the values used here.
@@ -100,8 +126,9 @@ bool soldier_grounded(int s)                                                    
 constexpr float kTrickUnset = -2.0f;
 constexpr float kTrickRefused = -1.0f;
 
-// Rate at which the sprint judder eases in and out, per second (the spec's 3/s).
-constexpr float kSprintEase = 3.0f;
+// For this long after a bump's shake, a drop in health is the bump's own
+// damage and does not shake again as a hit.
+constexpr float kBumpHitMute = 0.25f;
 
 using SetupCameraFn   = void(__fastcall*)(uint8_t* self, void* edx, void* camera, float dt);
 using SetMatrixFn     = void(__thiscall*)(void* camera, const void* matrix);
@@ -109,8 +136,13 @@ using IsFirstPersonFn = bool(__thiscall*)(void* tracker);
 using DoTrickFn       = void(__fastcall*)(uint8_t* self, void* edx, int trick);
 using SignalFireFn    = void(__fastcall*)(uint8_t* weapon, void* edx);
 using ReticleUpdateFn = bool(__fastcall*)(void* self, void* edx, float dt);
+using ApplyShakeFn    = void(__fastcall*)(void* manager, void* edx, float amount, float duration);
+using MeleeUpdateFn   = bool(__fastcall*)(uint8_t* self, void* edx, float dt);
+using MeleeDeflectFn  = bool(__fastcall*)(uint8_t* self, void* edx, void* ordnance, const void* pos,
+                                          const void* dir);
 using ObjectFn        = uint8_t*(__thiscall*)(void* self);
 using IsRttiFn        = bool(__thiscall*)(void* self, uint32_t hash);
+using IsMeleeFn       = bool(__thiscall*)(void* weapon);
 
 SetupCameraFn   s_setupCamera   = nullptr;
 SetMatrixFn     s_setMatrix     = nullptr;
@@ -118,7 +150,12 @@ IsFirstPersonFn s_isFirstPerson = nullptr;
 DoTrickFn       s_doTrick       = nullptr;
 SignalFireFn    s_signalFire    = nullptr;
 ReticleUpdateFn s_reticleUpdate = nullptr;
+ApplyShakeFn    s_applyShake    = nullptr;
+MeleeUpdateFn   s_meleeUpdate   = nullptr;
+MeleeDeflectFn  s_meleeDeflect  = nullptr;
 layout::Flyer::Offsets s_flyer  = layout::Flyer::kModtools;
+layout::Walker::Offsets s_walker = layout::Walker::kModtools;
+uint32_t        s_meleeHits     = layout::WeaponMelee::kDamageDataModtools;
 
 template<class T> T& at(uint8_t* p, uint32_t offset) { return *reinterpret_cast<T*>(p + offset); }
 template<class T> T& at(void* p, uint32_t offset) { return at<T>(static_cast<uint8_t*>(p), offset); }
@@ -133,19 +170,30 @@ bool is_rtti(uint8_t* obj, uint32_t hash)
    return reinterpret_cast<IsRttiFn>((*reinterpret_cast<void***>(obj))[kVt_IsRtti / 4])(obj, hash);
 }
 
+bool is_melee(uint8_t* weapon)
+{
+   return reinterpret_cast<IsMeleeFn>((*reinterpret_cast<void***>(weapon))[layout::Weapon::kVt_IsMelee / 4])(weapon);
+}
+
 // -----------------------------------------------------------------------------
-// ODF properties: seven shakes, each a scale and eight details, kept per class
+// ODF properties: twenty-one shakes, each a scale and twelve details, kept per class
 // and inherited through the reader's Derive
 // -----------------------------------------------------------------------------
 
-enum Field : uint8_t { kScale, kPitch, kYaw, kRollAxis, kPush, kLength, kRise, kRate, kLimit, kFieldCount };
+enum Field : uint8_t {
+   kScale, kPitch, kYaw, kRollAxis, kPush, kLength, kRise, kRate, kLimit, kThreshold, kSteady, kPushOnce,
+   kTeammates,
+   kFieldCount
+};
 
 constexpr const char* kShakeNames[kCameraShakeChannels] = {
    "Fire", "Hit", "Land", "Roll", "Sprint", "Brake", "Blast",
+   "Boost", "Turn", "Collision", "TrickRoll", "TrickFlip", "Takeoff", "Landing",
+   "Swing", "Strike", "Block", "Deflect", "SwingBlocked", "Step", "Jump",
 };
 constexpr const char* kFieldSuffixes[kFieldCount] = {
    "Shake", "ShakePitch", "ShakeYaw", "ShakeRoll", "ShakePush", "ShakeLength", "ShakeRise", "ShakeRate",
-   "ShakeLimit",
+   "ShakeLimit", "ShakeThreshold", "ShakeSteady", "ShakePushOnce", "ShakeTeammates",
 };
 
 struct PropName {
@@ -173,6 +221,19 @@ constexpr PropTable kProps = make_prop_table();
 static_assert(kProps.e[0].hash == pbl_hash("FireShake"), "name table order");
 static_assert(kProps.e[kShakeRoll * kFieldCount + kRollAxis].hash == pbl_hash("RollShakeRoll"), "name table order");
 static_assert(kProps.e[kShakeFire * kFieldCount + kLimit].hash == pbl_hash("FireShakeLimit"), "name table order");
+static_assert(kProps.e[kShakeBoost * kFieldCount + kThreshold].hash == pbl_hash("BoostShakeThreshold"),
+              "name table order");
+static_assert(kProps.e[kShakeLanding * kFieldCount + kSteady].hash == pbl_hash("LandingShakeSteady"),
+              "name table order");
+static_assert(kProps.e[kShakeBlast * kFieldCount + kPushOnce].hash == pbl_hash("BlastShakePushOnce"),
+              "name table order");
+static_assert(kProps.e[kShakeStrike * kFieldCount + kTeammates].hash == pbl_hash("StrikeShakeTeammates"),
+              "name table order");
+static_assert(kProps.e[kShakeSwingBlocked * kFieldCount + kScale].hash == pbl_hash("SwingBlockedShake"),
+              "name table order");
+static_assert(kProps.e[kShakeStep * kFieldCount + kThreshold].hash == pbl_hash("StepShakeThreshold"),
+              "name table order");
+static_assert(kProps.e[kShakeJump * kFieldCount + kScale].hash == pbl_hash("JumpShake"), "name table order");
 
 constexpr bool all_distinct(const PropTable& t)
 {
@@ -215,6 +276,23 @@ bool on_property(void* cls, uint32_t hash, const char* value)
          break;
       case kRate:     ok = parse_amount(value, s.shape.rate);   break;
       case kLimit:    ok = parse_amount(value, s.shape.limit);  break;
+      case kThreshold: ok = parse_threshold(value, s.shape.threshold); break;
+      case kSteady:
+         ok = parse_amount(value, s.shape.steady);
+         s.shape.steady = clamp01(s.shape.steady);
+         break;
+      case kPushOnce: {
+         float on = 0.0f;
+         ok = parse_amount(value, on);
+         if (ok) s.shape.pushOnce = on > 0.0f;
+         break;
+      }
+      case kTeammates: {
+         float on = 0.0f;
+         ok = parse_amount(value, on);
+         if (ok) s.shape.teammates = on > 0.0f;
+         break;
+      }
       default: break;
       }
       if (ok) s.set = static_cast<uint16_t>(s.set | (1u << p.field));
@@ -262,6 +340,10 @@ bool shape_for(const ClassShake* cs, int id, const Shape& base, bool onByDefault
    if (has(kRise))     out.rise = p->shape.rise;
    if (has(kRate))     out.rate = p->shape.rate;
    if (has(kLimit))    out.limit = p->shape.limit;
+   if (has(kThreshold)) out.threshold = p->shape.threshold;
+   if (has(kSteady))   out.steady = p->shape.steady;
+   if (has(kPushOnce)) out.pushOnce = p->shape.pushOnce;
+   if (has(kTeammates)) out.teammates = p->shape.teammates;
    return scale > 0.0f;
 }
 
@@ -273,17 +355,43 @@ struct View {
    uint8_t* obj          = nullptr;   // GameObject the chase camera follows
    int      soldierState = -1;
    int      flyerState   = -1;
-   float    prevSpeed    = -1.0f;
+   float    prevSpeed    = -1.0f;     // a flyer's speed last frame, m/s
+   float    prevForward  = 0.0f;      // and its speed along its nose
+   float    prevVelocity[3] = {};
+   bool     haveVelocity = false;
+   float    prevNose[3]  = {};        // a flyer's forward axis last frame
+   bool     haveNose     = false;
+   Hold     noseRate;                 // how fast its nose swings round, smoothed
+   TurnCount turn;                    // seconds of hard turning
+   SpeedUp  speedUp;                  // a speed-up the throttle or a boost asked for
+   float    hitMute      = 0.0f;      // seconds left of a bump's damage (kBumpHitMute)
+   bool     takesBumps   = false;     // its class sets CollisionShake
+   uint32_t walkerFeet   = 0;         // a walker's feet that had landed, last look
+   bool     walkerJumping = false;    // and whether it was jumping
+   bool     haveWalker   = false;     // those two hold a reading
+   WalkerAir walkerAir;               // its time off the ground
    AirTime  air;
    HitSense hit;
 };
 
+// A bump BF2's collision code reported for the viewed flyer, waiting for the
+// next camera frame, with the largest stock shake amount it came with.
+struct PendingBump {
+   bool  pending = false;
+   float amount  = 0.0f;
+};
+
 View        s_view;
+PendingBump s_bump;
 KickChannel s_fireKick, s_hitKick, s_landKick, s_rollKick;
+KickChannel s_trickRollKick, s_trickFlipKick, s_takeoffKick, s_landingKick, s_bumpKick;
+KickChannel s_swingKick, s_strikeKick, s_blockKick, s_deflectKick, s_swingBlockedKick;
+KickChannel s_stepKick, s_jumpKick;
 float       s_sprintLevel = 0.0f;
 Shape       s_sprintShape = defaults::kSprintSoldier;
-Hold        s_boost, s_brake, s_decel;
-Shape       s_boostShape = defaults::kSprintFlyer;
+Hold        s_boost, s_turn, s_brake, s_decel, s_accel;
+Shape       s_boostShape = defaults::kBoost;
+Shape       s_turnShape  = defaults::kTurn;
 Shape       s_brakeShape = defaults::kBrake;
 Rng         s_rng;
 double      s_time = 0.0;   // seconds of shake time, double: see noise()
@@ -297,6 +405,10 @@ struct ReticleView {
    bool     valid        = false;
 };
 ReticleView s_reticle;
+
+// The shake left in the chase camera's mMatrix, to hand BF2 its own matrix
+// back before the next SetupCamera (LeftShake).
+LeftShake s_left;
 
 void play(KickChannel& channel, const ClassShake* cs, int id, const Shape& base, float extra = 1.0f)
 {
@@ -314,7 +426,7 @@ bool first_person(uint8_t* owner)
 
 // Landings in any view; rolls and sprinting in third person only, since first
 // person has camera motion of its own for both.
-void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, float& sprintTarget)
+void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, bool firstPerson, float& sprintTarget)
 {
    uint8_t* ctrl = vcall_object(owner, kVt_GetControllable);
    const int state = ctrl ? at<int>(ctrl, g_soldier->mState) : -1;
@@ -324,7 +436,7 @@ void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, float& sprin
    if (s_view.air.update(soldier_airborne(state), soldier_grounded(state), dt))
       play(s_landKick, cs, kShakeLand, defaults::kLandSoldier);
 
-   if (first_person(owner)) return;
+   if (firstPerson) return;
    if (state == kSoldierRoll && prev != kSoldierRoll && prev != -1)
       play(s_rollKick, cs, kShakeRoll, defaults::kRollSoldier);
    Shape shape;
@@ -335,44 +447,236 @@ void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, float& sprin
    }
 }
 
-// On a flyer, sprinting is boosting, a landing is touching down and a roll is a
-// trick (from the DoTrick detour below).
-void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, float& boostTarget, float& brakeTarget)
+// A flyer class's MinSpeed, MidSpeed, MaxSpeed and BoostSpeed, where this
+// build's layout has them.
+FlyerSpeeds class_speeds(void* cls)
+{
+   FlyerSpeeds s;
+   if (!cls || !s_flyer.classSpeeds) return s;
+   const float* v = &at<float>(cls, s_flyer.classSpeeds);
+   s.min = v[0];
+   s.mid = v[1];
+   s.max = v[2];
+   s.boost = v[3];
+   s.known = std::isfinite(s.min) && std::isfinite(s.mid) && std::isfinite(s.max) && std::isfinite(s.boost);
+   return s;
+}
+
+// A bump: CollisionShake sized by how hard it was, as a kick on the flyer's
+// turbulence.
+void play_bump(const ClassShake* cs, const FlyerSpeeds& speeds, float impact)
+{
+   Shape shape;
+   float scale;
+   if (!shape_for(cs, kShakeCollision, defaults::kCollision, false, shape, scale)) return;
+   const float size = bump_scale(shape.threshold, speeds, impact);
+   if (!(size > 0.0f)) return;
+   s_bumpKick.trigger(make_kick(shape, scale * size, s_rng, true), s_time, shape.limit);
+   s_view.hitMute = kBumpHitMute;
+}
+
+// What the shakes that last are heading for this frame: a flyer's boost, turn
+// and brake, or a walker's boost and turn.
+struct HeldTargets {
+   float boost = 0.0f;
+   float turn  = 0.0f;
+   float brake = 0.0f;
+};
+
+// On a flyer: the boost, turn and brake turbulence, bumps, take-off and
+// landing. Tricks come from the DoTrick detour below.
+void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out)
 {
    const float* v = &at<float>(obj, s_flyer.velocity);
    const float speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+   // Its speed along its nose, which is what BF2 and the class's speeds mean by
+   // speed; plain speed where this build's field is not read yet.
+   const float forward = s_flyer.speed ? at<float>(obj, s_flyer.speed) : speed;
+   const FlyerSpeeds speeds = class_speeds(at<void*>(obj, s_flyer.cls));
+
+   // A bump is sized by how much it changed the velocity since the last frame,
+   // or failing that by BF2's own figure. Its frame is left out of speeding up
+   // and braking, which would read it as a sudden stop.
+   const bool bumped = s_bump.pending;
+   if (bumped) {
+      float impact = stock_bump_speed(s_bump.amount);
+      if (s_view.haveVelocity) {
+         const float dx = v[0] - s_view.prevVelocity[0];
+         const float dy = v[1] - s_view.prevVelocity[1];
+         const float dz = v[2] - s_view.prevVelocity[2];
+         impact = std::sqrt(dx * dx + dy * dy + dz * dz);
+      }
+      s_bump = PendingBump{};
+      play_bump(cs, speeds, impact);
+   }
+   std::memcpy(s_view.prevVelocity, v, sizeof s_view.prevVelocity);
+   s_view.haveVelocity = true;
+
+   // How fast the nose swings round, every frame so a take-off starts from
+   // where it points.
+   if (s_flyer.forward) {
+      const float* nose = &at<float>(obj, s_flyer.forward);
+      const float rate = s_view.haveNose ? nose_turn_rate(s_view.prevNose, nose, dt) : 0.0f;
+      std::memcpy(s_view.prevNose, nose, sizeof s_view.prevNose);
+      s_view.haveNose = true;
+      s_view.noseRate.advance(rate, dt, 0.05f, 0.1f);
+   }
+
    if (dt > 0.0f) {
-      const float decel = s_view.prevSpeed >= 0.0f ? (s_view.prevSpeed - speed) / dt : 0.0f;
+      const bool measured = s_view.prevSpeed >= 0.0f && !bumped;
+      const float decel = measured ? (s_view.prevSpeed - speed) / dt : 0.0f;
+      const float accel = measured ? (forward - s_view.prevForward) / dt : 0.0f;
       s_decel.advance(decel > 0.0f ? decel : 0.0f, dt, 0.05f, 0.15f);
+      s_accel.advance(accel > 0.0f ? accel : 0.0f, dt, 0.05f, 0.15f);
       s_view.prevSpeed = speed;
+      s_view.prevForward = forward;
    }
 
    const int state = at<int>(obj, s_flyer.state);
    const int prev = s_view.flyerState;
    s_view.flyerState = state;
+   if (state == layout::Flyer::kStateTakeoff && prev == layout::Flyer::kStateLanded)
+      play(s_takeoffKick, cs, kShakeTakeoff, defaults::kTakeoff);
    if (state == layout::Flyer::kStateLanded &&
        (prev == layout::Flyer::kStateLanding || prev == layout::Flyer::kStateFlying))
-      play(s_landKick, cs, kShakeLand, defaults::kLandFlyer);
-   if (state != layout::Flyer::kStateFlying) return;
+      play(s_landingKick, cs, kShakeLanding, defaults::kLanding);
+   if (state != layout::Flyer::kStateFlying) {
+      s_view.turn.reset();
+      s_view.speedUp.reset();
+      return;
+   }
+
+   // Speeding up or slowing down: toward the speed the throttle (or a boost)
+   // is taking it to, from well short of it, so steering is not mistaken for
+   // either. Speeding up counts only once the throttle as held, or a boost,
+   // has raised that speed: BF2 lowers its own while the flyer rolls
+   // (throttle_intent), and getting back what a roll or a turn cost is not a
+   // boost (SpeedUp). Where the throttle is not read yet, how fast the speed
+   // changes.
+   // Braking is slowing down with the brake held: easing back to cruise after
+   // the throttle is let go does not count.
+   bool speedingUp, slowingDown, braking;
+   if (s_flyer.move && s_flyer.landing && speeds.known) {
+      const float move = at<float>(obj, s_flyer.move);
+      const float roll = s_flyer.roll ? at<float>(obj, s_flyer.roll) : 0.0f;
+      const bool boosting = (at<uint8_t>(obj, s_flyer.flags) & layout::Flyer::kFlagBoost) != 0;
+      const bool landing = at<float>(obj, s_flyer.landing) != 0.0f;
+      const float target = throttle_target(speeds, move, boosting, landing);
+      const float asked = throttle_target(speeds, throttle_intent(move, roll), boosting, landing);
+      const float margin = heading_margin(speeds);
+      speedingUp = s_view.speedUp.update(asked, target, forward, margin);
+      slowingDown = forward - target > margin;
+      braking = slowingDown && move <= -kBrakeInput;
+   } else {
+      speedingUp = s_accel.level > kHoldingSpeed;
+      slowingDown = s_decel.level > kHoldingSpeed;
+      braking = slowingDown;
+   }
 
    Shape shape;
    float scale;
-   if ((at<uint8_t>(obj, s_flyer.flags) & layout::Flyer::kFlagBoost) &&
-       shape_for(cs, kShakeSprint, defaults::kSprintFlyer, false, shape, scale)) {
+   if (shape_for(cs, kShakeBoost, defaults::kBoost, false, shape, scale)) {
+      // Heading for the threshold's far end: speeding up, or for a pair
+      // written high to low, slowing down.
+      const bool heading = threshold_rising(shape.threshold, speeds) ? speedingUp : slowingDown;
       s_boostShape = shape;
-      boostTarget = scale;
+      out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, forward), heading, shape.steady);
+   }
+   if (s_flyer.forward && s_flyer.classTurnRates) {
+      // Turning hard: the nose swinging round near what the class can turn,
+      // whether by stick or mouse. A trick's flip is not a turn.
+      const float* rates = &at<float>(at<void*>(obj, s_flyer.cls), s_flyer.classTurnRates);   // pitch, turn
+      const bool tricking = (at<uint8_t>(obj, s_flyer.flags) &
+                             (layout::Flyer::kFlagRoll | layout::Flyer::kFlagFlip)) != 0;
+      s_view.turn.update(!tricking && s_view.noseRate.level >= hard_turn_rate(rates[0], rates[1]), dt);
+      if (shape_for(cs, kShakeTurn, defaults::kTurn, false, shape, scale)) {
+         // Harder the faster it goes, up to the class's MaxSpeed.
+         const float pace = speeds.known && speeds.max > 0.0f ? clamp01(forward / speeds.max) : 1.0f;
+         s_turnShape = shape;
+         out.turn = scale * pace * threshold_level(shape.threshold, speeds, s_view.turn.time);
+      }
    }
    if (shape_for(cs, kShakeBrake, defaults::kBrake, false, shape, scale)) {
       s_brakeShape = shape;
-      brakeTarget = scale * brake_intensity(s_decel.level);
+      out.brake = scale * boost_level(brake_position(shape.threshold, speeds, forward), braking, shape.steady);
    }
 }
 
-// Any unit: a drop in its health is a hit, sized by how much it lost.
+// A step: StepShake for the feet that landed this update, its roll turned
+// toward their side and its size graded by the walker's speed where the class
+// gives a Threshold, the way a bump is.
+void play_step(const ClassShake* cs, const FlyerSpeeds& speeds, float speed, uint32_t landed)
+{
+   Shape shape;
+   float scale;
+   if (!shape_for(cs, kShakeStep, defaults::kStep, false, shape, scale)) return;
+   const float size = bump_scale(shape.threshold, speeds, speed);
+   if (!(size > 0.0f)) return;
+   Kick k = make_kick(shape, scale * size, s_rng);
+   int side = step_side(landed);
+   if (side == 0) side = s_rng.unit() < 0.5f ? -1 : 1;
+   k.peak.roll = std::fabs(k.peak.roll) * static_cast<float>(side);
+   s_stepKick.trigger(k, s_time, shape.limit);
+}
+
+// On a walker: a step for each foot that lands, a jump, a landing, and the
+// sways while it turns on the spot or boosts. Steps, jumps and landings are
+// read off BF2's own records, so they come at the moment its stomp effect,
+// footstep sound and jump play.
+void update_walker(uint8_t* obj, const ClassShake* cs, HeldTargets& out)
+{
+   uint8_t* cls = at<uint8_t*>(obj, s_walker.cls);
+   const float* classSpeeds = cls ? &at<float>(cls, s_walker.classMaxSpeed) : nullptr;
+   const FlyerSpeeds speeds = classSpeeds ? walker_speeds(classSpeeds[0], classSpeeds[1]) : FlyerSpeeds{};
+   const float* v = &at<float>(obj, s_walker.velocity);
+   const float speed = std::sqrt(v[0] * v[0] + v[2] * v[2]);   // along the ground
+   const int state = at<int>(obj, s_walker.state);
+   const bool jumping = (at<uint32_t>(obj, s_walker.flags) & layout::Walker::kFlagJumping) != 0;
+   const int feet = cls ? at<uint8_t>(cls, s_walker.classNumFeet) : 0;
+   const uint32_t down = at<uint32_t>(obj, s_walker.footState) & feet_mask(feet);
+   const float came = s_view.walkerAir.update(at<float>(obj, s_walker.airTime), v[1]);
+
+   const bool first = !s_view.haveWalker;
+   const uint32_t landed = first ? 0 : feet_landed(s_view.walkerFeet, down);
+   const bool jumped = !first && jumping && !s_view.walkerJumping;
+   s_view.walkerFeet = down;
+   s_view.walkerJumping = jumping;
+   s_view.haveWalker = true;
+   if (state == layout::Walker::kStateDying || state == layout::Walker::kStateDead) return;
+
+   if (landed) play_step(cs, speeds, speed, landed);
+   if (jumped) play(s_jumpKick, cs, kShakeJump, defaults::kJump);
+   Shape shape;
+   float scale;
+   if (came >= 0.0f && shape_for(cs, kShakeLand, defaults::kLandWalker, false, shape, scale)) {
+      const float size = bump_scale(shape.threshold, speeds, came);
+      if (size > 0.0f) s_landKick.trigger(make_kick(shape, scale * size, s_rng), s_time, shape.limit);
+   }
+
+   if ((state == layout::Walker::kStateTurnLeft || state == layout::Walker::kStateTurnRight) &&
+       shape_for(cs, kShakeTurn, defaults::kTurnWalker, false, shape, scale)) {
+      s_turnShape = shape;
+      out.turn = scale;
+   }
+   if ((at<uint8_t>(obj, s_walker.boost) & layout::Walker::kBoosting) &&
+       shape_for(cs, kShakeBoost, defaults::kBoostWalker, false, shape, scale)) {
+      // Full while it is still speeding up to BoostSpeed, then Steady of that.
+      const bool heading = speeds.boost - speed > heading_margin(speeds);
+      s_boostShape = shape;
+      out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, speed), heading, shape.steady);
+   }
+}
+
+// Any unit: a drop in its health is a hit, sized by how much it lost. Right
+// after a bump's shake the drop is the bump's own damage, already shaken for.
 void update_hit(uint8_t* obj, const ClassShake* cs, float dt)
 {
    const float maxHealth = at<float>(obj, kObj_MaxHealth);
    const float hit = s_view.hit.update(at<float>(obj, kObj_Health), hit_threshold(maxHealth), dt);
+   if (s_view.hitMute > 0.0f) {
+      s_view.hitMute -= dt;
+      return;
+   }
    if (hit > 0.0f) play(s_hitKick, cs, kShakeHit, defaults::kHit, hit_scale(hit, maxHealth));
 }
 
@@ -397,7 +701,7 @@ Offset blast_offset(uint8_t* self, void* camera, const ClassShake* cs)
    return blast(shape, s_time, amount * scale * zoomScale);
 }
 
-void shake_view(uint8_t* self, void* camera, float dt, bool smooth)
+void shake_view(uint8_t* self, void* camera, float dt)
 {
    // SetupCamera has just set the camera from the unshaken matrix: keep the
    // inverse it made, for the reticule.
@@ -419,17 +723,32 @@ void shake_view(uint8_t* self, void* camera, float dt, bool smooth)
    if (obj != s_view.obj) {
       s_view = View{};
       s_view.obj = obj;
+      s_bump = PendingBump{};
    }
 
    const bool flyer = obj && is_rtti(obj, kFlyerRtti);
+   const bool walker = obj && !flyer && is_rtti(obj, kWalkerRtti);
    const ClassShake* cs = nullptr;
    if (obj && !s_classes.empty())
-      cs = find_class(flyer ? at<void*>(obj, s_flyer.cls) : vcall_object(obj, kVt_GetEntityClass));
+      cs = find_class(flyer    ? at<void*>(obj, s_flyer.cls)
+                      : walker ? at<void*>(obj, s_walker.cls)
+                               : vcall_object(obj, kVt_GetEntityClass));
+   const bool firstPerson = first_person(owner);
 
-   float sprintTarget = 0.0f, boostTarget = 0.0f, brakeTarget = 0.0f;
-   if (g_cameraShakeEnabled && obj) {
-      if (flyer)                          update_flyer(obj, cs, dt, boostTarget, brakeTarget);
-      else if (is_rtti(obj, kSoldierRtti)) update_soldier(owner, cs, dt, sprintTarget);
+   float sprintTarget = 0.0f;
+   HeldTargets held;
+   s_view.takesBumps = false;
+   if (s_odfShakes && obj) {
+      if (flyer) {
+         Shape bump;
+         float scale;
+         s_view.takesBumps = shape_for(cs, kShakeCollision, defaults::kCollision, false, bump, scale);
+         update_flyer(obj, cs, dt, held);
+      } else if (walker) {
+         update_walker(obj, cs, held);
+      } else if (is_rtti(obj, kSoldierRtti)) {
+         update_soldier(owner, cs, dt, firstPerson, sprintTarget);
+      }
       update_hit(obj, cs, dt);
    }
 
@@ -437,26 +756,58 @@ void shake_view(uint8_t* self, void* camera, float dt, bool smooth)
    s_hitKick.advance(dt);
    s_landKick.advance(dt);
    s_rollKick.advance(dt);
-   s_sprintLevel = approach(s_sprintLevel, sprintTarget, kSprintEase, dt);
-   s_boost.advance(boostTarget, dt, 0.1f, 0.3f);
-   s_brake.advance(brakeTarget, dt, 0.08f, 0.25f);
+   s_trickRollKick.advance(dt);
+   s_trickFlipKick.advance(dt);
+   s_takeoffKick.advance(dt);
+   s_landingKick.advance(dt);
+   s_bumpKick.advance(dt);
+   s_swingKick.advance(dt);
+   s_strikeKick.advance(dt);
+   s_blockKick.advance(dt);
+   s_deflectKick.advance(dt);
+   s_swingBlockedKick.advance(dt);
+   s_stepKick.advance(dt);
+   s_jumpKick.advance(dt);
+   // The shakes that last follow their target at the fade their Length and
+   // Rise give them.
+   s_sprintLevel = ramp_toward(s_sprintLevel, sprintTarget, dt, held_fade(s_sprintShape));
+   fade_toward(s_boost, held.boost, dt, held_fade(s_boostShape));
+   fade_toward(s_turn, held.turn, dt, held_fade(s_turnShape));
+   fade_toward(s_brake, held.brake, dt, held_fade(s_brakeShape));
 
-   const float* k = g_cameraShakeChannel;
    Offset total;
-   total += s_fireKick.value(s_time).scaled(k[kShakeFire]);
-   total += s_hitKick.value(s_time).scaled(k[kShakeHit]);
-   total += s_landKick.value(s_time).scaled(k[kShakeLand]);
-   total += s_rollKick.value(s_time).scaled(k[kShakeRoll]);
-   total += judder(s_sprintShape, s_time, s_sprintLevel).scaled(k[kShakeSprint]);
-   total += sway(s_boostShape, s_time, s_boost.level).scaled(k[kShakeSprint]);
-   total += sway(s_brakeShape, s_time, s_brake.level).scaled(k[kShakeBrake]);
-   if (smooth) total += blast_offset(self, camera, g_cameraShakeEnabled ? cs : nullptr).scaled(k[kShakeBlast]);
-   total = clamp_offset(total.scaled(g_cameraShakeStrength));
+   total += s_fireKick.value(s_time);
+   total += s_hitKick.value(s_time);
+   total += s_landKick.value(s_time);
+   total += s_rollKick.value(s_time);
+   total += s_trickRollKick.value(s_time);
+   total += s_trickFlipKick.value(s_time);
+   total += s_takeoffKick.value(s_time);
+   total += s_landingKick.value(s_time);
+   total += s_bumpKick.value(s_time);
+   total += s_swingKick.value(s_time);
+   total += s_strikeKick.value(s_time);
+   total += s_blockKick.value(s_time);
+   total += s_deflectKick.value(s_time);
+   total += s_swingBlockedKick.value(s_time);
+   total += s_stepKick.value(s_time);
+   total += s_jumpKick.value(s_time);
+   total += judder(s_sprintShape, s_time, s_sprintLevel);
+   total += turbulence(s_boostShape, s_time, s_boost.level);
+   total += turbulence(s_turnShape, s_time, s_turn.level);
+   total += sway(s_brakeShape, s_time, s_brake.level);
+   total += blast_offset(self, camera, s_odfShakes ? cs : nullptr);
+   // In first person, cockpits included, a shake turns the view but never
+   // moves it: the camera is at the eye, and the arms and cockpit drawn from
+   // mMatrix would move with it.
+   if (firstPerson) total = turn_only(total);
+   total = finite_offset(total);
    if (total.negligible()) return;
 
    float* m = &at<float>(self, cam::kMatrix);   // rows right, up, back, position
-   if (smooth) std::memcpy(self + cam::kPreShakeMatrix, m, 16 * sizeof(float));
+   std::memcpy(self + cam::kPreShakeMatrix, m, 16 * sizeof(float));
    apply(m, total);
+   s_left.leave(self, &at<float>(self, cam::kPreShakeMatrix), m);
    s_setMatrix(camera, m);
 
    s_reticle.camera = static_cast<uint8_t*>(camera);
@@ -469,34 +820,65 @@ void shake_view(uint8_t* self, void* camera, float dt, bool smooth)
 // Hooks
 // -----------------------------------------------------------------------------
 
-void shake_view_guarded(uint8_t* self, void* camera, float dt, bool smooth)
+void shake_view_guarded(uint8_t* self, void* camera, float dt)
 {
    __try {
-      shake_view(self, camera, dt, smooth);
+      shake_view(self, camera, dt);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // An unreadable frame keeps the view SetupCamera made.
    }
 }
 
-void __fastcall hooked_SetupCamera(uint8_t* self, void* edx, void* camera, float dt)
+// SetupCamera eases this frame's camera from last frame's mMatrix: let it start
+// from the matrix it made, not the one we shook.
+void put_back_unshaken(uint8_t* self)
 {
-   const bool smooth = g_cameraShakeSmooth;
-   float& suppress = at<float>(self, cam::kShakeSuppressUntil);
-   const float saved = suppress;
-   if (smooth) suppress = FLT_MAX;   // mission time is never past it: no stock turn
-   s_setupCamera(self, edx, camera, dt);
-   if (smooth) suppress = saved;
-   shake_view_guarded(self, camera, dt, smooth);
+   __try {
+      s_left.put_back(self, &at<float>(self, cam::kMatrix));
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
 }
 
+void __fastcall hooked_SetupCamera(uint8_t* self, void* edx, void* camera, float dt)
+{
+   put_back_unshaken(self);
+   float& suppress = at<float>(self, cam::kShakeSuppressUntil);
+   const float saved = suppress;
+   suppress = FLT_MAX;   // mission time is never past it: no stock turn
+   s_setupCamera(self, edx, camera, dt);
+   suppress = saved;
+   shake_view_guarded(self, camera, dt);
+}
+
+// The GameObject a weapon's owner is, or null.
+uint8_t* weapon_object(uint8_t* weapon)
+{
+   uint8_t* owner = at<uint8_t*>(weapon, layout::Weapon::kOwner);
+   return owner ? vcall_object(owner + kCtrl_Trackable, kVt_GetGameObject) : nullptr;
+}
+
+// A weapon's shake settings: its class's, or failing that its start class's.
+const ClassShake* weapon_shake(uint8_t* weapon)
+{
+   const ClassShake* cs = find_class(at<void*>(weapon, layout::Weapon::kClass));
+   return cs ? cs : find_class(at<void*>(weapon, layout::Weapon::kStart));
+}
+
+// The viewed unit's weapons that have signalled fire this frame (ShotGate).
+ShotGate s_shots;
+
+// A shot, or on a melee weapon a swing: each attack of a combo signals fire.
+// A shotgun's pellets signal once each, all at once, and kick once.
 void shake_for_fire(uint8_t* weapon)
 {
    __try {
-      uint8_t* owner = at<uint8_t*>(weapon, layout::Weapon::kOwner);
-      if (!owner || vcall_object(owner + kCtrl_Trackable, kVt_GetGameObject) != s_view.obj) return;
-      const ClassShake* cs = find_class(at<void*>(weapon, layout::Weapon::kClass));
-      if (!cs) cs = find_class(at<void*>(weapon, layout::Weapon::kStart));
-      play(s_fireKick, cs, kShakeFire, defaults::kFire);
+      if (weapon_object(weapon) != s_view.obj) return;
+      if (!s_shots.first(weapon, s_time)) return;
+      const ClassShake* cs = weapon_shake(weapon);
+      if (is_melee(weapon))
+         play(s_swingKick, cs, kShakeSwing, defaults::kSwing);
+      else
+         play(s_fireKick, cs, kShakeFire, defaults::kFire);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
 }
@@ -504,24 +886,148 @@ void shake_for_fire(uint8_t* weapon)
 void __fastcall hooked_SignalFire(uint8_t* weapon, void* edx)
 {
    s_signalFire(weapon, edx);
-   if (g_cameraShakeEnabled && s_view.obj && weapon && !s_classes.empty()) shake_for_fire(weapon);
+   if (s_view.obj && weapon && !s_classes.empty()) shake_for_fire(weapon);
 }
 
+// -----------------------------------------------------------------------------
+// Melee: strikes, blocks and deflections
+// -----------------------------------------------------------------------------
+
+// The viewed unit's swing while its WeaponMelee::UpdateFire runs: what the
+// swing had struck before, and what blocked it during the update.
+constexpr int kMeleeBlockers = 8;
+
+struct MeleeSwing {
+   uint8_t*    weapon = nullptr;
+   MeleeTally  before;
+   const void* blocker[kMeleeBlockers] = {};
+   int         blocked = 0;
+
+   bool blocked_by(const void* obj) const
+   {
+      for (int i = 0; i < blocked; ++i)
+         if (blocker[i] == obj) return true;
+      return false;
+   }
+};
+
+MeleeSwing s_swing;
+
+int hit_count(uint8_t* attack)
+{
+   const int n = at<int>(attack, layout::WeaponMelee::kHitCount);
+   return n < 0 ? 0 : (n > layout::WeaponMelee::kHitMax ? layout::WeaponMelee::kHitMax : n);
+}
+
+// Whether this update is the viewed unit's swing; if so, what it has struck.
+bool melee_watch_begin(uint8_t* weapon)
+{
+   __try {
+      s_swing.weapon = nullptr;
+      if (!s_view.obj || weapon_object(weapon) != s_view.obj) return false;
+      s_swing = MeleeSwing{};
+      uint8_t* attack = at<uint8_t*>(weapon, s_meleeHits);
+      for (int i = 0; attack && i < kMeleeAttacks; ++i) {
+         s_swing.before.add(attack, hit_count(attack));
+         attack = at<uint8_t*>(attack, layout::WeaponMelee::kHitNext);
+      }
+      s_swing.weapon = weapon;
+      return true;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      s_swing.weapon = nullptr;
+      return false;
+   }
+}
+
+// After it: the swing landed if it struck anything during the update that did
+// not block (StrikeShake; teammates count unless its Teammates is 0), and was
+// blocked if anything stopped it (SwingBlockedShake).
+void melee_watch_end(uint8_t* weapon)
+{
+   __try {
+      if (s_swing.weapon != weapon) return;
+      s_swing.weapon = nullptr;
+      const ClassShake* cs = weapon_shake(weapon);
+      if (s_swing.blocked > 0) play(s_swingBlockedKick, cs, kShakeSwingBlocked, defaults::kSwingBlocked);
+
+      Shape shape;
+      float scale;
+      if (!shape_for(cs, kShakeStrike, defaults::kStrike, false, shape, scale)) return;
+      const int own = team_from_bits(at<uint32_t>(s_view.obj, kObj_Team));
+      bool landed = false;
+      uint8_t* attack = at<uint8_t*>(weapon, s_meleeHits);
+      for (int i = 0; attack && i < kMeleeAttacks && !landed; ++i) {
+         const int n = hit_count(attack);
+         for (int k = s_swing.before.before(attack); k < n && !landed; ++k) {
+            uint8_t* obj = at<uint8_t*>(attack, layout::WeaponMelee::kHitObjects + 4 * k);
+            if (!obj || s_swing.blocked_by(obj)) continue;
+            if (!shape.teammates && same_team(own, team_from_bits(at<uint32_t>(obj, kObj_Team)))) continue;
+            landed = true;
+         }
+         attack = at<uint8_t*>(attack, layout::WeaponMelee::kHitNext);
+      }
+      if (landed) s_strikeKick.trigger(make_kick(shape, scale, s_rng), s_time, shape.limit);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+}
+
+bool __fastcall hooked_MeleeUpdate(uint8_t* self, void* edx, float dt)
+{
+   const bool watched = self && !s_classes.empty() && melee_watch_begin(self);
+   const bool result = s_meleeUpdate(self, edx, dt);
+   if (watched) melee_watch_end(self);
+   return result;
+}
+
+// A melee weapon stopped something: a strike (no ordnance) or a bolt or beam.
+// A strike by the viewed unit's swing goes on that swing's list; the viewed
+// unit's own block or deflection shakes.
+void melee_blocked(uint8_t* weapon, void* ordnance)
+{
+   __try {
+      uint8_t* blocker = weapon_object(weapon);
+      if (!blocker) return;
+      if (s_swing.weapon && !ordnance && s_swing.blocked < kMeleeBlockers)
+         s_swing.blocker[s_swing.blocked++] = blocker;
+      if (blocker != s_view.obj) return;
+      const ClassShake* cs = weapon_shake(weapon);
+      if (ordnance)
+         play(s_deflectKick, cs, kShakeDeflect, defaults::kDeflect);
+      else
+         play(s_blockKick, cs, kShakeBlock, defaults::kBlock);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+}
+
+bool __fastcall hooked_MeleeDeflect(uint8_t* self, void* edx, void* ordnance, const void* pos,
+                                    const void* dir)
+{
+   const bool blocked = s_meleeDeflect(self, edx, ordnance, pos, dir);
+   if (blocked && self && s_view.obj && !s_classes.empty()) melee_blocked(self, ordnance);
+   return blocked;
+}
+
+// A trick that has just started: a flip sets the flag byte's flip bit
+// (FlipAdd), a side roll only rolls (RollAdd).
 void shake_for_trick(uint8_t* self)
 {
    __try {
-      play(s_rollKick, find_class(at<void*>(self, s_flyer.cls)), kShakeRoll, defaults::kRollFlyer);
+      const ClassShake* cs = find_class(at<void*>(self, s_flyer.cls));
+      if (at<uint8_t>(self, s_flyer.flags) & layout::Flyer::kFlagFlip)
+         play(s_trickFlipKick, cs, kShakeTrickFlip, defaults::kTrickFlip);
+      else
+         play(s_trickRollKick, cs, kShakeTrickRoll, defaults::kTrickRoll);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
 }
 
 // DoTrick zeroes mTrick when it starts a trick and sets it to -1 when there is
-// not enough energy; a class with tricks turned off returns before touching it.
-// mTrick is set to a marker for the call so the three cases can be told apart,
-// and put back when DoTrick left it alone.
+// not enough energy or a trick is already running; a class with tricks turned
+// off returns before touching it. mTrick is set to a marker for the call so
+// the three cases can be told apart, and put back when DoTrick left it alone.
 void __fastcall hooked_DoTrick(uint8_t* self, void* edx, int trick)
 {
-   const bool watch = g_cameraShakeEnabled && self && self == s_view.obj;
+   const bool watch = self && self == s_view.obj;
    float* mTrick = watch ? &at<float>(self, s_flyer.trick) : nullptr;
    const float before = mTrick ? *mTrick : 0.0f;
    if (mTrick) *mTrick = kTrickUnset;
@@ -534,6 +1040,22 @@ void __fastcall hooked_DoTrick(uint8_t* self, void* edx, int trick)
       return;
    }
    if (*mTrick != kTrickRefused) shake_for_trick(self);
+}
+
+// Stands in for CameraManager::ApplyShake at the flyer's two collision calls.
+// BF2 makes them only for the flyer the chase camera follows, with the amount
+// impact x 0.8 and the duration impact x 0.7. When that flyer's class sets
+// CollisionShake the bump is kept for its next camera frame (update_flyer)
+// and never reaches the stock queue; otherwise it goes on to the queue as
+// before, where it plays as a blast.
+void __fastcall bump_apply_shake(void* manager, void* edx, float amount, float duration)
+{
+   if (s_view.takesBumps) {
+      s_bump.pending = true;
+      if (amount > s_bump.amount) s_bump.amount = amount;
+      return;
+   }
+   s_applyShake(manager, edx, amount, duration);
 }
 
 // The reticule sees the unshaken camera: for this call only, the camera's
@@ -579,7 +1101,93 @@ bool guard(uintptr_t base, uintptr_t va, const char* what, const char* bytes, co
    return true;
 }
 
-float clamp_strength(float v) { return std::isfinite(v) ? clampf(v, 0.0f, 5.0f) : 1.0f; }
+// Whether the CALL at `site` goes to `fn`, directly or through one JMP thunk.
+bool calls(uintptr_t base, uintptr_t site, uintptr_t fn)
+{
+   __try {
+      const auto* call = static_cast<const uint8_t*>(resolve(base, site));
+      if (call[0] != 0xE8) return false;
+      int32_t rel;
+      std::memcpy(&rel, call + 1, sizeof rel);
+      const uint8_t* target = call + 5 + rel;
+      const auto* want = static_cast<const uint8_t*>(resolve(base, fn));
+      if (target == want) return true;
+      if (target[0] != 0xE9) return false;
+      std::memcpy(&rel, target + 1, sizeof rel);
+      return target + 5 + rel == want;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
+void retarget(uintptr_t base, uintptr_t site, const void* to)
+{
+   uint8_t* call = static_cast<uint8_t*>(resolve(base, site));
+   const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(to) - reinterpret_cast<uintptr_t>(call + 5));
+   std::memcpy(call + 1, &rel, sizeof rel);
+}
+
+// CollisionShake: the flyer's two collision calls to ApplyShake go through
+// bump_apply_shake. Both or neither, so a class's bumps are all its own.
+void install_bumps(uintptr_t base)
+{
+   const uintptr_t post = g_addr->flyer_post_collision_shake_call;
+   const uintptr_t callback = g_addr->flyer_collision_shake_call;
+   if (!g_addr->camera_manager_apply_shake || !post || !callback) {
+      install_log("[CameraShake] CollisionShake: not on this build yet");
+      return;
+   }
+   if (!guard(base, g_addr->camera_manager_apply_shake, "CameraManager::ApplyShake",
+              "\x8B\x41\x28\x8B\x88\x9C\x00\x00\x00\x83\xF9\x04", "xxxxxxxxxxxx"))
+      return;
+   if (!calls(base, post, g_addr->camera_manager_apply_shake) ||
+       !calls(base, callback, g_addr->camera_manager_apply_shake)) {
+      install_log("[CameraShake] CollisionShake: the flyer collision calls (0x%08X, 0x%08X) are not "
+                  "as expected", (unsigned)post, (unsigned)callback);
+      return;
+   }
+   s_applyShake = reinterpret_cast<ApplyShakeFn>(resolve(base, g_addr->camera_manager_apply_shake));
+   retarget(base, post, reinterpret_cast<const void*>(&bump_apply_shake));
+   retarget(base, callback, reinterpret_cast<const void*>(&bump_apply_shake));
+   install_log("[CameraShake] CollisionShake: flyer collision calls 0x%08X, 0x%08X", (unsigned)post,
+               (unsigned)callback);
+}
+
+// StrikeShake, BlockShake, DeflectShake and SwingBlockedShake: detours on
+// WeaponMelee::UpdateFire and WeaponMelee::Deflect, both or neither.
+void install_melee(uintptr_t base, bool modtools)
+{
+   if (!g_addr->weapon_melee_update_fire || !g_addr->weapon_melee_deflect) {
+      install_log("[CameraShake] Strike, block and deflect shakes: not on this build yet");
+      return;
+   }
+   if (!guard(base, g_addr->weapon_melee_update_fire, "WeaponMelee::UpdateFire",
+              modtools ? "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\xA4\x03\x00\x00"
+                       : "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\x28\x02\x00\x00",
+              modtools ? "xxxxxxxxxxxx" : "xxxxxxxxxxxx") ||
+       !guard(base, g_addr->weapon_melee_deflect, "WeaponMelee::Deflect",
+              modtools ? "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\x54\x01\x00\x00"
+                       : "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\xE8\x00\x00\x00",
+              modtools ? "xxxxxxxxxxxx" : "xxxxxxxxxxxx"))
+      return;
+   s_meleeHits    = modtools ? layout::WeaponMelee::kDamageDataModtools : layout::WeaponMelee::kDamageDataRelease;
+   s_meleeUpdate  = reinterpret_cast<MeleeUpdateFn>(resolve(base, g_addr->weapon_melee_update_fire));
+   s_meleeDeflect = reinterpret_cast<MeleeDeflectFn>(resolve(base, g_addr->weapon_melee_deflect));
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   LONG r = DetourAttach(&(PVOID&)s_meleeUpdate, hooked_MeleeUpdate);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_meleeDeflect, hooked_MeleeDeflect);
+   if (r != NO_ERROR) {
+      DetourTransactionAbort();
+      install_log("[CameraShake] Strike, block and deflect shakes: DetourAttach failed (%ld)", (long)r);
+      return;
+   }
+   const bool ok = DetourTransactionCommit() == NO_ERROR;
+   install_log("[CameraShake] Strike, block and deflect shakes %s (UpdateFire 0x%08X, Deflect 0x%08X)",
+               ok ? "installed" : "commit failed", (unsigned)g_addr->weapon_melee_update_fire,
+               (unsigned)g_addr->weapon_melee_deflect);
+}
 
 } // namespace
 
@@ -588,12 +1196,6 @@ void camera_shake_install(uintptr_t base)
    const bool modtools = g_build == GameBuild::Modtools;
    if (!modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
 
-   g_cameraShakeStrength = clamp_strength(g_cameraShakeStrength);
-   for (float& s : g_cameraShakeChannel) s = clamp_strength(s);
-   if (!g_cameraShakeEnabled && !g_cameraShakeSmooth) {
-      install_log("[CameraShake] off in the INI (Enabled=0, Smooth=0)");
-      return;
-   }
    if (!g_soldier || !g_addr->chase_camera_setup_camera || !g_addr->red_camera_set_matrix ||
        !g_addr->tracker_is_first_person_view || !g_addr->flyer_do_trick ||
        !g_addr->weapon_signal_fire || !g_addr->reticle_display_update) {
@@ -628,6 +1230,7 @@ void camera_shake_install(uintptr_t base)
       return;
 
    s_flyer = modtools ? layout::Flyer::kModtools : layout::Flyer::kRelease;
+   s_walker = modtools ? layout::Walker::kModtools : layout::Walker::kRelease;
    s_setupCamera   = reinterpret_cast<SetupCameraFn>(resolve(base, g_addr->chase_camera_setup_camera));
    s_setMatrix     = reinterpret_cast<SetMatrixFn>(resolve(base, g_addr->red_camera_set_matrix));
    s_isFirstPerson = reinterpret_cast<IsFirstPersonFn>(resolve(base, g_addr->tracker_is_first_person_view));
@@ -636,29 +1239,31 @@ void camera_shake_install(uintptr_t base)
    s_reticleUpdate = reinterpret_cast<ReticleUpdateFn>(resolve(base, g_addr->reticle_display_update));
    s_rng.seed(GetTickCount() ^ 0x5EED5EEDu);
 
-   if (g_cameraShakeEnabled &&
-       (!odf_add_property_handler(on_property) || !odf_add_derive_handler(on_derive))) {
+   if (!odf_add_property_handler(on_property) || !odf_add_derive_handler(on_derive)) {
       install_log("[CameraShake] ODF properties unavailable: no listener slot left");
-      g_cameraShakeEnabled = false;
+      s_odfShakes = false;
    }
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    LONG r = DetourAttach(&(PVOID&)s_setupCamera, hooked_SetupCamera);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_reticleUpdate, hooked_ReticuleUpdate);
-   if (r == NO_ERROR && g_cameraShakeEnabled) r = DetourAttach(&(PVOID&)s_doTrick, hooked_DoTrick);
-   if (r == NO_ERROR && g_cameraShakeEnabled) r = DetourAttach(&(PVOID&)s_signalFire, hooked_SignalFire);
+   if (r == NO_ERROR && s_odfShakes) r = DetourAttach(&(PVOID&)s_doTrick, hooked_DoTrick);
+   if (r == NO_ERROR && s_odfShakes) r = DetourAttach(&(PVOID&)s_signalFire, hooked_SignalFire);
    if (r != NO_ERROR) {
       DetourTransactionAbort();
       install_log("[CameraShake] NOT installed: DetourAttach failed (%ld)", (long)r);
       return;
    }
    const bool ok = DetourTransactionCommit() == NO_ERROR;
-   const float* k = g_cameraShakeChannel;
-   install_log("[CameraShake] %s (SetupCamera 0x%08X): stock shake %s, ODF shake %s, strength %.2f "
-               "(fire %.2f hit %.2f land %.2f roll %.2f sprint %.2f brake %.2f blast %.2f)",
+   install_log("[CameraShake] %s (SetupCamera 0x%08X): the stock shake drawn as a blast, ODF shakes %s",
                ok ? "installed" : "commit failed", (unsigned)g_addr->chase_camera_setup_camera,
-               g_cameraShakeSmooth ? "as a blast" : "as stock", g_cameraShakeEnabled ? "on" : "off",
-               g_cameraShakeStrength, k[kShakeFire], k[kShakeHit], k[kShakeLand], k[kShakeRoll],
-               k[kShakeSprint], k[kShakeBrake], k[kShakeBlast]);
+               s_odfShakes ? "on" : "unavailable");
+   if (ok && s_odfShakes) install_bumps(base);
+   if (ok && s_odfShakes) install_melee(base, modtools);
+   if (ok && s_odfShakes &&
+       (!s_flyer.speed || !s_flyer.forward || !s_flyer.classSpeeds || !s_flyer.classTurnRates ||
+        !s_flyer.move || !s_flyer.landing || !s_flyer.roll))
+      install_log("[CameraShake] TurnShake, speed names in a Threshold and throttle-led boost and brake "
+                  "shakes are not on this build yet");
 }

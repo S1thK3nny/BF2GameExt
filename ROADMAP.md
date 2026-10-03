@@ -126,6 +126,12 @@ from a jump's apex, as BFIII's delay camera does, replacing `RollShake`'s plain 
 the soldier's position and vertical speed on each build. Details in
 [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
 
+**Frame-rate independent chase camera** - BF2 eases the chase camera toward the unit by a step
+that depends on the frame time, so a fast unit's camera sits a little further back at higher
+frame rates and lurches on a slow frame. Replace the easing with the exact step for a moving
+target. It changes the stock camera for every unit. Details in
+[docs/RE/CameraShake.md](docs/RE/CameraShake.md).
+
 ## Weapons
 
 **Dual pistols (`dualcannon`)** - Done on `feature/classlabel-dualcannon`: a new `dualcannon`

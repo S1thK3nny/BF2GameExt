@@ -6,20 +6,43 @@
 // Camera shake: the stock shake redrawn as a smooth blast, and ODF-driven shake
 // for what the local player does and what happens to them.
 //
-//   FireShake    weapon, soldier or vehicle   each shot
-//   HitShake     any unit                     taking damage
-//   LandShake    soldier, flyer               landing a jump or fall; touching down
-//   RollShake    soldier, flyer               a combat roll (third person); a trick
-//   SprintShake  soldier, flyer               sprinting (third person); boosting
-//   BrakeShake   flyer                        slowing down, by how hard
-//   BlastShake   any unit                     explosions, walker deaths and crashes
-//                                             while Smooth is on; on by default
+//   FireShake        weapon                 each shot
+//   SwingShake       melee weapon           each swing, in place of FireShake
+//   StrikeShake      melee weapon           a swing landing on something
+//   SwingBlockedShake melee weapon          a swing that something blocks
+//   BlockShake       melee weapon           blocking a melee strike
+//   DeflectShake     melee weapon           deflecting a bolt or beam
+//   HitShake         any unit               taking damage
+//   LandShake        soldier, walker        landing a jump or fall
+//   RollShake        soldier                a combat roll (third person)
+//   SprintShake      soldier                sprinting (third person)
+//   StepShake        walker                 a foot landing, rolled toward it
+//   JumpShake        walker                 a jump starting
+//   BoostShake       flyer, walker          going fast: by default boosting
+//   TurnShake        flyer, walker          a flyer turning hard for a while;
+//                                           a walker turning on the spot
+//   BrakeShake       flyer                  slowing down, by how hard
+//   CollisionShake   flyer                  bumping into something
+//   TrickRollShake   flyer                  a barrel roll
+//   TrickFlipShake   flyer                  a flip
+//   TakeoffShake     flyer                  lifting off
+//   LandingShake     flyer                  touching down
+//   BlastShake       any unit               explosions, walker deaths and flyer
+//                                           crashes; on by default
 //
 // Each takes the same detail properties after its name: Pitch, Yaw, Roll (in
 // degrees; "min max" picks one each time), Push (metres back along the view),
-// Length (seconds), Rise (share of the length), Rate (swings per second) and
-// Limit (how far repeats pile up, in shakes' worth; for BlastShake, where it
-// levels off). The reticule is kept on the unshaken view.
+// Length (seconds; for a shake that lasts, its fade in and out together),
+// Rise (share of the length, rising or fading in), Rate (swings per second),
+// Limit (how many can run at once, added together, up to 8; for BlastShake,
+// where it levels off), Threshold (when a flyer's boost, turn, brake or collision
+// shake or a walker's step, boost or landing plays, in its own measure),
+// Steady (the boost and brake shakes' share
+// once the flyer gets where it is going), PushOnce (the push goes out and
+// back once instead of swinging with the rate; on except for BlastShake) and
+// Teammates (whether StrikeShake counts a swing that lands only on teammates;
+// on unless set to 0).
+// The reticule is kept on the unshaken view.
 // Anything a class leaves out comes from the defaults in camera_shake_core.hpp.
 // Every property inherits through ClassParent; apart from BlastShake, a shake
 // does nothing until an ODF sets one of its properties.
@@ -30,7 +53,7 @@
 // address are in docs/RE/CameraShake.md.
 // =============================================================================
 
-// The shakes, in the order of the INI's per-shake strengths.
+// The shakes, in the order of their ODF names (kShakeNames in the .cpp).
 enum CameraShakeChannel {
    kShakeFire,
    kShakeHit,
@@ -39,13 +62,21 @@ enum CameraShakeChannel {
    kShakeSprint,
    kShakeBrake,
    kShakeBlast,
+   kShakeBoost,
+   kShakeTurn,
+   kShakeCollision,
+   kShakeTrickRoll,
+   kShakeTrickFlip,
+   kShakeTakeoff,
+   kShakeLanding,
+   kShakeSwing,
+   kShakeStrike,
+   kShakeBlock,
+   kShakeDeflect,
+   kShakeSwingBlocked,
+   kShakeStep,
+   kShakeJump,
    kCameraShakeChannels
 };
-
-// [CameraShake] INI settings, read before install.
-extern bool  g_cameraShakeEnabled;   // Enabled:  the ODF-driven shakes
-extern bool  g_cameraShakeSmooth;    // Smooth:   the stock shake redrawn as a blast
-extern float g_cameraShakeStrength;  // Strength: multiplier on everything drawn here
-extern float g_cameraShakeChannel[kCameraShakeChannels];   // FireStrength .. BlastStrength
 
 void camera_shake_install(uintptr_t exe_base);

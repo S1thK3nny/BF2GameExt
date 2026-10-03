@@ -1015,6 +1015,23 @@ namespace modtools {
    constexpr uintptr_t red_camera_set_matrix        = 0x007FEED0;
    constexpr uintptr_t tracker_is_first_person_view = 0x0049FDD0;
    constexpr uintptr_t flyer_do_trick               = 0x004F3D10;
+   // CameraManager::ApplyShake: thiscall(float amount, float duration), RET 8;
+   // queues a stock shake on the chase camera. EntityFlyer::PostCollisionUpdate
+   // and CollisionCallback CALL it, through its thunk at 0x004162D4, for a bump
+   // of the flyer the camera follows; camera shake retargets both CALLs for
+   // CollisionShake. Not yet read on Steam and GOG.
+   constexpr uintptr_t camera_manager_apply_shake   = 0x004A0690;
+   constexpr uintptr_t flyer_post_collision_shake_call = 0x004F7F3A;
+   constexpr uintptr_t flyer_collision_shake_call   = 0x00503230;
+   // WeaponMelee::UpdateFire: thiscall(float dt), RET 4, bool in AL (Weapon
+   // vtable +0xA4). WeaponMelee::Deflect: thiscall(Ordnance*, const PblVector3*
+   // pos, const PblVector3* dir), RET 0xC, bool in AL (vtable +0x48): a bolt
+   // or beam (Ordnance set) or a melee strike (null) stopped. Camera shake
+   // detours both for StrikeShake, BlockShake, DeflectShake and
+   // SwingBlockedShake. Found by their debug strings (" Deflect FAILED: less
+   // than %.1f energy", "WeaponMelee: hit pObj[%p] ... DEFLECTED").
+   constexpr uintptr_t weapon_melee_update_fire     = 0x00639020;
+   constexpr uintptr_t weapon_melee_deflect         = 0x00637670;
    constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
@@ -2262,6 +2279,10 @@ namespace steam {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CBEF0;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3C0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // WeaponMelee::UpdateFire and Deflect, as on modtools: slots +0xA4 and +0x48
+   // of the one Weapon vtable (0x007B1578) whose IsMelee (+0x54) returns true.
+   constexpr uintptr_t weapon_melee_update_fire     = 0x0068C230;
+   constexpr uintptr_t weapon_melee_deflect         = 0x0068A550;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t hud_game_events_open         = 0x0055E3A0;
@@ -2836,6 +2857,10 @@ namespace gog {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CCF90;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3A0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // WeaponMelee::UpdateFire and Deflect, as on modtools: slots +0xA4 and +0x48
+   // of the one Weapon vtable (0x007B24F0) whose IsMelee (+0x54) returns true.
+   constexpr uintptr_t weapon_melee_update_fire     = 0x0068D2C0;
+   constexpr uintptr_t weapon_melee_deflect         = 0x0068B5E0;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t hud_game_events_open         = 0x0055F120;
