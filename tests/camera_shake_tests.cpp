@@ -682,6 +682,139 @@ int main()
       assert(bump_scale(land, FlyerSpeeds{}, 10.0f) == 1.0f);
    }
 
+   // Hovers. ForwardSpeed is the class's MaxSpeed, and the name reads as
+   // MaxSpeed; bobbing on the springs is not speed, and speed up a slope is.
+   {
+      const FlyerSpeeds aat = hover_speeds(9.0f, 14.0f);
+      assert(aat.known && aat.min == 0.0f && aat.mid == 9.0f && aat.max == 9.0f && aat.boost == 14.0f);
+      Threshold th;
+      assert(parse_threshold("ForwardSpeed BoostSpeed", th) && th.pair && th.from.ref == SpeedRef::Max &&
+             th.to.ref == SpeedRef::Boost);
+      assert(parse_threshold("0 forwardspeed", th) && th.to.ref == SpeedRef::Max && th.from.value == 0.0f);
+      assert(!parse_threshold("ForwardSpeedy", th));
+      const float up[3] = { 0.0f, 1.0f, 0.0f };
+      const float bob[3] = { 0.0f, -3.0f, 0.0f };
+      const float drive[3] = { 3.0f, 2.0f, 4.0f };
+      assert(plane_speed(bob, up) == 0.0f && near(plane_speed(drive, up), 5.0f));
+      const float slope[3] = { 0.0f, 0.70710678f, 0.70710678f };   // tipped 45 degrees
+      const float climb[3] = { 0.0f, 4.0f, -4.0f };                 // along it
+      assert(near(plane_speed(climb, slope), std::sqrt(32.0f)));
+      // Moving sways gently up to ForwardSpeed; boosting adds a faster vibration
+      // from there to BoostSpeed. The defaults are the AAT's, tuned in play.
+      const Threshold& move = defaults::kMoveHover.threshold;
+      const Threshold& boost = defaults::kBoostHover.threshold;
+      assert(threshold_level(move, aat, 0.0f) == 0.0f && near(threshold_level(move, aat, 4.5f), 0.5f));
+      assert(threshold_level(move, aat, 12.0f) == 1.0f);
+      assert(threshold_level(boost, aat, 9.0f) == 0.0f && threshold_level(boost, aat, 14.0f) == 1.0f);
+      assert(defaults::kMoveHover.pitch.hi == 0.12f && defaults::kMoveHover.rate == 2.1f);
+      assert(defaults::kBoostHover.pitch.hi == 0.19f && defaults::kBoostHover.rate == 6.25f);
+      assert(defaults::kBoostHover.rate > defaults::kMoveHover.rate && defaults::kBoostHover.steady == 1.0f);
+      // Shakes that last, at one Rate, swing in step (ODF_PROPERTIES, How Rate
+      // works): together they are one bigger swing.
+      Shape inStep = defaults::kBoostHover;
+      inStep.rate = defaults::kMoveHover.rate;
+      for (double t : { 0.1, 0.37, 1.9 }) {
+         const Offset a = turbulence(defaults::kMoveHover, t, 1.0f);
+         const Offset b = turbulence(inStep, t, 1.0f);
+         assert(a.pitch * b.pitch >= 0.0f && a.yaw * b.yaw >= 0.0f && a.roll * b.roll >= 0.0f);
+      }
+   }
+
+   // Hover landings: from BF2's ground ratio, at least a quarter of a second
+   // below 0.9, sized by the fastest drop. Moments off the springs never count.
+   {
+      HoverAir a;
+      const float dt = 1.0f / 60.0f;
+      for (int i = 0; i < 60; ++i) assert(a.update(1.0f - dt, 0.0f, dt) < 0.0f);     // on its springs
+      float ratio = 1.0f;
+      for (int i = 0; i < 10; ++i) {                                                   // a sixth of a second off
+         ratio -= dt;
+         assert(a.update(ratio, -1.0f, dt) < 0.0f);
+      }
+      assert(a.update(1.0f - dt, 0.0f, dt) < 0.0f);
+      ratio = 1.0f;
+      for (int i = 1; i <= 40; ++i) {                                                  // two thirds of a second
+         ratio = std::fmax(0.0f, ratio - dt);
+         assert(a.update(ratio, -0.25f * i, dt) < 0.0f);
+      }
+      assert(near(a.update(1.0f - dt, 0.0f, dt), 10.0f));                              // down at 10 m/s
+      assert(a.update(1.0f - dt, 0.0f, dt) < 0.0f);                                    // once
+      assert(a.update(std::numeric_limits<float>::quiet_NaN(), 0.0f, dt) < 0.0f);
+      const Threshold& land = defaults::kLandHover.threshold;   // 4 to 14 m/s
+      assert(bump_scale(land, FlyerSpeeds{}, 3.9f) == 0.0f && near(bump_scale(land, FlyerSpeeds{}, 4.0f), kBumpLeast));
+      assert(bump_scale(land, FlyerSpeeds{}, 14.0f) == 1.0f);
+   }
+
+   // Hover hits: the closing speed on what was hit and the side of the hover
+   // that took it, read in the hover's own frame. Ground under it and a
+   // contact pulling apart do not count; a steep slope ahead does.
+   {
+      const float right[3] = { 1.0f, 0.0f, 0.0f }, up[3] = { 0.0f, 1.0f, 0.0f }, fwd[3] = { 0.0f, 0.0f, 1.0f };
+      const float strafe[3] = { 7.5f, 0.0f, 0.0f }, wallRight[3] = { -1.0f, 0.0f, 0.0f };
+      HoverHit h = hover_hit(strafe, wallRight, right, up, fwd);
+      assert(near(h.speed, 7.5f) && near(h.right, 1.0f) && near(h.forward, 0.0f));
+      const float ahead[3] = { 0.0f, 0.0f, 9.0f }, wallAhead[3] = { 0.0f, 0.0f, -1.0f };
+      h = hover_hit(ahead, wallAhead, right, up, fwd);
+      assert(near(h.speed, 9.0f) && near(h.forward, 1.0f) && near(h.right, 0.0f));
+      const float reverse[3] = { 0.0f, 0.0f, -6.0f }, wallBehind[3] = { 0.0f, 0.0f, 1.0f };
+      h = hover_hit(reverse, wallBehind, right, up, fwd);
+      assert(near(h.speed, 6.0f) && near(h.forward, -1.0f));
+      const float diagonal[3] = { 3.0f, 0.0f, 3.0f }, corner[3] = { -0.70710678f, 0.0f, -0.70710678f };
+      h = hover_hit(diagonal, corner, right, up, fwd);
+      assert(near(h.speed, 4.2426407f) && near(h.right, 0.70710678f) && near(h.forward, 0.70710678f));
+      const float drop[3] = { 0.0f, -8.0f, 5.0f }, ground[3] = { 0.0f, 1.0f, 0.0f };
+      assert(hover_hit(drop, ground, right, up, fwd).speed == 0.0f);                   // a landing
+      assert(hover_hit(reverse, wallAhead, right, up, fwd).speed == 0.0f);             // pulling away
+      const float steep[3] = { 0.0f, 0.5f, -0.8660254f };                              // 60 degrees, ahead
+      assert(hover_hit(ahead, steep, right, up, fwd).speed > 0.0f);
+      const float facingX[3] = { 1.0f, 0.0f, 0.0f }, itsRight[3] = { 0.0f, 0.0f, -1.0f };
+      const float east[3] = { 9.0f, 0.0f, 0.0f };
+      h = hover_hit(east, wallRight, itsRight, up, facingX);                           // turned to face +x
+      assert(near(h.forward, 1.0f) && near(h.right, 0.0f));
+      const float nan = std::numeric_limits<float>::quiet_NaN();
+      const float bad[3] = { nan, 0.0f, 0.0f };
+      assert(hover_hit(bad, wallRight, right, up, fwd).speed == 0.0f);
+   }
+
+   // A hover's bump tilts toward the hit: down for one ahead, up for one
+   // behind, toward the side for a side; a negative angle tilts away, and a
+   // push moves the camera toward the hit.
+   {
+      Rng rng(7u);
+      const Kick k = make_kick(defaults::kCollisionHover, 1.0f, rng);
+      assert(k.peak.pitch > 0.0f && k.peak.roll > 0.0f && k.rate == 0.0f && k.length == 0.8f);
+      assert(defaults::kCollisionHover.roll.lo == 2.97f && defaults::kCollisionHover.roll.hi == 3.63f);
+      Kick front = k, rear = k, side = k, left = k;
+      aim_bump(front, 0.0f, 1.0f);
+      aim_bump(rear, 0.0f, -1.0f);
+      aim_bump(side, 1.0f, 0.0f);
+      aim_bump(left, -1.0f, 0.0f);
+      assert(front.peak.pitch < 0.0f && front.peak.roll == 0.0f);
+      assert(rear.peak.pitch > 0.0f && near(rear.peak.pitch, k.peak.pitch));
+      assert(side.peak.roll > 0.0f && side.peak.pitch == 0.0f && left.peak.roll < 0.0f);
+      Shape away = defaults::kCollisionHover;
+      away.roll = { -3.0f, -3.0f };
+      Kick flipped = make_kick(away, 1.0f, rng);
+      aim_bump(flipped, 1.0f, 0.0f);
+      assert(near(flipped.peak.roll, -3.0f * kDegToRad));
+      Shape pushed = defaults::kCollisionHover;
+      pushed.push = { 0.2f, 0.2f };
+      Kick in = make_kick(pushed, 1.0f, rng);
+      aim_bump(in, 0.0f, 1.0f);
+      assert(near(in.peak.back, -0.2f));
+      // From 30% at 2 m/s to full at ForwardSpeed.
+      const FlyerSpeeds aat = hover_speeds(9.0f, 14.0f);
+      const Threshold& th = defaults::kCollisionHover.threshold;
+      assert(bump_scale(th, aat, 1.9f) == 0.0f && near(bump_scale(th, aat, 2.0f), kBumpLeast));
+      assert(bump_scale(th, aat, 9.0f) == 1.0f && bump_scale(th, aat, 14.0f) == 1.0f);
+      // A sphere of its springs sinking into a wall reports the contact for
+      // frames: it plays once, unless something hits half as hard again.
+      BumpGate g;
+      assert(g.admit(7.5f) && !g.admit(7.5f) && !g.admit(10.0f) && g.admit(12.0f));
+      g.advance(0.31f);
+      assert(g.admit(3.0f) && !g.admit(0.0f) && !g.admit(std::numeric_limits<float>::quiet_NaN()));
+   }
+
    // The turbulence: pitch at the rate, yaw at 1.3x and roll at 0.7x, inside the
    // shape's angles, linear in its level, still at level 0.
    {
@@ -1112,7 +1245,8 @@ int main()
 
    std::puts("Camera shake tests passed (noise, envelope, ODF values, kicks, restarts and limits, "
              "holds, sway, railed sprint judder, blast cap, thresholds, boost, speed-ups the throttle "
-             "asked for, hard turns, bumps, walker steps, speeds and landings, "
+             "asked for, hard turns, bumps, walker steps, speeds and landings, hover speeds, "
+             "air time, hits and tilts, "
              "turbulence, hits, landings, 2,000 rotation cases, ODF signs, no caps, one kick per "
              "shotgun blast, melee teams and tallies, first person turns only, BF2's camera handed "
              "back, defaults).");

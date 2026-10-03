@@ -18,15 +18,16 @@
 //    nothing, a smoothstep each way. At a rate of 0 it is a single push in one
 //    direction; above 0 it swings back and forth at that rate inside the same
 //    envelope.
-//  - A held shake, while a state lasts (sprinting, boosting, turning, braking,
-//    the stock blast queue). It swings at its rate, scaled by how strongly the
+//  - A held shake, while a state lasts (sprinting, a hover moving, boosting,
+//    turning, braking, the stock blast queue). It swings at its rate, scaled by how strongly the
 //    state holds at the moment.
 //
 // Everything is sampled by time, so the result is the same at any frame rate.
 // The shapes follow the BFIII-derived camera spec: fire, hit and landing are
 // smoothstep kicks, sprinting a railed judder, a blast three slow sines on roll
 // and position. A flyer's boost, turns and bumps share one turbulence, after
-// the user's reference model: a sine per axis near 11 Hz.
+// the user's reference model: a sine per axis near 11 Hz. A hover's movement
+// and boost use it too, slower.
 // =============================================================================
 
 namespace camera_shake {
@@ -186,7 +187,8 @@ inline bool parse_amount(const char* text, float& out)
 
 // One end of a threshold: a number, or one of the flyer class's own speeds
 // (its ODF's MinSpeed, MidSpeed, MaxSpeed or BoostSpeed), which differ per
-// class and are looked up in play.
+// class and are looked up in play. A hover's top speed is its ForwardSpeed, so
+// that name reads as MaxSpeed.
 enum class SpeedRef : uint8_t { None, Min, Mid, Max, Boost };
 
 struct Bound {
@@ -209,6 +211,7 @@ inline const char* parse_speed_name(const char* text, SpeedRef& out)
    static const struct { const char* name; SpeedRef ref; } kNames[] = {
       { "minspeed", SpeedRef::Min }, { "midspeed", SpeedRef::Mid },
       { "maxspeed", SpeedRef::Max }, { "boostspeed", SpeedRef::Boost },
+      { "forwardspeed", SpeedRef::Max },
    };
    for (const auto& n : kNames) {
       size_t i = 0;
@@ -253,8 +256,9 @@ inline bool parse_threshold(const char* text, Threshold& out)
    return true;
 }
 
-// A flyer class's four speeds, from its ODF. `known` is false where the class
-// cannot be read, and then no speed name resolves.
+// A class's four speeds for a Threshold: a flyer's from its ODF; walkers and
+// hovers fill them from theirs (walker_speeds, hover_speeds). `known` is false
+// where the class cannot be read, and then no speed name resolves.
 struct FlyerSpeeds {
    float min   = 0.0f;
    float mid   = 0.0f;
@@ -308,7 +312,7 @@ inline bool threshold_rising(const Threshold& th, const FlyerSpeeds& s)
 }
 
 // One shake's settings: angles in degrees and movement in metres, as an ODF
-// gives them. Length and rise only mean something to a one-off shake.
+// gives them.
 struct Shape {
    Range pitch, yaw, roll, push;
    // A one-off shake: how long it lasts, and the share of that spent rising to
@@ -320,10 +324,11 @@ struct Shape {
    // One-off: how many can run at once, added together (see KickChannel).
    // Blast: the amount of stock Shake it levels off at (see blast_amount).
    float limit  = 0.0f;
-   // When a flyer's boost, turn, brake or collision shake plays, in that
-   // shake's own measure (see the Triggers section).
+   // When a shake plays, in that shake's own measure: a flyer's boost, turn,
+   // brake or collision, a walker's step, landing or boost, a hover's
+   // movement, boost, landing or collision (see the Triggers section).
    Threshold threshold;
-   // BoostShake and BrakeShake: the share left once the flyer reaches the
+   // BoostShake and BrakeShake: the share left once the unit reaches the
    // speed it is heading for, 0..1.
    float steady = 0.0f;
    // The push goes out and back once (a one-off shake) or holds steady (a
@@ -339,14 +344,16 @@ constexpr Bound value_bound(float v) { return { v, SpeedRef::None }; }
 constexpr Threshold between(Bound a, Bound b) { return { a, b, true }; }
 
 // The defaults, used for whatever a class leaves unset. Fire, hit, landing,
-// sprint and blast are the spec's tune; the rest are first guesses.
+// sprint and blast are the spec's tune; the soldier's roll and the hover's
+// were tuned in play; the rest are first guesses.
 //
 // The pushes are the distances they used to show. Until 2026-10-01 a push
 // piled up in BF2's camera (LeftShake); at 60 frames a second, with the
 // soldier camera they were tuned under (MoveTensionZ "30 8"), fire's 0.015
 // showed as about 0.06, the roll's 0.1 as 0.7 and the blast's 0.03 as 0.08.
 namespace defaults {
-// pitch, yaw, roll, push, length, rise, rate, limit; then threshold and steady
+// pitch, yaw, roll, push, length, rise, rate, limit; then threshold, steady,
+// pushOnce and teammates (both on unless given)
 // Shots add together, up to eight running at once, as in the reference model.
 constexpr Shape kFire         = { { 0.25f, 0.4f }, { -0.12f, 0.12f }, { 0.0f, 0.0f }, { 0.06f, 0.06f }, 0.22f, 0.25f, 0.0f, 8.0f };
 constexpr Shape kHit          = { { 2.0f, 4.0f }, { -2.0f, 2.0f }, { 0.0f, 0.0f }, { 0.0f, 0.0f }, 0.25f, 0.3f, 0.0f, 1.0f };
@@ -398,6 +405,21 @@ constexpr Shape kLandWalker   = { { -1.5f, -1.0f }, { -0.3f, 0.3f }, { -0.6f, 0.
 constexpr Shape kTurnWalker   = { { 0.15f, 0.15f }, { 0.1f, 0.1f }, { 0.4f, 0.4f }, { 0.0f, 0.0f }, 1.0f, 0.5f, 1.5f, 0.0f };
 constexpr Shape kBoostWalker  = { { 0.3f, 0.3f }, { 0.2f, 0.2f }, { 0.3f, 0.3f }, { 0.0f, 0.0f }, 1.0f, 0.3f, 2.0f, 0.0f,
                                   between(speed_bound(SpeedRef::Max), speed_bound(SpeedRef::Boost)), 1.0f };
+// Hovers: the AAT's values as tuned in play (2026-10-03). Moving sways the
+// view gently, growing with speed to full at ForwardSpeed (its MaxSpeed), and
+// boosting adds a faster vibration from ForwardSpeed to BoostSpeed; both fade
+// out in the air. A jump is the walker's lift; a landing a dip sized by how
+// fast it came down, from 30% at 4 m/s to full at 14 m/s (about a half-metre
+// and a four-metre drop with GravityScale 4); a bump a tilt toward what was
+// hit (aim_bump), from 30% at 2 m/s to full at ForwardSpeed.
+constexpr Shape kMoveHover    = { { 0.12f, 0.12f }, { 0.04f, 0.04f }, { 0.12f, 0.12f }, { 0.0f, 0.0f }, 1.0f, 0.5f, 2.1f, 0.0f,
+                                  between(value_bound(0.0f), speed_bound(SpeedRef::Max)), 0.0f };
+constexpr Shape kBoostHover   = { { 0.19f, 0.19f }, { 0.06f, 0.06f }, { 0.19f, 0.19f }, { 0.0f, 0.0f }, 1.0f, 0.3f, 6.25f, 0.0f,
+                                  between(speed_bound(SpeedRef::Max), speed_bound(SpeedRef::Boost)), 1.0f };
+constexpr Shape kLandHover    = { { -1.2f, -0.8f }, { -0.2f, 0.2f }, { -0.4f, 0.4f }, { 0.0f, 0.0f }, 0.5f, 0.12f, 0.0f, 1.0f,
+                                  between(value_bound(4.0f), value_bound(14.0f)), 0.0f };
+constexpr Shape kCollisionHover = { { 2.38f, 2.9f }, { 0.0f, 0.0f }, { 2.97f, 3.63f }, { 0.0f, 0.0f }, 0.8f, 0.15f, 0.0f, 1.0f,
+                                    between(value_bound(2.0f), speed_bound(SpeedRef::Max)), 0.0f };
 // Per unit of the stock `Shake` amount.
 // The blast's push sways the camera's position with it, part of how it reads.
 constexpr Shape kBlast        = { { 0.0f, 0.0f }, { 0.0f, 0.0f }, { 6.0f, 6.0f }, { 0.08f, 0.08f }, 0.0f, 0.0f, 3.0f, 2.5f,
@@ -553,7 +575,6 @@ public:
 
    bool active() const { return m_count > 0; }
    int  count() const { return m_count; }
-   void clear() { m_count = 0; }
 
 private:
    void remove(int i)
@@ -653,8 +674,8 @@ inline Offset sway(const Shape& s, double t, float level)
    return o;
 }
 
-// A flyer's boost or turn: the turbulence held at `level`, each axis on its own
-// sine (turbulence_sines).
+// A flyer's boost or turn, or a hover's movement or boost: the turbulence held
+// at `level`, each axis on its own sine (turbulence_sines).
 inline Offset turbulence(const Shape& s, double t, float level)
 {
    Offset o;
@@ -740,9 +761,13 @@ inline Offset blast(const Shape& s, double t, float amount)
 //   BrakeShake      the same, while it brakes
 //   TurnShake       seconds of hard turning (TurnCount)
 //   CollisionShake  how much a bump changes its velocity, m/s
+// A walker's: its speed along the ground (StepShake, BoostShake) and how fast
+// it came down (LandShake). A hover's: its speed along its deck (MoveShake,
+// BoostShake), how fast it came down (LandShake) and how fast it closed on
+// what it hit (CollisionShake).
 
 // BoostShake and BrakeShake: where the speed sits in the threshold, at full
-// strength while the flyer is still speeding up (boost) or slowing down
+// strength while the unit is still speeding up (boost) or slowing down
 // (brake), and at `steady` of that once it gets where it is going.
 inline float boost_level(float position, bool heading, float steady)
 {
@@ -980,8 +1005,6 @@ struct WalkerAir {
    float air  = -1.0f;   // last look's count; -1 before the first
    float fall = 0.0f;    // fastest drop since it left the ground, m/s
 
-   void reset() { *this = WalkerAir{}; }
-
    // The speed it came down at when it lands after kWalkerMinAirtime or more,
    // else -1. `vy` is its vertical velocity, up positive.
    float update(float count, float vy)
@@ -993,6 +1016,125 @@ struct WalkerAir {
       if (count < air || count <= 0.0f) fall = 0.0f;
       air = count;
       return landed;
+   }
+};
+
+// Hovers. A hover class's speeds for a Threshold: its ForwardSpeed is its
+// MaxSpeed and cruising MidSpeed, BoostSpeed its own, and it has no MinSpeed.
+inline FlyerSpeeds hover_speeds(float forwardSpeed, float boostSpeed)
+{
+   return walker_speeds(forwardSpeed, boostSpeed);
+}
+
+// How fast something moves along a surface: its velocity less the part along
+// `up`, a unit vector, so a hover bobbing on its springs is not moving.
+inline float plane_speed(const float v[3], const float up[3])
+{
+   const float along = v[0] * up[0] + v[1] * up[1] + v[2] * up[2];
+   const float flat = v[0] * v[0] + v[1] * v[1] + v[2] * v[2] - along * along;
+   return flat > 0.0f && std::isfinite(flat) ? std::sqrt(flat) : 0.0f;
+}
+
+// A hover's time off the ground, from BF2's own ground ratio (mGroundRatio):
+// 1 while a spring body touches ground, running down by the frame time once
+// none does (a hover without springs: 1 at its SetAltitude, 0 at ten times
+// it). Below kHoverAirRatio it is in the air; back at or above it after
+// kHoverMinAirtime there, it has landed. Skimming rough ground, the springs
+// leave it for moments only, which never count.
+constexpr float kHoverAirRatio   = 0.9f;
+constexpr float kHoverMinAirtime = 0.25f;
+
+struct HoverAir {
+   float air  = 0.0f;   // seconds in the air so far
+   float fall = 0.0f;   // fastest drop since it left the ground, m/s
+
+   void reset() { *this = HoverAir{}; }
+
+   // The speed it came down at when it lands after kHoverMinAirtime or more,
+   // else -1. `vy` is its vertical velocity, up positive.
+   float update(float ratio, float vy, float dt)
+   {
+      if (!std::isfinite(ratio)) return -1.0f;
+      if (ratio < kHoverAirRatio) {
+         if (dt > 0.0f) air += dt;
+         if (std::isfinite(vy)) fall = std::fmax(fall, -vy);
+         return -1.0f;
+      }
+      const float landed = air >= kHoverMinAirtime ? fall : -1.0f;
+      reset();
+      return landed;
+   }
+};
+
+// A hit reported to a hover's collision callback: how fast it closed on what
+// it hit, and where that was, as shares of the hover's right and forward axes.
+// Only hits within about 45 degrees of level count (the hit's share along the
+// hover's up axis at most kHoverSideShare): ground under it is LandShake's.
+constexpr float kHoverSideShare = 0.7f;
+
+struct HoverHit {
+   float speed   = 0.0f;   // m/s; 0 when the contact does not count
+   float right   = 0.0f;   // -1 (left) to 1 (right)
+   float forward = 0.0f;   // -1 (behind) to 1 (ahead)
+};
+
+// `rel` is the hover's velocity less the other's; `normal` points out of what
+// was hit (CollisionResult::mSeparationNormal); the axes are the hover's
+// matrix rows.
+inline HoverHit hover_hit(const float rel[3], const float normal[3], const float right[3], const float up[3],
+                          const float forward[3])
+{
+   const auto dot = [](const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+   HoverHit h;
+   const float closing = -dot(rel, normal);
+   if (!(closing > 0.0f) || !std::isfinite(closing)) return h;
+   // Toward what was hit, in the hover's own frame.
+   const float r = -dot(normal, right);
+   const float u = -dot(normal, up);
+   const float f = -dot(normal, forward);
+   if (!(std::fabs(u) <= kHoverSideShare)) return h;
+   const float flat = std::sqrt(r * r + f * f);
+   if (!(flat > 1e-3f) || !std::isfinite(flat)) return h;
+   h.speed = closing;
+   h.right = r / flat;
+   h.forward = f / flat;
+   return h;
+}
+
+// A hover's CollisionShake tilts toward the hit: Roll toward the side that was
+// hit (clockwise for the right), Pitch down for a hit ahead and up for one
+// behind, the two mixed for a corner. A negative Pitch or Roll in the ODF
+// tilts away instead. Push moves the camera toward the hit, in for a hit ahead
+// and out for one behind; Yaw plays as picked.
+inline void aim_bump(Kick& k, float right, float forward)
+{
+   k.peak.roll  *= right;
+   k.peak.pitch *= -forward;
+   k.peak.back  *= -forward;
+}
+
+// A sphere of a hover's springs sinking into a wall reports the same contact
+// for several frames, so once a bump plays, others are left out for
+// kBumpQuiet seconds unless at least kBumpHarder times as hard.
+constexpr float kBumpQuiet  = 0.3f;
+constexpr float kBumpHarder = 1.5f;
+
+struct BumpGate {
+   float quiet = 0.0f;   // seconds left
+   float speed = 0.0f;   // the last bump's, m/s
+
+   void advance(float dt)
+   {
+      if (dt > 0.0f) quiet = std::fmax(0.0f, quiet - dt);
+   }
+
+   // Whether a bump this hard plays now; one that does starts the quiet.
+   bool admit(float s)
+   {
+      if (!(s > 0.0f) || (quiet > 0.0f && s < kBumpHarder * speed)) return false;
+      quiet = kBumpQuiet;
+      speed = s;
+      return true;
    }
 };
 
@@ -1080,8 +1222,6 @@ struct HitSense {
    float pending  = 0.0f;
    float cooldown = 0.0f;
 
-   void reset() { *this = HitSense{}; }
-
    // The damage to shake for now, or 0.
    float update(float health, float threshold, float dt)
    {
@@ -1113,8 +1253,6 @@ constexpr float kMinAirtime = 0.25f;
 struct AirTime {
    float air      = 0.0f;
    bool  airborne = false;
-
-   void reset() { *this = AirTime{}; }
 
    bool update(bool isAirborne, bool isGrounded, float dt)
    {

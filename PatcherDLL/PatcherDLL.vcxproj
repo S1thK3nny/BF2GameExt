@@ -267,6 +267,8 @@
     <ClInclude Include="src\util\install_log.hpp" />
     <ClInclude Include="src\util\shader_patch_detect.hpp" />
     <ClInclude Include="src\weapon\impact_sound_water_fix.hpp" />
+    <ClInclude Include="src\game\Battlefront2\Source\CollisionObject.h" />
+    <ClInclude Include="src\game\Battlefront2\Source\EntityHover.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">

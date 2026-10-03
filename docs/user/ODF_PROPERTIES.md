@@ -111,6 +111,7 @@ The engine's own `SoldierAnimation` property on the same class is worth knowing 
 | `BoostShake`, `TurnShake`, `BrakeShake`, `CollisionShake` | scale | Flyers: turbulence while the flyer speeds up (by default, while it boosts), holds a hard turn or slows down, and a jolt when it bumps into something. Each takes a `Threshold` for when it plays. See [Flyer thresholds](#flyer-thresholds). | 1.2.0 |
 | `TrickRollShake`, `TrickFlipShake`, `TakeoffShake`, `LandingShake` | scale | Flyers: a barrel roll, a flip, lifting off and touching down. | 1.2.0 |
 | `StepShake`, `JumpShake`, `LandShake`, `TurnShake`, `BoostShake` | scale | Walkers: a thump each time a foot lands, rolled toward that foot; a jump starting; landing a jump or fall; turning on the spot; boosting. See [Walker shakes](#walker-shakes). | 1.2.0 |
+| `MoveShake`, `BoostShake`, `JumpShake`, `LandShake`, `CollisionShake` | scale | Hovers: a sway while the hover moves, growing with its speed, that boosting adds to; a jump starting; landing a jump or a drop; and a tilt toward whatever it hits. See [Hover shakes](#hover-shakes). | 1.2.0 |
 
 ## Camera Shake
 
@@ -125,15 +126,16 @@ Camera shake moves only your own view, the one you are playing through, and only
 | `BlockShake` | melee weapons | Blocking a melee strike. |
 | `DeflectShake` | melee weapons | Deflecting a blaster bolt or beam. |
 | `HitShake` | any unit | When the unit takes damage, harder for a bigger hit. |
-| `LandShake` | soldiers, walkers | Landing a jump or fall. On a walker, harder for a faster drop. |
+| `LandShake` | soldiers, walkers, hovers | Landing a jump or fall. On a walker or hover, harder for a faster drop. |
 | `RollShake` | soldiers | A combat roll, in third person only. |
 | `SprintShake` | soldiers | While sprinting, in third person only. |
 | `StepShake` | walkers | Each time a foot lands, rolled toward that foot. |
-| `JumpShake` | walkers | A jump starting. |
-| `BoostShake` | flyers, walkers | While a flyer goes fast (by default, while it boosts), or while a walker boosts. |
+| `JumpShake` | walkers, hovers | A jump starting. |
+| `MoveShake` | hovers | While the hover moves, growing with its speed. |
+| `BoostShake` | flyers, walkers, hovers | While a flyer goes fast (by default, while it boosts), or while a walker or hover boosts. |
 | `TurnShake` | flyers, walkers | While a flyer is held in a hard turn, after a couple of seconds, or while a walker turns on the spot. |
 | `BrakeShake` | flyers | While you brake: slowing down with the brake or reverse input held. |
-| `CollisionShake` | flyers | When the flyer bumps into something, harder for a harder bump. |
+| `CollisionShake` | flyers, hovers | When the unit bumps into something, harder for a harder bump. A hover's tilts the view toward what it hit. |
 | `TrickRollShake` | flyers | A barrel roll. |
 | `TrickFlipShake` | flyers | A flip. |
 | `TakeoffShake` | flyers | Lifting off. |
@@ -149,16 +151,16 @@ Setting any property of a shake turns it on for that class. `BlastShake` is the 
 | `FireShakeYaw` | degrees, or `"min max"` | How far it turns right; negative turns it left. |
 | `FireShakeRoll` | degrees, or `"min max"` | How far it tilts clockwise; negative tilts it anticlockwise. |
 | `FireShakePush` | metres, or `"min max"` | How far the camera moves back along the view; negative moves it forward. Third person only. |
-| `FireShakeLength` | seconds | How long one shake lasts. On a shake that lasts (sprint, boost, turn, brake), how long it takes to fade in and out, the two together. |
+| `FireShakeLength` | seconds | How long one shake lasts. On a shake that lasts (sprint, move, boost, turn, brake), how long it takes to fade in and out, the two together. |
 | `FireShakeRise` | 0 to 1 | The share of the length spent reaching the peak; the rest eases back. On a shake that lasts, the share of `Length` spent fading in; the rest is how long it takes to fade out. |
 | `FireShakeRate` | per second | How many times a second the view swings back and forth. On a one-off shake `0` makes one push in one direction; a shake that lasts needs a rate above `0` to move at all. See [How Rate works](#how-rate-works). |
-| `FireShakeLimit` | 1 to 8 | How many can run at once. Above `1`, each shot (or hit, landing and so on) is a shake of its own and those still running add together, so rapid fire builds up a little and every shot still kicks; when that many are running, the oldest fades out to make room. At `1` a repeat takes over from wherever the view is instead, so it never goes past one shake. A whole number; fractions round down. Default `8` for `FireShake`, `1` for the rest. |
-| `BoostShakeThreshold` | a number, or `"from to"` | When the shake plays, in what that shake measures. One value: in full at or past it. Two: it starts at the first and grows to full at the second. Used by a flyer's `BoostShake`, `TurnShake`, `BrakeShake` and `CollisionShake` (see [Flyer thresholds](#flyer-thresholds)) and a walker's `StepShake`, `LandShake` and `BoostShake` (see [Walker shakes](#walker-shakes)). |
-| `BoostShakeSteady` | 0 to 1 | `BoostShake` and `BrakeShake`: the share of the shake left once the flyer or walker reaches the speed it is heading for. |
+| `FireShakeLimit` | 1 to 8 | How many can run at once. Above `1`, each shot (or hit, landing and so on) is a shake of its own and those still running add together, so rapid fire builds up a little and every shot still kicks; when that many are running, the oldest fades out to make room. At `1` a repeat takes over from wherever the view is instead, so it never goes past one shake. A whole number; fractions round down. Default `8` for `FireShake`, `1` for the other one-off shakes. |
+| `BoostShakeThreshold` | a number, or `"from to"` | When the shake plays, in what that shake measures. One value: in full at or past it. Two: it starts at the first and grows to full at the second. Used by a flyer's `BoostShake`, `TurnShake`, `BrakeShake` and `CollisionShake` (see [Flyer thresholds](#flyer-thresholds)), a walker's `StepShake`, `LandShake` and `BoostShake` (see [Walker shakes](#walker-shakes)) and a hover's `MoveShake`, `BoostShake`, `LandShake` and `CollisionShake` (see [Hover shakes](#hover-shakes)). |
+| `BoostShakeSteady` | 0 to 1 | `BoostShake` and `BrakeShake`: the share of the shake left once the flyer, walker or hover reaches the speed it is heading for. |
 | `FireShakePushOnce` | `1` or `0` | With a `Rate`, the push still goes out and back once, following the rise and fall, while the angles swing; on a shake that lasts, the camera eases back and holds there. `0` makes the push swing with the angles, which moves the camera in and out. Default `1`, except `BlastShake`, whose camera sways by default. |
 | `StrikeShakeTeammates` | `1` or `0` | `StrikeShake`: whether a swing that lands on teammates counts. At `0` it shakes only when the swing lands on something that is not a teammate. Default `1`. |
 
-The same thirteen work for every shake: `HitShakePitch`, `LandingShakeLength`, `BlastShakeRoll` and so on, and each shake uses the ones that mean something to it. A `"min max"` angle or push is picked afresh each time the shake plays, so every shot kicks a little differently. `SprintShake`, `BoostShake`, `TurnShake`, `BrakeShake` and `BlastShake` play for as long as something lasts rather than once: for them the angles and push are how far the view swings each way (a range uses its larger end), `Rate` is how fast it swings, `Length` and `Rise` set how quickly it fades in and out, and `Limit` is not used. `BlastShake` follows each explosion's own fade instead, so `Length` and `Rise` do nothing there; its angles and push are per unit of the explosion's stock `Shake`, and its `Limit` is where a blast levels off, in units of `Shake`, so a detpack is not four times a grenade.
+The same thirteen work for every shake: `HitShakePitch`, `LandingShakeLength`, `BlastShakeRoll` and so on, and each shake uses the ones that mean something to it. A `"min max"` angle or push is picked afresh each time the shake plays, so every shot kicks a little differently. `SprintShake`, `MoveShake`, `BoostShake`, `TurnShake`, `BrakeShake` and `BlastShake` play for as long as something lasts rather than once: for them the angles and push are how far the view swings each way (a range uses its larger end), `Rate` is how fast it swings, `Length` and `Rise` set how quickly it fades in and out, and `Limit` is not used. `BlastShake` follows each explosion's own fade instead, so `Length` and `Rise` do nothing there; its angles and push are per unit of the explosion's stock `Shake`, and its `Limit` is where a blast levels off, in units of `Shake`, so a detpack is not four times a grenade.
 
 Defaults, for anything a class leaves out (degrees, metres, seconds):
 
@@ -183,13 +185,17 @@ Defaults, for anything a class leaves out (degrees, metres, seconds):
 | Block | `0.4 0.6` | `-0.6 0.6` | `-0.6 0.6` | `0.05` | `0.3` | `0.1` | `0` | `1` |
 | Deflect | `0.2 0.3` | `-0.3 0.3` | `-0.3 0.3` | `0.02` | `0.2` | `0.15` | `0` | `1` |
 | Step (walker) | `-0.4 -0.25` | `-0.1 0.1` | `0.2 0.35`, toward the foot | `0` | `0.35` | `0.15` | `0` | `1` |
-| Jump (walker) | `0.6 0.9` | `-0.2 0.2` | `-0.3 0.3` | `0` | `0.4` | `0.25` | `0` | `1` |
+| Jump (walker, hover) | `0.6 0.9` | `-0.2 0.2` | `-0.3 0.3` | `0` | `0.4` | `0.25` | `0` | `1` |
 | Land (walker) | `-1.5 -1` | `-0.3 0.3` | `-0.6 0.6` | `0` | `0.5` | `0.12` | `0` | `1` |
 | Turn (walker) | `0.15` | `0.1` | `0.4` | `0` | `1` | `0.5` | `1.5` | |
 | Boost (walker) | `0.3` | `0.2` | `0.3` | `0` | `1` | `0.3` | `2` | |
+| Move (hover) | `0.12` | `0.04` | `0.12` | `0` | `1` | `0.5` | `2.1` | |
+| Boost (hover) | `0.19` | `0.06` | `0.19` | `0` | `1` | `0.3` | `6.25` | |
+| Land (hover) | `-1.2 -0.8` | `-0.2 0.2` | `-0.4 0.4` | `0` | `0.5` | `0.12` | `0` | `1` |
+| Collision (hover) | `2.38 2.9`, toward the hit | `0` | `2.97 3.63`, toward the hit | `0` | `0.8` | `0.15` | `0` | `1` |
 | Blast, per unit of `Shake` | `0` | `0` | `6` | `0.08` | | | `3` | `2.5` |
 
-The flyer, walker and melee defaults are first guesses, kept small for take-off and landing, until they are tuned in play.
+The hover defaults are the AAT's values, tuned in play. The flyer, walker and melee defaults are first guesses until they are tuned in play; a flyer's take-off and landing are kept small.
 
 A weapon with a heavier kick than the default, and a soldier class that dips on landing:
 
@@ -207,12 +213,12 @@ LandShakeLength = "0.5"
 ```
 
 - **Sprinting** judders rather than sways: the view flips between its limits in step with the stride, a stride lasting 2.8 / `Rate` seconds.
-- **Boost, turns and bumps** share one turbulence: pitch swings at `Rate`, yaw at 1.3 times it and roll at 0.7 times, so 11, 14.3 and 7.7 times a second at the default `11`. Braking sways on its own softer noise.
+- **Boost, turns and a flyer's bumps** share one turbulence: pitch swings at `Rate`, yaw at 1.3 times it and roll at 0.7 times, so 11, 14.3 and 7.7 times a second at the default `11`. A hover's movement and boost use it too, slower: `2.1` and `6.25` by default. Braking sways on its own softer noise.
 - **Hits** go by the unit's health, so they work the same on a multiplayer client. A hit of a tenth of the unit's maximum health or more gives the full shake, smaller ones down to a quarter of it, and slow drains such as a hero's never shake. Damage taken by shields alone does not count.
-- **Landings** count after at least a quarter of a second in the air.
+- **Landings** count after at least a quarter of a second in the air; a walker's after half a second.
 - **Melee:** BF2 decides what lands and what is blocked; the shakes follow. A swing that lands plays `StrikeShake` once, however many it lands on at the same moment, and one that something blocks plays `SwingBlockedShake`. You block a strike when your combo is in a state with a `Deflect`, the blade comes within its `DeflectAngle` and you have the energy; deflecting a bolt or beam works the same way and plays `DeflectShake`. On a melee weapon, `FireShake` does nothing; use `SwingShake`.
 - **Views:** in first person, cockpits included, a shake turns the view but never moves it, so `Push` plays in third person only. A soldier's rolls and sprinting don't shake first person at all, since it has its own camera motion for both. Everything else, flyers included, shakes in every view.
-- **Several at once:** shots add together, up to eight running at once, so a shot that lands before the last has faded still kicks on top of it. With a `Length` longer than the time between shots, rapid fire therefore pushes further than one shot does: about 1.2 times at a `Length` of 0.3 on a weapon that fires every 0.18 s, 1.7 times at 0.5. A hit, landing or roll that comes before the last has faded takes over from wherever the view is, without a jump. `Limit` sets which way each shake goes. A blast follows the strongest explosion running rather than adding them together, and shrinks while you zoom in.
+- **Several at once:** shots add together, up to eight running at once, so a shot that lands before the last has faded still kicks on top of it. With a `Length` longer than the time between shots, rapid fire therefore pushes further than one shot does: about 1.1 times at a `Length` of 0.3 on a weapon that fires every 0.18 s, 1.6 times at 0.5. A hit, landing or roll that comes before the last has faded takes over from wherever the view is, without a jump. `Limit` sets which way each shake goes. A blast follows the strongest explosion running rather than adding them together, and shrinks while you zoom in.
 - **The reticle holds still:** the shake moves the picture under it, and the reticle stays where the unshaken view would put it, so it does not bounce with each shot.
 - **No caps:** every value is used as given. A `Push` of 5 moves the camera five metres and a `Pitch` of 30 turns the view thirty degrees, so keep values to what looks right.
 - **The same at any frame rate:** a shake sits on top of the game's own camera and never feeds into how that camera follows the unit, so a `Push` of 0.5 is half a metre whether the game runs at 30 or 144 frames a second.
@@ -223,13 +229,13 @@ LandShakeLength = "0.5"
 
 `Rate` is how often the view swings: full swings there and back each second. The angles and push say how far each swing goes.
 
-- **One-off shakes** (Fire, Hit, Land, Roll, Collision, TrickRoll, TrickFlip, Takeoff, Landing, the walker's Step and Jump, and the melee Swing, Strike, SwingBlocked, Block and Deflect): `Length` and `Rise` set how big the shake is from moment to moment, rising to its peak and easing away, and `Rate` sets how often it swings inside that. At `0` it is one push in one direction and back. Above `0` it swings about `Rate` x `Length` times before it fades: `TrickRollShakeRate = "5"` over a `0.6` second length is three swings. Each shake starts at a random point in its swing, so repeats never look quite alike.
-- **Shakes that last** (Sprint, Boost, Turn, Brake, Blast) only swing, so at `0` they do nothing. Their size follows whatever triggers them, fading in and out as `Length` and `Rise` set, and `Rate` is how fast they swing the whole time.
+- **One-off shakes** (Fire, Hit, Land, Roll, Collision, TrickRoll, TrickFlip, Takeoff, Landing, the walker's Step, Jump, and the melee Swing, Strike, SwingBlocked, Block and Deflect): `Length` and `Rise` set how big the shake is from moment to moment, rising to its peak and easing away, and `Rate` sets how often it swings inside that. At `0` it is one push in one direction and back. Above `0` it swings about `Rate` x `Length` times before it fades: `TrickRollShakeRate = "5"` over a `0.6` second length is three swings. Each shake starts at a random point in its swing, so repeats never look quite alike.
+- **Shakes that last** (Sprint, Move, Boost, Turn, Brake, Blast) only swing, so at `0` they do nothing. Their size follows whatever triggers them, fading in and out as `Length` and `Rise` set, and `Rate` is how fast they swing the whole time.
 - **What swings** differs by shake:
 
 | Shake | How it swings at a given `Rate` |
 |-------|---------------------------------|
-| Boost, Turn, Collision (flyers and walkers alike) | One smooth swing per axis: pitch at `Rate`, yaw at 1.3 times it, roll at 0.7 times and push at 1.1 times. At `11`, that is 11, 14.3 and 7.7 swings a second. |
+| Move, Boost, Turn, and a flyer's Collision | One smooth swing per axis: pitch at `Rate`, yaw at 1.3 times it, roll at 0.7 times and push at 1.1 times. At `11`, that is 11, 14.3 and 7.7 swings a second. Two shakes that last at the same `Rate` swing in step, so together they are one bigger swing. |
 | Brake, and every other one-off | A rougher swing: mostly at `Rate`, with a half-size ripple at nearly twice it and a quarter-size one at three times it, each axis out of step with the others. |
 | Sprint | A judder: pitch flips between its limits about `Rate` times a second, and yaw follows a stride lasting 2.8 / `Rate` seconds. |
 | Blast | Three slow swings at 1.14, 0.89 and 0.96 times `Rate`. |
@@ -256,6 +262,7 @@ LandShakeLength = "0.5"
 - **Turning** is measured on the flyer itself, so a stick and a mouse count the same: it counts while the nose swings round at 60% or more of the faster of the class's `TurnRate` and `PitchRate`, and holds through a lull of up to a quarter of a second, such as a mouse between two pushes. Rolling in place and tricks do not count. The shake also grows with the flyer's speed, up to its `MaxSpeed`.
 - **Fading in and out:** `Threshold` decides how strongly the shake should play at each moment; `Length` and `Rise` decide how quickly it follows. It fades in over `Rise` x `Length` seconds and out over the rest, covering most of the way in that time and easing into the end. A single-value threshold jumps straight from nothing to full, so the fade is all that softens it; a pair already ramps, so a short fade barely shows and a long one mostly adds lag. With `Length "1"` and `Rise "0.3"`, a brake shake builds over about 0.3 s when you hit the brake and dies away over about 0.7 s when you let go.
 - **Bumps:** a bump at the first value still gives 30% of the shake, so a graze registers. A bump that plays `CollisionShake` no longer reaches the blast, and the damage it does is not shaken for again as a hit.
+- **Modtools only, for now:** on Steam and GOG a flyer's `TurnShake` and `CollisionShake` do nothing, and speed names in its `Threshold` never resolve, so `BoostShake` and `BrakeShake` need numbers there (their defaults are speed names). Speeding up and braking are then judged by how fast the speed changes rather than by the throttle. Walkers and hovers work the same on every build.
 
 A flyer without a boost that shakes while it throttles up to top speed, and one whose brake shake, while you hold the brake, builds as it slows from cruise to its slowest:
 
@@ -427,7 +434,7 @@ Walkers (`walker` and `commandwalker` classes) take five shakes. Each follows wh
 - **Steady:** a walker's `BoostShakeSteady` defaults to `1`, so the sway lasts for the whole boost.
 - **Dying walkers** stop stepping and swaying; the stock death shake plays through `BlastShake` as before.
 
-Each walker shake with every property it uses, at its defaults:
+Each walker shake with the properties it is usually given, at its defaults; anything left out, such as `Push`, keeps its default from the table above:
 
 ```
 [Properties]
@@ -473,6 +480,74 @@ BoostShakeRise          = "0.3"
 BoostShakeRate          = "2"
 BoostShakeThreshold     = "MaxSpeed BoostSpeed"
 BoostShakeSteady        = "1"
+```
+
+### Hover shakes
+
+Hovers (`hover` and `commandhover` classes) take five shakes. The jump, the landing and the hits follow what BF2 itself records: its jump, how much the hover is on the ground, and its collision code.
+
+| Shake | Plays | `Threshold` measures | Default `Threshold` |
+|-------|-------|----------------------|---------------------|
+| `MoveShake` | While the hover moves: forward, in reverse or strafing. It grows with speed, and fades out in the air. | The hover's speed along the ground, in m/s: a number, `ForwardSpeed` (or `MaxSpeed`, the same) or `BoostSpeed`. It grows from the first value to full at the second. | `"0 ForwardSpeed"` |
+| `BoostShake` | While the hover boosts, on top of `MoveShake`. It fades out in the air too. | The hover's speed, as for `MoveShake`. | `"ForwardSpeed BoostSpeed"` |
+| `JumpShake` | A jump starting. Only a class with a `JumpForce` ever jumps. | not used | |
+| `LandShake` | Coming down after at least a quarter of a second off the ground, from a jump or off a ledge. | How fast it came down, in m/s. Graded like a bump: nothing below the first value, 30% at it, full at the second. | `"4 14"` |
+| `CollisionShake` | Hitting something from the side, the front or behind: the view tilts toward what it hit. | How fast the hover closed on it, in m/s, against that thing's own speed. Graded like a bump. | `"2 ForwardSpeed"` |
+
+- **Which way a hit tilts:** toward the hit. A hit on the right tilts the view right (clockwise) and one on the left tilts it left; one ahead tips it down and one behind tips it up; a corner does some of each. `CollisionShakeRoll` is the tilt for a hit square on a side and `CollisionShakePitch` for one square on the nose or tail. A negative value tilts away from the hit instead. A `CollisionShakePush` moves the camera toward the hit, in for a hit ahead and out for one behind (third person only), and `CollisionShakeYaw` plays as written.
+- **What counts as a hit:** walls, buildings, props and other vehicles, measured against the other thing's own speed. Soldiers don't count, as BF2 ignores them for hovers too, and neither does the ground under the hover: a surface within 45 degrees of level is ground, and coming down onto it is `LandShake`'s. A hover pushed against a wall shakes once, not every frame: another hit within 0.3 s of a shake plays only if it is at least half as hard again.
+- **Moving and boosting:** by default moving is a gentle sway, 2.1 swings a second, and boosting adds a faster vibration, 6.25, on top. Give the two the same `Rate` and they swing in step instead, so boosting makes the one sway bigger. Both fade out once the hover leaves the ground and come back as it lands.
+- **Off the ground:** a hover with springs (`AddSpringBody`) is in the air once none of its springs has touched ground for a tenth of a second; one without springs, once it is about twice its `SetAltitude` up.
+- **Speeds:** a hover has `ForwardSpeed` and `BoostSpeed`. In a `Threshold`, `ForwardSpeed` and `MaxSpeed` mean the same, `MidSpeed` reads as `ForwardSpeed` and `MinSpeed` as `0`. Its speed is measured along its own deck, so bobbing on its springs does not count.
+- **Steady:** a hover's `BoostShakeSteady` defaults to `1`, so the boost sway lasts for the whole boost.
+- **The ride itself:** on a hover with springs, `VelocitySpring`, `VelocityDamp`, `OmegaXSpring`, `OmegaXDamp`, `OmegaZSpring`, `OmegaZDamp` and each `BodySpringLength` set the ride. `LiftSpring` and `LiftDamp` only work on a hover without springs, whatever the stock ODF comments say.
+
+Each hover shake with the properties it is usually given, at its defaults; anything left out, such as `Push`, keeps its default from the table above:
+
+```
+[Properties]
+MoveShake               = "1"
+MoveShakePitch          = "0.12"
+MoveShakeYaw            = "0.04"
+MoveShakeRoll           = "0.12"
+MoveShakeLength         = "1"
+MoveShakeRise           = "0.5"
+MoveShakeRate           = "2.1"
+MoveShakeThreshold      = "0 ForwardSpeed"
+
+BoostShake              = "1"
+BoostShakePitch         = "0.19"
+BoostShakeYaw           = "0.06"
+BoostShakeRoll          = "0.19"
+BoostShakeLength        = "1"
+BoostShakeRise          = "0.3"
+BoostShakeRate          = "6.25"
+BoostShakeThreshold     = "ForwardSpeed BoostSpeed"
+BoostShakeSteady        = "1"
+
+JumpShake               = "1"
+JumpShakePitch          = "0.6 0.9"
+JumpShakeYaw            = "-0.2 0.2"
+JumpShakeRoll           = "-0.3 0.3"
+JumpShakeLength         = "0.4"
+JumpShakeRise           = "0.25"
+
+LandShake               = "1"
+LandShakePitch          = "-1.2 -0.8"
+LandShakeYaw            = "-0.2 0.2"
+LandShakeRoll           = "-0.4 0.4"
+LandShakeLength         = "0.5"
+LandShakeRise           = "0.12"
+LandShakeThreshold      = "4 14"
+
+CollisionShake          = "1"
+CollisionShakePitch     = "2.38 2.9"
+CollisionShakeRoll      = "2.97 3.63"
+CollisionShakeLength    = "0.8"
+CollisionShakeRise      = "0.15"
+CollisionShakeRate      = "0"
+CollisionShakeLimit     = "1"
+CollisionShakeThreshold = "2 ForwardSpeed"
 ```
 
 ## Animation Naming Conventions

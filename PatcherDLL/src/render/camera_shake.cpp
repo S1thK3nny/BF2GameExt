@@ -5,7 +5,9 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "game/Battlefront2/Source/ChaseCamera.h"
+#include "game/Battlefront2/Source/CollisionObject.h"
 #include "game/Battlefront2/Source/EntityFlyer.h"
+#include "game/Battlefront2/Source/EntityHover.h"
 #include "game/Battlefront2/Source/EntityWalker.h"
 #include "game/Battlefront2/Source/RedCamera.h"
 #include "game/Battlefront2/Source/Weapon.h"
@@ -47,6 +49,9 @@
 //     thiscall(float dt), bool in AL, RET 4
 //   WeaponMelee::Deflect          0x00637670   0x0068A550   0x0068B5E0   detoured
 //     thiscall(Ordnance*, const PblVector3*, const PblVector3*), bool in AL, RET 0xC
+//   EntityHover::CollisionCallback 0x005155B0  0x004C66A0   0x004C66A0   detoured
+//     thiscall(CollisionResult*, CollisionObject*, Restrictor*), bool in AL,
+//     RET 0xC; `this` is the hover + 0xC; CommandHover shares it
 //
 // Same on every build: the chase camera fields and its shake queue
 // (layout::ChaseCamera); the render camera's zoom (layout::RedCamera); the
@@ -54,16 +59,19 @@
 // Tracker::IsFirstPersonView itself calls; a Controllable's Trackable part at
 // +0x18; GameObject::IsRtti (+0x00, thiscall(hash), RET 4) and GetEntityClass
 // (+0x28), as in hud_class_icons.cpp; a GameObject's Damageable at +0x140, as
-// controller_rumble.cpp and aim_assist.cpp read it; the soldier's mState at
-// Controllable + g_soldier->mState; a GameObject's mTeam bits at +0x234; the
-// Weapon vtable's IsMelee (+0x54). WeaponMelee's list of what a swing struck
-// moves between modtools and retail (layout::WeaponMelee). The flyer fields are per build
+// controller_rumble.cpp and aim_assist.cpp read it; a GameObject's mTeam bits
+// at +0x234; the Weapon vtable's IsMelee (+0x54). Per build: the soldier's
+// mState, at Controllable + g_soldier->mState; WeaponMelee's list of what a
+// swing struck (layout::WeaponMelee). The flyer fields are per build
 // (layout::EntityFlyer); those not yet read on Steam and GOG are 0 there, and so
 // are the collision sites, so what needs them stays off on those builds. The
-// walker fields are per build too (layout::EntityWalker), read on all three.
+// walker and hover fields are per build too (layout::EntityWalker and
+// layout::EntityHover), read on all three, and a hover's collision callback
+// reads the other object and the contact as BF2's own callback does
+// (layout::CollisionObject, layout::CollisionResult), the same on every build.
 //
 // How the shake gets drawn: SetupCamera builds mMatrix, turns it by the stock
-// shake unless mission time is past mShakeSuppressUntil, and hands it to
+// shake once mission time is past mShakeSuppressUntil, and hands it to
 // RedCamera::SetMatrix. The hook holds mShakeSuppressUntil at FLT_MAX for the
 // call, so the stock turn is skipped, then moves and turns mMatrix by its own
 // offset, the stock queue drawn as a blast included, and sets the camera again. The aim never
@@ -89,6 +97,9 @@ namespace fly = layout::EntityFlyer;
 namespace fly_class = layout::EntityFlyerClass;
 namespace walk = layout::EntityWalker;
 namespace walk_class = layout::EntityWalkerClass;
+namespace hov = layout::EntityHover;
+namespace hov_class = layout::EntityHoverClass;
+namespace coll = layout::CollisionObject;
 
 // The ODF-driven shakes. Always on; off only if the ODF reader had no
 // listener slot left for their properties, when just the blast is drawn.
@@ -99,6 +110,7 @@ constexpr uint32_t kVt_GetControllable = 0x28;  // Trackable vtable
 constexpr uint32_t kCtrl_Trackable     = 0x18;  // a Controllable's Trackable part
 constexpr uint32_t kVt_IsRtti          = 0x00;  // GameObject primary vtable
 constexpr uint32_t kVt_GetEntityClass  = 0x28;  // GameObject primary vtable
+constexpr uint32_t kVt_GetVelocity     = 0x44;  // GameObject primary vtable: const PblVector3*
 
 // A GameObject's Damageable part is at +0x140 (Phantom PDB: the vptr at +0x140,
 // Damageable_data from +0x144), on every build.
@@ -114,6 +126,7 @@ constexpr uint32_t kObj_Team      = 0x234;
 constexpr uint32_t kSoldierRtti = pbl_hash("EntitySoldier");
 constexpr uint32_t kFlyerRtti   = pbl_hash("EntityFlyer");
 constexpr uint32_t kWalkerRtti  = pbl_hash("EntityWalker");   // CommandWalker answers it too
+constexpr uint32_t kHoverRtti   = pbl_hash("EntityHover");    // CommandHover answers it too
 static_assert(kSoldierRtti == 0x5E8739F4u, "the target bar's soldier RTTI hash");
 
 // SoldierState (PDB enum), the values used here.
@@ -144,6 +157,8 @@ using ApplyShakeFn    = void(__fastcall*)(void* manager, void* edx, float amount
 using MeleeUpdateFn   = bool(__fastcall*)(uint8_t* self, void* edx, float dt);
 using MeleeDeflectFn  = bool(__fastcall*)(uint8_t* self, void* edx, void* ordnance, const void* pos,
                                           const void* dir);
+using HoverCollisionFn = bool(__fastcall*)(uint8_t* self, void* edx, void* result, uint8_t* other,
+                                           void* restrictor);
 using ObjectFn        = uint8_t*(__thiscall*)(void* self);
 using IsRttiFn        = bool(__thiscall*)(void* self, uint32_t hash);
 using IsMeleeFn       = bool(__thiscall*)(void* weapon);
@@ -158,6 +173,8 @@ ApplyShakeFn    s_applyShake    = nullptr;
 MeleeUpdateFn   s_meleeUpdate   = nullptr;
 MeleeDeflectFn  s_meleeDeflect  = nullptr;
 uint32_t        s_meleeHits     = layout::WeaponMelee::kDamageDataModtools;
+HoverCollisionFn s_hoverCollision = nullptr;
+bool            s_hoverHooked   = false;   // the hover's collision callback is detoured
 
 template<class T> T& at(uint8_t* p, uint32_t offset) { return *reinterpret_cast<T*>(p + offset); }
 template<class T> T& at(void* p, uint32_t offset) { return at<T>(static_cast<uint8_t*>(p), offset); }
@@ -178,7 +195,7 @@ bool is_melee(uint8_t* weapon)
 }
 
 // -----------------------------------------------------------------------------
-// ODF properties: twenty-one shakes, each a scale and twelve details, kept per class
+// ODF properties: twenty-two shakes, each a scale and twelve details, kept per class
 // and inherited through the reader's Derive
 // -----------------------------------------------------------------------------
 
@@ -191,7 +208,7 @@ enum Field : uint8_t {
 constexpr const char* kShakeNames[kCameraShakeChannels] = {
    "Fire", "Hit", "Land", "Roll", "Sprint", "Brake", "Blast",
    "Boost", "Turn", "Collision", "TrickRoll", "TrickFlip", "Takeoff", "Landing",
-   "Swing", "Strike", "Block", "Deflect", "SwingBlocked", "Step", "Jump",
+   "Swing", "Strike", "Block", "Deflect", "SwingBlocked", "Step", "Jump", "Move",
 };
 constexpr const char* kFieldSuffixes[kFieldCount] = {
    "Shake", "ShakePitch", "ShakeYaw", "ShakeRoll", "ShakePush", "ShakeLength", "ShakeRise", "ShakeRate",
@@ -236,6 +253,36 @@ static_assert(kProps.e[kShakeSwingBlocked * kFieldCount + kScale].hash == pbl_ha
 static_assert(kProps.e[kShakeStep * kFieldCount + kThreshold].hash == pbl_hash("StepShakeThreshold"),
               "name table order");
 static_assert(kProps.e[kShakeJump * kFieldCount + kScale].hash == pbl_hash("JumpShake"), "name table order");
+static_assert(kProps.e[kShakeMove * kFieldCount + kThreshold].hash == pbl_hash("MoveShakeThreshold"),
+              "name table order");
+
+// Every shake's name in its enum's place, so one added out of order fails here.
+struct ShakeName {
+   int         id;
+   const char* name;
+};
+constexpr ShakeName kNameOrder[] = {
+   { kShakeFire, "FireShake" },           { kShakeHit, "HitShake" },
+   { kShakeLand, "LandShake" },           { kShakeRoll, "RollShake" },
+   { kShakeSprint, "SprintShake" },       { kShakeBrake, "BrakeShake" },
+   { kShakeBlast, "BlastShake" },         { kShakeBoost, "BoostShake" },
+   { kShakeTurn, "TurnShake" },           { kShakeCollision, "CollisionShake" },
+   { kShakeTrickRoll, "TrickRollShake" }, { kShakeTrickFlip, "TrickFlipShake" },
+   { kShakeTakeoff, "TakeoffShake" },     { kShakeLanding, "LandingShake" },
+   { kShakeSwing, "SwingShake" },         { kShakeStrike, "StrikeShake" },
+   { kShakeBlock, "BlockShake" },         { kShakeDeflect, "DeflectShake" },
+   { kShakeSwingBlocked, "SwingBlockedShake" }, { kShakeStep, "StepShake" },
+   { kShakeJump, "JumpShake" },           { kShakeMove, "MoveShake" },
+};
+static_assert(sizeof kNameOrder / sizeof kNameOrder[0] == kCameraShakeChannels, "a shake missing from kNameOrder");
+
+constexpr bool names_in_order()
+{
+   for (const ShakeName& n : kNameOrder)
+      if (kProps.e[n.id * kFieldCount + kScale].hash != pbl_hash(n.name)) return false;
+   return true;
+}
+static_assert(names_in_order(), "kShakeNames must follow CameraShakeChannel");
 
 constexpr bool all_distinct(const PropTable& t)
 {
@@ -372,6 +419,11 @@ struct View {
    bool     walkerJumping = false;    // and whether it was jumping
    bool     haveWalker   = false;     // those two hold a reading
    WalkerAir walkerAir;               // its time off the ground
+   bool     takesHoverHits = false;   // a hover whose class sets CollisionShake
+   bool     hoverJumping = false;     // a hover jumping, last look
+   bool     haveHover    = false;     // that holds a reading
+   HoverAir hoverAir;                 // its time off the ground
+   BumpGate hoverBumps;               // its bumps that have just played
    AirTime  air;
    HitSense hit;
 };
@@ -383,18 +435,27 @@ struct PendingBump {
    float amount  = 0.0f;
 };
 
+// A hit the viewed hover's collision callback reported, waiting for the next
+// camera frame: the hardest since the last, with where it came from.
+struct PendingHoverHit {
+   bool     pending = false;
+   HoverHit hit;
+};
+
 View        s_view;
 PendingBump s_bump;
+PendingHoverHit s_hoverHit;
 KickChannel s_fireKick, s_hitKick, s_landKick, s_rollKick;
 KickChannel s_trickRollKick, s_trickFlipKick, s_takeoffKick, s_landingKick, s_bumpKick;
 KickChannel s_swingKick, s_strikeKick, s_blockKick, s_deflectKick, s_swingBlockedKick;
 KickChannel s_stepKick, s_jumpKick;
 float       s_sprintLevel = 0.0f;
 Shape       s_sprintShape = defaults::kSprintSoldier;
-Hold        s_boost, s_turn, s_brake, s_decel, s_accel;
+Hold        s_boost, s_turn, s_brake, s_move, s_decel, s_accel;
 Shape       s_boostShape = defaults::kBoost;
 Shape       s_turnShape  = defaults::kTurn;
 Shape       s_brakeShape = defaults::kBrake;
+Shape       s_moveShape  = defaults::kMoveHover;
 Rng         s_rng;
 double      s_time = 0.0;   // seconds of shake time, double: see noise()
 
@@ -454,7 +515,9 @@ void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, bool firstPe
 FlyerSpeeds class_speeds(void* cls)
 {
    FlyerSpeeds s;
-   if (!cls || !fly_class::mMinSpeed.off()) return s;
+   if (!cls || !fly_class::mMinSpeed.off() || !fly_class::mMidSpeed.off() || !fly_class::mMaxSpeed.off() ||
+       !fly_class::mBoostSpeed.off())
+      return s;
    s.min = fly_class::mMinSpeed(cls);
    s.mid = fly_class::mMidSpeed(cls);
    s.max = fly_class::mMaxSpeed(cls);
@@ -477,15 +540,16 @@ void play_bump(const ClassShake* cs, const FlyerSpeeds& speeds, float impact)
 }
 
 // What the shakes that last are heading for this frame: a flyer's boost, turn
-// and brake, or a walker's boost and turn.
+// and brake, a walker's boost and turn, or a hover's movement and boost.
 struct HeldTargets {
    float boost = 0.0f;
    float turn  = 0.0f;
    float brake = 0.0f;
+   float move  = 0.0f;
 };
 
-// On a flyer: the boost, turn and brake turbulence, bumps, take-off and
-// landing. Tricks come from the DoTrick detour below.
+// On a flyer: the boost and turn turbulence, the brake sway, bumps, take-off
+// and landing. Tricks come from the DoTrick detour below.
 void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out)
 {
    const float* v = fly::mVelocity(obj);
@@ -583,11 +647,12 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
       s_boostShape = shape;
       out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, forward), heading, shape.steady);
    }
-   if (fly::mMatrix_forward.off() && fly_class::mPitchRate.off()) {
+   if (fly::mMatrix_forward.off() && fly_class::mPitchRate.off() && fly_class::mTurnRate.off()) {
       // Turning hard: the nose swinging round near what the class can turn,
       // whether by stick or mouse. A trick's flip is not a turn.
       const EntityFlyerClass* cls = fly::mClass(obj);
-      const float hard = hard_turn_rate(fly_class::mPitchRate(cls), fly_class::mTurnRate(cls));
+      const float hard = cls ? hard_turn_rate(fly_class::mPitchRate(cls), fly_class::mTurnRate(cls))
+                             : hard_turn_rate(0.0f, 0.0f);
       const bool tricking = (fly::mFlags(obj) & (fly::kFlagRoll | fly::kFlagFlip)) != 0;
       s_view.turn.update(!tricking && s_view.noseRate.level >= hard, dt);
       if (shape_for(cs, kShakeTurn, defaults::kTurn, false, shape, scale)) {
@@ -668,6 +733,69 @@ void update_walker(uint8_t* obj, const ClassShake* cs, HeldTargets& out)
    }
 }
 
+// A hover's bump: CollisionShake sized by how hard it hit, tilted toward the
+// hit. A contact that keeps reporting (a spring sinking into a wall) plays
+// once (BumpGate).
+void play_hover_bump(const ClassShake* cs, const FlyerSpeeds& speeds, const HoverHit& hit)
+{
+   Shape shape;
+   float scale;
+   if (!shape_for(cs, kShakeCollision, defaults::kCollisionHover, false, shape, scale)) return;
+   const float size = bump_scale(shape.threshold, speeds, hit.speed);
+   if (!(size > 0.0f) || !s_view.hoverBumps.admit(hit.speed)) return;
+   Kick k = make_kick(shape, scale * size, s_rng);
+   aim_bump(k, hit.right, hit.forward);
+   s_bumpKick.trigger(k, s_time, shape.limit);
+   s_view.hitMute = kBumpHitMute;
+}
+
+// On a hover: a sway while it moves and a stronger one while it boosts, both
+// fading out in the air; a jump; a landing; and a tilt toward whatever it
+// hits. The jump, the landing and the hits come from BF2's own records: the
+// jump flag, the ground ratio and the collision callback.
+void update_hover(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out)
+{
+   const EntityHoverClass* cls = hov::mClass(obj);
+   const FlyerSpeeds speeds = cls ? hover_speeds(hov_class::mForwardSpeed(cls), hov_class::mBoostSpeed(cls))
+                                  : FlyerSpeeds{};
+   const float* v = hov::mVelocity(obj);
+   const float speed = plane_speed(v, hov::mMatrix_up(obj));   // along its deck: its bob is not speed
+   const float ratio = hov::mGroundRatio(obj);
+   const float ground = std::isfinite(ratio) ? clamp01(ratio) : 0.0f;
+   const bool jumping = (hov::mFlags(obj) & hov::kFlagJumping) != 0;
+   const float came = s_view.hoverAir.update(ratio, v[1], dt);
+
+   const bool jumped = s_view.haveHover && jumping && !s_view.hoverJumping;
+   s_view.hoverJumping = jumping;
+   s_view.haveHover = true;
+   s_view.hoverBumps.advance(dt);
+
+   if (s_hoverHit.pending) {
+      const HoverHit hit = s_hoverHit.hit;
+      s_hoverHit = PendingHoverHit{};
+      play_hover_bump(cs, speeds, hit);
+   }
+   if (jumped) play(s_jumpKick, cs, kShakeJump, defaults::kJump);
+   Shape shape;
+   float scale;
+   if (came >= 0.0f && shape_for(cs, kShakeLand, defaults::kLandHover, false, shape, scale)) {
+      const float size = bump_scale(shape.threshold, speeds, came);
+      if (size > 0.0f) s_landKick.trigger(make_kick(shape, scale * size, s_rng), s_time, shape.limit);
+   }
+
+   if (shape_for(cs, kShakeMove, defaults::kMoveHover, false, shape, scale)) {
+      s_moveShape = shape;
+      out.move = scale * threshold_level(shape.threshold, speeds, speed) * ground;
+   }
+   if (hov::mBoost(obj) && shape_for(cs, kShakeBoost, defaults::kBoostHover, false, shape, scale)) {
+      // Full while it is still speeding up to BoostSpeed, then Steady of that.
+      const bool heading = speeds.boost - speed > heading_margin(speeds);
+      s_boostShape = shape;
+      out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, speed), heading, shape.steady) *
+                  ground;
+   }
+}
+
 // Any unit: a drop in its health is a hit, sized by how much it lost. Right
 // after a bump's shake the drop is the bump's own damage, already shaken for.
 void update_hit(uint8_t* obj, const ClassShake* cs, float dt)
@@ -725,20 +853,24 @@ void shake_view(uint8_t* self, void* camera, float dt)
       s_view = View{};
       s_view.obj = obj;
       s_bump = PendingBump{};
+      s_hoverHit = PendingHoverHit{};
    }
 
    const bool flyer = obj && is_rtti(obj, kFlyerRtti);
    const bool walker = obj && !flyer && is_rtti(obj, kWalkerRtti);
+   const bool hover = obj && !flyer && !walker && is_rtti(obj, kHoverRtti);
    const ClassShake* cs = nullptr;
    if (obj && !s_classes.empty())
       cs = find_class(flyer    ? static_cast<const void*>(fly::mClass(obj))
                       : walker ? static_cast<const void*>(walk::mClass(obj))
+                      : hover  ? static_cast<const void*>(hov::mClass(obj))
                                : static_cast<const void*>(vcall_object(obj, kVt_GetEntityClass)));
    const bool firstPerson = first_person(owner);
 
    float sprintTarget = 0.0f;
    HeldTargets held;
    s_view.takesBumps = false;
+   s_view.takesHoverHits = false;
    if (s_odfShakes && obj) {
       if (flyer) {
          Shape bump;
@@ -747,6 +879,12 @@ void shake_view(uint8_t* self, void* camera, float dt)
          update_flyer(obj, cs, dt, held);
       } else if (walker) {
          update_walker(obj, cs, held);
+      } else if (hover) {
+         Shape bump;
+         float scale;
+         s_view.takesHoverHits =
+            s_hoverHooked && shape_for(cs, kShakeCollision, defaults::kCollisionHover, false, bump, scale);
+         update_hover(obj, cs, dt, held);
       } else if (is_rtti(obj, kSoldierRtti)) {
          update_soldier(owner, cs, dt, firstPerson, sprintTarget);
       }
@@ -775,6 +913,7 @@ void shake_view(uint8_t* self, void* camera, float dt)
    fade_toward(s_boost, held.boost, dt, held_fade(s_boostShape));
    fade_toward(s_turn, held.turn, dt, held_fade(s_turnShape));
    fade_toward(s_brake, held.brake, dt, held_fade(s_brakeShape));
+   fade_toward(s_move, held.move, dt, held_fade(s_moveShape));
 
    Offset total;
    total += s_fireKick.value(s_time);
@@ -794,6 +933,7 @@ void shake_view(uint8_t* self, void* camera, float dt)
    total += s_stepKick.value(s_time);
    total += s_jumpKick.value(s_time);
    total += judder(s_sprintShape, s_time, s_sprintLevel);
+   total += turbulence(s_moveShape, s_time, s_move.level);
    total += turbulence(s_boostShape, s_time, s_boost.level);
    total += turbulence(s_turnShape, s_time, s_turn.level);
    total += sway(s_brakeShape, s_time, s_brake.level);
@@ -1059,6 +1199,55 @@ void __fastcall bump_apply_shake(void* manager, void* edx, float amount, float d
    s_applyShake(manager, edx, amount, duration);
 }
 
+// The collision type BF2 gives an object, where its own callback reads it: in
+// its tree-grid stack's row when it has a stack, else its own.
+int collision_type(uint8_t* object)
+{
+   uint8_t* grid = object + coll::kTreeGrid;
+   uint8_t* stack = at<uint8_t*>(grid, layout::TreeGridObject::kStackPtr);
+   if (!stack) return at<int>(grid, layout::TreeGridObject::kData);
+   return at<int>(stack, layout::TreeGridStack::kData + 4u * at<uint32_t>(grid, layout::TreeGridObject::kStackIdx));
+}
+
+// A contact on the viewed hover, before BF2 handles it: how fast the hover
+// closes on what it hit, less that thing's own velocity, as BF2 works it out,
+// and from where. `part` is the hover's CollisionObject part, the callback's
+// `this`. Like BF2, only a contact with something whose collision type is at
+// least the hover's own counts, and never a soldier. The hardest since the
+// last camera frame waits for it (update_hover).
+void note_hover_hit(uint8_t* part, void* result, uint8_t* other)
+{
+   __try {
+      const int type = collision_type(other);
+      if (type < collision_type(part) || type == coll::kTypeSoft) return;
+      uint8_t* hover = part - hov::kCollisionPart;
+      const float* v = hov::mVelocity(hover);
+      float rel[3] = { v[0], v[1], v[2] };
+      if (uint8_t* go = vcall_object(other, coll::kVt_GetGameObject)) {
+         if (const auto* ov = reinterpret_cast<const float*>(vcall_object(go, kVt_GetVelocity)))
+            for (int i = 0; i < 3; ++i) rel[i] -= ov[i];
+      }
+      const auto* normal = reinterpret_cast<const float*>(static_cast<uint8_t*>(result) +
+                                                          layout::CollisionResult::kSeparationNormal);
+      const HoverHit hit = hover_hit(rel, normal, hov::mMatrix_right(hover), hov::mMatrix_up(hover),
+                                     hov::mMatrix_forward(hover));
+      if (hit.speed > s_hoverHit.hit.speed) {
+         s_hoverHit.pending = true;
+         s_hoverHit.hit = hit;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+}
+
+// EntityHover::CollisionCallback, for every hover and CommandHover; only the
+// viewed one, whose class sets CollisionShake, is looked at.
+bool __fastcall hooked_HoverCollision(uint8_t* self, void* edx, void* result, uint8_t* other, void* restrictor)
+{
+   if (s_view.takesHoverHits && self && result && other && self - hov::kCollisionPart == s_view.obj)
+      note_hover_hit(self, result, other);
+   return s_hoverCollision(self, edx, result, other, restrictor);
+}
+
 // The reticule sees the unshaken camera: for this call only, the camera's
 // world-to-camera matrix goes back to the one SetupCamera made before the shake,
 // and the shaken one returns straight after. Only when the camera still holds
@@ -1135,7 +1324,7 @@ void install_bumps(uintptr_t base)
    const uintptr_t post = g_addr->flyer_post_collision_shake_call;
    const uintptr_t callback = g_addr->flyer_collision_shake_call;
    if (!g_addr->camera_manager_apply_shake || !post || !callback) {
-      install_log("[CameraShake] CollisionShake: not on this build yet");
+      install_log("[CameraShake] Flyer CollisionShake: not on this build yet");
       return;
    }
    if (!guard(base, g_addr->camera_manager_apply_shake, "CameraManager::ApplyShake",
@@ -1188,6 +1377,34 @@ void install_melee(uintptr_t base, bool modtools)
    install_log("[CameraShake] Strike, block and deflect shakes %s (UpdateFire 0x%08X, Deflect 0x%08X)",
                ok ? "installed" : "commit failed", (unsigned)g_addr->weapon_melee_update_fire,
                (unsigned)g_addr->weapon_melee_deflect);
+}
+
+// A hover's CollisionShake: a detour on EntityHover::CollisionCallback, which
+// CommandHover shares. Its other shakes need no hook.
+void install_hover(uintptr_t base, bool modtools)
+{
+   if (!g_addr->hover_collision_callback) {
+      install_log("[CameraShake] Hover CollisionShake: not on this build yet");
+      return;
+   }
+   if (!guard(base, g_addr->hover_collision_callback, "EntityHover::CollisionCallback",
+              modtools ? "\x83\xEC\x2C\x53\x55\x56\x57\x8B\x7C\x24\x44"
+                       : "\x55\x8B\xEC\x83\xEC\x2C\x56\x57\x8B\x7D\x0C\x8B\xF1",
+              modtools ? "xxxxxxxxxxx" : "xxxxxxxxxxxxx"))
+      return;
+   s_hoverCollision = reinterpret_cast<HoverCollisionFn>(resolve(base, g_addr->hover_collision_callback));
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   const LONG r = DetourAttach(&(PVOID&)s_hoverCollision, hooked_HoverCollision);
+   if (r != NO_ERROR) {
+      DetourTransactionAbort();
+      install_log("[CameraShake] Hover CollisionShake: DetourAttach failed (%ld)", (long)r);
+      return;
+   }
+   s_hoverHooked = DetourTransactionCommit() == NO_ERROR;
+   install_log("[CameraShake] Hover CollisionShake %s (CollisionCallback 0x%08X)",
+               s_hoverHooked ? "installed" : "commit failed", (unsigned)g_addr->hover_collision_callback);
 }
 
 } // namespace
@@ -1260,10 +1477,11 @@ void camera_shake_install(uintptr_t base)
                s_odfShakes ? "on" : "unavailable");
    if (ok && s_odfShakes) install_bumps(base);
    if (ok && s_odfShakes) install_melee(base, modtools);
+   if (ok && s_odfShakes) install_hover(base, modtools);
    if (ok && s_odfShakes &&
        (!fly::mGetSpeedSpeed.off() || !fly::mMatrix_forward.off() || !fly_class::mMinSpeed.off() ||
         !fly_class::mPitchRate.off() || !fly::mControlMove.off() || !fly::mInLandingRegionFactor.off() ||
         !fly::mControlStrafe.off()))
-      install_log("[CameraShake] TurnShake, speed names in a Threshold and throttle-led boost and brake "
-                  "shakes are not on this build yet");
+      install_log("[CameraShake] A flyer's TurnShake, speed names in a flyer's Threshold and its "
+                  "throttle-led boost and brake shakes are not on this build yet");
 }

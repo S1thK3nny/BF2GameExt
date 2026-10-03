@@ -244,6 +244,8 @@ void log_step(int i)
    char verdict[200];
    if (s.counted)
       _snprintf_s(verdict, sizeof verdict, _TRUNCATE, "yes");
+   else if (s_driven.type && s.rearmed)
+      _snprintf_s(verdict, sizeof verdict, _TRUNCATE, "NO, though BF2 re-armed it on the way down");
    else if (s_driven.type && g_walkerStompFix)
       _snprintf_s(verdict, sizeof verdict, _TRUNCATE, "NO, it never came down faster than %.1f m/s, so it "
                   "was not re-armed", kWalkerStompSpeed);

@@ -523,6 +523,12 @@
     <ClInclude Include="src\weapon\impact_sound_water_fix.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\CollisionObject.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\EntityHover.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">

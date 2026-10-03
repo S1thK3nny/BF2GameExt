@@ -24,6 +24,8 @@ GAME = SRC / "game" / "Battlefront2" / "Source"
 chase = (GAME / "ChaseCamera.h").read_text()
 flyer = (GAME / "EntityFlyer.h").read_text()
 walker = (GAME / "EntityWalker.h").read_text()
+hover = (GAME / "EntityHover.h").read_text()
+collision = (GAME / "CollisionObject.h").read_text()
 red_camera = (GAME / "RedCamera.h").read_text()
 weapon = (GAME / "Weapon.h").read_text()
 odf = (SRC / "entity" / "odf_gameext_props.cpp").read_text()
@@ -36,10 +38,19 @@ def const(text, name):
     return int(match.group(1), 0)
 
 
+def namespace_body(text, namespace):
+    return re.search(r"namespace " + re.escape(namespace) + r"\s*\{(.*?)\n\}\s*//\s*namespace "
+                     + re.escape(namespace) + r"\b", text, re.S).group(1)
+
+
+def ns_const(text, namespace, name):
+    """A constant inside one namespace, for names more than one namespace uses."""
+    return const(namespace_body(text, namespace), name)
+
+
 def fields(text, namespace):
     """A namespace's Field<> members: name -> (modtools, release); one offset is both."""
-    body = re.search(r"namespace " + re.escape(namespace) + r"\s*\{(.*?)\n\}\s*//\s*namespace "
-                     + re.escape(namespace) + r"\b", text, re.S).group(1)
+    body = namespace_body(text, namespace)
     out = {}
     for m in re.finditer(r"Field<[^;]*?>\s+(\w+)\{(0x[0-9A-Fa-f]+|\d+)(?:,\s*(0x[0-9A-Fa-f]+|\d+))?\}", body):
         dbg = int(m.group(2), 0)
@@ -61,7 +72,9 @@ expected = {
     (walker, "kMaxFeet"): 6,
     (module, "kVt_GetGameObject"): 0x1C, (module, "kVt_GetControllable"): 0x28,
     (module, "kCtrl_Trackable"): 0x18, (module, "kVt_IsRtti"): 0x00,
-    (module, "kVt_GetEntityClass"): 0x28,
+    (module, "kVt_GetEntityClass"): 0x28, (module, "kVt_GetVelocity"): 0x44,
+    # The hover's jump bit, and its collision callback's `this` (the CollisionObject part).
+    (hover, "kFlagJumping"): 0x02, (hover, "kCollisionPart"): 0x0C,
     # A GameObject's Damageable at +0x140 (vptr), mCurHealth and mMaxHealth after it:
     # the offsets controller_rumble.cpp (Damageable + 4 / + 8) and aim_assist.cpp read.
     (module, "kObj_Health"): 0x144, (module, "kObj_MaxHealth"): 0x148,
@@ -87,7 +100,20 @@ assert "s == 0 || s == 1 || s == 2 || s == 3 || s == 5 || s == 19" in module, "g
 for (text, name), value in expected.items():
     assert const(text, name) == value, name
 
-# The flyer and walker fields camera shake reads, (modtools, release); a release 0
+# What a hover's collision callback reads of the other object and the contact,
+# where BF2's own callback reads it (the sites below).
+expected_collision = {
+    ("layout::CollisionObject", "kTreeGrid"): 0x04, ("layout::CollisionObject", "kVt_GetGameObject"): 0x38,
+    ("layout::CollisionObject", "kTypeSoft"): 2,
+    ("layout::TreeGridObject", "kStackPtr"): 0x00, ("layout::TreeGridObject", "kStackIdx"): 0x04,
+    ("layout::TreeGridObject", "kData"): 0x1C, ("layout::TreeGridStack", "kData"): 0x04,
+    ("layout::CollisionResult", "kSeparationNormal"): 0x0C,
+}
+for (namespace, name), value in expected_collision.items():
+    assert ns_const(collision, namespace, name) == value, (namespace, name)
+assert 'kHoverRtti   = pbl_hash("EntityHover")' in module, "the hover RTTI name"
+
+# The flyer, walker and hover fields camera shake reads, (modtools, release); a release 0
 # is a field not read on Steam and GOG yet. The sites below are where each was read.
 expected_fields = {
     ("layout::EntityFlyer", flyer): {
@@ -107,6 +133,14 @@ expected_fields = {
     },
     ("layout::EntityWalkerClass", walker): {
         "mMaxSpeed": (0x768, 0x6A0), "mBoostSpeed": (0x76C, 0x6A4), "mNumFeet": (0xD22, 0xC5A),
+    },
+    ("layout::EntityHover", hover): {
+        "mMatrix_right": (0xF0, 0xF0), "mMatrix_up": (0x100, 0x100), "mMatrix_forward": (0x110, 0x110),
+        "mVelocity": (0x498, 0x460), "mGroundRatio": (0x4B0, 0x478), "mClass": (0x4C4, 0x48C),
+        "mBoost": (0x1D40, 0x1D00), "mFlags": (0x1D41, 0x1D01),
+    },
+    ("layout::EntityHoverClass", hover): {
+        "mForwardSpeed": (0x6C8, 0x600), "mBoostSpeed": (0xEC0, 0xDEC),
     },
 }
 for (namespace, text), want in expected_fields.items():
@@ -138,7 +172,7 @@ GUARDS = guards()
 assert set(GUARDS) == {"chase_camera_setup_camera", "red_camera_set_matrix",
                        "tracker_is_first_person_view", "flyer_do_trick", "weapon_signal_fire",
                        "reticle_display_update", "camera_manager_apply_shake",
-                       "weapon_melee_update_fire", "weapon_melee_deflect"}, GUARDS
+                       "weapon_melee_update_fire", "weapon_melee_deflect", "hover_collision_callback"}, GUARDS
 # Read on modtools only so far: a build without the address skips the guard.
 MODTOOLS_ONLY = {"camera_manager_apply_shake", "flyer_post_collision_shake_call",
                  "flyer_collision_shake_call"}
@@ -205,6 +239,55 @@ retail_walker = {
     0x00500DFC: [("mov", "eax, dword ptr [edx + 0x1de0]"), ("and", "eax, 0xffffffbf"),
                  ("mov", "dword ptr [edx + 0x1e34], 0"), ("or", "eax, 0x80"),
                  ("mov", "dword ptr [edx + 0x1de0], eax")],
+}
+# EntityHover on Steam and GOG, which have it at the same addresses.
+retail_hover = {
+    # CollisionCallback (this = the hover + 0xC): the other object and its
+    # collision type, the hover's velocity, the other's GameObject and its
+    # velocity, the contact normal, soldiers left out, the hover handed on,
+    # and the returns.
+    0x004C66A8: [("mov", "edi, dword ptr [ebp + 0xc]"), ("mov", "esi, ecx"), ("mov", "ecx, dword ptr [edi + 4]"),
+                 ("test", "ecx, ecx"), ("je", "0x4c66bd"), ("mov", "eax, dword ptr [edi + 8]"),
+                 ("mov", "ecx, dword ptr [ecx + eax*4 + 4]"), ("jmp", "0x4c66c0"),
+                 ("mov", "ecx, dword ptr [edi + 0x20]")],
+    # The hover's own type, the same way; nothing below it goes further.
+    0x004C66C0: [("mov", "edx, dword ptr [esi + 4]"), ("test", "edx, edx"), ("je", "0x4c66d0"),
+                 ("mov", "eax, dword ptr [esi + 8]"), ("mov", "eax, dword ptr [edx + eax*4 + 4]"),
+                 ("jmp", "0x4c66d3"), ("mov", "eax, dword ptr [esi + 0x20]"), ("cmp", "ecx, eax"),
+                 ("jl", "0x4c6e73")],
+    0x004C66E3: [("movq", "xmm0, qword ptr [esi + 0x454]")],
+    0x004C66FD: [("mov", "eax, dword ptr [eax + 0x38]"), ("call", "eax")],
+    0x004C670F: [("mov", "ecx, eax"), ("mov", "edx, dword ptr [eax]"), ("mov", "eax, dword ptr [edx + 0x44]"),
+                 ("call", "eax")],
+    0x004C676D: [("lea", "ecx, [edx + 0xc]")],
+    0x004C67A7: [("cmp", "eax, 2")],
+    0x004C67DD: [("lea", "ecx, [esi - 0xc]")],
+    0x004C6814: [("ret", "0xc")],
+    0x004C6928: [("ret", "0xc")],
+    # Move: the class with its BoostSpeed and ForwardSpeed, the matrix, the
+    # velocity, the jump bit (tested, set, cleared), the up and forward rows.
+    0x004C3FE2: [("mov", "eax, dword ptr [esi + 0x48c]")],
+    0x004C4059: [("lea", "eax, [esi + 0xf0]")],
+    0x004C40B5: [("movss", "xmm0, dword ptr [eax + 0xdec]")],
+    0x004C40ED: [("test", "byte ptr [esi + 0x1d01], 2")],
+    0x004C417F: [("lea", "edi, [esi + 0x460]")],
+    0x004C42C2: [("movss", "xmm2, dword ptr [eax + 0x600]")],
+    0x004C44A3: [("mulss", "xmm0, dword ptr [esi + 0x110]")],
+    0x004C44CA: [("or", "cl, 2"), ("mov", "byte ptr [esi + 0x1d01], cl")],
+    0x004C52D0: [("and", "byte ptr [esi + 0x1d01], 0xfd")],
+    0x004C5283: [("movss", "xmm2, dword ptr [esi + 0x104]")],
+    # Update works from the Controllable part (the hover + 0x240, its matrix at
+    # -0x150): mBoost from the sprint input, then Move.
+    0x004C2ECB: [("lea", "ecx, [ebx + 0x1ac0]"), ("movss", "xmm4, dword ptr [ebp + 8]"),
+                 ("mov", "byte ptr [ecx], al")],
+    0x004C2FA0: [("movq", "xmm0, qword ptr [ebx - 0x150]")],
+    0x004C2FD0: [("call", "0x4c3fa0")],
+    # PostCollisionUpdate takes the frame time off the ground ratio, floored at
+    # 0; UpdateColliderBody sets it to 1 while a spring touches ground.
+    0x004C343D: [("movss", "dword ptr [edi + 0x478], xmm1")],
+    0x004C3447: [("mov", "dword ptr [edi + 0x478], 0")],
+    0x004C61C5: [("mov", "dword ptr [esi + 0x478], 0x3f800000")],
+    0x00402BA0: [("push", "{hover_rtti_name}")],                            # rttiHashEntityHover
 }
 sites = {
     "modtools": {
@@ -320,8 +403,52 @@ sites = {
         0x0054F7DC: [("mov", "eax, dword ptr [esi + 0x1e20]"), ("and", "eax, 0xffffffbf"), ("pop", "edi"),
                      ("or", "eax, 0x80"), ("mov", "dword ptr [esi + 0x1e20], eax")],
         0x0054F7F2: [("mov", "dword ptr [esi + 0x1e74], 0")],
+        # EntityHover, as on retail. CollisionCallback (this = the hover + 0xC).
+        0x005155B7: [("mov", "edi, dword ptr [esp + 0x44]"), ("mov", "eax, dword ptr [edi + 4]"),
+                     ("test", "eax, eax"), ("mov", "ebp, ecx"), ("je", "0x5155cd"),
+                     ("mov", "ecx, dword ptr [edi + 8]"), ("mov", "eax, dword ptr [eax + ecx*4 + 4]"),
+                     ("jmp", "0x5155d0"), ("mov", "eax, dword ptr [edi + 0x20]")],
+        0x005155D0: [("mov", "ecx, dword ptr [ebp + 4]"), ("test", "ecx, ecx"), ("je", "0x5155e0"),
+                     ("mov", "edx, dword ptr [ebp + 8]"), ("mov", "ecx, dword ptr [ecx + edx*4 + 4]"),
+                     ("jmp", "0x5155e3"), ("mov", "ecx, dword ptr [ebp + 0x20]"), ("cmp", "eax, ecx"),
+                     ("jl", "0x515b19")],
+        0x005155EB: [("lea", "esi, [ebp + 0x48c]")],
+        0x00515603: [("mov", "edx, dword ptr [edi]"), ("mov", "ecx, edi"), ("mov", "dword ptr [esp + 0x2c], eax"),
+                     ("call", "dword ptr [edx + 0x38]")],
+        0x00515619: [("mov", "edx, dword ptr [eax]"), ("mov", "ecx, eax"), ("call", "dword ptr [edx + 0x44]")],
+        0x00515657: [("lea", "ebx, [edx + 0xc]")],
+        0x00515676: [("cmp", "eax, 2")],
+        0x005156A4: [("lea", "ecx, [ebp - 0xc]")],
+        0x005156E4: [("ret", "0xc")],
+        0x00515794: [("ret", "0xc")],
+        # Move: the class, the matrix, BoostSpeed, the jump bit, the forward row,
+        # the velocity, ForwardSpeed; ApplyCollisionImpact's up row.
+        0x0050E46F: [("mov", "eax, dword ptr [ebx + 0x4c4]")],
+        0x0050E4E1: [("lea", "eax, [ebx + 0xf0]")],
+        0x0050E576: [("fld", "dword ptr [ecx + 0xec0]")],
+        0x0050E5AF: [("test", "byte ptr [ebx + 0x1d41], 2")],
+        0x0050F47D: [("fmul", "dword ptr [ebx + 0x110]")],
+        0x0050F49A: [("or", "cl, 2"), ("mov", "byte ptr [ebx + 0x1d41], cl")],
+        0x0050F5C0: [("and", "byte ptr [ebx + 0x1d41], 0xfd")],
+        0x0050FCDB: [("lea", "eax, [ebx + 0x498]")],
+        0x0050FD4D: [("fld", "dword ptr [ecx + 0x6c8]")],
+        0x0051529F: [("fld", "dword ptr [ebx + 0x104]")],
+        # Update, from the Controllable part (the hover + 0x240): mBoost, then
+        # Move on the hover, through the thunk.
+        0x00513AFA: [("lea", "ecx, [esi + 0x1b00]"), ("mov", "byte ptr [ecx], al")],
+        0x00513C0F: [("lea", "edi, [esi - 0x240]"), ("mov", "ecx, edi")],
+        0x00513C2D: [("call", "0x40c897")],
+        0x0040C897: [("jmp", "0x50e460")],
+        # PostCollisionUpdate: the class, the ground ratio less the frame time,
+        # floored at 0; UpdateColliderBody: 1 while a spring touches ground.
+        0x0051450A: [("mov", "eax, dword ptr [ebx + 0x4c4]")],
+        0x0051453D: [("fld", "dword ptr [ebx + 0x4b0]")],
+        0x00514559: [("fst", "dword ptr [ebx + 0x4b0]")],
+        0x00514575: [("mov", "dword ptr [ebx + 0x4b0], 0")],
+        0x0050CAAB: [("mov", "dword ptr [esi + 0x4b0], 0x3f800000")],
+        0x00A16A90: [("push", "{hover_rtti_name}")],                       # rttiHashEntityHover
     },
-    "steam": {**retail_flyer, **retail_walker, **{
+    "steam": {**retail_flyer, **retail_walker, **retail_hover, **{
         0x00453D14: [("cmp", "dword ptr [esi + 0xc], 0"), ("lea", "eax, [esi + 0x10]")],
         0x00453D21: [("call", "{red_camera_set_matrix}")],
         0x00453D3B: [("ret", "8")],
@@ -347,7 +474,7 @@ sites = {
         0x0068A6C9: [("ret", "0xc")],
         0x0068B0F8: [("ret", "0xc")],
     }},
-    "gog": {**retail_flyer, **retail_walker, **{
+    "gog": {**retail_flyer, **retail_walker, **retail_hover, **{
         0x00453CF4: [("cmp", "dword ptr [esi + 0xc], 0"), ("lea", "eax, [esi + 0x10]")],
         0x00453D01: [("call", "{red_camera_set_matrix}")],
         0x00453D1B: [("ret", "8")],
@@ -376,6 +503,15 @@ sites = {
 # WeaponMelee's vtable: Deflect (+0x48) and UpdateFire (+0xA4) are the hooked
 # functions, and IsMelee (+0x54) answers true. modtools goes through thunks.
 melee_vtables = {"modtools": 0x00A54210, "steam": 0x007B1578, "gog": 0x007B24F0}
+
+# EntityHover's and CommandHover's CollisionObject vtables, each with the
+# constructor store that puts it at +0xC: (store, vtable). Slot 6 (+0x18) of
+# both is the detoured callback; modtools goes through a thunk.
+hover_vtables = {
+    "modtools": [(0x005118E5, 0x00A3DE68), (0x0064907B, 0x00A57258)],
+    "steam": [(0x004C0ABC, 0x0079BC98), (0x00478FD9, 0x0079834C)],
+    "gog": [(0x004C0ABC, 0x0079CC38), (0x00478FD9, 0x007992EC)],
+}
 
 # ChaseCamera's vtable: Update (+0x04) sits in the slot before SetupCamera (+0x08),
 # which ties the queue sites above to the class. modtools goes through thunks.
@@ -422,6 +558,15 @@ for build, filename in builds:
             after[1].mnemonic == "call", (build, "RTTI hash call")
         names = {name: hex(value) for name, value in addrs.items()}
         names["flyer_rtti_name"] = hex(name_va)
+
+        # And the hover's, which CommandHover answers too.
+        hover_push = [a for a in sites[build] if sites[build][a] == [("push", "{hover_rtti_name}")]][0]
+        hover_va = int.from_bytes(image[hover_push + 1 - base:hover_push + 5 - base], "little")
+        assert image[hover_va - base:hover_va - base + 12] == b"EntityHover\x00", (build, "hover RTTI name")
+        after = list(decoder.disasm(image[hover_push + 5 - base:hover_push + 20 - base], hover_push + 5, count=2))
+        assert after[0].mnemonic == "mov" and after[0].op_str.startswith("ecx, ") and \
+            after[1].mnemonic == "call", (build, "hover RTTI hash call")
+        names["hover_rtti_name"] = hex(hover_va)
 
         for address_name, per_kind in GUARDS.items():
             if address_name in MODTOOLS_ONLY and address_name not in addrs:
@@ -471,6 +616,13 @@ for build, filename in builds:
         assert image[is_melee - base:is_melee - base + 3] == b"\xb0\x01\xc3", (build, "WeaponMelee::IsMelee")
         assert slot_target(melee, 0x4C) == addrs["weapon_signal_fire"], (build, "WeaponMelee uses Weapon::SignalFire")
 
+        for store_va, table_va in hover_vtables[build]:
+            store = list(decoder.disasm(image[store_va - base:store_va - base + 10], store_va, count=1))[0]
+            assert store.mnemonic == "mov" and store.op_str.endswith("+ 0xc], " + hex(table_va)), \
+                (build, hex(store_va), store.op_str)
+            assert slot_target(table_va, 0x18) == addrs["hover_collision_callback"], \
+                (build, hex(table_va), "hover CollisionCallback slot")
+
         # The collision sites and ApplyShake, where this build has them, and the
         # stock amount and duration factors the bump is read back with.
         present = MODTOOLS_ONLY & set(addrs)
@@ -505,6 +657,6 @@ for build, filename in builds:
 
         guarded = sum(1 for name in GUARDS if name not in MODTOOLS_ONLY or name in addrs)
         print(f"{build}: {guarded} guards, {len(sites[build])} camera shake sites and "
-              f"2 Derive sites passed{'' if present else ' (collision sites not read yet)'}")
+              f"2 Derive sites passed{'' if present else ' (flyer collision sites not read yet)'}")
     finally:
         pe.close()

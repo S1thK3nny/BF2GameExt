@@ -66,13 +66,13 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Prone stance | ✅ | ✅ | ✅ |
 | First-person animation banks and FP sprint | ✅ | ✅ | ✅ |
 | Soldier and weapon systems | ✅ | ✅ | ✅ |
-| Vehicle fixes (carrier, droideka, hover, view toggle) | ✅ | ✅ | ✅ |
+| Vehicle fixes (carrier, droideka, hover, view toggle, walker stomps, flyer roll throttle) | ✅ | ✅ | ✅ |
 | Flyer boost animation | ✅ | ✅ | ✅ |
 | Aim assist | ✅ | ✅ | ✅ |
 | Gamepad bindings and rumble | ✅ | ✅ | ✅ |
 | Loading screen system | ✅ | ✅ | ✅ |
 | HUD events, number transforms, `FillFrom` | ✅ | ✅ | ✅ |
-| Camera shake | ✅ | ✅ | ✅ |
+| Camera shake *(a flyer's turn and collision shakes and speed-name thresholds: modtools only for now)* | ✅ | ✅ | ✅ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |
 

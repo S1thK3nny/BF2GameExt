@@ -323,6 +323,14 @@ played on modtools. Retail does not print the "Unable to find branch region" war
 it there means turning on `[Diagnostic] BranchRegionDebug=1` and watching units actually take the
 branch.
 
+**Flyer shakes on retail** - On Steam and GOG a flyer's `TurnShake` and `CollisionShake` do
+nothing, and speed names in a flyer's `Threshold` never resolve, so its default boost and brake
+shakes stay quiet there and speeding up is judged by speed change instead of the throttle. The
+flyer fields the rework reads (`mGetSpeedSpeed`, the forward axis, the class's speeds and turn
+rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor`) need reading on retail, and
+retail `ApplyShake`, which takes its amount and duration in XMM1 and XMM2, needs a stand-in at
+the two collision calls. Details in [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
+
 ## Limits
 
 **AI reservation pool past 127** - `ReservationPoolSize` stops at 127 because of how the value is
@@ -375,7 +383,8 @@ per-family handling as `SetInstanceProperty`.
 to the class's stock `SetProperty`, which ignores them. Stock `SetClassProperty` also only finds
 entity classes, so weapon classes are out of reach altogether. Route those names through the
 same listeners from the class `SetProperty` (the soldier one is already hooked on every build;
-`EntityFlyerClass::SetProperty`, Phantom `0x00529ED0`, needs porting), and let
+`EntityFlyerClass::SetProperty`, Phantom `0x00529ED0`, and the walker's and hover's need
+porting), and let
 `SetClassProperty` fall back to weapon classes by name. Details in
 [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
 

@@ -1158,6 +1158,12 @@ namespace modtools {
    // (entity/walker_stomp_fix.cpp).
    constexpr uintptr_t walker_update_state          = 0x0055B3C0;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00555D0F;
+   // EntityHover::CollisionCallback: thiscall(CollisionResult*, CollisionObject*
+   // other, Restrictor*), RET 0xC, bool in AL; `this` is the hover + 0xC, its
+   // CollisionObject part. Slot 6 (+0x18) of the CollisionObject vtable of
+   // EntityHover (0x00A3DE68) and CommandHover (0x00A57258), both through the
+   // thunk at 0x0041683D. Camera shake detours it for a hover's CollisionShake.
+   constexpr uintptr_t hover_collision_callback     = 0x005155B0;
    constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
    constexpr uintptr_t hud_game_events_open         = 0x006AEF00;
@@ -2483,6 +2489,10 @@ namespace steam {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntityHover::CollisionCallback, as on modtools: slot 6 of the
+   // CollisionObject vtable of EntityHover (0x0079BC98) and CommandHover
+   // (0x0079834C).
+   constexpr uintptr_t hover_collision_callback     = 0x004C66A0;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t net_is_local_turn            = 0x01E62F10;  // WeaponCannon::Fire 0x0067F793
@@ -3081,6 +3091,10 @@ namespace gog {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntityHover::CollisionCallback, at Steam's address: slot 6 of the
+   // CollisionObject vtable of EntityHover (0x0079CC38) and CommandHover
+   // (0x007992EC).
+   constexpr uintptr_t hover_collision_callback     = 0x004C66A0;
    constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
    constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t net_is_local_turn            = 0x01E643C0;  // WeaponCannon::Fire 0x00680813

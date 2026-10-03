@@ -97,9 +97,9 @@ void walker_stomp_fix_install(uintptr_t base)
    const bool found =
       modtools ? take_operand(base, g_addr->walker_stomp_drop_site, kTestModtools, sizeof kTestModtools)
                : take_operand(base, g_addr->walker_stomp_drop_site, gog ? kRearmGog : kRearmSteam,
-                              sizeof kRearmSteam) &&
+                              gog ? sizeof kRearmGog : sizeof kRearmSteam) &&
                  take_operand(base, g_addr->walker_stomp_drop_site2, gog ? kLandGog : kLandSteam,
-                              sizeof kLandSteam);
+                              gog ? sizeof kLandGog : sizeof kLandSteam);
    if (!found) {
       s_operandCount = 0;
       install_log("[WalkerStompFix] NOT installed: DoFootImpactEffects' type 1 test (0x%08X) is not as expected",

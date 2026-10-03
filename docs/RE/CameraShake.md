@@ -5,8 +5,11 @@ how GameExt redraws it as a blast and adds shake for firing, hits, landings, rol
 sprinting (`render/camera_shake.cpp`, built 2026-09-27 for modtools, Steam and GOG; the
 shapes follow a BFIII-derived camera spec), and for flyers: boosting, hard turns,
 braking, bumps, tricks, take-off and landing (reworked 2026-09-30 on modtools, from the
-user's own flight model and BF2's flight code; see [Flyers](#flyers)), and melee: swings,
-strikes, blocks and deflections (2026-10-02; see [Melee](#melee)). Read on the Phantom build, which has symbols,
+user's own flight model and BF2's flight code; see [Flyers](#flyers)), melee: swings,
+strikes, blocks and deflections (2026-10-02; see [Melee](#melee)), walkers: steps, jumps,
+landings, turning on the spot and boosting (2026-10-02; see [Walkers](#walkers)), and
+hovers: moving, boosting, jumps, landings and a tilt toward whatever they hit (2026-10-03;
+see [Hovers](#hovers)). Read on the Phantom build, which has symbols,
 then ported. Addresses are Phantom and unrelocated (imagebase `0x400000`) unless
 stated. User-facing details are in [ODF_PROPERTIES.md](../user/ODF_PROPERTIES.md#camera-shake).
 
@@ -191,15 +194,16 @@ they used to show at 60 frames a second under the soldier camera they were tuned
 |---|---|---|
 | `FireShake` | `Weapon::SignalFire` detour, when the weapon's owner (`Weapon +0x6C`, its Trackable at `+0x18`) is that object; class from `Weapon +0x64`, else `+0x60`; once per weapon per frame (`ShotGate`), see below | one-off; adds up, 8 at most |
 | `HitShake` | its health (`GameObject +0x144`) dropping, below | one-off; restarts |
-| `LandShake` | soldier `mState` going from airborne (4 `JUMP`, 6 `JET_JUMP`, 7 `JET_HOVER`, 8 `FALL`) to grounded (0 `STAND`, 1 `CROUCH`, 2 `PRONE`, 3 `SPRINT`, 5 `ROLL`, 19 `SLIDE`) after at least 0.25 s; a walker's `m_fGroundedTimer` dropping back after at least 0.5 s, sized by its fastest fall in its `Threshold` (see [Walkers](#walkers)) | one-off; restarts |
+| `LandShake` | soldier `mState` going from airborne (4 `JUMP`, 6 `JET_JUMP`, 7 `JET_HOVER`, 8 `FALL`) to grounded (0 `STAND`, 1 `CROUCH`, 2 `PRONE`, 3 `SPRINT`, 5 `ROLL`, 19 `SLIDE`) after at least 0.25 s; a walker's `m_fGroundedTimer` dropping back after at least 0.5 s, sized by its fastest fall in its `Threshold` (see [Walkers](#walkers)); a hover's `mGroundRatio` back at 0.9 or more after at least 0.25 s below it, sized the same way (see [Hovers](#hovers)) | one-off; restarts |
 | `StepShake` | a bit coming on in the walker's `mFootState`, one kick for all the feet that landed in an update, rolled toward their side | one-off; restarts |
-| `JumpShake` | the walker's jumping flag (`0x80`) coming on | one-off; restarts |
+| `JumpShake` | the walker's jumping flag (`0x80`) coming on; the hover's (`0x02` of its flag byte) | one-off; restarts |
+| `MoveShake` | a hover's speed along its deck in its `Threshold`, times `mGroundRatio` (see [Hovers](#hovers)) | held |
 | `RollShake` | soldier `mState` turning to 5 (`ROLL`), third person only | one-off; restarts |
 | `SprintShake` | soldier `mState` 3 (`SPRINT`), third person only | held |
-| `BoostShake` | the flyer's `mGetSpeedSpeed` in its `Threshold`, full while it speeds up toward a throttle target the throttle or a boost has raised and `Steady` of that once there, while `mState` is 2 (`FLYING`); a walker's ground speed in its `Threshold` while its `mBoost` bit is set | held |
+| `BoostShake` | the flyer's `mGetSpeedSpeed` in its `Threshold`, full while it speeds up toward a throttle target the throttle or a boost has raised and `Steady` of that once there, while `mState` is 2 (`FLYING`); a walker's ground speed in its `Threshold` while its `mBoost` bit is set; a hover's speed along its deck while its `mBoost` is set, times `mGroundRatio` | held |
 | `TurnShake` | seconds of hard turning, measured from the flyer's forward axis, in its `Threshold`, times speed over `MaxSpeed`, while `FLYING`; a walker's `mState` 1 or 2 (turning on the spot) | held |
 | `BrakeShake` | the same speed in its `Threshold` (one value: at or below it; default `MinSpeed` to `MaxSpeed`), full while it brakes: slows toward its throttle target with `mControlMove` at -0.1 or below, while `FLYING` | held |
-| `CollisionShake` | the flyer's two stock collision shakes, retargeted; sized by the change in `mVelocity` | one-off; restarts |
+| `CollisionShake` | the flyer's two stock collision shakes, retargeted (modtools only); sized by the change in `mVelocity`. A hover's: the `EntityHover::CollisionCallback` detour, sized by the closing speed and tilted toward the hit (see [Hovers](#hovers)) | one-off; restarts |
 | `TrickRollShake`, `TrickFlipShake` | `EntityFlyer::DoTrick` detour when it starts a trick: a flip if it set flag bit `0x02` | one-off; restarts |
 | `TakeoffShake` | flyer `mState` going from 0 (`LANDED`) to 1 (`TAKEOFF`) | one-off; restarts |
 | `LandingShake` | flyer `mState` going to 0 (`LANDED`) from 3 (`LANDING`) or 2 (`FLYING`) | one-off; restarts |
@@ -298,9 +302,9 @@ every build: a `GameObject` has its `Damageable` part at `+0x140` (Phantom PDB),
 `mCurHealth` and `mMaxHealth` after the vptr.
 
 **ODF properties.**
-- **Names:** twenty-one shakes, each with a scale (`FireShake`) and twelve details
+- **Names:** twenty-two shakes, each with a scale (`FireShake`) and twelve details
   (`FireShakePitch`, `Yaw`, `Roll`, `Push`, `Length`, `Rise`, `Rate`, `Limit`,
-  `Threshold`, `Steady`, `PushOnce`, `Teammates`). The 273 names are hashed at compile
+  `Threshold`, `Steady`, `PushOnce`, `Teammates`). The 286 names are hashed at compile
   time and checked there for collisions. No stock property shares one; the nearest, the flyer class's unused
   `CrashShakeStart`, `CrashShakeEnd` and `CrashShakeLength` fields, are left alone by
   not naming a shake `Crash`.
@@ -337,8 +341,12 @@ Where the fields live:
 - **Per build:** the flyer's fields (`game/Battlefront2/Source/EntityFlyer.h`), pinned at `DoTrick` and
   `RecalculateSpeed` (modtools `0x004F2F80`, Steam and GOG `0x004ABC70`). The ones added
   for the flyer rework (`mGetSpeedSpeed`, the forward axis, the class's speeds and turn
-  rates, `mControlMove`, `mInLandingRegionFactor`) are read
+  rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor`) are read
   on modtools only so far, and are 0 on Steam and GOG.
+- **Per build, read on all three:** the walker's fields
+  (`game/Battlefront2/Source/EntityWalker.h`) and the hover's (`EntityHover.h`). A hover's
+  collision callback reads the other object and the contact through `CollisionObject.h`,
+  the same on every build.
 - **`ChaseCamera::Update`:** the vtable slot before `SetupCamera` on each build; modtools
   reaches both through thunks.
 - **RTTI hashes:** `PblHash` of the class name, which is how both initialisers make them.
@@ -621,6 +629,205 @@ are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
   `mBoost` bit 0 while it does. `BoostShake` reads that bit and grades the ground speed in
   its `Threshold`, by default `MaxSpeed` to `BoostSpeed`.
 
+### Hovers
+
+Built 2026-10-03 on all three builds; played on modtools. Hovers (`EntityHover`, and
+`CommandHover`, whose `IsRtti` answers `EntityHover` too) take `MoveShake`, `BoostShake`,
+`JumpShake`, `LandShake` and `CollisionShake`. The first four read what BF2 records, once a
+frame, through `layout::EntityHover`; the collision detours `EntityHover::CollisionCallback`.
+Every offset and address below was read off an instruction on modtools, Steam and GOG, and
+the ABI audit checks them. Steam and GOG run the hover code at the same addresses; only the
+constants they load differ.
+
+**Two rides.** `EntityHover::Move` (Phantom `0x005423B0`, modtools `0x0050E460`, retail
+`0x004C3FA0`) runs one of two physics models, chosen by whether the class has spring
+bodies:
+
+- **Spring bodies** (any `AddSpringBody`, so `mNumColliderBodies` above 0). All five of
+  the user's hovers ride this way: the AAT, both republic tanks, the STAP and the speeder
+  bike. Each `AddSpringBody` is a sphere with a `BodySpringLength`.
+  - When a sphere touches ground facing up (the contact normal within 60° of straight up,
+    both for the world and for the hover), `UpdateColliderBody` sets `mGroundRatio` to 1
+    (Phantom `0x0054AE70`, modtools `0x0050C8E0`; retail writes it at `0x004C61C5`).
+  - `PostCollisionUpdate` takes the frame time off `mGroundRatio` every frame, down to 0.
+    So the ratio is 1 less the seconds since a spring last touched, and 0 after a second
+    in the air.
+  - Gravity is 9.8 on the springs and rises to `GravityScale` × 9.8 over the first second
+    in the air. With `GravityScale` 4, every one of the user's hovers ends up falling at
+    4 g.
+  - The ride is the springs': `VelocitySpring`, `VelocityDamp`, `OmegaXSpring`,
+    `OmegaXDamp`, `OmegaZSpring`, `OmegaZDamp` and each body's `BodySpringLength` and
+    factors. `LiftSpring` and `LiftDamp` are read only on the ray ride (modtools
+    `0x0050EF07` and `0x0050EF2F`), so on a spring-body hover they do nothing, whatever the
+    stock ODF comment on `LiftSpring` says.
+- **Ray hovers** (no spring bodies, `SetAltitude` above 0). A ray cast down sets
+  `mGroundRatio` from the height: 1 at `SetAltitude` and 0 at ten times it. Gravity is the
+  other way round: 1 g in the air and `GravityScale` near the ground, where `LiftSpring` and
+  `LiftDamp` hold the hover up. None of the user's hovers ride this way.
+
+**What BF2 records.**
+
+- **Boost.** `EntityHover::Update` (modtools `0x00512D60`) sets `mBoost`, a bool, each
+  frame:
+  - a player boosts with the sprint input while pushing forward (0.9 or more);
+  - AI boosts when its controller asks to sprint.
+
+  `Move` clears `mBoost` when the class has no `BoostSpeed` or the energy runs out
+  (`EnergyBoostDrain`). So `mBoost` means "boosting this frame".
+- **Jump.** Only with `JumpForce` above 0. Of the user's hovers, only the speeder bike sets
+  it: `JumpForce` 50, `JumpTimeMin` 0.1, `JumpTimeMax` 0.35, `JumpMinSpeedMult` 0.4.
+  - The jump input starts a jump when `mGroundRatio` is over 0.9 and the forward speed is
+    over `JumpMinSpeedMult` × `ForwardSpeed`. It sets bit 1 (`0x02`) of the flag byte that
+    follows `mBoost`.
+  - `Move` then pushes along the hover's up axis at `JumpForce` while the energy lasts
+    (`JumpEnergyPerSec`). The push lasts from `JumpTimeMin` up to `JumpTimeMax`, longer
+    at speed, and then the bit clears.
+
+  So the bit coming on is the take-off. Bit 0 of the same byte is something else: `Update`
+  sets it when the pre-game ends.
+- **Collisions.** `EntityHover::CollisionCallback` is slot 6 of the `CollisionObject`
+  vtable, which `CommandHover` shares: Phantom `0x00541160`; modtools `0x005155B0`, vtables
+  `0x00A3DE68` and `0x00A57258` (through the thunk at `0x0041683D`); retail `0x004C66A0`,
+  vtables Steam `0x0079BC98` and `0x0079834C`, GOG `0x0079CC38` and `0x007992EC`. Plain
+  thiscall on every build: (`CollisionResult*`, `CollisionObject*` other, `Restrictor*`),
+  bool in AL, RET 0xC, `this` the hover + 0xC. It first works out the closing speed: the
+  hover's velocity less the other's (other's `GetGameObject`, CollisionObject vtable +0x38,
+  then its `GetVelocity`, GameObject vtable +0x44), dotted with
+  `CollisionResult::mSeparationNormal` (+0xC, pointing out of what was hit); below 0 is
+  closing. It goes on only when the other's collision type (its `TreeGridObject` at +4:
+  the stack's row, or its own `mData[0]` at +0x20) is at least the hover's own, found the
+  same way (modtools `0x005155E3`, retail `0x004C66D3`); anything below goes straight to
+  the base callback. Then, by the other's type:
+  - **Soldiers** (`COLL_SOFT`, 2). The hover takes no impact and no bounce of its own.
+  - **Rigid objects** (`COLL_RIGID`, 8). `ApplyCollisionImpact` is called.
+  - **Anything else, against a spring sphere.** The spring has it. An up-facing contact
+    pushes the hover up; a side contact is ignored. Only when the sphere sinks deeper than
+    its `BodySpringLength` does `ApplyCollisionImpact` run, followed by a bounce.
+  - **Anything else, against the hull's own primitives.** The hover bounces: its
+    velocity is reflected, with friction. `ApplyCollisionImpact` is not called.
+- **The crash.** `ApplyCollisionImpact`:
+  - Addresses and conventions:
+    - Phantom `0x00540BE0`.
+    - modtools `0x00515250`: thiscall(float closingSpeed, PblVector3* normal,
+      CollisionObject* other), RET 0xC.
+    - retail `0x004C63B0`: ECX the hover, the closing speed in **XMM1**, normal and other
+      on the stack, RET 8.
+  - What it does:
+    - It skips other hovers and walkers.
+    - It does nothing below the class's `CollisionThreshold`, mixed by the contact
+      normal's dot products with the hover's up and forward axes.
+    - Past that, it plays FoleyFX, `PlayImpactEffects` and the engine's collision sound,
+      and deals `CollisionScale` × excess² damage.
+  - Its only callers are two CALLs in `CollisionCallback`: modtools `0x005156F1` (spring
+    bottom-out) and `0x005157A1` (rigid); retail `0x004C6822` and `0x004C6933`.
+  - GameExt does not use it: a hull meeting a wall only bounces, so a hover strafing into
+    a wall would never reach it, and on retail its closing speed arrives in XMM1.
+- **Not needed**, for the record:
+  - `mCloseToGround`, the latch for `SoundCloseToGround`.
+  - `mStrain` and `mAccel`, the engine sound's inputs.
+  - Each spring's compression, `mColliderBody[i].mOldOverlap`, which `HoverSprings`
+    draws.
+
+**What plays.**
+
+- **`MoveShake`**, new for hovers: the flyers' turbulence, held at a level that grows with
+  the hover's speed along its own deck (the velocity less its part along the hover's up
+  axis, so bobbing on the springs is not speed) through its `Threshold`, by default
+  `"0 MaxSpeed"`, times `mGroundRatio`, so it fades out in the air.
+- **`BoostShake`**: while `mBoost` is set, the speed graded through `"MaxSpeed BoostSpeed"`,
+  `Steady` 1, times `mGroundRatio` too. By default it vibrates faster than `MoveShake`
+  (6.25 a second against 2.1); at one `Rate` the two turbulences would be the same sines,
+  and boosting would make the one sway bigger instead.
+- **Defaults**: the AAT's tuned values (v2, below), made the defaults at the user's
+  request once v2 played well.
+- **`JumpShake`**: the jump bit coming on, after a first look at the hover.
+- **`LandShake`** (`HoverAir`): `mGroundRatio` below 0.9 for at least 0.25 s, then back at
+  or above it, sized by the fastest drop (−`mVelocity` y) while away through its
+  `Threshold`, by default `"4 14"`, graded like a bump. For a spring hover, below 0.9 is a
+  tenth of a second without a spring touching; for a ray hover, about twice its
+  `SetAltitude` up.
+- **`CollisionShake`**: the detour runs before BF2's callback, for the viewed hover only and
+  only when its class sets `CollisionShake`. It skips what BF2 skips (a type below the
+  hover's own, and soldiers), works out the closing speed as BF2 does, and turns the
+  hit's direction (the reversed normal) into the hover's frame. A hit with more than 0.7 of it along the hover's up axis is ground (`LandShake`'s
+  job) and is dropped; the rest give the side and fore-aft shares of the hit, normalised.
+  The hardest hit since the last camera frame plays there (`aim_bump`): `Roll` times the
+  right share (a right hit rolls clockwise), `Pitch` times minus the forward share (a hit
+  ahead tips down, behind tips up), `Push` the same way (in toward a hit ahead), `Yaw` as
+  picked. A negative ODF value tilts away. Sized by the closing speed through its
+  `Threshold`, by default `"2 MaxSpeed"`, graded like a bump; `Rate` 0, so one tilt in and
+  out over 0.8 s. A sphere sinking into a wall reports the same contact for frames, so
+  after a bump others wait 0.3 s unless at least 1.5 times as hard (`BumpGate`), and
+  `HitShake` is muted for 0.25 s, since crash damage arrives as a health drop.
+- **Speeds**: `hover_speeds` reads `ForwardSpeed` as the class's `MaxSpeed` (and `MidSpeed`)
+  with no `MinSpeed`, and `ForwardSpeed` is accepted as a name in a `Threshold`.
+- **Not built**:
+  - `BrakeShake`: a hover has no brake as such. With the throttle let go it slows at
+    `Deceleration`; pulling back slows it at `Acceleration` toward `ReverseSpeed`. So the
+    speeder bike (60 and 30) brakes hardest by letting go, from 28 m/s to rest in about
+    half a second, while the tanks' 6 is gentle either way.
+  - `TurnShake`: hovers spin on the spot, and the body banks already.
+  - A suspension rumble from the spring compression: the camera already follows the
+    body's bob.
+- **Turret seats.** A passenger in a turret seat follows the turret, not the hover, as on
+  flyers, so gets none of these shakes.
+
+**Fields.** In `game/Battlefront2/Source/EntityHover.h` (each with the site it was read
+at) and `CollisionObject.h`. The instance fields sit 4 above Phantom on modtools up to the
+big animation blocks, and 0x10 above after them; on retail they sit 0x34 and 0x30 below
+Phantom. The class's data starts at `+0x6AC` on modtools as on Phantom, and at `+0x5E4` on
+retail, where `mSoundCloseToGround` (a `GameSound`, 20 bytes in debug, 8 in release) moves
+everything after it a further 0xC.
+
+| EntityHover | modtools | retail | read at (modtools; retail) |
+|---|---|---|---|
+| `mMatrix` rows | `0x00F0` | `0x00F0` | `Move` `0x0050E4E1`; `0x004C4059` |
+| `mVelocity` | `0x0498` | `0x0460` | `Move` `0x0050FCDB`; `Move` `0x004C417F` |
+| `mGroundRatio` | `0x04B0` | `0x0478` | `PostCollisionUpdate` `0x0051453D`; `0x004C343D` |
+| `mClass` | `0x04C4` | `0x048C` | `PostCollisionUpdate` `0x0051450A`; `Move` `0x004C3FE2` |
+| `mBoost` (bool) | `0x1D40` | `0x1D00` | `Update` `0x00513AFA` (`+0x240` base); `0x004C2ECB` (same base) |
+| flags (bit 1 jumping) | `0x1D41` | `0x1D01` | `Move` `0x0050E5AF`; `0x004C40ED` |
+
+| EntityHoverClass | modtools | retail | read at (modtools; retail) |
+|---|---|---|---|
+| `mForwardSpeed` | `0x06C8` | `0x0600` | `Move` `0x0050FD4D`; `0x004C42C2` |
+| `mCollisionThreshold[3]` | `0x0710` | `0x0648` | `ApplyCollisionImpact` `0x00515317`; `0x004C6492` (not read by GameExt) |
+| `mBoostSpeed` | `0x0EC0` | `0x0DEC` | `Move` `0x0050E576`; `0x004C40B5` |
+| `mJumpForce` | `0x0EE4` | `0x0E10` | `Move` `0x0050F429`; `0x004C444D` (not read by GameExt) |
+
+**Values.** The five hover ODFs in `data_BF3/Sides/vehicles` carry a GAMEEXT VALUES block,
+each worked out from that hover's own numbers on one scale (scratchpad `hover_shakes.py`;
+originals in `odf_hovers_originals_2026-10-03`). The first set (v1) was played on modtools
+the same day: the movement sway's rate was too fast for general movement, boosting was
+good, and collisions showed little. The second set (v2) answers that:
+
+- `MoveShake`: pitch and roll 0.04 × √`ForwardSpeed`, yaw a third of that, `Rate` 1 +
+  `ForwardSpeed` / 8, a gentle sway: the tanks 0.12° at 2.1 a second, the STAP 0.18° at
+  3.5, the bike 0.21° at 4.5. (v1: `Rate` 4 + `ForwardSpeed` / 4, 6.25 to 11.)
+- `BoostShake`: on its own, what v1's movement and boost sways made together at their
+  shared rate, which was the boost the user liked: pitch and roll `MoveShake` ×
+  `BoostSpeed` / `ForwardSpeed` (0.19 to 0.30°) at `Rate` 4 + `ForwardSpeed` / 4; `Steady`
+  1. With `MoveShake` slower, the two no longer swing in step: a full boost is v1's
+  vibration over the slow sway.
+- `JumpShake` (the bike only): pitch 0.012 to 0.018 × `JumpForce`, so 0.6 to 0.9.
+- `LandShake`: `Threshold` from the speed of a half-metre drop to that of a four-metre
+  drop under the hover's own air gravity, `"4 14"` for all five; the dip itself is fixed,
+  since no ODF number says how hard a hover lands.
+- `CollisionShake`: full at a cruise-speed hit, `Threshold` `"2 ForwardSpeed"`; roll 1.1 ×
+  √`ForwardSpeed`, pitch 0.8 of it, each from 0.9 to 1.1 of that (about 3.3° of roll on the
+  tanks, 4.9 on the STAP, 5.8 on the bike); `Length` 0.8. (v1: full only at `BoostSpeed`,
+  roll 0.75 × √`BoostSpeed`, `Length` 0.6, so a tank hitting at cruise or strafing into a
+  wall got about 1.5 to 2°.)
+
+v2 played well on modtools ("Plays much better", 2026-10-03), and the AAT's v2 values are
+now the code's hover defaults. During that run a temporary `[HoverHit]` log (since removed)
+recorded every hit of 2 m/s or more on the hover in play: 12 shook, each tilting the way it
+should (a hit ahead tipped the view down, one on the left rolled it left, one on the right
+rolled it right); 42 were a sphere still sinking into the same wall and were left out by
+`BumpGate`; 346 were ground contacts, the springs on rough ground and landings at 2 to 7 m/s,
+with up shares from 0.74 to 1, all left out as ground; none fell below a `Threshold`. So
+v1's quiet collisions were small tilts, not missed hits.
+
 ## Open
 
 - Confirmed in play on modtools and Steam (2026-09-27): every shake, the limit and the
@@ -629,11 +836,15 @@ are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
   be tuned.
 - The flyer rework (2026-09-30) is built and played on modtools only. For Steam
   and GOG it needs `mGetSpeedSpeed`, the forward axis, the class's speeds and turn
-  rates, `mControlMove`, `mInLandingRegionFactor` and the two collision CALLs read there; retail `ApplyShake` (Steam `0x0044F4C0`, GOG `0x0044F4A0`)
+  rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor` and the two collision CALLs read there; retail `ApplyShake` (Steam `0x0044F4C0`, GOG `0x0044F4A0`)
   takes its amount and duration in XMM1 and XMM2 with a plain `RET`, so it needs a naked
-  stand-in, and the two CALLs are at `0x004B24F2` and `0x004B4D2B` on both (not yet
-  audited). Until then, on retail, `TurnShake`, `CollisionShake` and speed names in a
-  `Threshold` do nothing (numbers still work), and the install log says so.
+  stand-in (the hover collision callback did not need one), and the two CALLs are at
+  `0x004B24F2` and `0x004B4D2B` on both (not yet audited). Until then, on retail, a
+  flyer's `TurnShake`, `CollisionShake` and speed names in its `Threshold` do nothing
+  (numbers still work), so its default `BoostShake` and `BrakeShake` thresholds, which are
+  speed names, do nothing either; speeding up and braking are judged by how fast its speed
+  changes, not the throttle. The install log says so. Walkers and hovers are not affected.
+  On ROADMAP (Retail builds).
 - Easing into `BoostShakeSteady` at top speed looked choppy in play, as if the ship
   bounced (2026-10-01, with a 2 m push). The cause was the push piling up in BF2's
   camera ([The camera eases from last frame's view](#the-camera-eases-from-last-frames-view)).
@@ -652,9 +863,16 @@ are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
   replacing its easing, per axis, with the exact step for a moving target: keep
   `e^(-T * dt)` of the old gap plus `(1 - e^(-T * dt)) / (T * dt)` of the frame's move.
   That would change the stock camera for every unit; not built.
-- The walker shakes (2026-10-02) are built on all three builds and not played. The
-  half-second landing gate assumes a walker in stride stays below it; the walker state
-  numbers were read off Phantom's table only.
+- The walker shakes (2026-10-02) are built on all three builds. `StepShake` is seen in
+  play on modtools (with `WalkerStompFix`); `JumpShake`, `LandShake`, `TurnShake` and
+  `BoostShake` have no play report yet. The half-second landing gate assumes a walker in
+  stride stays below it; the walker state numbers were read off Phantom's table only.
+- The hover shakes (2026-10-03) are built on all three builds and played on modtools: the
+  second values play well and are the defaults (see Values, under Hovers). Not checked yet:
+  Steam and GOG in play; whether a hover standing still runs its callback when something
+  rams it (the closing speed allows for the other's velocity, so it would count); and
+  whether a multiplayer client runs `CollisionCallback` for its own hover (in
+  `NetGame::Predict`), without which the hover's `CollisionShake` stays quiet there.
 - The melee shakes (2026-10-02) are built on all three builds and not played. Whether a
   multiplayer client runs `UpdateFire` and `Deflect` for its own swings and blocks is
   not known yet. Per-attack shakes would need the combo file: unknown names there are
@@ -666,9 +884,10 @@ are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
 - Landing regions: easing into one slows the flyer toward the capped cruise speed, which
   `BrakeShake` does not count (the brake is not held). Whether that approach wants a shake
   of its own is to be decided on feel.
-- The flyer defaults are first guesses, small for take-off and landing, to be tuned in
-  play. The unused `CrashShake*` fields suggest a shake while a destroyed flyer spins
-  down; not built.
+- The flyer's boost, turn and collision defaults follow the user's reference turbulence
+  (half a degree a side at 11 Hz); take-off and landing are first guesses, kept small, to
+  be tuned in play. The unused `CrashShake*` fields suggest a shake while a destroyed flyer
+  spins down; not built.
 - The spec's roll and jump sweep is not built yet: the camera trailing behind and looking
   toward the feet through rolls and jumps. `RollShake` is a plain shake until then.
 - The blast's shape is set by the unit being viewed, not by the explosion, because the
@@ -691,5 +910,5 @@ are in `game/Battlefront2/Source/EntityWalker.h`; the ABI audit checks them.
   into `"1"`/`"0"`, hashes the property name and calls the class's own `SetProperty`
   through its vtable. The shake properties are taken at the ODF reader instead, so that
   `SetProperty` ignores them, and weapon classes are not found by that lookup at all.
-  Hooking the soldier and flyer classes' `SetProperty` for these names would cover
-  soldiers and flyers; weapons need a lookup of their own. On ROADMAP.
+  Hooking the soldier, flyer, walker and hover classes' `SetProperty` for these names
+  would cover the units; weapons need a lookup of their own. On ROADMAP.

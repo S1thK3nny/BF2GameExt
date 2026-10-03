@@ -13,16 +13,18 @@
 //   BlockShake       melee weapon           blocking a melee strike
 //   DeflectShake     melee weapon           deflecting a bolt or beam
 //   HitShake         any unit               taking damage
-//   LandShake        soldier, walker        landing a jump or fall
+//   LandShake        soldier, walker, hover landing a jump or fall
 //   RollShake        soldier                a combat roll (third person)
 //   SprintShake      soldier                sprinting (third person)
 //   StepShake        walker                 a foot landing, rolled toward it
-//   JumpShake        walker                 a jump starting
-//   BoostShake       flyer, walker          going fast: by default boosting
+//   JumpShake        walker, hover          a jump starting
+//   MoveShake        hover                  moving, by how fast
+//   BoostShake       flyer, walker, hover   going fast: by default boosting
 //   TurnShake        flyer, walker          a flyer turning hard for a while;
 //                                           a walker turning on the spot
-//   BrakeShake       flyer                  slowing down, by how hard
-//   CollisionShake   flyer                  bumping into something
+//   BrakeShake       flyer                  slowing down with the brake held
+//   CollisionShake   flyer, hover           bumping into something; a hover
+//                                           tilts toward what it hit
 //   TrickRollShake   flyer                  a barrel roll
 //   TrickFlipShake   flyer                  a flip
 //   TakeoffShake     flyer                  lifting off
@@ -36,9 +38,10 @@
 // Rise (share of the length, rising or fading in), Rate (swings per second),
 // Limit (how many can run at once, added together, up to 8; for BlastShake,
 // where it levels off), Threshold (when a flyer's boost, turn, brake or collision
-// shake or a walker's step, boost or landing plays, in its own measure),
+// shake, a walker's step, boost or landing, or a hover's movement, boost,
+// landing or collision plays, in its own measure),
 // Steady (the boost and brake shakes' share
-// once the flyer gets where it is going), PushOnce (the push goes out and
+// once the unit gets where it is going), PushOnce (the push goes out and
 // back once instead of swinging with the rate; on except for BlastShake) and
 // Teammates (whether StrikeShake counts a swing that lands only on teammates;
 // on unless set to 0).
@@ -48,9 +51,12 @@
 // does nothing until an ODF sets one of its properties.
 //
 // The shake moves only the rendered view, after the aim has been taken from the
-// unshaken camera, so shots land where they would without it. Client-local, so
-// it behaves the same online. Modtools, Steam and GOG. The research and every
-// address are in docs/RE/CameraShake.md.
+// unshaken camera, so shots land where they would without it. Client-local: it
+// changes nothing in the simulation or on the network (whether a client runs
+// the melee and hover collision code it watches for its own unit is not known
+// yet). Modtools, Steam and GOG; on Steam and GOG a flyer's TurnShake,
+// CollisionShake and speed names in its Threshold are not available yet. The
+// research and every address are in docs/RE/CameraShake.md.
 // =============================================================================
 
 // The shakes, in the order of their ODF names (kShakeNames in the .cpp).
@@ -76,6 +82,7 @@ enum CameraShakeChannel {
    kShakeSwingBlocked,
    kShakeStep,
    kShakeJump,
+   kShakeMove,
    kCameraShakeChannels
 };
 
