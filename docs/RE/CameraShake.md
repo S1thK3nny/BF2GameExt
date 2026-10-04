@@ -799,8 +799,9 @@ bodies:
   - `TurnShake`: hovers spin on the spot, and the body banks already.
   - A suspension rumble from the spring compression: the camera already follows the
     body's bob.
-- **Turret seats.** A passenger in a turret seat follows the turret, not the hover, as on
-  flyers, so gets none of these shakes.
+- **Turret seats.** The camera follows the turret, but the turret answers with the hover as
+  its game object (see [Turrets](#turrets)), so a gunner probably gets these shakes too; not
+  checked in play.
 
 **Fields.** In `game/Battlefront2/Source/EntityHover.h` (each with the site it was read
 at) and `CollisionObject.h`. The instance fields sit 4 above Phantom on modtools up to the
@@ -857,6 +858,20 @@ rolled it right); 42 were a sphere still sinking into the same wall and were lef
 `BumpGate`; 346 were ground contacts, the springs on rough ground and landings at 2 to 7 m/s,
 with up shares from 0.74 to 1, all left out as ground; none fell below a `Threshold`. So
 v1's quiet collisions were small tilts, not missed hits.
+
+### Turrets
+
+Nothing turret-specific is hooked; the existing shakes reach turrets on their own. A manned
+`MountedTurret` (the turret of an `EntityBuildingArmed`, and every vehicle gunner seat) is
+the chase camera's owner, and its `GetGameObject` (Phantom `0x006716A0`) returns `mParent`
+(Phantom `+0x258`): the armed building, or the vehicle. So:
+- `FireShake` plays for the turret's weapon, set on the weapon's ODF: the weapon's owner is
+  the turret's Controllable, whose game object is the same parent.
+- `HitShake` reads the parent's health and takes its settings from the parent's class: the
+  turret's own ODF for a standalone turret, the vehicle's for a gunner seat.
+- Both confirmed in play on turrets (the user, 2026-10-04).
+- A turning shake was considered, following `mOmegaYaw` and `mOmegaPitch` (Phantom
+  `+0x254`, `+0x24C`), the speeds BF2's turret yaw and pitch sounds follow, and declined.
 
 ## Open
 
@@ -921,8 +936,9 @@ v1's quiet collisions were small tilts, not missed hits.
     retargeted on modtools for `CollisionShake`);
   - an `ExplosionClass::Read` Derive site, for inheritance.
 - Damage that only reaches shields does not shake: `mCurShield` is not read.
-- A passenger in a flyer's turret seat is following the turret, not the flyer, so gets
-  none of the flyer's own shakes.
+- A gunner in a flyer's turret seat probably gets the flyer's own shakes too, since the
+  turret answers with the flyer as its game object (see [Turrets](#turrets)); not checked
+  in play.
 - The reticule holds still by design, so a big shake leaves it off the true aim point in
   the shaken picture by the shake's angle. Publishing the shake's screen offset as a HUD
   event (ROADMAP's HUD shake) would let a `.hud` choose to follow it.
