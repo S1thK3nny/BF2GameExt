@@ -32,6 +32,19 @@ inline uintptr_t exe_base()
    return (uintptr_t)GetModuleHandleW(nullptr);
 }
 
+// Code bytes as the loader leaves them: the build-time absolute address at
+// `operand` (a [disp32] memory operand, or an immediate that is an address)
+// moved with the exe. Steam and GOG are always relocated, with a .reloc entry
+// on every such operand; modtools never moves, so there it changes nothing.
+// Compare live code against this, never against the bytes as built.
+inline void rebase_operand(uint8_t* bytes, size_t operand, uintptr_t exe_base)
+{
+   uint32_t va;
+   memcpy(&va, bytes + operand, sizeof va);
+   va = (uint32_t)(uintptr_t)resolve(exe_base, va);
+   memcpy(bytes + operand, &va, sizeof va);
+}
+
 // Write into the exe image outside the install-time RW window (uninstall).
 inline void protected_write(void* dst, const void* src, size_t len)
 {

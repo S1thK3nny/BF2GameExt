@@ -45,6 +45,13 @@ const uint8_t kBeforeRelease[] = { 0x0F, 0x57, 0xC9, 0xF2, 0x0F, 0x5A, 0xC8 };  
 const uint8_t kAfterRelease[]  = { 0xF3, 0x0F, 0x10, 0x44, 0x24, 0x10,           // MOVSS XMM0,[ESP+0x10]
                                    0xF3, 0x0F, 0x5E, 0xC1 };                     // DIVSS XMM0,XMM1
 
+// Where the 1.0's address sits in those. Steam and GOG move it with the exe
+// (each has a relocation on it), so it is compared where the loader put it.
+constexpr size_t kOneModtools = 2;   // FCOM [1.0], FDIVR [1.0]
+constexpr size_t kOneRelease  = 3;   // COMISS XMM1,[1.0]
+static_assert(sizeof kSiteModtools <= 16 && sizeof kSiteSteam <= 16 && sizeof kAfterModtools <= 16,
+              "matches() copies into 16 bytes");
+
 float    s_one   = 1.0f;     // the compare the shims stand in for
 void*    s_scale = nullptr;  // the original scaling, after the compare
 void*    s_keep  = nullptr;  // where the pair goes on as it came
@@ -52,6 +59,16 @@ bool     s_skip  = false;    // this call's answer, read after the registers com
 uint8_t* s_site  = nullptr;
 uint8_t  s_orig[sizeof(kSiteModtools)] = {};
 size_t   s_len   = 0;
+
+// Whether the code at `at` is `bytes`, with the 1.0's address at `one` as the
+// loader left it.
+bool matches(const uint8_t* at, const uint8_t* bytes, size_t len, size_t one, uintptr_t base)
+{
+   uint8_t want[16];
+   std::memcpy(want, bytes, len);
+   rebase_operand(want, one, base);
+   return std::memcmp(at, want, len) == 0;
+}
 
 // Whether `owner`, the Controllable a PlayerController drives, is a flyer.
 bool __cdecl is_flyer(void* owner)
@@ -179,8 +196,11 @@ void flyer_roll_throttle_fix_install(uintptr_t exe_base)
    }
 
    uint8_t* at = (uint8_t*)resolve(exe_base, g_addr->player_controller_input_cap);
-   if (std::memcmp(at, site, siteLen) != 0 || std::memcmp(at - beforeLen, before, beforeLen) != 0 ||
-       std::memcmp(at + siteLen, after, afterLen) != 0) {
+   const bool same = matches(at, site, siteLen, modtools ? kOneModtools : kOneRelease, exe_base) &&
+                     std::memcmp(at - beforeLen, before, beforeLen) == 0 &&
+                     (modtools ? matches(at + siteLen, after, afterLen, kOneModtools, exe_base)
+                               : std::memcmp(at + siteLen, after, afterLen) == 0);
+   if (!same) {
       install_log("[FlyerRollThrottle] PlayerController::Update at %08X does not match -- left stock",
                   (unsigned)g_addr->player_controller_input_cap);
       return;

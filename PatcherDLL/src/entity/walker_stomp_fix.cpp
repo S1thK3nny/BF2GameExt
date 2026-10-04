@@ -24,6 +24,8 @@ const uint8_t kRearmSteam[]   = { 0x0F, 0x2F, 0x05, 0x60, 0x1F, 0x7B, 0x00 };   
 const uint8_t kLandSteam[]    = { 0xF3, 0x0F, 0x10, 0x0D, 0x60, 0x1F, 0x7B, 0x00 };  // MOVSS XMM1,[0x007B1F60]
 const uint8_t kRearmGog[]     = { 0x0F, 0x2F, 0x05, 0xD8, 0x2E, 0x7B, 0x00 };        // COMISS XMM0,[0x007B2ED8]
 const uint8_t kLandGog[]      = { 0xF3, 0x0F, 0x10, 0x0D, 0xD8, 0x2E, 0x7B, 0x00 };  // MOVSS XMM1,[0x007B2ED8]
+static_assert(sizeof kLandSteam <= 8 && sizeof kLandGog <= 8 && sizeof kTestModtools <= 8,
+              "take_operand copies into 8 bytes");
 
 UpdateStateFn s_updateState = nullptr;
 
@@ -58,11 +60,15 @@ bool guard(uintptr_t base, uintptr_t va, const char* what, const char* bytes, co
 }
 
 // Notes the operand of the compare at `va`, if the code is `bytes` and the
-// constant they end in holds 0.1.
+// constant they end in holds 0.1. Steam and GOG move that address with the exe
+// (each has a relocation on it), so it is compared where the loader put it.
 bool take_operand(uintptr_t base, uintptr_t va, const uint8_t* bytes, size_t len)
 {
    uint8_t* code = static_cast<uint8_t*>(resolve(base, va));
-   if (std::memcmp(code, bytes, len) != 0) return false;
+   uint8_t want[8];
+   std::memcpy(want, bytes, len);
+   rebase_operand(want, len - 4, base);
+   if (std::memcmp(code, want, len) != 0) return false;
    uint32_t constant;
    std::memcpy(&constant, bytes + len - 4, sizeof constant);
    if (*static_cast<const float*>(resolve(base, constant)) != 0.1f) return false;

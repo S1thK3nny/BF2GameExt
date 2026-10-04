@@ -39,6 +39,17 @@ compares = {
     "steam": [array("kRearmSteam"), array("kLandSteam")],
     "gog": [array("kRearmGog"), array("kLandGog")],
 }
+# Each compare's last four bytes are the 0.1's address, which the install moves
+# as the loader did before comparing (Steam and GOG are always relocated).
+assert "rebase_operand(want, len - 4, base);" in module
+
+
+def relocations(pe):
+    """The addresses the loader moves when it loads the exe elsewhere (HIGHLOW entries)."""
+    pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_BASERELOC"]])
+    base = pe.OPTIONAL_HEADER.ImageBase
+    return {base + e.rva for block in getattr(pe, "DIRECTORY_ENTRY_BASERELOC", [])
+            for e in block.entries if e.type == pefile.RELOCATION_TYPE["IMAGE_REL_BASED_HIGHLOW"]}
 
 
 def guards():
@@ -191,12 +202,24 @@ for build, filename in builds:
             assert writes(0x00502890, 0x005029DA, "dword ptr [ebp + 8],") == [], (build, "argument rewritten")
 
         # The compares the fix moves: the bytes, inside DoFootImpactEffects, on 0.1.
+        # What the loader moves in them: on Steam and GOG, always loaded away from
+        # their build address, only the 0.1's address, which the install moves
+        # the same way; nothing in the prologue it checks; modtools never moves.
+        moved = relocations(pe)
+        if build == "modtools":
+            assert pe.FILE_HEADER.Characteristics & 0x0001 and not moved, (build, "modtools has a fixed base")
+        else:
+            assert pe.OPTIONAL_HEADER.DllCharacteristics & 0x0040, (build, "retail is built to be relocated")
+        assert not [va for va in moved if update - 3 <= va < update + len(want)], (build, "prologue relocated")
         sites = [table["walker_stomp_drop_site"]] + ([table["walker_stomp_drop_site2"]] if build != "modtools" else [])
         assert len(sites) == len(compares[build])
         for site, expect in zip(sites, compares[build]):
             assert at(site, len(expect)) == expect, (build, hex(site), at(site, len(expect)).hex())
             assert struct.unpack("<I", expect[-4:])[0] == f["constant"], (build, "constant")
             assert foot_fx < site < foot_fx + 0x500, (build, hex(site), "outside DoFootImpactEffects")
+            inside = sorted(va for va in moved if site - 3 <= va < site + len(expect))
+            assert inside == ([] if build == "modtools" else [site + len(expect) - 4]), \
+                (build, hex(site), [hex(va) for va in inside])
         assert struct.unpack("<f", at(f["constant"], 4))[0] == struct.unpack("<f", struct.pack("<f", 0.1))[0]
 
         names = {"c": hex(f["constant"]), "fn": hex(foot_fx)}
@@ -207,6 +230,6 @@ for build, filename in builds:
             assert got_ins == want_ins, (build, hex(address), got_ins, want_ins)
 
         print(f"{build}: UpdateState's prologue, RET 0x14, its length argument and {len(f['slots'])} vtable "
-              f"slots, {len(sites)} compare(s) on 0.1 and {len(checks)} code sites passed")
+              f"slots, {len(sites)} compare(s) on 0.1 and their relocations, and {len(checks)} code sites passed")
     finally:
         pe.close()

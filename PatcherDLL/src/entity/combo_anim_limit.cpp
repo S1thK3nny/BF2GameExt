@@ -524,12 +524,8 @@ void storage_expected(const storage_patch& patch, uintptr_t base, GameBuild buil
    memcpy(output, patch.expected, patch.length);
    // Retail's map and bank registry operands have PE HIGHLOW relocations.
    if ((patch.kind == patch_kind::registry_address || patch.kind == patch_kind::bank_address) &&
-       build != GameBuild::Modtools) {
-      uint32_t value;
-      memcpy(&value, output + patch.operand, sizeof(value));
-      value += (uint32_t)(base - kUnrelocatedBase);
-      memcpy(output + patch.operand, &value, sizeof(value));
-   }
+       build != GameBuild::Modtools)
+      rebase_operand(output, patch.operand, base);
 }
 
 void storage_replacement(const storage_patch& patch, GameBuild build, uint8_t* output)

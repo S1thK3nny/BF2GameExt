@@ -31,7 +31,9 @@
 //   gog      0x0061B88F  the same as Steam
 // mOwner, the Controllable being driven, is at this + 4 on every build. Read
 // on Phantom (PlayerController::Update 0x0071CAA0, the compare at 0x0071D013)
-// and found by the same code on the others.
+// and found by the same code on the others. Steam and GOG are always loaded
+// away from their build address, which moves the 1.0's address in the
+// compare; the install checks it where the loader put it.
 //
 // Only a player's own flyer changes, on whichever machine runs their
 // controller. Online behaviour is untested: see docs/user/MULTIPLAYER.md.

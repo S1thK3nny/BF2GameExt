@@ -2,9 +2,9 @@
 
 Usage: python tests/flyer_roll_throttle_abi_tests.py PATH_TO_GAMEDATA
 Requires pefile and capstone. Reads the site addresses from game_addrs.hpp and
-the bytes the install checks from the module, and checks them, and the code
-the shims rely on, against each executable. Never loads or executes the game.
-Not an in-game behaviour test.
+the bytes the install checks from the module, and checks them, the addresses
+the loader moves inside them, and the code the shims rely on, against each
+executable. Never loads or executes the game. Not an in-game behaviour test.
 """
 import re
 import struct
@@ -33,6 +33,22 @@ module = {
 }
 assert "kCtrl_Trackable   = 0x18" in source and "kVt_GetGameObject = 0x1C" in source
 assert "push   dword ptr [ebx + 4]" in source and "push   dword ptr [edi + 4]" in source
+
+# Where the 1.0's address sits in the compared bytes; the install moves it as
+# the loader did before comparing (Steam and GOG are always relocated).
+ONE = {"modtools": int(re.search(r"kOneModtools = (\d+);", source).group(1)),
+       "release": int(re.search(r"kOneRelease  = (\d+);", source).group(1))}
+assert "matches(at, site, siteLen, modtools ? kOneModtools : kOneRelease, exe_base)" in source
+assert "matches(at + siteLen, after, afterLen, kOneModtools, exe_base)" in source
+assert "rebase_operand(want, one, base);" in source
+
+
+def relocations(pe):
+    """The addresses the loader moves when it loads the exe elsewhere (HIGHLOW entries)."""
+    pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_BASERELOC"]])
+    base = pe.OPTIONAL_HEADER.ImageBase
+    return {base + e.rva for block in getattr(pe, "DIRECTORY_ENTRY_BASERELOC", [])
+            for e in block.entries if e.type == pefile.RELOCATION_TYPE["IMAGE_REL_BASED_HIGHLOW"]}
 
 # Each read off the disassembly before recording. The function sets its this
 # register once at entry; after the compare come the two paths, then the
@@ -100,9 +116,25 @@ for build, filename in builds:
         assert at(site + len(site_bytes), len(b(scale))) == b(scale), (build, "scaling path")
         assert at(keep, len(b(keep_code))) == b(keep_code), (build, "keep path", hex(keep))
 
-        # The compare is against 1.0.
-        operand = struct.unpack("<I", site_bytes[2:6] if mt else site_bytes[3:7])[0]
+        # The compare is against 1.0, and so is modtools' divide after it.
+        one = ONE["modtools" if mt else "release"]
+        operand = struct.unpack("<I", site_bytes[one:one + 4])[0]
         assert struct.unpack("<f", at(operand, 4))[0] == 1.0, (build, hex(operand))
+        if mt:
+            assert struct.unpack("<I", after[one:one + 4])[0] == operand, (build, "the divide's 1.0")
+
+        # What the loader moves inside the compared bytes: on Steam and GOG, which
+        # are always loaded away from their build address, only the 1.0's address
+        # in the compare, which the install moves the same way; modtools never moves.
+        moved = relocations(pe)
+        lo, hi = site - len(before), site + len(site_bytes) + len(after)
+        inside = sorted(va for va in moved if lo - 3 <= va < hi)
+        if mt:
+            assert pe.FILE_HEADER.Characteristics & 0x0001 and not moved, (build, "modtools has a fixed base")
+            assert inside == [], (build, [hex(va) for va in inside])
+        else:
+            assert pe.OPTIONAL_HEADER.DllCharacteristics & 0x0040, (build, "retail is built to be relocated")
+            assert inside == [site + one], (build, [hex(va) for va in inside])
 
         # The this register: set from ECX at entry and never written again on
         # the way down to the site (pops on early-return paths aside).
@@ -114,6 +146,7 @@ for build, filename in builds:
 
         for offset, text in stores:
             assert at(site + offset, len(b(text))) == b(text), (build, hex(site + offset))
-        print(f"{build}: site, both paths, the 1.0 compare, this register and {len(stores)} stores passed")
+        print(f"{build}: site, both paths, the 1.0 compare, its relocation, this register and "
+              f"{len(stores)} stores passed")
     finally:
         pe.close()

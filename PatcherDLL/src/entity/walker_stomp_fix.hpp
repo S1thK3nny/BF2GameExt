@@ -30,7 +30,9 @@
 //   type 1's landing test         (the same)  0x0050089D  0x0050089D   operand moved
 //   the 0.1 they read             0x00A2C074  0x007B1F60  0x007B2ED8
 // modtools makes one FCOMP [0.1] serve both tests; retail reads the 0.1 with
-// COMISS XMM0,[0.1] to re-arm and MOVSS XMM1,[0.1] to land.
+// COMISS XMM0,[0.1] to re-arm and MOVSS XMM1,[0.1] to land. Steam and GOG
+// are always loaded away from their build address, which moves the 0.1's
+// address in each compare; the install checks it where the loader put it.
 //
 // Only how walkers' steps look and sound changes, each machine for its own
 // view: the landed bits feed nothing else (docs/RE/CameraShake.md, Walkers).
