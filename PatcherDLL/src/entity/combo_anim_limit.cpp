@@ -654,6 +654,23 @@ void* combo_anim_limit_get_body(void* owner, int map, int index, bool lower)
    return combo_anim_body(g_storage.get(owner, map), index, lower);
 }
 
+const combo_map_key* combo_anim_limit_map_registry()
+{
+   return g_installed ? g_mapRegistry : nullptr;
+}
+
+const combo_anim_bank* combo_anim_limit_bank_registry()
+{
+   return g_installed ? g_bankRegistry : nullptr;
+}
+
+void** combo_anim_limit_action_slot(int map, int action, bool lower)
+{
+   if (!g_installed || !g_instance || action < 0 || action >= 38) return nullptr;
+   combo_anim_map* table = g_storage.get(*g_instance, map);
+   return table ? &table->action[action][lower ? 1 : 0] : nullptr;
+}
+
 size_t combo_anim_limit_crash_details(uintptr_t fault, uintptr_t frame, uintptr_t animator,
                                       unsigned movement, char* output, size_t capacity)
 {

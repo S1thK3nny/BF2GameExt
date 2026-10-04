@@ -217,6 +217,15 @@
     <ClInclude Include="src\entity\walker_stomp_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -529,6 +538,9 @@
     <ClInclude Include="src\game\Battlefront2\Source\EntityHover.h">
       <Filter>game\Battlefront2\Source</Filter>
     </ClInclude>
+    <ClInclude Include="src\game\Battlefront2\Source\SoldierAnimator.h">
+      <Filter>game\Battlefront2\Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -673,6 +685,12 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\walker_stomp_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\directional_rolls.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">

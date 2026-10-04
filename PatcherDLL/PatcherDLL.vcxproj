@@ -172,6 +172,9 @@
     <ClInclude Include="src\entity\walker_foot_diag.hpp" />
     <ClInclude Include="src\entity\walker_foot_diag_core.hpp" />
     <ClInclude Include="src\entity\walker_stomp_fix.hpp" />
+    <ClInclude Include="src\entity\directional_rolls.hpp" />
+    <ClInclude Include="src\entity\directional_rolls_core.hpp" />
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\entity\attached_effects_cleanup.hpp" />
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
@@ -269,6 +272,7 @@
     <ClInclude Include="src\weapon\impact_sound_water_fix.hpp" />
     <ClInclude Include="src\game\Battlefront2\Source\CollisionObject.h" />
     <ClInclude Include="src\game\Battlefront2\Source\EntityHover.h" />
+    <ClInclude Include="src\game\Battlefront2\Source\SoldierAnimator.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -306,6 +310,8 @@
     <ClCompile Include="src\entity\flyer_roll_throttle_fix.cpp" />
     <ClCompile Include="src\entity\walker_foot_diag.cpp" />
     <ClCompile Include="src\entity\walker_stomp_fix.cpp" />
+    <ClCompile Include="src\entity\directional_rolls.cpp" />
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\attached_effects_cleanup.cpp" />
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />

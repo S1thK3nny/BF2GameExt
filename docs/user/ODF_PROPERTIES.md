@@ -54,6 +54,7 @@ Set on the concrete soldier class.
 | `OverrideTexture5` | texture name | Fifth slot. | 1.0.0 |
 | `DisableProne` | `1` | The unit can never go prone, for the AI as well as the player. A double-tap of crouch just stands the soldier up again, and AI sent to a prone spot crouches there instead. | 1.1.0 |
 | `DisableCrouch` | `1` | The unit can never crouch, for the AI as well as the player. The crouch key goes straight to prone instead, and pressing it again stands back up. With `DisableProne` also set, the crouch key does nothing. | 1.1.0 |
+| `UseDirectionalRolls` | `1` | A roll to the side plays `diveleft` or `diveright` instead of a forward dive turned sideways, and follows the roll's real direction through turns as a forward roll does. The side is picked the way the stock `UseDirectionalJumps` picks a side jump: moving faster than 2 m/s, with more of the move sideways than forward. A side whose dive the bank lacks rolls as stock. Inherited through `ClassParent`. Names in [Animation Naming Conventions](#animation-naming-conventions). | 1.2.0 |
 | `HitShake` | scale | Kicks your view when the unit takes damage, harder for a bigger hit. See [Camera shake](#camera-shake). | 1.2.0 |
 | `LandShake` | scale | Dips your view when the unit lands a jump or fall. | 1.2.0 |
 | `RollShake` | scale | Eases your view back and down through a combat roll, then settles. Third person only. | 1.2.0 |
@@ -556,4 +557,5 @@ Not properties, but ODF-adjacent: these are picked up by name out of an animatio
 | Animation | Where | Description | Since |
 |-----------|-------|-------------|-------|
 | `<bank>_rifle_sprint` | first person soldier bank | Played while sprinting, in place of the run animation being sped up. Also `<bank>_bazooka_sprint` and `<bank>_tool_sprint`. Entirely optional: if the animation is not in the bank, nothing changes. | 1.0.0 |
+| `<bank>_<weapon>_diveleft`, `<bank>_<weapon>_diveright` | soldier animation bank | The side rolls of a unit with `UseDirectionalRolls`, named like its `diveforward`: whole-body `human_rifle_diveleft_full`, or `_upper` and `_lower` halves. Found like any soldier animation: the unit's bank and then its parent banks, for its weapon and then the weapon's parents (a pistol uses the tool's and then the rifle's). A side without one keeps the stock roll. Make them at least three quarters of `human_rifle_diveforward`'s length, where every roll ends, or they hold their last frame until then. | 1.2.0 |
 | `boost` | flyer animation bank | Played automatically while boosting, blending in and out. Frame 0 should be the normal flying pose and the last frame the full boost pose. The length of the animation sets how long the blend takes, so add frames to slow it down and remove frames to speed it up. | 1.0.0 |

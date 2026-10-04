@@ -1581,6 +1581,30 @@ namespace modtools {
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
 
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: thiscall(RedPose*), RET 4, the per-frame pose
+   // build that plays a roll's DIVE action; called from EntitySoldier::Render
+   // (0x00536E56, 0x00536E84) and SoldierElement::RenderUsingContext (0x00674C38).
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x0057C490;
+   // SoldierAnimatorClass::sInstance, a pointer cell, and the class's action
+   // table getters: thiscall(action, map), RET 8, reading
+   // [class + (map * 0x97 + action) * 8 + 0x24] (upper) and + 0x28 (lower).
+   constexpr uintptr_t soldier_animator_class_instance = 0x00B8D3C4;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x0057DCA0;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x0057DCC0;
+   // SoldierAnimationBank::s_aBank (0x2C each), s_aWeapon (0x30 each) and
+   // s_aMap (eBank, eWeapon): the names and parents AnimationFinder builds
+   // animation names from. Read by the table code at 0x005703C7, 0x005703FA
+   // and 0x00570775.
+   constexpr uintptr_t soldier_anim_banks              = 0x00ACECF8;
+   constexpr uintptr_t soldier_anim_weapons            = 0x00ACF198;
+   constexpr uintptr_t soldier_anim_maps               = 0x00ACF558;
+   // GameLoop::sClientDeltaTime, the frame time SoldierAnimator::SetAction
+   // (0x00575D50) reads first, at 0x00575D9B.
+   constexpr uintptr_t game_client_delta_time          = 0x00C6A9AC;
+
 } // namespace modtools
 
 // =============================================================================
@@ -2905,6 +2929,26 @@ namespace steam {
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
 
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: thiscall(RedPose*), RET 4 (with an SEH frame);
+   // called from 0x0048E023, 0x004E357A and 0x004E35AF.
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x0063FAA0;
+   // SoldierAnimatorClass::sInstance and the action table getters, as on modtools.
+   constexpr uintptr_t soldier_animator_class_instance = 0x01EAFB1C;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x00643940;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x00643960;
+   // SoldierAnimationBank::s_aBank, s_aWeapon and s_aMap (here the weapons come
+   // first in .data). Read by the table code at 0x0063C3C3, 0x0063C3E6 and
+   // 0x0063C980.
+   constexpr uintptr_t soldier_anim_banks              = 0x007E9440;
+   constexpr uintptr_t soldier_anim_weapons            = 0x007E9070;
+   constexpr uintptr_t soldier_anim_maps               = 0x007E9700;
+   // GameLoop::sClientDeltaTime: SoldierAnimator::SetAction (0x0063ED60) loads
+   // it into XMM3 first, at 0x0063ED66.
+   constexpr uintptr_t game_client_delta_time          = 0x01E56058;
+
 } // namespace steam
 
 // =============================================================================
@@ -3944,6 +3988,23 @@ namespace gog {
    // (ECX = layer).  The reset clears the mesh count but not the layer's
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
+
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: Steam's code 0x10A0 later; called from the same
+   // three sites as on Steam.
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x00640B40;
+   constexpr uintptr_t soldier_animator_class_instance = 0x01EB0FD0;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x006449E0;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x00644A00;
+   // SoldierAnimationBank::s_aBank, s_aWeapon and s_aMap. Read by the table
+   // code at 0x0063D463, 0x0063D486 and 0x0063DA20.
+   constexpr uintptr_t soldier_anim_banks              = 0x007EA070;
+   constexpr uintptr_t soldier_anim_weapons            = 0x007EA330;
+   constexpr uintptr_t soldier_anim_maps               = 0x007EA8E0;
+   // GameLoop::sClientDeltaTime, loaded first by SetAction (0x0063FE00) at 0x0063FE06.
+   constexpr uintptr_t game_client_delta_time          = 0x01E574F0;
 
 } // namespace gog
 

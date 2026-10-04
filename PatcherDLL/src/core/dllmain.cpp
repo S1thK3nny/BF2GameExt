@@ -41,6 +41,7 @@
 #include "entity/branch_region_fix.hpp"
 #include "entity/walker_foot_diag.hpp"
 #include "entity/walker_stomp_fix.hpp"
+#include "entity/directional_rolls.hpp"
 #include "util/sound_diag.hpp"
 #include "util/game_log_lock.hpp"
 #include "util/voice_limit.hpp"
@@ -386,6 +387,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
    camera_shake_install(exe_base);            // after odf_gameext_props: its ODF listeners
+   directional_rolls_install(exe_base);       // after odf_gameext_props: its ODF listeners; Detours .text
    walker_stomp_fix_install(exe_base);        // Detours .text and moves two operands — needs the RW window
    walker_foot_diag_install(exe_base);        // Detours .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
