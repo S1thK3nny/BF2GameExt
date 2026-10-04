@@ -72,7 +72,7 @@ A runtime build-dispatch layer resolves per-build addresses, so features light u
 | Gamepad bindings and rumble | ✅ | ✅ | ✅ |
 | Loading screen system | ✅ | ✅ | ✅ |
 | HUD events, number transforms, `FillFrom` | ✅ | ✅ | ✅ |
-| Camera shake *(a flyer's turn and collision shakes and speed-name thresholds: modtools only for now)* | ✅ | ✅ | ✅ |
+| Camera shake | ✅ | ✅ | ✅ |
 | Grappling hook *(experimental)* | ✅ | ❌ | ❌ |
 | Additional debug console commands | ✅ | n/a | n/a |
 

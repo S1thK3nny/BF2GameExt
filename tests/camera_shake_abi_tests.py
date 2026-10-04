@@ -113,18 +113,18 @@ for (namespace, name), value in expected_collision.items():
     assert ns_const(collision, namespace, name) == value, (namespace, name)
 assert 'kHoverRtti   = pbl_hash("EntityHover")' in module, "the hover RTTI name"
 
-# The flyer, walker and hover fields camera shake reads, (modtools, release); a release 0
-# is a field not read on Steam and GOG yet. The sites below are where each was read.
+# The flyer, walker and hover fields camera shake reads, (modtools, release). The
+# sites below are where each was read.
 expected_fields = {
     ("layout::EntityFlyer", flyer): {
-        "mMatrix_forward": (0x110, 0), "mControlMove": (0x2C0, 0), "mControlStrafe": (0x2C4, 0),
+        "mMatrix_forward": (0x110, 0x110), "mControlMove": (0x2C0, 0x2C0), "mControlStrafe": (0x2C4, 0x2C4),
         "mVelocity": (0x580, 0x540), "mState": (0x5A4, 0x564), "mFlags": (0x5F4, 0x5B4),
-        "mGetSpeedSpeed": (0x5F8, 0), "mInLandingRegionFactor": (0x5FC, 0), "mTrick": (0x610, 0x5D0),
+        "mGetSpeedSpeed": (0x5F8, 0x5B8), "mInLandingRegionFactor": (0x5FC, 0x5BC), "mTrick": (0x610, 0x5D0),
         "mClass": (0x66C, 0x62C),
     },
     ("layout::EntityFlyerClass", flyer): {
-        "mMinSpeed": (0x88C, 0), "mMidSpeed": (0x890, 0), "mMaxSpeed": (0x894, 0), "mBoostSpeed": (0x898, 0),
-        "mPitchRate": (0x8A0, 0), "mTurnRate": (0x8A4, 0),
+        "mMinSpeed": (0x88C, 0x7C4), "mMidSpeed": (0x890, 0x7C8), "mMaxSpeed": (0x894, 0x7CC),
+        "mBoostSpeed": (0x898, 0x7D0), "mPitchRate": (0x8A0, 0x7D8), "mTurnRate": (0x8A4, 0x7DC),
     },
     ("layout::EntityWalker", walker): {
         "mClass": (0x498, 0x460), "mVelocity": (0x4A0, 0x468), "mFlags": (0x2060, 0x2020),
@@ -173,9 +173,6 @@ assert set(GUARDS) == {"chase_camera_setup_camera", "red_camera_set_matrix",
                        "tracker_is_first_person_view", "flyer_do_trick", "weapon_signal_fire",
                        "reticle_display_update", "camera_manager_apply_shake",
                        "weapon_melee_update_fire", "weapon_melee_deflect", "hover_collision_callback"}, GUARDS
-# Read on modtools only so far: a build without the address skips the guard.
-MODTOOLS_ONLY = {"camera_manager_apply_shake", "flyer_post_collision_shake_call",
-                 "flyer_collision_shake_call"}
 
 # The Derive sites and the bytes the patcher expects, by reader and build kind.
 derive_bytes = {
@@ -211,9 +208,60 @@ retail_flyer = {
     0x004B1B64: [("ret", "4")],
     0x004ABC70: [("mov", "dl, byte ptr [ecx + 0x5b4]")],                    # RecalculateSpeed
     0x004ABC7F: [("cmp", "dword ptr [ecx + 0x564], 2")],                    # mState == FLYING
-    0x004ABD07: [("movss", "xmm1, dword ptr [ecx + 0x544]")],               # mVelocity.y
-    0x004ABD0F: [("mulss", "xmm0, dword ptr [ecx + 0x540]")],               # mVelocity.x
+    0x004ABCA6: [("mov", "eax, dword ptr [ecx + 0x62c]"),                   # the class's BoostSpeed
+                 ("movss", "xmm2, dword ptr [eax + 0x7d0]")],
+    # mVelocity along the matrix's forward axis (+ 0x110) into mGetSpeedSpeed.
+    0x004ABCFF: [("movss", "xmm0, dword ptr [ecx + 0x110]"), ("movss", "xmm1, dword ptr [ecx + 0x544]"),
+                 ("mulss", "xmm0, dword ptr [ecx + 0x540]"), ("mulss", "xmm1, dword ptr [ecx + 0x114]")],
+    0x004ABD1F: [("addss", "xmm1, xmm0"), ("movss", "xmm0, dword ptr [ecx + 0x548]"),
+                 ("mulss", "xmm0, dword ptr [ecx + 0x118]"), ("addss", "xmm1, xmm0"),
+                 ("movss", "dword ptr [ecx + 0x5b8], xmm1")],
     0x00402AD0: [("push", "{flyer_rtti_name}")],                            # rttiHashEntityFlyer
+    # GetFlyerMaxSpeed, GetFlyerMidSpeed and GetFlyerMinSpeed (ECX the flyer, the
+    # speed back in XMM0): mInLandingRegionFactor, then the class's MaxSpeed,
+    # MidSpeed and MinSpeed, capped while it is non-zero (the caps are per build).
+    0x004AC3A0: [("movss", "xmm0, dword ptr [ecx + 0x5bc]")],
+    0x004AC3B3: [("mov", "eax, dword ptr [ecx + 0x62c]"), ("movss", "xmm0, dword ptr [eax + 0x7cc]")],
+    0x004AC3F3: [("mov", "eax, dword ptr [ecx + 0x62c]"), ("movss", "xmm0, dword ptr [eax + 0x7c8]")],
+    0x004AC433: [("mov", "eax, dword ptr [ecx + 0x62c]"), ("movss", "xmm0, dword ptr [eax + 0x7c4]")],
+    # EntityFlyer::Update works from the flyer's Controllable part, the flyer +
+    # 0x240 (EDI; the flyer in ESI): the throttle, mControlMove (+ 0x80, kept at
+    # [ESP + 0x88]), and outside a landing region (+ 0x37C, the flyer's + 0x5BC)
+    # the roll, mControlStrafe (+ 0x84).
+    0x004AC460: [("push", "ebp"), ("mov", "ebp, esp"), ("and", "esp, 0xfffffff0"), ("sub", "esp, 0x2b8"),
+                 ("push", "esi"), ("push", "edi"), ("mov", "edi, ecx")],
+    0x004AC470: [("lea", "eax, [ebp + 8]"), ("push", "eax"), ("mov", "dword ptr [esp + 0x100], edi"),
+                 ("lea", "esi, [edi - 0x240]")],
+    0x004ACACB: [("mov", "ecx, esi"), ("call", "0x4abc70")],               # RecalculateSpeed(flyer)
+    0x004ACD81: [("movss", "xmm0, dword ptr [edi + 0x37c]"), ("xorps", "xmm1, xmm1"),
+                 ("movss", "xmm7, dword ptr [edi + 0x80]"), ("ucomiss", "xmm0, xmm1"),
+                 ("movss", "dword ptr [esp + 0x88], xmm7")],
+    0x004ACDA6: [("test", "byte ptr [edi + 0x54], 1"), ("je", "0x4acdb6"),
+                 ("movss", "xmm2, dword ptr [edi + 0x88]"), ("jmp", "0x4acdc3"),
+                 ("movss", "xmm2, dword ptr [edi + 0x84]")],
+    # The class (+ 0x3EC, the flyer's + 0x62C): BoostSpeed and MaxSpeed, then
+    # TurnRate and PitchRate.
+    0x004AD113: [("mov", "edx, dword ptr [edi + 0x3ec]"), ("movss", "xmm0, dword ptr [edx + 0x7d0]"),
+                 ("movss", "xmm1, dword ptr [edx + 0x7cc]"), ("comiss", "xmm1, xmm0")],
+    0x004AD12C: [("movss", "dword ptr [esp + 0x20], xmm0"), ("movss", "dword ptr [esp + 0x90], xmm1"),
+                 ("ja", "0x4ad146"), ("movss", "dword ptr [esp + 0x90], xmm0")],
+    0x004AD146: [("movss", "xmm6, dword ptr [edx + 0x7dc]"), ("movss", "xmm7, dword ptr [edx + 0x7d8]")],
+    # The speed it steers toward, into mSetSpeed (+ 0x318, the flyer's + 0x558):
+    # the class's BoostSpeed (XMM3; every way into 0x004AE671 passes 0x004AE145)
+    # while boosting (flag bit 0x04) with one; else MidSpeed + (MidSpeed -
+    # MinSpeed) x the throttle held back, MidSpeed + (MaxSpeed - MidSpeed) x the
+    # throttle held forward, through the capped getters.
+    0x004AE145: [("mov", "edx, dword ptr [edi + 0x3ec]"), ("movss", "xmm3, dword ptr [edx + 0x7d0]")],
+    0x004AE671: [("test", "byte ptr [edi + 0x374], 4"), ("je", "0x4ae690"), ("ucomiss", "xmm3, xmm7"),
+                 ("lahf", ""), ("test", "ah, 0x44"), ("jnp", "0x4ae690"),
+                 ("movss", "dword ptr [edi + 0x318], xmm3")],
+    0x004AE690: [("movss", "xmm5, dword ptr [esp + 0x88]"), ("mov", "ecx, esi"), ("comiss", "xmm7, xmm5"),
+                 ("jbe", "0x4ae6cb"), ("call", "0x4ac3e0"), ("movaps", "xmm3, xmm0"), ("call", "0x4ac420")],
+    0x004AE6B0: [("call", "0x4ac3e0"), ("subss", "xmm2, xmm0"), ("mulss", "xmm2, xmm5"),
+                 ("subss", "xmm3, xmm2"), ("movss", "dword ptr [edi + 0x318], xmm3")],
+    0x004AE6CB: [("call", "0x4ac3a0"), ("mov", "ecx, esi"), ("movaps", "xmm2, xmm0"), ("call", "0x4ac3e0"),
+                 ("subss", "xmm2, xmm0"), ("mulss", "xmm2, xmm5"), ("call", "0x4ac3e0")],
+    0x004AE6E7: [("addss", "xmm2, xmm0"), ("movss", "dword ptr [edi + 0x318], xmm2")],
 }
 # EntityWalker on Steam and GOG, which have it at the same addresses.
 retail_walker = {
@@ -473,6 +521,30 @@ sites = {
         0x0068D178: [("ret", "4")],
         0x0068A6C9: [("ret", "0xc")],
         0x0068B0F8: [("ret", "0xc")],
+        # CameraManager::ApplyShake: the amount from XMM1, the duration from XMM2,
+        # a plain RET.
+        0x0044F4CE: [("movss", "dword ptr [ecx + eax*4 + 0xa0], xmm1")],
+        0x0044F4DD: [("divss", "xmm1, xmm2"), ("movss", "dword ptr [ecx + eax*4 + 0xb0], xmm1"),
+                     ("inc", "dword ptr [ecx + 0x9c]"), ("ret", "")],
+        # The flyer's two collision shakes, in PostCollisionUpdate and
+        # CollisionCallback: ApplyShake(impact x 0.8, impact x 0.7) with the camera
+        # manager in ECX and EDX. After the call the impact in XMM0 and the
+        # manager in EDX are used again, for the chase camera's mTimer.
+        0x004B24CE: [("movss", "xmm0, dword ptr [esp + 0xc]"), ("mov", "edx, dword ptr [0x1e30324]"),
+                     ("movaps", "xmm1, xmm0"), ("mulss", "xmm1, dword ptr [0x7b20a0]")],
+        0x004B24E5: [("movaps", "xmm2, xmm0"), ("mov", "ecx, edx"), ("mulss", "xmm2, dword ptr [0x7b2070]"),
+                     ("call", "{camera_manager_apply_shake}"), ("comiss", "xmm0, dword ptr [0x7b2014]"),
+                     ("jbe", "0x4b254d"), ("mov", "eax, dword ptr [edx + 0x28]")],
+        0x004B4D07: [("movss", "xmm0, dword ptr [esp + 0x10]"), ("mov", "edx, dword ptr [0x1e30324]"),
+                     ("movaps", "xmm1, xmm0"), ("mulss", "xmm1, dword ptr [0x7b20a0]")],
+        0x004B4D1E: [("movaps", "xmm2, xmm0"), ("mov", "ecx, edx"), ("mulss", "xmm2, dword ptr [0x7b2070]"),
+                     ("call", "{camera_manager_apply_shake}"), ("comiss", "xmm0, dword ptr [0x7b2014]"),
+                     ("jbe", "0x4b4d8a"), ("mov", "eax, dword ptr [edx + 0x28]")],
+        # The getters' landing-region caps: MaxSpeed, MidSpeed, MinSpeed's share
+        # and MinSpeed.
+        0x004AC3C3: [("movss", "xmm1, dword ptr [0x7b2308]")],
+        0x004AC403: [("movss", "xmm1, dword ptr [0x7b22d4]")],
+        0x004AC443: [("mulss", "xmm0, dword ptr [0x7b1f88]"), ("movss", "xmm1, dword ptr [0x7b228c]")],
     }},
     "gog": {**retail_flyer, **retail_walker, **retail_hover, **{
         0x00453CF4: [("cmp", "dword ptr [esi + 0xc], 0"), ("lea", "eax, [esi + 0x10]")],
@@ -497,6 +569,22 @@ sites = {
         0x0068E208: [("ret", "4")],
         0x0068B759: [("ret", "0xc")],
         0x0068C188: [("ret", "0xc")],
+        0x0044F4AE: [("movss", "dword ptr [ecx + eax*4 + 0xa0], xmm1")],
+        0x0044F4BD: [("divss", "xmm1, xmm2"), ("movss", "dword ptr [ecx + eax*4 + 0xb0], xmm1"),
+                     ("inc", "dword ptr [ecx + 0x9c]"), ("ret", "")],
+        0x004B24CE: [("movss", "xmm0, dword ptr [esp + 0xc]"), ("mov", "edx, dword ptr [0x1e317c4]"),
+                     ("movaps", "xmm1, xmm0"), ("mulss", "xmm1, dword ptr [0x7b3018]")],
+        0x004B24E5: [("movaps", "xmm2, xmm0"), ("mov", "ecx, edx"), ("mulss", "xmm2, dword ptr [0x7b2fe8]"),
+                     ("call", "{camera_manager_apply_shake}"), ("comiss", "xmm0, dword ptr [0x7b2f8c]"),
+                     ("jbe", "0x4b254d"), ("mov", "eax, dword ptr [edx + 0x28]")],
+        0x004B4D07: [("movss", "xmm0, dword ptr [esp + 0x10]"), ("mov", "edx, dword ptr [0x1e317c4]"),
+                     ("movaps", "xmm1, xmm0"), ("mulss", "xmm1, dword ptr [0x7b3018]")],
+        0x004B4D1E: [("movaps", "xmm2, xmm0"), ("mov", "ecx, edx"), ("mulss", "xmm2, dword ptr [0x7b2fe8]"),
+                     ("call", "{camera_manager_apply_shake}"), ("comiss", "xmm0, dword ptr [0x7b2f8c]"),
+                     ("jbe", "0x4b4d8a"), ("mov", "eax, dword ptr [edx + 0x28]")],
+        0x004AC3C3: [("movss", "xmm1, dword ptr [0x7b3280]")],
+        0x004AC403: [("movss", "xmm1, dword ptr [0x7b324c]")],
+        0x004AC443: [("mulss", "xmm0, dword ptr [0x7b2f00]"), ("movss", "xmm1, dword ptr [0x7b3204]")],
     }},
 }
 
@@ -513,6 +601,51 @@ hover_vtables = {
     "gog": [(0x004C0ABC, 0x0079CC38), (0x00478FD9, 0x007992EC)],
 }
 
+# EntityFlyer's functions the flyer shakes read in, found through its vtables:
+# the constructor store that puts the vtable in place (at the part's offset),
+# the vtable, the slot, the function there, and sites above that lie in it.
+# PostCollisionUpdate (primary, slot 71) and CollisionCallback (CollisionObject
+# part, slot 6) make the two collision CALLs; Update (Controllable part, slot 1)
+# reads the throttle, the roll and the turn rates. modtools goes through thunks.
+retail_update_sites = (0x004AC470, 0x004ACACB, 0x004ACD81, 0x004ACDA6, 0x004AD113, 0x004AD146, 0x004AE145,
+                       0x004AE671, 0x004AE6E7)
+flyer_functions = {
+    "modtools": [
+        (0x004F2876, 0x000, 0x00A3CDC8, 0x11C, 0x004F79B0, ("flyer_post_collision_shake_call", 0x004F7F20)),
+        (0x004F287C, 0x00C, 0x00A3CD68, 0x018, 0x005025B0, ("flyer_collision_shake_call", 0x00503216)),
+        (0x004F28A1, 0x240, 0x00A3CBC8, 0x004, 0x004FC930,
+         (0x004FD376, 0x004FD39D, 0x004FD752, 0x004FD86D, 0x004FECF9, 0x004FED19)),
+    ],
+    "steam": [
+        (0x004AAB53, 0x000, 0x0079B49C, 0x11C, 0x004B1E70, ("flyer_post_collision_shake_call", 0x004B24CE)),
+        (0x004AAB59, 0x00C, 0x0079B20C, 0x018, 0x004B3DE0, ("flyer_collision_shake_call", 0x004B4D07)),
+        (0x004AAB7E, 0x240, 0x0079B3CC, 0x004, 0x004AC460, retail_update_sites),
+    ],
+    "gog": [
+        (0x004AAB53, 0x000, 0x0079C43C, 0x11C, 0x004B1E70, ("flyer_post_collision_shake_call", 0x004B24CE)),
+        (0x004AAB59, 0x00C, 0x0079C1AC, 0x018, 0x004B3DE0, ("flyer_collision_shake_call", 0x004B4D07)),
+        (0x004AAB7E, 0x240, 0x0079C36C, 0x004, 0x004AC460, retail_update_sites),
+    ],
+}
+
+# Per build, the stock bump's amount and duration factors (0.8 and 0.7) the
+# collision sites multiply by, and the landing-region caps the getters read:
+# MaxSpeed 60, MidSpeed 20, MinSpeed 10 and MinSpeed's share 0.2.
+bump_factors = {"modtools": (0xA2A9B4, 0xA2C664), "steam": (0x7B20A0, 0x7B2070), "gog": (0x7B3018, 0x7B2FE8)}
+landing_caps = {
+    "modtools": (0xACDC60, 0xACDC64, 0xACDC68, 0xACDC6C),
+    "steam": (0x7B2308, 0x7B22D4, 0x7B228C, 0x7B1F88),
+    "gog": (0x7B3280, 0x7B324C, 0x7B3204, 0x7B2F00),
+}
+for build, constants in list(bump_factors.items()) + list(landing_caps.items()):
+    operands = " ".join(ops for instructions in sites[build].values() for _, ops in instructions)
+    for va in constants:
+        assert hex(va) in operands, (build, hex(va), "not read at any site")
+assert "constexpr float kStockBumpAmount = 0.8f;" in core, "the stock amount factor"
+for name, value in (("kLandSpeedMax", "60.0f"), ("kLandSpeedMid", "20.0f"),
+                    ("kLandSpeedMin", "10.0f"), ("kLandSpeedMinMult", "0.2f")):
+    assert re.search(r"constexpr float " + name + r"\s*=\s*" + re.escape(value), core), name
+
 # ChaseCamera's vtable: Update (+0x04) sits in the slot before SetupCamera (+0x08),
 # which ties the queue sites above to the class. modtools goes through thunks.
 # build: (address of the SetupCamera slot, Update, SetupCamera thunk, Update thunk)
@@ -528,6 +661,15 @@ builds = [
     ("gog", "BattlefrontII_GoG.exe"),
 ]
 decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+
+
+def relocations(pe):
+    """The addresses the loader moves when it loads the exe elsewhere (HIGHLOW entries)."""
+    if not hasattr(pe, "DIRECTORY_ENTRY_BASERELOC"):
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_BASERELOC"]])
+    base = pe.OPTIONAL_HEADER.ImageBase
+    return {base + e.rva for block in getattr(pe, "DIRECTORY_ENTRY_BASERELOC", [])
+            for e in block.entries if e.type == pefile.RELOCATION_TYPE["IMAGE_REL_BASED_HIGHLOW"]}
 
 
 def branch_targets(image, base, start, end):
@@ -569,8 +711,6 @@ for build, filename in builds:
         names["hover_rtti_name"] = hex(hover_va)
 
         for address_name, per_kind in GUARDS.items():
-            if address_name in MODTOOLS_ONLY and address_name not in addrs:
-                continue
             raw, mask = per_kind[kind]
             want = codecs.decode(raw, "unicode_escape").encode("latin1")
             assert len(want) == len(mask), (build, address_name, "guard length")
@@ -578,6 +718,23 @@ for build, filename in builds:
             got = image[va - base:va - base + len(want)]
             assert all(m != "x" or g == w for g, w, m in zip(got, want, mask)), \
                 (build, address_name, got.hex())
+
+        # Steam and GOG are always loaded away from their build address, and the
+        # loader moves every absolute address in them first. The guards compare
+        # bytes as built, so none of the bytes they compare may be one it moves,
+        # nor may the two CALLs that are retargeted (a CALL's target is relative).
+        moved = relocations(pe)
+        if kind == "modtools":
+            assert pe.FILE_HEADER.Characteristics & 0x0001 and not moved, (build, "modtools has a fixed base")
+        else:
+            assert pe.OPTIONAL_HEADER.DllCharacteristics & 0x0040, (build, "retail is built to be relocated")
+        for address_name, per_kind in GUARDS.items():
+            va = addrs[address_name]
+            compared = {va + i for i, m in enumerate(per_kind[kind][1]) if m == "x"}
+            hits = [hex(r) for r in moved if compared & set(range(r, r + 4))]
+            assert not hits, (build, address_name, "compares bytes the loader moves", hits)
+        for name in ("flyer_post_collision_shake_call", "flyer_collision_shake_call"):
+            assert not [r for r in moved if addrs[name] - 3 <= r < addrs[name] + 5], (build, name)
 
         for address, instructions in sites[build].items():
             want_ins = [(m, ops.format(**names)) for m, ops in instructions]
@@ -623,27 +780,43 @@ for build, filename in builds:
             assert slot_target(table_va, 0x18) == addrs["hover_collision_callback"], \
                 (build, hex(table_va), "hover CollisionCallback slot")
 
-        # The collision sites and ApplyShake, where this build has them, and the
-        # stock amount and duration factors the bump is read back with.
-        present = MODTOOLS_ONLY & set(addrs)
-        assert present in (set(), MODTOOLS_ONLY), (build, "collision addresses: all or none", present)
-        if present:
-            for name in ("flyer_post_collision_shake_call", "flyer_collision_shake_call"):
-                ins = list(decoder.disasm(image[addrs[name] - base:addrs[name] - base + 5], addrs[name]))[0]
-                assert ins.mnemonic == "call" and jmp_target(int(ins.op_str, 16)) == \
-                    addrs["camera_manager_apply_shake"], (build, name)
-            floats = {va: struct.unpack("<f", image[va - base:va - base + 4])[0] for va in (0xA2A9B4, 0xA2C664)}
-            assert abs(floats[0xA2A9B4] - 0.8) < 1e-6 and abs(floats[0xA2C664] - 0.7) < 1e-6, floats
-            assert "constexpr float kStockBumpAmount = 0.8f;" in core, "the stock amount factor"
+        def lies_in(fn, va):
+            """Whether decoding from fn reaches va without leaving the function."""
+            for ins in decoder.disasm(image[fn - base:va + 16 - base], fn):
+                if ins.address == va:
+                    return True
+                if ins.address > va or ins.mnemonic == "int3":
+                    return False
+            return False
+
+        for store_va, part, table_va, slot, fn, inner in flyer_functions[build]:
+            store = list(decoder.disasm(image[store_va - base:store_va - base + 10], store_va, count=1))[0]
+            at = "]" if part == 0 else f" + {hex(part)}]"
+            assert store.mnemonic == "mov" and store.op_str.endswith(f"{at}, {hex(table_va)}"), \
+                (build, hex(store_va), store.op_str)
+            assert slot_target(table_va, slot) == fn, (build, hex(table_va), hex(slot))
+            for site in inner:
+                va = addrs[site] if isinstance(site, str) else site
+                assert lies_in(fn, va), (build, hex(fn), hex(va), "not in the function")
+
+        def f32(va):
+            return struct.unpack("<f", image[va - base:va - base + 4])[0]
+
+        # The collision sites CALL ApplyShake (modtools through its thunk), with
+        # the stock amount and duration factors the bump is read back with.
+        for name in ("flyer_post_collision_shake_call", "flyer_collision_shake_call"):
+            call = list(decoder.disasm(image[addrs[name] - base:addrs[name] - base + 5], addrs[name]))[0]
+            assert call.mnemonic == "call", (build, name)
+            target = int(call.op_str, 16)
+            if build == "modtools":
+                target = jmp_target(target)
+            assert target == addrs["camera_manager_apply_shake"], (build, name)
+        amount, duration = (f32(va) for va in bump_factors[build])
+        assert abs(amount - 0.8) < 1e-6 and abs(duration - 0.7) < 1e-6, (build, amount, duration)
 
         # The landing-region caps camera_shake_core.hpp mirrors.
-        if build == "modtools":
-            caps = {va: struct.unpack("<f", image[va - base:va - base + 4])[0]
-                    for va in (0xACDC60, 0xACDC64, 0xACDC68, 0xACDC6C)}
-            assert [round(caps[va], 6) for va in sorted(caps)] == [60.0, 20.0, 10.0, 0.2], caps
-            for name, value in (("kLandSpeedMax", "60.0f"), ("kLandSpeedMid", "20.0f"),
-                                ("kLandSpeedMin", "10.0f"), ("kLandSpeedMinMult", "0.2f")):
-                assert re.search(r"constexpr float " + name + r"\s*=\s*" + re.escape(value), core), name
+        caps = [round(f32(va), 6) for va in landing_caps[build]]
+        assert caps == [60.0, 20.0, 10.0, 0.2], (build, caps)
 
         for reader in ("entity", "weapon"):
             va = addrs[reader + "_class_read_derive_site"]
@@ -655,8 +828,7 @@ for build, filename in builds:
                       if va < t < va + 8}
             assert not inside, (build, reader, "a branch lands inside the Derive site", inside)
 
-        guarded = sum(1 for name in GUARDS if name not in MODTOOLS_ONLY or name in addrs)
-        print(f"{build}: {guarded} guards, {len(sites[build])} camera shake sites and "
-              f"2 Derive sites passed{'' if present else ' (flyer collision sites not read yet)'}")
+        print(f"{build}: {len(GUARDS)} guards, {len(sites[build])} camera shake sites and "
+              f"2 Derive sites passed")
     finally:
         pe.close()

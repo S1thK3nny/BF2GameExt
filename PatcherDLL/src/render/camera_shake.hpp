@@ -54,9 +54,8 @@
 // unshaken camera, so shots land where they would without it. Client-local: it
 // changes nothing in the simulation or on the network (whether a client runs
 // the melee and hover collision code it watches for its own unit is not known
-// yet). Modtools, Steam and GOG; on Steam and GOG a flyer's TurnShake,
-// CollisionShake and speed names in its Threshold are not available yet. The
-// research and every address are in docs/RE/CameraShake.md.
+// yet). Modtools, Steam and GOG. The research and every address are in
+// docs/RE/CameraShake.md.
 // =============================================================================
 
 // The shakes, in the order of their ODF names (kShakeNames in the .cpp).

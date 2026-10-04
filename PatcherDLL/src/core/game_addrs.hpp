@@ -1131,7 +1131,7 @@ namespace modtools {
    // queues a stock shake on the chase camera. EntityFlyer::PostCollisionUpdate
    // and CollisionCallback CALL it, through its thunk at 0x004162D4, for a bump
    // of the flyer the camera follows; camera shake retargets both CALLs for
-   // CollisionShake. Not yet read on Steam and GOG.
+   // CollisionShake.
    constexpr uintptr_t camera_manager_apply_shake   = 0x004A0690;
    constexpr uintptr_t flyer_post_collision_shake_call = 0x004F7F3A;
    constexpr uintptr_t flyer_collision_shake_call   = 0x00503230;
@@ -2475,6 +2475,15 @@ namespace steam {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CBEF0;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3C0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // CameraManager::ApplyShake: ECX the manager, the amount in XMM1 and the
+   // duration in XMM2, plain RET. It changes only EAX, ECX and XMM1, and both
+   // flyer collision callers use EDX and XMM0 after it. EntityFlyer::
+   // PostCollisionUpdate and CollisionCallback CALL it directly; camera shake
+   // retargets both CALLs for CollisionShake, to a stand-in that keeps every
+   // register.
+   constexpr uintptr_t camera_manager_apply_shake   = 0x0044F4C0;
+   constexpr uintptr_t flyer_post_collision_shake_call = 0x004B24F2;
+   constexpr uintptr_t flyer_collision_shake_call   = 0x004B4D2B;
    // WeaponMelee::UpdateFire and Deflect, as on modtools: slots +0xA4 and +0x48
    // of the one Weapon vtable (0x007B1578) whose IsMelee (+0x54) returns true.
    constexpr uintptr_t weapon_melee_update_fire     = 0x0068C230;
@@ -3079,6 +3088,11 @@ namespace gog {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CCF90;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3A0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // CameraManager::ApplyShake, as on Steam; its two flyer collision CALLs are
+   // at Steam's addresses.
+   constexpr uintptr_t camera_manager_apply_shake   = 0x0044F4A0;
+   constexpr uintptr_t flyer_post_collision_shake_call = 0x004B24F2;
+   constexpr uintptr_t flyer_collision_shake_call   = 0x004B4D2B;
    // WeaponMelee::UpdateFire and Deflect, as on modtools: slots +0xA4 and +0x48
    // of the one Weapon vtable (0x007B24F0) whose IsMelee (+0x54) returns true.
    constexpr uintptr_t weapon_melee_update_fire     = 0x0068D2C0;

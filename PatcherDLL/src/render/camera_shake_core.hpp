@@ -830,10 +830,6 @@ inline float heading_margin(const FlyerSpeeds& s)
    return std::fmax(1.0f, kHeadingShare * std::fabs(std::fmax(s.max, s.boost) - s.min));
 }
 
-// Where the throttle cannot be read, speeding up or slowing down more gently
-// than this, in m/s per second, counts as holding speed.
-constexpr float kHoldingSpeed = 2.0f;
-
 // A speed-up the pilot asked for: the throttle, or a boost, raising the speed
 // it asks for by more than the margin since the last speed-up got there.
 // `asked` is the speed the throttle as held asks for (throttle_intent), and

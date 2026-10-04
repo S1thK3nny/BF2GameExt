@@ -30,14 +30,12 @@ Scripts can check the running version through `GameExt.version`.
   `MidSpeed`, `MaxSpeed` and `BoostSpeed`; the boost shake plays when the throttle or a
   boost raises the speed, not when a flyer regains speed a roll or turn bled off.
   Walkers and hovers take thresholds too, and a hover's `ForwardSpeed` counts as
-  `MaxSpeed`. On Steam and GOG a flyer's `TurnShake` and `CollisionShake`, and speed
-  names in a flyer's `Threshold`, are not available yet. Only the view moves: the aim is
-  taken before the shake, and the reticle holds still rather than chasing it. Shots add
-  together, up to eight at once, so rapid fire keeps its kick. In first person a shake
-  only turns the view; `Push` is for third person. A shake is drawn on top of the game's
-  camera without feeding into how it follows the unit, so it looks the same at any frame
-  rate. There are no INI settings: the ODFs decide. See
-  [ODF properties](docs/user/ODF_PROPERTIES.md#camera-shake).
+  `MaxSpeed`. Only the view moves: the aim is taken before the shake, and the reticle
+  holds still rather than chasing it. Shots add together, up to eight at once, so rapid
+  fire keeps its kick. In first person a shake only turns the view; `Push` is for third
+  person. A shake is drawn on top of the game's camera without feeding into how it
+  follows the unit, so it looks the same at any frame rate. There are no INI settings:
+  the ODFs decide. See [ODF properties](docs/user/ODF_PROPERTIES.md#camera-shake).
 - **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
   `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
   so a `.hud` can show every command post's owner and capture progress in a row.

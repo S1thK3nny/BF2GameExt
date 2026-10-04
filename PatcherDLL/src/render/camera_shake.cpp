@@ -39,12 +39,13 @@
 //     thiscall(), RET; controller rumble detours it too
 //   ReticuleDisplay::Update       0x00683270   0x00630650   0x006316F0   detoured
 //     thiscall(float dt), bool in AL, RET 4; the widescreen fix detours it too
-//   CameraManager::ApplyShake     0x004A0690   -            -            called
-//     thiscall(float amount, float duration), RET 8
-//   its CALL in EntityFlyer::     0x004F7F3A   -            -            retargeted
+//   CameraManager::ApplyShake     0x004A0690   0x0044F4C0   0x0044F4A0   called
+//     modtools: thiscall(float amount, float duration), RET 8; Steam and GOG:
+//     ECX the manager, the amount in XMM1 and the duration in XMM2, plain RET
+//   its CALL in EntityFlyer::     0x004F7F3A   0x004B24F2   0x004B24F2   retargeted
 //     PostCollisionUpdate, and in
-//     CollisionCallback           0x00503230   -            -            retargeted
-//     both through the thunk at 0x004162D4
+//     CollisionCallback           0x00503230   0x004B4D2B   0x004B4D2B   retargeted
+//     on modtools both through the thunk at 0x004162D4
 //   WeaponMelee::UpdateFire       0x00639020   0x0068C230   0x0068D2C0   detoured
 //     thiscall(float dt), bool in AL, RET 4
 //   WeaponMelee::Deflect          0x00637670   0x0068A550   0x0068B5E0   detoured
@@ -62,13 +63,11 @@
 // controller_rumble.cpp and aim_assist.cpp read it; a GameObject's mTeam bits
 // at +0x234; the Weapon vtable's IsMelee (+0x54). Per build: the soldier's
 // mState, at Controllable + g_soldier->mState; WeaponMelee's list of what a
-// swing struck (layout::WeaponMelee). The flyer fields are per build
-// (layout::EntityFlyer); those not yet read on Steam and GOG are 0 there, and so
-// are the collision sites, so what needs them stays off on those builds. The
-// walker and hover fields are per build too (layout::EntityWalker and
-// layout::EntityHover), read on all three, and a hover's collision callback
-// reads the other object and the contact as BF2's own callback does
-// (layout::CollisionObject, layout::CollisionResult), the same on every build.
+// swing struck (layout::WeaponMelee). The flyer, walker and hover fields are
+// per build (layout::EntityFlyer, layout::EntityWalker and layout::EntityHover),
+// read on all three, and a hover's collision callback reads the other object
+// and the contact as BF2's own callback does (layout::CollisionObject,
+// layout::CollisionResult), the same on every build.
 //
 // How the shake gets drawn: SetupCamera builds mMatrix, turns it by the stock
 // shake once mission time is past mShakeSuppressUntil, and hands it to
@@ -404,9 +403,7 @@ struct View {
    uint8_t* obj          = nullptr;   // GameObject the chase camera follows
    int      soldierState = -1;
    int      flyerState   = -1;
-   float    prevSpeed    = -1.0f;     // a flyer's speed last frame, m/s
-   float    prevForward  = 0.0f;      // and its speed along its nose
-   float    prevVelocity[3] = {};
+   float    prevVelocity[3] = {};     // a flyer's velocity last frame
    bool     haveVelocity = false;
    float    prevNose[3]  = {};        // a flyer's forward axis last frame
    bool     haveNose     = false;
@@ -451,7 +448,7 @@ KickChannel s_swingKick, s_strikeKick, s_blockKick, s_deflectKick, s_swingBlocke
 KickChannel s_stepKick, s_jumpKick;
 float       s_sprintLevel = 0.0f;
 Shape       s_sprintShape = defaults::kSprintSoldier;
-Hold        s_boost, s_turn, s_brake, s_move, s_decel, s_accel;
+Hold        s_boost, s_turn, s_brake, s_move;
 Shape       s_boostShape = defaults::kBoost;
 Shape       s_turnShape  = defaults::kTurn;
 Shape       s_brakeShape = defaults::kBrake;
@@ -510,14 +507,11 @@ void update_soldier(uint8_t* owner, const ClassShake* cs, float dt, bool firstPe
    }
 }
 
-// A flyer class's MinSpeed, MidSpeed, MaxSpeed and BoostSpeed, where this
-// build's layout has them.
+// A flyer class's MinSpeed, MidSpeed, MaxSpeed and BoostSpeed.
 FlyerSpeeds class_speeds(void* cls)
 {
    FlyerSpeeds s;
-   if (!cls || !fly_class::mMinSpeed.off() || !fly_class::mMidSpeed.off() || !fly_class::mMaxSpeed.off() ||
-       !fly_class::mBoostSpeed.off())
-      return s;
+   if (!cls) return s;
    s.min = fly_class::mMinSpeed(cls);
    s.mid = fly_class::mMidSpeed(cls);
    s.max = fly_class::mMaxSpeed(cls);
@@ -553,17 +547,14 @@ struct HeldTargets {
 void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out)
 {
    const float* v = fly::mVelocity(obj);
-   const float speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
    // Its speed along its nose, which is what BF2 and the class's speeds mean by
-   // speed; plain speed where this build's field is not read yet.
-   const float forward = fly::mGetSpeedSpeed.off() ? fly::mGetSpeedSpeed(obj) : speed;
+   // speed.
+   const float forward = fly::mGetSpeedSpeed(obj);
    const FlyerSpeeds speeds = class_speeds(fly::mClass(obj));
 
    // A bump is sized by how much it changed the velocity since the last frame,
-   // or failing that by BF2's own figure. Its frame is left out of speeding up
-   // and braking, which would read it as a sudden stop.
-   const bool bumped = s_bump.pending;
-   if (bumped) {
+   // or failing that by BF2's own figure.
+   if (s_bump.pending) {
       float impact = stock_bump_speed(s_bump.amount);
       if (s_view.haveVelocity) {
          const float dx = v[0] - s_view.prevVelocity[0];
@@ -579,23 +570,11 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
 
    // How fast the nose swings round, every frame so a take-off starts from
    // where it points.
-   if (fly::mMatrix_forward.off()) {
-      const float* nose = fly::mMatrix_forward(obj);
-      const float rate = s_view.haveNose ? nose_turn_rate(s_view.prevNose, nose, dt) : 0.0f;
-      std::memcpy(s_view.prevNose, nose, sizeof s_view.prevNose);
-      s_view.haveNose = true;
-      s_view.noseRate.advance(rate, dt, 0.05f, 0.1f);
-   }
-
-   if (dt > 0.0f) {
-      const bool measured = s_view.prevSpeed >= 0.0f && !bumped;
-      const float decel = measured ? (s_view.prevSpeed - speed) / dt : 0.0f;
-      const float accel = measured ? (forward - s_view.prevForward) / dt : 0.0f;
-      s_decel.advance(decel > 0.0f ? decel : 0.0f, dt, 0.05f, 0.15f);
-      s_accel.advance(accel > 0.0f ? accel : 0.0f, dt, 0.05f, 0.15f);
-      s_view.prevSpeed = speed;
-      s_view.prevForward = forward;
-   }
+   const float* nose = fly::mMatrix_forward(obj);
+   const float rate = s_view.haveNose ? nose_turn_rate(s_view.prevNose, nose, dt) : 0.0f;
+   std::memcpy(s_view.prevNose, nose, sizeof s_view.prevNose);
+   s_view.haveNose = true;
+   s_view.noseRate.advance(rate, dt, 0.05f, 0.1f);
 
    const int state = fly::mState(obj);
    const int prev = s_view.flyerState;
@@ -616,14 +595,13 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
    // either. Speeding up counts only once the throttle as held, or a boost,
    // has raised that speed: BF2 lowers its own while the flyer rolls
    // (throttle_intent), and getting back what a roll or a turn cost is not a
-   // boost (SpeedUp). Where the throttle is not read yet, how fast the speed
-   // changes.
+   // boost (SpeedUp).
    // Braking is slowing down with the brake held: easing back to cruise after
    // the throttle is let go does not count.
-   bool speedingUp, slowingDown, braking;
-   if (fly::mControlMove.off() && fly::mInLandingRegionFactor.off() && speeds.known) {
+   bool speedingUp = false, slowingDown = false, braking = false;
+   if (speeds.known) {
       const float move = fly::mControlMove(obj);
-      const float roll = fly::mControlStrafe.off() ? fly::mControlStrafe(obj) : 0.0f;
+      const float roll = fly::mControlStrafe(obj);
       const bool boosting = (fly::mFlags(obj) & fly::kFlagBoost) != 0;
       const bool landing = fly::mInLandingRegionFactor(obj) != 0.0f;
       const float target = throttle_target(speeds, move, boosting, landing);
@@ -632,10 +610,6 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
       speedingUp = s_view.speedUp.update(asked, target, forward, margin);
       slowingDown = forward - target > margin;
       braking = slowingDown && move <= -kBrakeInput;
-   } else {
-      speedingUp = s_accel.level > kHoldingSpeed;
-      slowingDown = s_decel.level > kHoldingSpeed;
-      braking = slowingDown;
    }
 
    Shape shape;
@@ -647,20 +621,18 @@ void update_flyer(uint8_t* obj, const ClassShake* cs, float dt, HeldTargets& out
       s_boostShape = shape;
       out.boost = scale * boost_level(threshold_level(shape.threshold, speeds, forward), heading, shape.steady);
    }
-   if (fly::mMatrix_forward.off() && fly_class::mPitchRate.off() && fly_class::mTurnRate.off()) {
-      // Turning hard: the nose swinging round near what the class can turn,
-      // whether by stick or mouse. A trick's flip is not a turn.
-      const EntityFlyerClass* cls = fly::mClass(obj);
-      const float hard = cls ? hard_turn_rate(fly_class::mPitchRate(cls), fly_class::mTurnRate(cls))
-                             : hard_turn_rate(0.0f, 0.0f);
-      const bool tricking = (fly::mFlags(obj) & (fly::kFlagRoll | fly::kFlagFlip)) != 0;
-      s_view.turn.update(!tricking && s_view.noseRate.level >= hard, dt);
-      if (shape_for(cs, kShakeTurn, defaults::kTurn, false, shape, scale)) {
-         // Harder the faster it goes, up to the class's MaxSpeed.
-         const float pace = speeds.known && speeds.max > 0.0f ? clamp01(forward / speeds.max) : 1.0f;
-         s_turnShape = shape;
-         out.turn = scale * pace * threshold_level(shape.threshold, speeds, s_view.turn.time);
-      }
+   // Turning hard: the nose swinging round near what the class can turn,
+   // whether by stick or mouse. A trick's flip is not a turn.
+   const EntityFlyerClass* cls = fly::mClass(obj);
+   const float hard = cls ? hard_turn_rate(fly_class::mPitchRate(cls), fly_class::mTurnRate(cls))
+                          : hard_turn_rate(0.0f, 0.0f);
+   const bool tricking = (fly::mFlags(obj) & (fly::kFlagRoll | fly::kFlagFlip)) != 0;
+   s_view.turn.update(!tricking && s_view.noseRate.level >= hard, dt);
+   if (shape_for(cs, kShakeTurn, defaults::kTurn, false, shape, scale)) {
+      // Harder the faster it goes, up to the class's MaxSpeed.
+      const float pace = speeds.known && speeds.max > 0.0f ? clamp01(forward / speeds.max) : 1.0f;
+      s_turnShape = shape;
+      out.turn = scale * pace * threshold_level(shape.threshold, speeds, s_view.turn.time);
    }
    if (shape_for(cs, kShakeBrake, defaults::kBrake, false, shape, scale)) {
       s_brakeShape = shape;
@@ -1183,20 +1155,67 @@ void __fastcall hooked_DoTrick(uint8_t* self, void* edx, int trick)
    if (*mTrick != kTrickRefused) shake_for_trick(self);
 }
 
-// Stands in for CameraManager::ApplyShake at the flyer's two collision calls.
-// BF2 makes them only for the flyer the chase camera follows, with the amount
-// impact x 0.8 and the duration impact x 0.7. When that flyer's class sets
-// CollisionShake the bump is kept for its next camera frame (update_flyer)
-// and never reaches the stock queue; otherwise it goes on to the queue as
-// before, where it plays as a blast.
+// The stand-ins below take CameraManager::ApplyShake's place at the flyer's
+// two collision calls. BF2 makes them only for the flyer the chase camera
+// follows, with the amount impact x 0.8 and the duration impact x 0.7. When
+// that flyer's class sets CollisionShake the bump is kept for its next camera
+// frame (update_flyer) and never reaches the stock queue; otherwise it goes on
+// to the queue as before, where it plays as a blast.
+bool __cdecl keep_bump(float amount)
+{
+   if (!s_view.takesBumps) return false;
+   s_bump.pending = true;
+   if (amount > s_bump.amount) s_bump.amount = amount;
+   return true;
+}
+
+// Modtools: thiscall(float amount, float duration), RET 8.
 void __fastcall bump_apply_shake(void* manager, void* edx, float amount, float duration)
 {
-   if (s_view.takesBumps) {
-      s_bump.pending = true;
-      if (amount > s_bump.amount) s_bump.amount = amount;
-      return;
+   if (!keep_bump(amount)) s_applyShake(manager, edx, amount, duration);
+}
+
+// Steam and GOG: ECX the manager, the amount in XMM1 and the duration in XMM2,
+// plain RET. ApplyShake changes only EAX, ECX and XMM1, and both callers use
+// EDX and XMM0 after it (Steam 0x004B24F7, 0x004B4D30), so every register comes
+// back as it was, whether ApplyShake runs or not.
+void* s_applyShakeRelease = nullptr;
+bool  s_kept = false;   // this call's answer, read after the registers come back
+
+__declspec(naked) void bump_apply_shake_release()
+{
+   __asm {
+      pushad
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      sub    esp, 4
+      movss  dword ptr [esp], xmm1        // the amount
+      call   keep_bump
+      add    esp, 4
+      mov    s_kept, al
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      add    esp, 0x80
+      popad
+      cmp    s_kept, 0
+      jne    kept
+      jmp    [s_applyShakeRelease]        // ECX, XMM1 and XMM2 as the caller set them
+   kept:
+      ret
    }
-   s_applyShake(manager, edx, amount, duration);
 }
 
 // The collision type BF2 gives an object, where its own callback reads it: in
@@ -1318,8 +1337,8 @@ void retarget(uintptr_t base, uintptr_t site, const void* to)
 }
 
 // CollisionShake: the flyer's two collision calls to ApplyShake go through
-// bump_apply_shake. Both or neither, so a class's bumps are all its own.
-void install_bumps(uintptr_t base)
+// this build's stand-in. Both or neither, so a class's bumps are all its own.
+void install_bumps(uintptr_t base, bool modtools)
 {
    const uintptr_t post = g_addr->flyer_post_collision_shake_call;
    const uintptr_t callback = g_addr->flyer_collision_shake_call;
@@ -1328,7 +1347,9 @@ void install_bumps(uintptr_t base)
       return;
    }
    if (!guard(base, g_addr->camera_manager_apply_shake, "CameraManager::ApplyShake",
-              "\x8B\x41\x28\x8B\x88\x9C\x00\x00\x00\x83\xF9\x04", "xxxxxxxxxxxx"))
+              modtools ? "\x8B\x41\x28\x8B\x88\x9C\x00\x00\x00\x83\xF9\x04"
+                       : "\x8B\x49\x28\x8B\x81\x9C\x00\x00\x00\x83\xF8\x04",
+              modtools ? "xxxxxxxxxxxx" : "xxxxxxxxxxxx"))
       return;
    if (!calls(base, post, g_addr->camera_manager_apply_shake) ||
        !calls(base, callback, g_addr->camera_manager_apply_shake)) {
@@ -1336,9 +1357,16 @@ void install_bumps(uintptr_t base)
                   "as expected", (unsigned)post, (unsigned)callback);
       return;
    }
-   s_applyShake = reinterpret_cast<ApplyShakeFn>(resolve(base, g_addr->camera_manager_apply_shake));
-   retarget(base, post, reinterpret_cast<const void*>(&bump_apply_shake));
-   retarget(base, callback, reinterpret_cast<const void*>(&bump_apply_shake));
+   const void* standIn;
+   if (modtools) {
+      s_applyShake = reinterpret_cast<ApplyShakeFn>(resolve(base, g_addr->camera_manager_apply_shake));
+      standIn = reinterpret_cast<const void*>(&bump_apply_shake);
+   } else {
+      s_applyShakeRelease = resolve(base, g_addr->camera_manager_apply_shake);
+      standIn = reinterpret_cast<const void*>(&bump_apply_shake_release);
+   }
+   retarget(base, post, standIn);
+   retarget(base, callback, standIn);
    install_log("[CameraShake] CollisionShake: flyer collision calls 0x%08X, 0x%08X", (unsigned)post,
                (unsigned)callback);
 }
@@ -1475,13 +1503,7 @@ void camera_shake_install(uintptr_t base)
    install_log("[CameraShake] %s (SetupCamera 0x%08X): the stock shake drawn as a blast, ODF shakes %s",
                ok ? "installed" : "commit failed", (unsigned)g_addr->chase_camera_setup_camera,
                s_odfShakes ? "on" : "unavailable");
-   if (ok && s_odfShakes) install_bumps(base);
+   if (ok && s_odfShakes) install_bumps(base, modtools);
    if (ok && s_odfShakes) install_melee(base, modtools);
    if (ok && s_odfShakes) install_hover(base, modtools);
-   if (ok && s_odfShakes &&
-       (!fly::mGetSpeedSpeed.off() || !fly::mMatrix_forward.off() || !fly_class::mMinSpeed.off() ||
-        !fly_class::mPitchRate.off() || !fly::mControlMove.off() || !fly::mInLandingRegionFactor.off() ||
-        !fly::mControlStrafe.off()))
-      install_log("[CameraShake] A flyer's TurnShake, speed names in a flyer's Threshold and its "
-                  "throttle-led boost and brake shakes are not on this build yet");
 }

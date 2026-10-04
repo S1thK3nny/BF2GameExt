@@ -323,14 +323,6 @@ played on modtools. Retail does not print the "Unable to find branch region" war
 it there means turning on `[Diagnostic] BranchRegionDebug=1` and watching units actually take the
 branch.
 
-**Flyer shakes on retail** - On Steam and GOG a flyer's `TurnShake` and `CollisionShake` do
-nothing, and speed names in a flyer's `Threshold` never resolve, so its default boost and brake
-shakes stay quiet there and speeding up is judged by speed change instead of the throttle. The
-flyer fields the rework reads (`mGetSpeedSpeed`, the forward axis, the class's speeds and turn
-rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor`) need reading on retail, and
-retail `ApplyShake`, which takes its amount and duration in XMM1 and XMM2, needs a stand-in at
-the two collision calls. Details in [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
-
 ## Limits
 
 **AI reservation pool past 127** - `ReservationPoolSize` stops at 127 because of how the value is

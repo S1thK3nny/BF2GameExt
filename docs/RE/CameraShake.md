@@ -5,8 +5,9 @@ how GameExt redraws it as a blast and adds shake for firing, hits, landings, rol
 sprinting (`render/camera_shake.cpp`, built 2026-09-27 for modtools, Steam and GOG; the
 shapes follow a BFIII-derived camera spec), and for flyers: boosting, hard turns,
 braking, bumps, tricks, take-off and landing (reworked 2026-09-30 on modtools, from the
-user's own flight model and BF2's flight code; see [Flyers](#flyers)), melee: swings,
-strikes, blocks and deflections (2026-10-02; see [Melee](#melee)), walkers: steps, jumps,
+user's own flight model and BF2's flight code, and ported to Steam and GOG 2026-10-04; see
+[Flyers](#flyers)), melee: swings, strikes, blocks and deflections (2026-10-02; see
+[Melee](#melee)), walkers: steps, jumps,
 landings, turning on the spot and boosting (2026-10-02; see [Walkers](#walkers)), and
 hovers: moving, boosting, jumps, landings and a tilt toward whatever they hit (2026-10-03;
 see [Hovers](#hovers)). Read on the Phantom build, which has symbols,
@@ -203,7 +204,7 @@ they used to show at 60 frames a second under the soldier camera they were tuned
 | `BoostShake` | the flyer's `mGetSpeedSpeed` in its `Threshold`, full while it speeds up toward a throttle target the throttle or a boost has raised and `Steady` of that once there, while `mState` is 2 (`FLYING`); a walker's ground speed in its `Threshold` while its `mBoost` bit is set; a hover's speed along its deck while its `mBoost` is set, times `mGroundRatio` | held |
 | `TurnShake` | seconds of hard turning, measured from the flyer's forward axis, in its `Threshold`, times speed over `MaxSpeed`, while `FLYING`; a walker's `mState` 1 or 2 (turning on the spot) | held |
 | `BrakeShake` | the same speed in its `Threshold` (one value: at or below it; default `MinSpeed` to `MaxSpeed`), full while it brakes: slows toward its throttle target with `mControlMove` at -0.1 or below, while `FLYING` | held |
-| `CollisionShake` | the flyer's two stock collision shakes, retargeted (modtools only); sized by the change in `mVelocity`. A hover's: the `EntityHover::CollisionCallback` detour, sized by the closing speed and tilted toward the hit (see [Hovers](#hovers)) | one-off; restarts |
+| `CollisionShake` | the flyer's two stock collision shakes, retargeted; sized by the change in `mVelocity`. A hover's: the `EntityHover::CollisionCallback` detour, sized by the closing speed and tilted toward the hit (see [Hovers](#hovers)) | one-off; restarts |
 | `TrickRollShake`, `TrickFlipShake` | `EntityFlyer::DoTrick` detour when it starts a trick: a flip if it set flag bit `0x02` | one-off; restarts |
 | `TakeoffShake` | flyer `mState` going from 0 (`LANDED`) to 1 (`TAKEOFF`) | one-off; restarts |
 | `LandingShake` | flyer `mState` going to 0 (`LANDED`) from 3 (`LANDING`) or 2 (`FLYING`) | one-off; restarts |
@@ -329,24 +330,24 @@ every build: a `GameObject` has its `Damageable` part at `+0x140` (Phantom PDB),
 | `EntityClass::Read` Derive site | `0x004D0992` | `0x00491DE0` | `0x00491DE0` |
 | `WeaponClass::Read` Derive site | `0x0061E55C` | `0x0067A37D` | `0x0067B41D` |
 | `rttiHashEntityFlyer` initialiser | `0x00A168C0` | `0x00402AD0` | `0x00402AD0` |
-| `CameraManager::ApplyShake` (called; `RET 8`) | `0x004A0690` | not read | not read |
-| its CALL in `EntityFlyer::PostCollisionUpdate` (retargeted) | `0x004F7F3A` | not read | not read |
-| its CALL in `EntityFlyer::CollisionCallback` (retargeted) | `0x00503230` | not read | not read |
-| `mControlMove` load in `EntityFlyer::Update` | `0x004FD376` | not read | not read |
+| `CameraManager::ApplyShake` (called; modtools `RET 8`, release XMM1/XMM2 and plain `RET`) | `0x004A0690` | `0x0044F4C0` | `0x0044F4A0` |
+| its CALL in `EntityFlyer::PostCollisionUpdate` (retargeted) | `0x004F7F3A` | `0x004B24F2` | `0x004B24F2` |
+| its CALL in `EntityFlyer::CollisionCallback` (retargeted) | `0x00503230` | `0x004B4D2B` | `0x004B4D2B` |
+| `EntityFlyer::Update` (slot 1 of the Controllable vtable; `this` the flyer `+0x240`) | `0x004FC930` | `0x004AC460` | `0x004AC460` |
+| `EntityFlyer::PostCollisionUpdate`, `CollisionCallback` (primary slot 71; CollisionObject slot 6) | `0x004F79B0`, `0x005025B0` | `0x004B1E70`, `0x004B3DE0` | as Steam |
+| `mControlMove` load in `EntityFlyer::Update` | `0x004FD376` | `0x004ACD8C` | `0x004ACD8C` |
+| `GetFlyerMaxSpeed`, `GetFlyerMidSpeed`, `GetFlyerMinSpeed` | `0x004F0950`, `0x004F09B0`, `0x004F0A10` | `0x004AC3A0`, `0x004AC3E0`, `0x004AC420` | as Steam |
 
 Where the fields live:
 - **Same on every build:** the chase camera's fields and its queue
   (`game/Battlefront2/Source/ChaseCamera.h`), and the render camera's zoom
   (`game/Battlefront2/Source/RedCamera.h`).
-- **Per build:** the flyer's fields (`game/Battlefront2/Source/EntityFlyer.h`), pinned at `DoTrick` and
-  `RecalculateSpeed` (modtools `0x004F2F80`, Steam and GOG `0x004ABC70`). The ones added
-  for the flyer rework (`mGetSpeedSpeed`, the forward axis, the class's speeds and turn
-  rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor`) are read
-  on modtools only so far, and are 0 on Steam and GOG.
-- **Per build, read on all three:** the walker's fields
-  (`game/Battlefront2/Source/EntityWalker.h`) and the hover's (`EntityHover.h`). A hover's
-  collision callback reads the other object and the contact through `CollisionObject.h`,
-  the same on every build.
+- **Per build, read on all three:** the flyer's fields
+  (`game/Battlefront2/Source/EntityFlyer.h`), pinned at `DoTrick`, `RecalculateSpeed`
+  (modtools `0x004F2F80`, Steam and GOG `0x004ABC70`), the speed getters and `Update`;
+  the walker's (`EntityWalker.h`) and the hover's (`EntityHover.h`). A hover's collision
+  callback reads the other object and the contact through `CollisionObject.h`, the same
+  on every build.
 - **`ChaseCamera::Update`:** the vtable slot before `SetupCamera` on each build; modtools
   reaches both through thunks.
 - **RTTI hashes:** `PblHash` of the class name, which is how both initialisers make them.
@@ -356,7 +357,8 @@ link, on all three executables; `tests/camera_shake_tests.cpp` checks the maths.
 
 ### Flyers
 
-Read on Phantom, then modtools. The user's reference model (their Unreal flight project)
+Read on Phantom, then modtools, then ported to Steam and GOG (see **On Steam and GOG**,
+below). The user's reference model (their Unreal flight project)
 supplied the feel: a turbulence of three sines near 11 Hz, a boost that punches while it
 spools up and then holds a quarter, a turn shake after 2 to 3 s of turning, and a bump
 that jolts by its impact. Its inputs were Unreal's flight model, so they were replaced
@@ -365,8 +367,8 @@ with BF2's own:
 **Speeds.** Every flyer class has its own speeds, and a fixed reference (the model's
 80 m/s) fits none of them. `EntityFlyerClass_data` (class `+0x728`) has `mMinFlyerSpeed`,
 `mMidFlyerSpeed`, `mMaxFlyerSpeed` and `mBoostFlyerSpeed` together at data `+0x164`, so
-class `+0x88C` to `+0x898` on Phantom and modtools, from the ODF's `MinSpeed` to
-`BoostSpeed`. The stock ODFs:
+class `+0x88C` to `+0x898` on Phantom and modtools and `+0x7C4` to `+0x7D0` on Steam and
+GOG, from the ODF's `MinSpeed` to `BoostSpeed`. The stock ODFs:
 
 | Flyers | MinSpeed | MidSpeed | MaxSpeed | BoostSpeed |
 |---|---|---|---|---|
@@ -376,15 +378,16 @@ class `+0x88C` to `+0x898` on Phantom and modtools, from the ODF's `MinSpeed` to
 | ride-along gunships | -15 | 0 | 45 | none |
 
 - `GetFlyerMinSpeed`, `GetFlyerMidSpeed` and `GetFlyerMaxSpeed` (Phantom `0x005266E0`,
-  `0x00526690`, `0x00526640`; modtools `0x004F0A10`, `0x004F09B0`, `0x004F0950`) return
-  the class values, capped by the `land_speed_*` globals while `mInLandingRegionFactor`
-  (modtools `+0x5FC`) is set. GameExt reads the class values as the ODF gave them.
-- `RecalculateSpeed` keeps `mGetSpeedSpeed` (data `+0x80`, modtools `+0x5F8`): the
-  velocity along the flyer's nose, or on a path, its speed target. The stock motion
-  blur (`SetupCameraTrackMatrix`, Phantom `0x0052CD70`, single player only) scales from
-  the class's `BlurStartV` to max(`MaxSpeed`, `BoostSpeed`) on it, times `BlurEffect`;
-  `SetupCameraFOV` (`0x0052CA00`) reads the same top speed. `BoostShake` measures the same
-  speed, so its `Threshold` can name the class's speeds.
+  `0x00526690`, `0x00526640`; modtools `0x004F0A10`, `0x004F09B0`, `0x004F0950`; Steam
+  and GOG `0x004AC420`, `0x004AC3E0`, `0x004AC3A0`) return the class values, capped by
+  the `land_speed_*` globals while `mInLandingRegionFactor` (modtools `+0x5FC`, release
+  `+0x5BC`) is set. GameExt reads the class values as the ODF gave them.
+- `RecalculateSpeed` keeps `mGetSpeedSpeed` (data `+0x80`, modtools `+0x5F8`, release
+  `+0x5B8`): the velocity along the flyer's nose, or on a path, its speed target. The
+  stock motion blur (`SetupCameraTrackMatrix`, Phantom `0x0052CD70`, single player only)
+  scales from the class's `BlurStartV` to max(`MaxSpeed`, `BoostSpeed`) on it, times
+  `BlurEffect`; `SetupCameraFOV` (`0x0052CA00`) reads the same top speed. `BoostShake`
+  measures the same speed, so its `Threshold` can name the class's speeds.
 
 **Turning.** BF2 has its own hard-turn count, `Controllable::mTurnBuildup` and
 `mPitchBuildup` (Phantom `Controllable_data +0xB8`/`+0xBC`; modtools Controllable
@@ -393,7 +396,7 @@ class `+0x88C` to `+0x898` on Phantom and modtools, from the ODF's `MinSpeed` to
 - `PlayerController::Update` (Phantom `0x0071CAA0`; modtools `0x0059B88D`) adds the frame
   time to both while the turn and pitch inputs' squared length is at least 0.9, caps them
   at 1, and zeroes both when it is not.
-- `EntityFlyer::Update` (Phantom `0x0052EB00`; modtools from `0x004FD86D`) turns each
+- `EntityFlyer::Update` (Phantom `0x0052EB00`; modtools `0x004FC930`) turns each
   past 0.5 into a rate multiplier, `1 + 2 (TurnBuildupMultiplier - 1)(buildup - 0.5)`,
   full at 1. Most stock flyers leave the multipliers at 1; the Jedi fighter (1.5/1.25)
   and the snowspeeder (1.25) tighten.
@@ -405,12 +408,13 @@ class `+0x88C` to `+0x898` on Phantom and modtools, from the ODF's `MinSpeed` to
   gave no `TurnShake` while it read this count. `PlayerController::Update` also keeps a
   separate `mMouseTurnBuildup`, which is the mouse's own path.
 - So GameExt measures the turn on the flyer instead (`nose_turn_rate`): the angle between
-  its forward axis (the matrix row at flyer `+0x110` on modtools, the one
-  `RecalculateSpeed` takes `mVelocity` along, `0x004F3050` on) a frame apart, over the
-  frame time, smoothed over about a twentieth of a second. It turns hard at 60% or more of
-  the faster of the class's `PitchRate` and `TurnRate` (class `+0x8A0`/`+0x8A4`, read by
-  `Update` at `0x004FD752`), which `Update` blends between by how far each way the stick
-  is pushed, so about what full stick gives; a class with neither counts from 45°/s.
+  its forward axis (the matrix row at flyer `+0x110` on every build, the one
+  `RecalculateSpeed` takes `mVelocity` along, modtools `0x004F3050` on) a frame apart,
+  over the frame time, smoothed over about a twentieth of a second. It turns hard at 60%
+  or more of the faster of the class's `PitchRate` and `TurnRate` (class
+  `+0x8A0`/`+0x8A4`, read by `Update` at `0x004FD752`; release `+0x7D8`/`+0x7DC`), which
+  `Update` blends between by how far each way the stick is pushed, so about what full
+  stick gives; a class with neither counts from 45°/s.
   Tricks (flag bits `0x03`) do not count. `TurnCount` adds up the seconds, holding
   through a lull of up to 0.25 s, such as a mouse between two pushes, so a `Threshold` is
   still in seconds (default 2 to 3 s, the reference's).
@@ -427,8 +431,8 @@ target and never faster than a fixed rate, so measuring the speed's change says 
   same caps (`landing_speeds`); a `Threshold`'s speed names stay the ODF's numbers.
 - **Target:** `BoostSpeed` while boosting with one (modtools `0x004FECF9`, into `mSetSpeed`
   at data `+0x20`, flyer `+0x598`); otherwise from `mControlMove`, the forward and back
-  input at Controllable_data `+0x44` (modtools Controllable `+0x80`, flyer `+0x2C0`,
-  loaded at `0x004FD376`): `MidSpeed + (MaxSpeed - MidSpeed) x move` forward,
+  input at Controllable_data `+0x44` (Controllable `+0x80` on every build, flyer `+0x2C0`,
+  loaded at modtools `0x004FD376`): `MidSpeed + (MaxSpeed - MidSpeed) x move` forward,
   `MidSpeed + (MidSpeed - MinSpeed) x move` back (`0x004FED19` on).
 - **Rate:** `mSetSpeed` moves from `mGetSpeedSpeed` toward the target by at most
   `Acceleration x dt` (Phantom `0x00530E38`; the ODF takes both `Acceleration` and the
@@ -442,8 +446,7 @@ target and never faster than a fixed rate, so measuring the speed's change says 
   through `MomentumFilter`, so every turn dips it a metre or two a second and BF2 speeds
   it back up. Measured, that is speeding up. GameExt compares the speed with the target
   instead: speeding up while more than a twentieth of the class's speed range below
-  it, slowing down while that far above (`heading_margin`), and uses the measured
-  change only where `mControlMove` is not read yet.
+  it, slowing down while that far above (`heading_margin`).
 - **Rolling:** BF2 reads the throttle and the roll as one stick. `PlayerController::Update`
   (Phantom `0x0071CAA0`) scales `mControlMove` and `mControlStrafe` down together when
   their length passes 1, so full throttle held through a roll (not a trick) reaches the
@@ -456,11 +459,9 @@ target and never faster than a fixed rate, so measuring the speed's change says 
   the speed that asks for rises by more than the margin since the last one arrived
   (`SpeedUp`); arriving is still judged against BF2's own target. Regaining speed after
   a roll or turn does not count, and neither does the climb to cruise after take-off.
-  It needs `mControlMove` and `mControlStrafe`, which retail does not read yet; there
-  the shake still measures the speed change. `[Fixes] FlyerRollThrottleFix` (on by
-  default, all three builds; `entity/flyer_roll_throttle_fix.hpp`) now skips the cap
-  for a flyer, so a roll no longer costs speed at all and retail loses the replay too;
-  `throttle_intent` still covers the fix being off on modtools.
+  `[Fixes] FlyerRollThrottleFix` (on by default, all three builds;
+  `entity/flyer_roll_throttle_fix.hpp`) now skips the cap for a flyer, so a roll no
+  longer costs speed at all; `throttle_intent` still covers the fix being off.
 - **Braking** is slowing down with `mControlMove` at -0.1 or below: the brake or reverse
   input. Letting go of the throttle at `MaxSpeed` or after a boost also slows the flyer,
   back to `MidSpeed`, but with the input at 0, so it is not braking.
@@ -480,13 +481,42 @@ speed just after the bump, `|mVelocity| / 40 + 0.01` capped at 1, and when the f
 the one `GetChaseCameraTarget(0)` follows, call `ApplyShake(impact x 0.8, impact x 0.7)`;
 above 0.5 they also set the chase camera's `mTimer` to 0.1. The two CALLs go through the
 thunk `0x004162D4` to `0x004A0690` on modtools, which is `thiscall(amount, duration)`,
-`RET 8`, and appends to the four-slot queue. GameExt retargets both CALLs to
-`bump_apply_shake`: when the viewed flyer's class sets `CollisionShake` it keeps the bump
-for the next camera frame and never queues it; otherwise it calls `ApplyShake` as
-before. The impact is judged by the change in `mVelocity` since the last camera frame,
-since BF2's own figure rates a head-on stop, which leaves little speed, as almost
-nothing, and stops at 40 m/s. The bump's own damage is kept from shaking again as a hit
-for 0.25 s.
+`RET 8`, and appends to the four-slot queue. GameExt retargets both CALLs to a stand-in
+(`bump_apply_shake` on modtools; Steam and GOG below): when the viewed flyer's class sets
+`CollisionShake` it keeps the bump for the next camera frame and never queues it;
+otherwise it calls `ApplyShake` as before. The impact is judged by the change in
+`mVelocity` since the last camera frame, since BF2's own figure rates a head-on stop,
+which leaves little speed, as almost nothing, and stops at 40 m/s. The bump's own damage
+is kept from shaking again as a hit for 0.25 s.
+
+**On Steam and GOG** (ported 2026-10-04). GOG runs the flyer code at Steam's addresses;
+only its constants and globals sit elsewhere. The flyer's fields sit 0x40 lower from
+`mVelocity` on and the class's 0xC8 lower, while the matrix and the Controllable part's
+inputs are where modtools has them; `EntityFlyer.h` lists the instruction each was read
+off. Retail's whole-program optimisation passes values in registers between its own
+functions, which changes three things:
+- The speed getters take the flyer in ECX and return the speed in XMM0, and the four
+  `land_speed_*` caps are folded into constants, with the same values (Steam
+  `0x007B2308` 60, `0x007B22D4` 20, `0x007B228C` 10, `0x007B1F88` 0.2; GOG `0x007B3280`,
+  `0x007B324C`, `0x007B3204`, `0x007B2F00`).
+- `Update` (`0x004AC460`) holds the Controllable part in EDI and the flyer in ESI, keeps
+  the throttle at `[ESP+0x88]` (`0x004ACD8C`), reads the roll at `0x004ACDB6`, and builds
+  the same target: `BoostSpeed` while boosting with one (`0x004AE671`), else the
+  throttle's point between the capped getters (`0x004AE690` on), into `mSetSpeed`
+  (`+0x558`). It reads `PitchRate` and `TurnRate` at `0x004AD146`.
+- `ApplyShake` (Steam `0x0044F4C0`, GOG `0x0044F4A0`) takes the manager in ECX, the
+  amount in XMM1 and the duration in XMM2, and returns with a plain `RET`. It changes only
+  EAX, ECX and XMM1, and both callers (`0x004B24F2` in `PostCollisionUpdate`, `0x004B4D2B`
+  in `CollisionCallback`, both direct) read the impact from XMM0 and the manager from EDX
+  after the call, to set the chase camera's `mTimer`. Compiled code would clobber both, so
+  the retail stand-in (`bump_apply_shake_release`) is naked: it keeps every register,
+  asks the same question as the modtools one (`keep_bump`), puts them all back, and
+  either returns or jumps on to `ApplyShake` with ECX, XMM1 and XMM2 as the caller set
+  them.
+
+The ABI audit checks each of these sites on both builds, ties `Update`,
+`PostCollisionUpdate` and `CollisionCallback` to EntityFlyer's vtables through its
+constructor, and reads the caps and the stock bump factors (0.8, 0.7) on every build.
 
 **Dead ends.**
 - `EntityFlyerClass_data` has `mCrashShakeStart`, `mCrashShakeEnd` and
@@ -831,20 +861,11 @@ v1's quiet collisions were small tilts, not missed hits.
 ## Open
 
 - Confirmed in play on modtools and Steam (2026-09-27): every shake, the limit and the
-  still reticule. GOG has the same addresses verified but has not been played. The soldier
+  still reticule. GOG was first played on 2026-10-04, with the flyer port below. The soldier
   shakes are final (the user, 2026-09-30); the blast's size per unit of `Shake` can still
   be tuned.
-- The flyer rework (2026-09-30) is built and played on modtools only. For Steam
-  and GOG it needs `mGetSpeedSpeed`, the forward axis, the class's speeds and turn
-  rates, `mControlMove`, `mControlStrafe`, `mInLandingRegionFactor` and the two collision CALLs read there; retail `ApplyShake` (Steam `0x0044F4C0`, GOG `0x0044F4A0`)
-  takes its amount and duration in XMM1 and XMM2 with a plain `RET`, so it needs a naked
-  stand-in (the hover collision callback did not need one), and the two CALLs are at
-  `0x004B24F2` and `0x004B4D2B` on both (not yet audited). Until then, on retail, a
-  flyer's `TurnShake`, `CollisionShake` and speed names in its `Threshold` do nothing
-  (numbers still work), so its default `BoostShake` and `BrakeShake` thresholds, which are
-  speed names, do nothing either; speeding up and braking are judged by how fast its speed
-  changes, not the throttle. The install log says so. Walkers and hovers are not affected.
-  On ROADMAP (Retail builds).
+- The flyer rework (2026-09-30) is played on modtools. Its Steam and GOG port (2026-10-04,
+  see **On Steam and GOG** under Flyers) was played on both builds the same day and works.
 - Easing into `BoostShakeSteady` at top speed looked choppy in play, as if the ship
   bounced (2026-10-01, with a 2 m push). The cause was the push piling up in BF2's
   camera ([The camera eases from last frame's view](#the-camera-eases-from-last-frames-view)).
