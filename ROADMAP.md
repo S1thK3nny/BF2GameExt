@@ -132,6 +132,14 @@ can follow an animated bone. If not, the shield would be a fixed box in front of
 while holding a block stance and wrong as soon as the arm moves. Settle that first. Details in
 [docs/RE/SoldierCollisionSystem.md](docs/RE/SoldierCollisionSystem.md).
 
+**Backward rolls** - A roll is the crouch press while moving, and `CheckMoveControlForRoll`
+only rolls when the stick points forward or within 30 degrees of straight sideways, so pulling
+back and pressing crouch just crouches. Behind a soldier ODF switch, let a backward stick roll
+too, playing a `divebackward` found and fallen back like `UseDirectionalRolls`' side dives, its
+root aimed a half turn from the move as theirs is aimed a quarter turn. Unlike the side dives
+this changes movement, not only the animation, so it needs checking online. Details in
+[docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md).
+
 **Roll and jump camera sweep** - In third person the camera follows a roll or a jump rigidly.
 Let it trail behind and look toward the unit's feet through rolls, jump launches and the fall
 from a jump's apex, as BFIII's delay camera does, replacing `RollShake`'s plain shake. It needs
@@ -143,6 +151,14 @@ that depends on the frame time, so a fast unit's camera sits a little further ba
 frame rates and lurches on a slow frame. Replace the easing with the exact step for a moving
 target. It changes the stock camera for every unit. Details in
 [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
+
+**One home for soldier animation features** - Animation modules change the same tables and
+lookups independently: ComboAnimIncrease moves every map's table and the bank and map lists,
+AnimBankAppend widens the banks behind the lookup, and the damage guard, first-person banks, prone,
+directional rolls and others read them. Each new one has to know which of the others are on, and
+the combinations multiply. Move them onto one layer that owns the tables and lookups, growing
+`entity/soldier_anim_tables`, which already reads both the stock layout and ComboAnimIncrease's.
+Details in [docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md).
 
 ## Weapons
 
