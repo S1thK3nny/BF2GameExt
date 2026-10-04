@@ -1995,9 +1995,9 @@ so it glides in motion and looks slightly soft at rest.
 
 ### `HudSubPixel`
 
-Off by default. When on, both floor CALLs go to `keep_fraction`, cdecl(double) → ST0
-like `floor`, which returns its argument less 0.5, so the translation keeps its
-fraction. Its only error is what the draw's own single-precision add already rounded,
+On by default since 2026-10-04 (off when first built). When on, both floor CALLs go to
+`keep_fraction`, cdecl(double) → ST0 like `floor`, which returns its argument less 0.5,
+so the translation keeps its fraction. Its only error is what the draw's own single-precision add already rounded,
 where 0.5 carries a coordinate into the next power of two: at most half a float step,
 2^-10 of a pixel at 16384.
 

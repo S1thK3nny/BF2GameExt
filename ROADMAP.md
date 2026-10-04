@@ -262,7 +262,7 @@ frame), `EventScale` and `EventRotation`. Extend all three to every element thro
 reader every class shares, with a persistent alpha.
 
 **Sub-pixel per element** - `[Features] HudSubPixel` is all or nothing and each player's
-own choice, so a mod cannot ship gliding markers without softening still text as well.
+own choice, so gliding markers always come with slightly softer still text.
 Add a `SubPixel(1)` property covering an element and everything inside it; the reader,
 a spare flag bit and the draw are in
 [pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).

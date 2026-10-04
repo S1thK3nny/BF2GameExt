@@ -27,7 +27,7 @@ Optional behaviour that changes the game rather than fixing it. Some need assets
 | `GameLogging` | `0` | Enable the engine's BFront2.log file logging on retail builds |
 | `SpawnVehicleList` | `1` | On the spawn screen, list the vehicles that spawn at the highlighted command post, the way SWBF1 did. Stock BF2 leaves that line blank. Set 0 for stock |
 | `TargetBarLatchSeconds` | `0.5` | Seconds to retain the last naturally selected HUD target after selection is lost; no hit required. Fade time belongs to the .hud file (0.25 matches the reference). 0 never times out |
-| `HudSubPixel` | `0` | Draw the HUD and menus at their exact positions instead of rounding each element to a whole pixel. Anything that moves across the screen, such as floating markers and health bars, glides instead of stepping a pixel at a time. Text and icons that come to rest between two pixels look slightly softer. Set 1 to enable |
+| `HudSubPixel` | `1` | Draw the HUD and menus at their exact positions instead of rounding each element to a whole pixel. Anything that moves across the screen, such as floating markers and health bars, glides instead of stepping a pixel at a time. Text and icons that come to rest between two pixels look slightly softer. Set 0 for stock |
 | `EnableSoundWarnings` | `0` | Log 'Unable to find sound property' warnings for missing sounds (modtools only) |
 | `DisableAwardBuffs` | `0` | Remove the permanent combat-award buffs. Buffs from officer buff weapons and buff pickups are untouched. The technician's award weapon goes with its passive |
 | `DisableAwardWeapons` | `0` | Remove the combat-award weapons. Set alongside DisableAwardBuffs to disable all nine awards |

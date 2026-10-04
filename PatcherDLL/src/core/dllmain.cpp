@@ -315,7 +315,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_hudWeaponIconFixEnabled = cfg.get_bool("Fixes", "WeaponIconFix", true);
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
       g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
-      g_hudSubPixel = cfg.get_bool("Features", "HudSubPixel", false);
+      g_hudSubPixel = cfg.get_bool("Features", "HudSubPixel", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);

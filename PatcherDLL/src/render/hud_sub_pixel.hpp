@@ -9,7 +9,7 @@
 // elements glide, and anything that comes to rest between two pixels is
 // filtered across both, so it looks slightly softer.
 //
-// INI: [Features] HudSubPixel = 0 (stock rounding, the default) or 1.
+// INI: [Features] HudSubPixel = 1 (the default) or 0 (stock rounding).
 // Stays set only if the draw was patched. GameExt's own position events (the
 // command post markers and the floating target bar) read it: they round to
 // whole pixels, as the draw does, while it is off.

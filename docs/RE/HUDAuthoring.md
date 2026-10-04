@@ -1525,7 +1525,7 @@ read-only.
 
 ### Sub-pixel checks
 
-Set `HudSubPixel=1` under `[Features]` and look for `[HudSubPixel] installed` in
+`HudSubPixel` under `[Features]` is on by default: look for `[HudSubPixel] installed` in
 `BF2GameExt.log`. Turn slowly on the spot with command post markers or a floating
 target bar in view: they should glide rather than step a pixel at a time, the icon and
 its distance text moving together. Menus and still HUD elements should look as before,
@@ -1630,7 +1630,7 @@ state mapping, landings and shots, and `tests/hud_number_math_tests.cpp` the ler
 | A lerp fades the wrong way | `RiseTime` and `FallTime` follow the input, not the output: with A = 1 and B = 0 the output falls over `RiseTime` |
 | A lerp never sends | Its input has not sent a valid value yet, or an event end has not arrived; nothing is sent before both |
 | A state event stays at 0 | The unit states are for soldiers on foot only; a droideka, vehicle, turret or remote reads 0 |
-| A moving marker or bar steps a pixel at a time | The game draws every element on a whole pixel. `[Features] HudSubPixel=1` in `BF2GameExt.ini` draws them at their exact positions; it is each player's setting and off by default |
+| A moving marker or bar steps a pixel at a time | The game draws every element on a whole pixel. `[Features] HudSubPixel` in `BF2GameExt.ini` draws them at their exact positions; it is on by default, but each player's own setting, so check it is not 0 |
 
 ## Evidence and related references
 
