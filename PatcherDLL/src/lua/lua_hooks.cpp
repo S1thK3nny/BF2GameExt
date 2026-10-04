@@ -13,6 +13,7 @@
 #include "entity/vehicle_view_toggle.hpp"
 #include "entity/soldier_fp_animation_override.hpp"
 #include "entity/droideka_ball_mode.hpp"
+#include "entity/directional_rolls.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/tentacle_limit.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
@@ -163,6 +164,7 @@ static void __cdecl hooked_init_state()
    held_ordnance_effect_reset(); // old level's effect/weapon pointers are no longer valid
    freecam_light_reset(); // its pool block did not survive the level change
    foleyfx_region_reset(); // the old map's regions went with its heap
+   directional_rolls_reset(); // the old map's animations went with it
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).

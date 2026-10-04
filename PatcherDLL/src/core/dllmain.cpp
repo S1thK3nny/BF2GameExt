@@ -38,6 +38,7 @@
 #include "entity/command_post_overflow_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
+#include "entity/directional_rolls.hpp"
 #include "util/sound_diag.hpp"
 #include "util/game_log_lock.hpp"
 #include "util/voice_limit.hpp"
@@ -375,6 +376,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_squad_order_null_fix_install(exe_base); // byte-patches .text — needs the RW window
    combo_damage_anim_guard_install(exe_base); // Detours .text — needs the RW window
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
+   directional_rolls_install(exe_base);       // after odf_gameext_props: its ODF listeners; Detours .text
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);

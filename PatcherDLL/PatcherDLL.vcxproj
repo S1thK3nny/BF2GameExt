@@ -168,6 +168,9 @@
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp" />
     <ClInclude Include="src\entity\award_disable.hpp" />
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
+    <ClInclude Include="src\entity\directional_rolls.hpp" />
+    <ClInclude Include="src\entity\directional_rolls_core.hpp" />
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\entity\attached_effects_cleanup.hpp" />
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
@@ -253,6 +256,8 @@
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp" />
     <ClCompile Include="src\entity\award_disable.cpp" />
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
+    <ClCompile Include="src\entity\directional_rolls.cpp" />
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\attached_effects_cleanup.cpp" />
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />
