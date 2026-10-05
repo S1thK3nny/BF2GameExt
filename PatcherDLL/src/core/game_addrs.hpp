@@ -1548,6 +1548,19 @@ namespace modtools {
    // (0x00575D50) reads first, at 0x00575D9B.
    constexpr uintptr_t game_client_delta_time          = 0x00C6A9AC;
 
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices:
+   // thiscall(float dt), RET 4: the aim's spine and head turns, then the world
+   // matrices. SetupPose's one call of it, after every action and movement case
+   // has built the local pose, through the thunk 0x0040BE79.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00579F10;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x0057D3ED;
+   // ZephyrPoseStatic<32>::Blend(ZephyrPoseDyn<32>*, PblBitVector<32>* mask,
+   // float): thiscall, RET 0xC; how UpdateActionAnimation lays the lower body's
+   // animation on the pose (0x0057B2D4).
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0082D450;
+
 } // namespace modtools
 
 // =============================================================================
@@ -2848,6 +2861,16 @@ namespace steam {
    // it into XMM3 first, at 0x0063ED66.
    constexpr uintptr_t game_client_delta_time          = 0x01E56058;
 
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices: ECX the
+   // animator and the frame time in XMM1, plain RET. SetupPose's one call of it.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00642860;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x006406DC;
+   // ZephyrPoseStatic<32>::Blend(dyn, mask, float): thiscall, RET 0xC, every
+   // argument on the stack; UpdateActionAnimation's lower-body call 0x00640B5F.
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072DB30;
+
 } // namespace steam
 
 // =============================================================================
@@ -3866,6 +3889,15 @@ namespace gog {
    constexpr uintptr_t soldier_anim_maps               = 0x007EA8E0;
    // GameLoop::sClientDeltaTime, loaded first by SetAction (0x0063FE00) at 0x0063FE06.
    constexpr uintptr_t game_client_delta_time          = 0x01E574F0;
+
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // As on Steam: ApplyProceduralAnimationAndBuildWorldMatrices (ECX, XMM1,
+   // plain RET) and SetupPose's call of it; the masked Blend, called by
+   // UpdateActionAnimation at 0x00641BFF.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00643900;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x0064177C;
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072EC00;
 
 } // namespace gog
 

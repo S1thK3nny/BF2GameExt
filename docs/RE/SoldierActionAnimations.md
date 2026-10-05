@@ -1,10 +1,12 @@
 # Soldier action animations
 
-How a soldier's actions (jumps, rolls, landings, deaths) pick their animations,
-how the stock directional jumps work, and the research behind
-`UseDirectionalRolls` (2026-10-04). Names and logic are from the Phantom PDB
+How a soldier's actions (jumps, rolls, landings, deaths, jets) pick their
+animations, how the stock directional jumps work, how a soldier's pose is built
+each frame, and the research behind `UseDirectionalRolls` (2026-10-04) and
+`UseDirectionalJets` (2026-10-05). Names and logic are from the Phantom PDB
 build in Ghidra; every address used by the DLL was then read on modtools, Steam
-and GOG and is audited by `tests/directional_rolls_abi_tests.py`.
+and GOG and is audited by `tests/directional_rolls_abi_tests.py` and
+`tests/directional_jets_abi_tests.py`.
 
 ## Actions and the action table
 
@@ -204,7 +206,8 @@ The dive then stayed square to the body and swung with the camera whenever the
 soldier turned mid-roll; found in play 2026-10-05.
 
 Code: `entity/directional_rolls.cpp`, through `entity/soldier_anim_tables.cpp`
-for the tables.
+for the tables and the lookup (`soldier_anim_tables::find_named`, shared with
+the directional jets since 2026-10-05).
 
 An earlier version on the `dinput-hook` branch (March 2026) hooked `SetAction`
 and the two getters. It had three problems:
@@ -216,3 +219,160 @@ and the two getters. It had three problems:
 It also read a bank's parent from `+0x20`, which is the name hash, and picked
 left and right the other way round from the engine's jumps (left for a negative
 move along the right row).
+
+## How SetupPose builds a pose
+
+`SoldierAnimator` holds the pose and the players that fill it, at the same
+offsets on every build:
+
+| Member | Offset | |
+|--------|--------|-|
+| `mUpperBodyAnimMask`, `mLowerBodyAnimMask` | `0x58`, `0x5C` | `PblBitVector<32>`: one bit per skeleton joint |
+| `mZephyrSkeleton` | `0xD0` | `ZephyrSkeleton<32>`: the shared skeleton, then 32 world matrices from `+0x10` |
+| `mZephyrPoseStatic` | `0x8E0` | `ZephyrPoseStatic<32>`: the local pose being built |
+| `mZephyrPoseDynUpper`, `mZephyrPoseDynLower` | `0xC64`, `0x1614` | `ZephyrPoseDyn<32>` (`0x9B0` each): each half's player |
+| `m_pAnimLower` | `0x1FC4` | the `SoldierAnimation` on the legs |
+| `mBlendFactorLower` | `0x1FE0` | how far the legs' animation has blended in |
+
+Each frame the soldier is drawn, `EntitySoldier::Render` calls `SetAction` with
+the matrix it draws (network-interpolated for other players) and then
+`SetupPose`, which:
+
+1. Switches on `mAction`. Most actions, `JET` among them, go through
+   `UpdateActionAnimation`: it starts or advances each half's player and lays
+   it on `mZephyrPoseStatic` through that half's mask, with
+   `ZephyrPoseStatic<32>::Set` once the animation has blended in and `::Blend`
+   by the step until then. The pose stays from frame to frame, so a change of
+   animation blends from the last pose drawn.
+2. Turns `DummyRoot` to the leg angle (`RotateLowerBody`), setting its rotation
+   outright after both halves are laid on. For `JET` the leg angle eases to 0.
+3. Calls `ApplyProceduralAnimationAndBuildWorldMatrices`: the aim's turn of
+   `bone_a_spine` (or `bone_abdomen`), `bone_b_spine`, `bone_ribcage`,
+   `bone_neck` and `bone_head`, made on world matrices it builds as it goes,
+   then the rest of the world matrices.
+4. Hands the world matrices to the renderer (`RedPose::ConvertFromZephyrPose`).
+
+`SoldierAnimatorClass::SetupBodyMasks` makes the masks. The lower body is ten
+bones (`auiNormalLowerBodyBoneHash`): `bone_root`, `bone_pelvis` and
+`bone_l_`/`bone_r_` `thigh`, `calf`, `foot` and `toe`; a skeleton with an
+acklay's bone uses a list of fifteen. The upper body is every other joint but
+joint 0.
+
+The bone names are from their PblTEMPHash: `DummyRoot` `0x4446E9B8`,
+`bone_root` `0x16E27226`, `bone_pelvis` `0xE6E47876`, `bone_a_spine`
+`0x5DE52389`, `bone_abdomen` `0x93E93819`, `bone_b_spine` `0x8C1C9BBA`,
+`bone_ribcage` `0xE5B51072`, `bone_neck` `0xD2AFB28A`, `bone_head`
+`0x8AFDF5E4`.
+
+For a pilot animation, `SetupPose` already lays an extra animation (the
+overlay) on the pose this way: a `ZephyrPoseDyn<32>` on its stack, `Open`ed on
+the skeleton, given the animation with `SetAnimation(anim, 30.0)` and laid on
+through the upper mask with `Blend`.
+
+### Zephyr
+
+A `ZephyrPoseDyn<32>` plays one `ZephyrAnim`: `m_kAnim` (a
+`ZephyrAnimInst<32>`: per-joint decoder state and the joint maps between the
+animation and the skeleton, room for 32 joints) and its time `m_fCurT`, 0 at
+the first frame and 1 at the last. `GetJointTransform` reads frame
+`(frames - 1) * m_fCurT` and interpolates to the next; with `m_bLoop` the frame
+after the last is frame 1. The decoders (`DecompQuatToFrame`) run forward
+through run-length deltas, from frame 0 again when asked for an earlier frame,
+and check no bounds: a one-frame animation that loops reads past its data.
+
+| `ZephyrPoseDyn<32>` | Offset | | `ZephyrAnim` | Offset |
+|---------------------|--------|-|--------------|--------|
+| `m_kAnim.m_piAnimJointIdx` | `0x940` | | `m_u16NumFrames` | `0x8` |
+| `m_kAnim.m_pkAnim` | `0x980` | | `m_u16NumJoints` | `0xA` |
+| `m_pSkel` | `0x988` | | | |
+| `m_fCurT` | `0x99C` | | | |
+| `m_bLoop`, `m_bInterpolate` | `0x9AA`, `0x9AD` | | | |
+
+`ZephyrPoseStatic<32>` is a skeleton pointer and one transform per joint
+(quaternion then translation, `0x1C` bytes); a quaternion `w` of 1e6 marks a
+joint not set yet. Its `Blend` comes in four forms, from another static pose or
+a player, with or without a mask; `UpdateActionAnimation` uses
+`Blend(ZephyrPoseDyn<32>*, PblBitVector<32>*, float t)`, which moves each joint
+the mask and the animation both have `t` of the way to the animation (slerp and
+lerp), or sets one not set yet.
+
+| | modtools | Steam | GOG |
+|-|----------|-------|-----|
+| `ZephyrPoseDyn<32>::SetAnimation`: thiscall(anim, fps), RET 8 | `0x0082AAC0` | `0x0072D430` | `0x0072E500` |
+| `ZephyrPoseStatic<32>::Blend(dyn, mask, t)`: thiscall, RET 0xC | `0x0082D450` | `0x0072DB30` | `0x0072EC00` |
+| `ApplyProceduralAnimationAndBuildWorldMatrices` | `0x00579F10` | `0x00642860` | `0x00643900` |
+| `SetupPose`'s call of it | `0x0057D3ED` | `0x006406DC` | `0x0064177C` |
+
+`ApplyProceduralAnimationAndBuildWorldMatrices` is thiscall(float dt), RET 4,
+on modtools; on Steam and GOG (LTCG) it takes the frame time in XMM1 and
+returns with a plain RET. `SetupPose` is its only caller.
+
+## Jets
+
+`SetAction` plays `JET` (`jetpack_hover`) for both `JET_JUMP` and `JET_HOVER`.
+`EntitySoldier::Update` moves them differently:
+
+- **`JET_HOVER`** calls `EntitySoldier::MoveJetHover`: the velocity decays by
+  `e^(-2 dt)`, then is pushed toward target speeds, along the eye direction and
+  the body's right row, by at most `JetAcceleration * dt`. The targets are the
+  stick times `MaxSpeed` (forward) or `MaxStrafeSpeed` (backward), times
+  `mThrustFactor[jet]`, and the strafe stick times `MaxStrafeSpeed` times
+  `mStrafeFactor[jet]`.
+- **`JET_JUMP`** adds `JetPush * dt` upward and calls `MoveOffGround` with the
+  stick times `JetAcceleration` as the push: no target speed.
+
+`mThrustFactor`, `mStrafeFactor` and `mTurnFactor` hold one value per
+`ControlSpeed` posture (`ControlSpeed = "<posture> thrust strafe turn"`, read by
+`EntitySoldierClass::SetProperty`); `jet` is index 6, with defaults 0.3, 0.3
+and 1.0 from the class constructor. `EntitySoldierClass_data` sits as one block,
+`0xA0` lower on modtools than on Phantom and `0x294` lower on release. Where
+`Update` reads them for `MoveJetHover`:
+
+| `EntitySoldierClass` | modtools | Steam and GOG |
+|----------------------|----------|---------------|
+| `mMaxSpeed` | `0x890` @`0x00548AE1` | `0x69C` @`0x004EBA85` |
+| `mMaxStrafeSpeed` | `0x894` @`0x00548AE9` | `0x6A0` @`0x004EBA8F` |
+| `mThrustFactor[6]` | `0x8D8` @`0x00548AF7` | `0x6E4` @`0x004EBABE` |
+| `mStrafeFactor[6]` | `0x8F8` @`0x00548B05` | `0x704` @`0x004EBAB6` |
+| `mJetAcceleration` | `0x9BC` @`0x00548B11` | `0x7C8` @`0x004EBAAA` |
+
+## Directional jets (built 2026-10-05)
+
+`UseDirectionalJets` is a soldier ODF switch, kept per class and inherited
+through `ClassParent` like `UseDirectionalRolls`.
+
+- **Names.** `jetpack_hover_forward`, `_backward`, `_left` and `_right`, each
+  the pose while moving that way. Each is looked up for the soldier's map like
+  the side dives (`soldier_anim_tables::find_named`), for the lower half
+  (`_lower`, plain, `_full`). One with more than 32 joints is skipped and
+  logged. A way without one keeps the hover for its share.
+- **Where.** `SetupPose`'s call of `ApplyProceduralAnimationAndBuildWorldMatrices`
+  is retargeted to a stand-in that keeps every general and XMM register and the
+  stack, does the blend, and jumps on to the function: the local pose is
+  finished there (the leg twist included), and nothing has been turned to the
+  aim or built into world matrices yet.
+- **When.** For a soldier in `JET` whose class has the switch and whose legs
+  play the map's `JET` lower animation (not a melee swing).
+- **How much.** The body's speed along its forward and right rows is its move
+  this frame (`mMovement`, from the drawn matrix) over the frame time, as
+  `SetAction` reads it for directional jumps. Each part over the unit's top jet
+  speed that way (the `MoveJetHover` targets at full stick; the run speed where
+  the jet factor is 0, as it can still move off a jet jump) gives the lean, kept
+  in the unit disc. The legs' lean follows it at `min(dt * 7.5, 1)` of the way a
+  frame, the rate `UpdateActionAnimation` turns the leg angle. Its length is the
+  directional share, split between its forward-or-backward way and its side in
+  proportion to the two parts.
+- **Blend.** For each way with a share, a `ZephyrPoseDyn<32>` on the stack,
+  zeroed, with `m_pSkel` the animator's skeleton and `m_bInterpolate` set,
+  takes the animation with `SetAnimation(anim, 30.0)` and the hover player's
+  `m_fCurT`, never looping. `Blend` lays it on `mZephyrPoseStatic` through
+  `mLowerBodyAnimMask` by its share over the share laid so far, the hover's
+  included, so each ends with its own share.
+
+The next frame `UpdateActionAnimation` sets the legs from the hover again, so
+nothing builds up; when the soldier leaves `JET`, the next animation blends in
+from the leaning pose.
+
+Code: `entity/directional_jets.cpp`, the weights in
+`entity/directional_jets_core.hpp` (`tests/directional_jets_tests.cpp`); audit
+`tests/directional_jets_abi_tests.py`.

@@ -72,9 +72,13 @@ def fields(text, namespace):
             re.finditer(r"Field<[^;]*?>\s+(\w+)\{(0x[0-9A-Fa-f]+|\d+)\}", body)}
 
 
+# The roll's fields; tests/directional_jets_abi_tests.py checks the rest of the
+# header and that the two audits cover all of it.
 F = fields(animator, "layout::SoldierAnimator")
-assert set(F) == {"mLegMatrix_right", "mLegMatrix_forward", "mOwner", "mSoldierAction",
-                  "mWeaponAnimationMap", "mMovement", "mAction", "mActionTime"}, F
+ROLL_FIELDS = {"mLegMatrix_right", "mLegMatrix_forward", "mOwner", "mSoldierAction",
+               "mWeaponAnimationMap", "mMovement", "mAction", "mActionTime"}
+assert ROLL_FIELDS <= set(F), F
+F = {name: F[name] for name in ROLL_FIELDS}
 DIVE = constant("kActionDive", animator)
 ROLL = constant("kStateRoll", animator)
 assert (DIVE, ROLL) == (24, 5)
@@ -87,7 +91,8 @@ assert "kMapStride      = 0x97 * 8;" in animator and "kActionTable    = 0x24;" i
 assert constant("kMinSpeedSq", core) == 4, "SetAction's 2 m/s"
 assert re.search(r"return s > 0\.0f \? Side::Left : Side::Right;", core), "the right row points left"
 # The source's own claims this audit rests on.
-assert "tables::find_animation(pbl_temp_hash(names[n]))" in module
+assert "tables::find_named(map, dive_name(side), half, d.name[half], match)" in module
+assert "find_animation(pbl_temp_hash(names[n]))" in tables_src
 assert "s_findAnimation(cls, nullptr, hash, nullptr)" in tables_src
 assert "kSoldierControllable = 0x240;" in module
 assert ("side_dive_aim(moved, sa::mLegMatrix_right(self), sa::mLegMatrix_forward(self), dive->side, move);"
