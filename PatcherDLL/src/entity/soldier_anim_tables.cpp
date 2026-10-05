@@ -3,6 +3,7 @@
 #include "combo_anim_limit.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "game/Battlefront2/Source/SoldierAnimator.h"
 #include "util/install_log.hpp"
@@ -190,6 +191,33 @@ void* find_animation(uint32_t hash)
    if (s_state <= 0) return nullptr;
    void* cls = *s_classCell;
    return cls ? s_findAnimation(cls, nullptr, hash, nullptr) : nullptr;
+}
+
+void* find_named(int map, const char* anim, int half, char (&name)[kNameMax], Match& match)
+{
+   int bank = 0, weapon = 0;
+   if (!map_key(map, bank, weapon)) return nullptr;
+   int banks[kMaxChain], weapons[kMaxChain];
+   const int bankCount = parent_chain(bank, max_banks(), bank_parent, banks);
+   const int weaponCount = parent_chain(weapon, kMaxWeapons, weapon_parent, weapons);
+   char names[kNamesPerHalf][kNameMax];
+   for (int w = 0; w < weaponCount; ++w) {
+      char weaponName[kNameBuffer];
+      weapon_name(weapons[w], weaponName);
+      for (int b = 0; b < bankCount; ++b) {
+         char bankName[kNameBuffer];
+         bank_name(banks[b], bankName);
+         half_names(names, bankName, weaponName, anim, half);
+         for (int n = 0; n < kNamesPerHalf; ++n) {
+            if (void* found = find_animation(pbl_temp_hash(names[n]))) {
+               std::memcpy(name, names[n], kNameMax);
+               match = kMatchOf[n];
+               return found;
+            }
+         }
+      }
+   }
+   return nullptr;
 }
 
 } // namespace soldier_anim_tables

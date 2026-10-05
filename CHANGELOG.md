@@ -112,6 +112,16 @@ Scripts can check the running version through `GameExt.version`.
   `ComboAnimIncrease` on or off. Animation only, for every soldier you see, and
   inherited through `ClassParent`.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#soldier-classes).
+- **`UseDirectionalJets`** - A soldier ODF property for jets that lean with the
+  move: a jetting soldier's legs blend from `jetpack_hover` toward
+  `jetpack_hover_forward`, `_backward`, `_left` and `_right` by the way it moves
+  and how fast, all the way at the unit's top jet speed, which comes from its own
+  `MaxSpeed`, `MaxStrafeSpeed` and `ControlSpeed` jet values. A change of
+  direction swings the legs over rather than snapping them. The animations are
+  found like the side rolls' (`human_rifle_jetpack_hover_forward`) and a way
+  without one keeps the hover. Works with `ComboAnimIncrease` on or off. Lower
+  body only, for every soldier you see, and inherited through `ClassParent`.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#soldier-classes).
 - **`dualcannon` weapon class** - A `cannon` with a second gun in the soldier's other
   hand (`OffhandGeometryName`, `OffhandHardPoint`, `OffhandFirePointName`) that fires
   from each gun in turn, per trigger pull or within a salvo (`AlternateMode`). Each gun

@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "soldier_anim_tables_core.hpp"
+
 struct SoldierAnimation;
 
 // =============================================================================
@@ -58,5 +60,13 @@ SoldierAnimation* action_animation(int map, int action, int half);
 // SoldierAnimatorClass::FindAnimation: the ZephyrAnim a PblTEMPHash names in
 // any loaded soldier bank, or null.
 void* find_animation(uint32_t hash);
+
+// The ZephyrAnim for one half (0 upper, 1 lower) of an animation named like a
+// map's action animations, found as AnimationFinder finds them: the map's
+// weapon and then each parent weapon, each with the map's bank and then each
+// parent bank, each by the half's three names (half_names), hashed with
+// PblTEMPHash and looked up with find_animation. Null when no loaded bank has
+// one. `name` gets the name it was found by, `match` which of the three.
+void* find_named(int map, const char* anim, int half, char (&name)[kNameMax], Match& match);
 
 } // namespace soldier_anim_tables

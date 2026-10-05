@@ -1,13 +1,13 @@
 #pragma once
 
 #include <cmath>
-#include <cstdio>
 #include <stdint.h>
 
 // The parts of the directional rolls that need no game: which way a roll
-// goes, the names its dive is looked up by, and the parent chains the lookup
-// walks. Tested by tests/directional_rolls_tests.cpp; the rest is in
-// directional_rolls.cpp, and the mechanism in directional_rolls.hpp.
+// goes, the dive it plays and where that dive's root aims. Tested by
+// tests/directional_rolls_tests.cpp; the rest is in directional_rolls.cpp,
+// the mechanism in directional_rolls.hpp, and the names and parent chains
+// the dives are looked up through in soldier_anim_tables_core.hpp.
 
 namespace directional_rolls {
 
@@ -65,48 +65,6 @@ inline void side_dive_aim(const float movement[3], const float right[3], const f
    const float f2 = side == Side::Left ? s : -s;
    const float s2 = side == Side::Left ? -f : f;
    for (int i = 0; i < 3; ++i) out[i] = forward[i] * f2 + right[i] * s2;
-}
-
-// How the name was found, which sets the SoldierAnimation's scope as
-// AnimationFinder::AssignAnimation does: the half's own suffix, the plain
-// name (the action's own scope), or "_full".
-enum class Match : uint8_t { Half, Plain, Full };
-constexpr int kNameMax = 128;
-constexpr int kNamesPerHalf = 3;
-
-// The names AnimationFinder::AssignAnimation tries for one half of a
-// full-body action, in its order: "<bank>_<weapon>_<anim>_upper" (or _lower),
-// then "<bank>_<weapon>_<anim>", then "<bank>_<weapon>_<anim>_full". Half 0 is
-// the upper body, 1 the lower.
-inline void half_names(char out[kNamesPerHalf][kNameMax], const char* bank, const char* weapon,
-                       const char* anim, int half)
-{
-   std::snprintf(out[0], kNameMax, "%s_%s_%s_%s", bank, weapon, anim, half == 0 ? "upper" : "lower");
-   std::snprintf(out[1], kNameMax, "%s_%s_%s", bank, weapon, anim);
-   std::snprintf(out[2], kNameMax, "%s_%s_%s_full", bank, weapon, anim);
-}
-
-constexpr Match kMatchOf[kNamesPerHalf] = { Match::Half, Match::Plain, Match::Full };
-
-// A parent chain from `start`: start, its parent, and so on, ending at a root
-// (its own parent), a parent outside [0, count) or kMaxChain entries.
-// `parent(i)` reads entry i's parent. Returns the length written to `out`.
-constexpr int kMaxChain = 8;
-
-template <class ParentOf>
-int parent_chain(int start, int count, ParentOf parent, int out[kMaxChain])
-{
-   int n = 0;
-   int at = start;
-   while (n < kMaxChain && at >= 0 && at < count) {
-      for (int i = 0; i < n; ++i)
-         if (out[i] == at) return n;   // a loop
-      out[n++] = at;
-      const int up = parent(at);
-      if (up == at) break;
-      at = up;
-   }
-   return n;
 }
 
 } // namespace directional_rolls

@@ -28,7 +28,25 @@
 //
 // SetAction(ROLL) sets mAction to DIVE and mActionTime to 0; SetupPose plays
 // the action and adds the frame time to mActionTime once it has, so the first
-// SetupPose of a roll sees 0. TUMBLE_RECOVER plays DIVE too.
+// SetupPose of a roll sees 0. TUMBLE_RECOVER plays DIVE too. JET_JUMP and
+// JET_HOVER play JET ("jetpack_hover").
+//
+// The pose, where the directional jets read it (Zephyr.h has the structs):
+//   mLowerBodyAnimMask     0x5C    lower-body joints, a 32-bit mask: the mask
+//                                  UpdateActionAnimation hands Blend for the
+//                                  legs (0x57B2C3 / 0x640B4E / 0x641BEE)
+//   mZephyrSkeleton        0xD0    ZephyrSkeleton<32>: SetupPose hands it to
+//                                  ConvertFromZephyrPose (0x57D3F2 / 0x6406E4 /
+//                                  0x641784)
+//   mZephyrPoseStatic      0x8E0   ZephyrPoseStatic<32>, the local pose being
+//                                  built: Blend's `this` (0x57B254 / 0x640B00 /
+//                                  0x641BA0)
+//   mZephyrPoseDynLower    0x1614  ZephyrPoseDyn<32> playing the lower body:
+//                                  Blend's animation (0x57B2C7 / 0x640B52 /
+//                                  0x641BF2); its m_fCurT is read at +0x1FB0
+//                                  (0x57B0F7 / 0x6409CC / 0x641A6C)
+//   m_pAnimLower           0x1FC4  the SoldierAnimation on the legs (0x57B0CF /
+//                                  0x640995 / 0x641A35)
 //
 // The action table: SoldierAnimatorClass::GetUpperBodyActionAnimation and
 // GetLowerBodyActionAnimation, thiscall(action, map) with ECX the class
@@ -47,17 +65,26 @@
 // with PblTEMPHash. Addresses in game_addrs.hpp.
 // =============================================================================
 
+struct SoldierAnimation;
+
 namespace layout::SoldierAnimator {
 
 constexpr int32_t kStateRoll  = 5;    // SoldierState ROLL
 constexpr int32_t kActionDive = 24;   // ActionAnimation DIVE ("diveforward")
+constexpr int32_t kActionJet  = 25;   // ActionAnimation JET ("jetpack_hover")
 
 inline constexpr Field<float[4]>  mLegMatrix_right{0x00};
 inline constexpr Field<float[4]>  mLegMatrix_forward{0x20};
 inline constexpr Field<uint8_t*>  mOwner{0x50};
+inline constexpr Field<uint32_t>  mLowerBodyAnimMask{0x5C};
 inline constexpr Field<int32_t>   mSoldierAction{0x70};
 inline constexpr Field<int32_t>   mWeaponAnimationMap{0x74};
 inline constexpr Field<float[3]>  mMovement{0xAC};
+// Embedded structs: take the member's address, &mZephyrSkeleton(animator).
+inline constexpr Field<uint8_t>   mZephyrSkeleton{0xD0};
+inline constexpr Field<uint8_t>   mZephyrPoseStatic{0x8E0};
+inline constexpr Field<uint8_t>   mZephyrPoseDynLower{0x1614};
+inline constexpr Field<const SoldierAnimation*> m_pAnimLower{0x1FC4};
 inline constexpr Field<int32_t>   mAction{0x1FEC};
 inline constexpr Field<float>     mActionTime{0x1FF0};
 

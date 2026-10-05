@@ -14,7 +14,6 @@
 #include <detours.h>
 
 #include <cstdlib>
-#include <cstring>
 #include <unordered_set>
 
 // See directional_rolls.hpp for the mechanism.
@@ -80,47 +79,17 @@ struct SideDive {
    const SoldierAnimation* from[2] = {};   // the DIVE entries the copies came from
    bool                    found[2] = {};
    SoldierAnimation        anim[2] = {};
-   char                    name[2][kNameMax] = {};
+   char                    name[2][tables::kNameMax] = {};
 };
 SideDive s_dives[tables::kMaxMapsAny][2];   // [map][left, right]
-
-// The ZephyrAnim for one half of a side dive, looked up as AnimationFinder
-// would: the map's weapon and then each parent weapon, each with the map's
-// bank and then each parent bank, each by the half's three names.
-void* find_half(int map, Side side, int half, char* nameOut, Match& match)
-{
-   int bank = 0, weapon = 0;
-   if (!tables::map_key(map, bank, weapon)) return nullptr;
-   int banks[kMaxChain], weapons[kMaxChain];
-   const int bankCount = parent_chain(bank, tables::max_banks(), tables::bank_parent, banks);
-   const int weaponCount = parent_chain(weapon, tables::kMaxWeapons, tables::weapon_parent, weapons);
-   char names[kNamesPerHalf][kNameMax];
-   for (int w = 0; w < weaponCount; ++w) {
-      char weaponName[tables::kNameBuffer];
-      tables::weapon_name(weapons[w], weaponName);
-      for (int b = 0; b < bankCount; ++b) {
-         char bankName[tables::kNameBuffer];
-         tables::bank_name(banks[b], bankName);
-         half_names(names, bankName, weaponName, dive_name(side), half);
-         for (int n = 0; n < kNamesPerHalf; ++n) {
-            if (void* anim = tables::find_animation(pbl_temp_hash(names[n]))) {
-               std::memcpy(nameOut, names[n], kNameMax);
-               match = kMatchOf[n];
-               return anim;
-            }
-         }
-      }
-   }
-   return nullptr;
-}
 
 // The scope a found half gets, as AnimationFinder::AssignAnimation gives it:
 // the half's own (1 upper, 2 lower), "_full"'s, or the action's own for the
 // plain name, which is diveforward's.
-uint32_t scope_of(Match match, int half, uint32_t from)
+uint32_t scope_of(tables::Match match, int half, uint32_t from)
 {
-   if (match == Match::Half) return half == 0 ? 1u : 2u;
-   if (match == Match::Full) return 3u;
+   if (match == tables::Match::Half) return half == 0 ? 1u : 2u;
+   if (match == tables::Match::Full) return 3u;
    return from >> 30;
 }
 
@@ -156,8 +125,8 @@ SideDive* side_dive(int map, Side side)
          const SoldierAnimation* from = stock[half];
          d.from[half] = from;
          if (!from) continue;
-         Match match = Match::Plain;
-         void* anim = find_half(map, side, half, d.name[half], match);
+         tables::Match match = tables::Match::Plain;
+         void* anim = tables::find_named(map, dive_name(side), half, d.name[half], match);
          if (!anim) continue;
          d.anim[half] = *from;
          d.anim[half].m_pZephyrAnim = anim;
