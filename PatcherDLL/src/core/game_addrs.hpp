@@ -330,6 +330,13 @@ namespace modtools {
    constexpr uintptr_t explosion_class_read_prop_site = 0x00601fab;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x00605a4b;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0061e46c;
+   // The TYPE branch's Derive call in EntityClass::Read and WeaponClass::Read,
+   // child = parent->Derive(nameHash): load the vptr, push the hash, point ECX
+   // at the parent, CALL [vptr+4]; eight bytes each, signatures in
+   // odf_gameext_props.cpp. Hooked so the ODF property listeners can inherit
+   // their values through ClassParent.
+   constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
 
    // Second self-piloted-hover crash: issuing a unit order crashes in
    // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
@@ -2240,6 +2247,9 @@ namespace steam {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f842d;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067a2b9;
+   // The Derive calls in EntityClass::Read and WeaponClass::Read, as on modtools.
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -3362,6 +3372,9 @@ namespace gog {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f94cd;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067b359;
+   // The Derive calls in EntityClass::Read and WeaponClass::Read, as on Steam.
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;
