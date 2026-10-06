@@ -63,6 +63,7 @@
 #include "render/target_bar_latch.hpp"
 #include "render/hud_bar_fill_from.hpp"
 #include "render/hud_sub_pixel.hpp"
+#include "render/hud_true_widescreen.hpp"
 #include "render/camera_shake.hpp"
 #include "render/hud_editor_disable.hpp"
 #include "render/red_light_stale_node_fix.hpp"
@@ -378,6 +379,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    target_bar_latch_install(exe_base);
    hud_bar_fill_from_install(exe_base);
    hud_sub_pixel_install(exe_base);        // rewrites two CALL rel32s - needs the RW window
+   hud_true_widescreen_install(exe_base);  // Detours .text, rewrites CALL rel32s - needs the RW window
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window

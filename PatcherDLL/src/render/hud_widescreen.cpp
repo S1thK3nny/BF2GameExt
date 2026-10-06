@@ -9,9 +9,11 @@
 // =============================================================================
 // HUD widescreen reticle fix
 // =============================================================================
-// The vanilla letterbox transform in HUD::Manager::Update applies a Y-scale and
-// Y-offset to ALL HUD elements on widescreen displays, misaligning the reticle
-// with the 3D aim point (error grows with distance from screen center).
+// The vanilla letterbox applies a Y-scale and Y-offset to ALL HUD elements on
+// widescreen displays, misaligning the reticle with the 3D aim point (error
+// grows with distance from screen center). The HUD loader sets it on each HUD
+// screen group's local matrix when the HUD loads (modtools 0x006B7300, called
+// from HUD::Manager::Load); it is not in HUD::Manager::Update.
 //
 // Fix: pre-distort ONLY the reticle Y in ReticuleDisplay::Update so that, after
 // the letterbox transform, it lands on the correct spot.  Everything else
@@ -256,6 +258,13 @@ void hud_widescreen_install(uintptr_t exe_base)
    update_correction_params(); // initial params (screen dims usually available)
 }
 
+// The sent y is (ndc_y - s_yOffsetNorm) / s_yScale on every build (modtools'
+// redirected constants are the same expression); 1 and 0 while uninstalled.
+float hud_widescreen_reticle_uncorrect(float y)
+{
+   return y * s_yScale + s_yOffsetNorm;
+}
+
 // ---------------------------------------------------------------------------
 // Uninstall
 // ---------------------------------------------------------------------------
@@ -277,5 +286,7 @@ void hud_widescreen_uninstall()
       DetourTransactionCommit();
    }
 
+   s_yScale = 1.0f;
+   s_yOffsetNorm = 0.0f;
    s_addrs = nullptr;
 }

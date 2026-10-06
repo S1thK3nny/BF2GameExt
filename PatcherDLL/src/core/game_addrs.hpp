@@ -1111,6 +1111,61 @@ namespace modtools {
    constexpr uintptr_t hud_element_draw_floor_x     = 0x00816FFE;
    constexpr uintptr_t hud_element_draw_floor_y     = 0x00817014;
    constexpr uintptr_t crt_floor                    = 0x008D5020;
+   // TrueWidescreen HUD files (render/hud_true_widescreen.cpp). FileInfo
+   // ReadData is thiscall(PblConfig*, PblConfig::Data*) -> bool, RET 8, the
+   // FileInfo vtable's +0x20; Manager::Load is cdecl(PblConfig*), one call per
+   // .hud file. GetContainerViewWidth is thiscall() -> ST0; the relative-to-
+   // pixels conversion is cdecl(mode, value, frame, view, screen) -> ST0; the
+   // EventPosition handler is cdecl(Event*, element). hud_element_list is
+   // HUD::Element::sList (its terminator node), hud_view_groups the cell
+   // holding gHudViewPorts (RedScreenGroupElement[5], 0xA0 apart),
+   // hud_interface_frustum the interface camera's frustum width t. The aspect
+   // calls are CALL GetScreenAspectRatio (cdecl -> ST0) in the bitmap rect
+   // setup (element in ESI) and ElementMap::PostReadSetup (element in EBX).
+   constexpr uintptr_t hud_file_info_read_data      = 0x006B7F50;
+   constexpr uintptr_t hud_manager_load             = 0x006B8480;
+   // In Manager::Load, MOV ECX,EDI / CALL [EDX+8]: each top-level item's Read,
+   // the item in EDI, its vtable in EDX, three arguments pushed.
+   constexpr uintptr_t hud_manager_load_read_call   = 0x006B8730;
+   constexpr uintptr_t hud_container_view_width     = 0x006926B0;
+   constexpr uintptr_t hud_relative_to_pixels       = 0x00691120;
+   constexpr uintptr_t hud_event_position           = 0x0069A350;
+   constexpr uintptr_t hud_element_list             = 0x00AD7EE0;
+   constexpr uintptr_t hud_view_groups              = 0x00BA4478;
+   constexpr uintptr_t hud_interface_frustum        = 0x00E5B504;
+   constexpr uintptr_t renderer_screen_aspect       = 0x008059A0;
+   constexpr uintptr_t hud_bitmap_rect_aspect_call  = 0x006988F9;
+   constexpr uintptr_t hud_map_aspect_call_1        = 0x0069BA00;
+   constexpr uintptr_t hud_map_aspect_call_2        = 0x0069BA4E;
+   constexpr uintptr_t hud_map_aspect_call_3        = 0x0069BA66;
+   constexpr uintptr_t hud_map_aspect_call_4        = 0x0069BAA3;
+   // The HUD editor's .hud writer, for TrueWidescreen: FileInfo WriteData is
+   // thiscall(PblFile*, int indent), RET 8, the FileInfo vtable's +0x28; the
+   // indent writer is thiscall(int count) on the file, RET 4; the format writer
+   // cdecl(PblFile*, const char* fmt, ...). The pixels-to-relative conversion is
+   // cdecl(mode, pixels, frame, view, screen) -> ST0. Loaded FileInfos are kept
+   // in hud_config_files[hud_config_file_count].
+   constexpr uintptr_t hud_file_info_write_data     = 0x006B8090;
+   constexpr uintptr_t hud_file_info_vtable         = 0x00A60398;
+   constexpr uintptr_t hud_write_indent             = 0x006B5A20;
+   constexpr uintptr_t hud_write_format             = 0x006B5A50;
+   constexpr uintptr_t hud_pixels_to_relative       = 0x00691170;
+   constexpr uintptr_t hud_config_files             = 0x00BA4070;
+   constexpr uintptr_t hud_config_file_count        = 0x00BA4480;
+   // Read straight from HUD::Element::sViewportWidth (not through
+   // GetContainerViewWidth): ElementMap's constructor and ElementText's
+   // TextBox, both when a file loads, and ElementText's SetProperty,
+   // GetProperty and WriteData, thiscall(2 args) -> AL or void, RET 8, from
+   // the editor. ElementTarget (primary vtable) places its markers from the
+   // real width. ElementBarSegmented::SetValue's aspect call has the
+   // ElementBar base, element + 0x200, in EBX.
+   constexpr uintptr_t hud_viewport_width           = 0x00BA38FC;
+   constexpr uintptr_t hud_text_set_property        = 0x006AAE10;
+   constexpr uintptr_t hud_text_get_property        = 0x006A95C0;
+   constexpr uintptr_t hud_text_write_data          = 0x006A9A90;
+   constexpr uintptr_t hud_target_vtable            = 0x00A5E000;
+   constexpr uintptr_t hud_target_update            = 0x006A9170;   // its +0x2C
+   constexpr uintptr_t hud_bar_segmented_aspect_call = 0x00696B97;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test

@@ -337,6 +337,12 @@
     <ClInclude Include="src\render\hud_sub_pixel.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\hud_true_widescreen.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\hud_true_widescreen_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\hud_weapon_icon_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -775,6 +781,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_sub_pixel.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\hud_true_widescreen.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\render\hud_weapon_icon_fix.cpp">

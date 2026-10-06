@@ -279,6 +279,22 @@ Add a `SubPixel(1)` property covering an element and everything inside it; the r
 a spare flag bit and the draw are in
 [pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).
 
+**Screen anchor per element** - A `TrueWidescreen(1)` file picks each top-level piece's edge
+from where it is written (left, middle or right third), so a piece near a boundary can keep
+to the wrong edge, and a full-screen overlay covers only the 4:3 middle. Add
+`ScreenAnchor("Left" | "Center" | "Right" | "Full")` on top-level elements, `"Full"` laying
+that element out across the real width.
+
+**HUD editor guides** - The modtools HUD editor's only overlay is the safe-area frame its
+Update draws on a key. Add more toggles: a grid, the screen centre, and for a
+`TrueWidescreen(1)` file the 4:3 area and the third lines where pieces change edge;
+possibly nudges that snap to the grid.
+
+**HUD editor keeps GameExt's lines** - The modtools HUD editor writes a `.hud` back with only
+the properties stock BF2 knows, so a file it generates loses `FillFrom`, and what it writes
+for `TransformNumberMath`, `TransformNumberLerp` and `TransformNumberCompare` is unchecked.
+Write each back from its class's `WriteData`, as `TrueWidescreen` is for `FileInfo`.
+
 **Colour gradients** - An element is drawn in one tint, so an icon or bar can only show a
 gradient baked into its texture. Add a `Gradient` property for bitmaps and bars that draws
 them through the engine's masked-bitmap mode with a gradient texture GameExt builds from
