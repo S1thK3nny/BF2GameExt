@@ -2550,6 +2550,44 @@ namespace steam {
    constexpr uintptr_t hud_element_draw_floor_x     = 0x006C0E43;
    constexpr uintptr_t hud_element_draw_floor_y     = 0x006C0E66;
    constexpr uintptr_t crt_floor                    = 0x0075317C;
+   // TrueWidescreen HUD files (render/hud_true_widescreen.cpp); the same
+   // pieces as on modtools, found through RTTI (the FileInfo is a
+   // HUD::Manager::ConfigFile; HUD::ElementGroupBase's constructor registers
+   // EventPosition) and their callers, and the same on GOG byte for byte but
+   // for moved addresses. LTCG changed four
+   // contracts: Manager::Load takes its PblConfig in ECX (plain RET);
+   // GetContainerViewWidth returns in XMM0 and leaves every register but EAX,
+   // ECX and XMM0 alone; the relative-to-pixels conversion takes the mode in
+   // ECX, value, frame and view in XMM1-3 and the screen width on the stack
+   // (caller pops), returns in XMM0 and changes only XMM0 and XMM1;
+   // GetScreenAspectRatio still returns in ST0 and changes nothing else.
+   // ConfigFile ReadData, the EventPosition handler and the draw keep
+   // theirs. Load reads each top-level item with MOV ECX,ESI / CALL
+   // [EAX+8]. The bitmap rect setup and ElementMap::PostReadSetup hold the
+   // element in ESI at their aspect calls, ElementBarSegmented::SetValue its
+   // ElementBar base (element + 0x200) in EDI. The interface frustum width
+   // is not beside the screen size here. The editor's writers are not
+   // needed: GameExt keeps the editor off on retail (hud_editor_disable).
+   constexpr uintptr_t hud_file_info_read_data      = 0x00564DB0;
+   constexpr uintptr_t hud_manager_load             = 0x00565950;
+   constexpr uintptr_t hud_manager_load_read_call   = 0x00565B5C;
+   constexpr uintptr_t hud_container_view_width     = 0x005490B0;
+   constexpr uintptr_t hud_relative_to_pixels       = 0x00547010;
+   constexpr uintptr_t hud_event_position           = 0x0054F110;
+   constexpr uintptr_t hud_element_list             = 0x007EBA18;
+   constexpr uintptr_t hud_view_groups              = 0x01E573C8;
+   constexpr uintptr_t hud_interface_frustum        = 0x0093E4E0;
+   constexpr uintptr_t renderer_screen_aspect       = 0x006B1890;
+   constexpr uintptr_t hud_bitmap_rect_aspect_call  = 0x0054D738;
+   constexpr uintptr_t hud_map_aspect_call_1        = 0x005521AC;
+   constexpr uintptr_t hud_map_aspect_call_2        = 0x00552208;
+   constexpr uintptr_t hud_map_aspect_call_3        = 0x00552226;
+   constexpr uintptr_t hud_map_aspect_call_4        = 0x0055227E;
+   constexpr uintptr_t hud_file_info_vtable         = 0x007A329C;
+   constexpr uintptr_t hud_viewport_width           = 0x01E56C34;
+   constexpr uintptr_t hud_target_vtable            = 0x007A17FC;
+   constexpr uintptr_t hud_target_update            = 0x0055A340;   // its +0x2C
+   constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054C24C;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
@@ -3193,6 +3231,27 @@ namespace gog {
    constexpr uintptr_t hud_element_draw_floor_x     = 0x006C1ED3;
    constexpr uintptr_t hud_element_draw_floor_y     = 0x006C1EF6;
    constexpr uintptr_t crt_floor                    = 0x0075427C;
+   // TrueWidescreen HUD files: as on Steam (see there).
+   constexpr uintptr_t hud_file_info_read_data      = 0x00565B30;
+   constexpr uintptr_t hud_manager_load             = 0x005666D0;
+   constexpr uintptr_t hud_manager_load_read_call   = 0x005668DC;
+   constexpr uintptr_t hud_container_view_width     = 0x00549E00;
+   constexpr uintptr_t hud_relative_to_pixels       = 0x00547D60;
+   constexpr uintptr_t hud_event_position           = 0x0054FE60;
+   constexpr uintptr_t hud_element_list             = 0x007EC9E8;
+   constexpr uintptr_t hud_view_groups              = 0x01E58878;
+   constexpr uintptr_t hud_interface_frustum        = 0x0093F980;
+   constexpr uintptr_t renderer_screen_aspect       = 0x006B2910;
+   constexpr uintptr_t hud_bitmap_rect_aspect_call  = 0x0054E488;
+   constexpr uintptr_t hud_map_aspect_call_1        = 0x00552F0C;
+   constexpr uintptr_t hud_map_aspect_call_2        = 0x00552F68;
+   constexpr uintptr_t hud_map_aspect_call_3        = 0x00552F86;
+   constexpr uintptr_t hud_map_aspect_call_4        = 0x00552FDE;
+   constexpr uintptr_t hud_file_info_vtable         = 0x007A4064;
+   constexpr uintptr_t hud_viewport_width           = 0x01E580E4;
+   constexpr uintptr_t hud_target_vtable            = 0x007A2658;
+   constexpr uintptr_t hud_target_update            = 0x0055B0B0;   // its +0x2C
+   constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054CF9C;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test

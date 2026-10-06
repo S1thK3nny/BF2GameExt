@@ -2,7 +2,7 @@
 
 The long form of [HUD.md](../user/HUD.md). The user doc covers what GameExt adds and
 [HUD_PROPERTIES.md](../user/HUD_PROPERTIES.md) lists it on one page; this file keeps
-the detail behind it, every parameter and edge case, in four parts:
+the detail behind it, every parameter and edge case, in five parts:
 
 - **How events are wired**: file structure, names, load order and which element
   property takes which type of event.
@@ -10,6 +10,8 @@ the detail behind it, every parameter and edge case, in four parts:
   states, floating target bar positions, a horizon-levelled reticule angle and the
   command post strip.
 - **Bar fill direction**: `FillFrom` on a `BarBitmap`.
+- **TrueWidescreen files**: `TrueWidescreen(1)` in a `FileInfo`, a whole file laid out
+  at 4:3 and drawn without the stock wide-screen stretch.
 - **Transforms**: `TransformNumberMath`, `TransformNumberLerp`,
   `TransformNumberCompare` and the four native transforms they sit beside, with
   math recipes and an input event catalogue.
@@ -31,6 +33,7 @@ supplied by GameExt.
   - [Reticule horizon levelling](#reticule-horizon-levelling)
   - [Command post strip](#command-post-strip)
 - [Bar fill direction](#bar-fill-direction)
+- [TrueWidescreen files](#truewidescreen-files)
 - [Transforms](#transforms)
   - [Choose a transform](#choose-a-transform)
   - [TransformNumberMath](#transformnumbermath)
@@ -670,6 +673,69 @@ BarBitmap("player1cpstrip_slot1_fill")
 - `ScaleTexture(0)` squeezes the whole texture into the moving bar, as on a stock bar.
 - A vertical bar has no flash: `FlashyScale` and the fade times do nothing on it.
 - `Rotation` still applies on top, like any bar.
+
+## TrueWidescreen files
+
+`TrueWidescreen(1)` in a file's `FileInfo` takes that file out of the stock wide-screen
+handling. Any number other than 0 turns it on, and `true` and `false` work too; a quoted
+value or an empty line is logged once under `[TrueWidescreen]` in `BF2GameExt.log` and the
+file keeps the stock layout. It applies on a screen the game treats as wide (height
+below 3/4 of the width) with one viewport, both read as the file loads; otherwise the
+file draws the stock way.
+
+### What the stock game does at 16:9
+
+| | Stock | TrueWidescreen |
+|---|---|---|
+| `"Viewport"`/`"Screen"` x and widths | fractions of the real width | fractions of W43 = 4/3 × the height (960 at 720p) |
+| `"Pixels"` | screen pixels | pixels of the 4:3 layout |
+| Heights | in a band of 8/9 the height, 40 pixels short at top and bottom at 720p | the full height |
+| Bitmaps | 32/27 as tall as wide for a square `BitmapRect` | as written |
+| Minimap and segmented-bar rings | stretched to make up for the width | as written |
+| Text | 8/9 as tall | as written |
+
+### Where each piece goes
+
+An element at the top of the file is a piece. After the file loads, each piece is kept
+to the edge nearest where its position puts it in the 4:3 layout: left of W43/3 it stays
+where the layout puts it, right of 2/3 × W43 it moves right by the width beyond the
+layout (320 pixels at 1280×720), and between them by half that. An element inside a
+piece moves with it.
+
+A top-level element whose position is exactly (0, 0), written so or left out, is a
+plain container rather than a piece: each element directly inside it is placed as a
+piece instead. A `Target` element is never moved: `ElementTarget` places its markers
+over their targets on the real screen.
+
+Positions sent later through `EventPosition` are read in the layout too, so a
+`TransformNumberVector3` output means the same on every screen. Four kinds of position
+follow the world instead, and arrive as fractions of the real screen; for a piece in a
+TrueWidescreen file each is turned into the layout fraction that lands on the real point,
+whatever edge the piece keeps to:
+
+- `player1.weapon1.reticule.position`, `player1.weapon2.reticule.position`, with
+  `[Fixes] ReticleCorrection` taken back off their y
+- `player1.weapon1.lockOnPosition`, `player1.weapon2.lockOnPosition`
+- `player1.weapon1.target.position`, `player1.weapon2.target.position`
+- `player1.commandPost1.position` to `player1.commandPost16.position`
+
+Each opted-in file logs one line to the game's log as it loads on a wide screen, for
+example
+`[TrueWidescreen] a .hud file laid out for 1280x720 as on 960x720: 17 pieces kept to the
+left, 5 centred, 0 to the right (1 plain containers, 0 Target elements)`.
+
+### Limits
+
+- A piece always keeps to its nearest edge; it cannot pick another.
+- 512 pieces across all opted-in files; more are logged once and keep the stock layout.
+- Other files are not affected, so a TrueWidescreen file and a stock one can be loaded
+  together, but their elements line up differently on a wide screen.
+- The modtools HUD editor saves a TrueWidescreen file in its 4:3 numbers and keeps the
+  line. GameExt keeps the editor off on Steam and GOG.
+- A game without BF2GameExt logs `Error reading parameter` for the line and draws the
+  file the stock way, which looks off: its numbers are for the 4:3 layout.
+
+[HUD.md](../user/HUD.md#writing-the-numbers) has the conversion from stock 16:9 numbers.
 
 ## Transforms
 
@@ -1535,6 +1601,26 @@ x87 stack balanced; `tests/hud_world_markers_tests.cpp` and
 `tests/target_bar_geometry_tests.cpp` cover the unrounded marker and target bar
 positions. `tests/hud_sub_pixel_abi_tests.py "path\to\GameData"` checks the draw, both
 `floor` sites, the 0.5 each adds and the draw's callers on all three executables,
+read-only.
+
+### TrueWidescreen checks
+
+Look for `[TrueWidescreen] installed` in `BF2GameExt.log`. At a 16:9 resolution, load a
+map with a `TrueWidescreen(1)` file: the game's log should show one
+`[TrueWidescreen] a .hud file laid out ...` line for it, with its counts of pieces per
+edge. A square `BitmapRect` should look square, pieces should sit against the edges
+they were written near, and the stock files, if any are loaded beside it, should look
+as before. Aim at things with the reticule, lock on, and bring up the floating target
+bar and command post markers: each should sit on its point, at the screen's edges too.
+Load a map at a 4:3 resolution: the file should draw the stock way, as written. On
+modtools, move a
+piece in the HUD editor and save: the file should keep `TrueWidescreen(1)` and come
+back in the same place. `tests/hud_true_widescreen_tests.cpp` covers the layout, edges,
+slides and world-following positions on five screen shapes, the parent matrix through
+the interface camera, and the stock mapping it replaces.
+`tests/hud_true_widescreen_abi_tests.py "path\to\GameData"` checks every guard, the
+addresses the loader moves inside them, the vtable slots, the contracts of the
+detoured functions and the register each stand-in reads, on all three executables,
 read-only.
 
 ### Math transform checks

@@ -130,6 +130,7 @@ Slots follow each post's `HUDIndex`, lowest first, then posts without one in map
 | Property | Element | Value | Description | Since |
 |----------|---------|-------|-------------|-------|
 | `FillFrom` | `BarBitmap` | `"Left"`, `"Right"`, `"Bottom"` or `"Top"` | Which end of the bar stays put while its value changes. `"Left"` is the stock fill and the default. `"Right"` keeps the right end and grows to the left, `"Bottom"` keeps the bottom edge and grows upward, and `"Top"` keeps the top edge and grows downward. | 1.2.0 |
+| `TrueWidescreen` | `FileInfo` | `1` or `0` | `1` lays the file's elements out as on a 4:3 screen of the real height and draws them one to one, with no stretching, each piece kept to its nearest screen edge, on screens wider than 4:3 with one player. The file's numbers are written for that 4:3 layout. Other files draw as before. `0` is the default. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
 
 The texture is never stretched or flipped: each point of the bar shows the part of the picture the full bar shows there. So two bars can share one picture, such as a health silhouette with the missing part in another colour, and an upright icon fills from the bottom without being rotated.
 
@@ -143,6 +144,18 @@ BarBitmap("player1health_missing")
 ```
 
 "Right" is the bar's own far end, not the screen's right, so a rotated bar turns with it. Any `TexCoords` work, including flipped ones the stock fill gets wrong. `"Right"` keeps the bar flash; the vertical modes have none. Case does not matter, and any other value is logged once under `[BarFillFrom]` and fills from the left.
+
+`TrueWidescreen(1)` goes in the file's `FileInfo`, beside `Viewports`:
+
+```
+FileInfo("mymod_hud")
+{
+    Viewports(1)
+    TrueWidescreen(1)
+}
+```
+
+Any other number counts as `1`, and `true` and `false` work too. A quoted value or an empty line is logged once under `[TrueWidescreen]` and the file keeps the stock layout. A game without BF2GameExt logs "Error reading parameter" for the line and draws the file the stock way.
 
 ## Transforms
 

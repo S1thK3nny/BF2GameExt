@@ -44,6 +44,18 @@ Scripts can check the running version through `GameExt.version`.
   `.onScreen`/`.offScreen`, `.direction` for an edge arrow, and `.distance` in metres.
   Works on multiplayer clients; inert unless a `.hud` binds it.
   See [HUD authoring](docs/user/HUD.md#command-post-strip).
+- **TrueWidescreen HUD files** - A `.hud` file with `TrueWidescreen(1)` in its
+  `FileInfo` is laid out as on a 4:3 screen of the real height and drawn one to one on
+  wider screens, instead of the stock stretch: no squeezed band at the top and bottom,
+  no bitmaps a fifth too tall at 16:9, no flattened text, and the same look on every
+  screen shape. Each top-level piece keeps to its nearest screen edge (by which third of
+  the 4:3 layout it sits in); a top-level group at (0, 0) is a plain container whose
+  children do so instead, and `Target` elements stay put. Reticules, lock-ons, the
+  floating target bar and command post markers land exactly on their points, and
+  `ReticleCorrection` is not applied to those reticules. Only that file changes: stock
+  and other modded files draw as before. No INI setting; split screen and 4:3 screens
+  keep the stock layout. The modtools HUD editor saves such a file in its 4:3 numbers
+  and keeps the line. See [HUD authoring](docs/user/HUD.md#truewidescreen).
 - **Sub-pixel HUD** - `[Features] HudSubPixel`, on by default, draws every HUD and menu
   element at its exact position instead of the nearest whole pixel, so floating
   markers, target bars and anything else that moves glide instead of stepping a pixel

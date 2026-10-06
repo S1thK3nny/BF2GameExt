@@ -571,3 +571,76 @@ BarBitmap("player1health_missing")
 - `"Right"` keeps the bar flash. The vertical modes have none.
 - A game without BF2GameExt logs `Error reading parameter` for the line and fills
   from the left.
+
+## TrueWidescreen
+
+On a screen wider than 4:3 the stock game stretches a HUD to fit it. Positions spread
+across the full width, and the whole HUD is squeezed into a band that leaves a strip
+at the top and bottom: 40 pixels each at 1280×720, so everything is 8/9 of its height.
+At 16:9 a bitmap comes out about a fifth taller than it is wide, so `BitmapRect(128,
+108, ...)` looks square, and text is a ninth flatter. All of it changes with the
+screen's shape, so a layout tuned at 16:9 looks different at 16:10 or 21:9.
+
+A `.hud` file that puts `TrueWidescreen(1)` in its `FileInfo` gets none of that:
+
+```
+FileInfo("mymod_hud")
+{
+    Viewports(1)
+    TrueWidescreen(1)
+}
+```
+
+- **Laid out at 4:3, drawn one to one.** The file is laid out as on a 4:3 screen of
+  the real height, 960×720 at 1280×720, and drawn at full height, one layout pixel to
+  one screen pixel. A square is square and text keeps its shape on every screen.
+- **Kept to the nearest edge.** Each piece at the top of the file keeps its distance
+  from the screen edge nearest to it. Where its position falls across the 4:3 layout
+  decides which: the left third stays at the left, the middle third keeps to the
+  centre and the right third keeps to the right. At 1280×720 the middle third moves
+  160 pixels right and the right third 320.
+- **Plain containers.** A top-level group at (0, 0), or with no position, holds pieces
+  rather than being one. Each of its children is kept to its own nearest edge instead.
+- **Things that follow the world** land exactly on their points: the reticules
+  (`player1.weaponN.reticule.position`), lock-ons (`player1.weaponN.lockOnPosition`),
+  the [floating target bar](#floating-target-bars) and the
+  [command post markers](#markers-in-the-world). `[Fixes] ReticleCorrection` is not
+  applied to these reticules, as they do not need it.
+- **`Target` elements** place their markers over their targets the stock way, which
+  already lands on the real screen, so they are never moved.
+- **Only this file.** Other files, stock or modded, draw exactly as before, even beside
+  this one. There is no INI setting: the file decides.
+- **Only wide screens, one player.** At 4:3 or narrower, or in split screen, the file
+  draws the stock way.
+
+### Writing the numbers
+
+Write a TrueWidescreen file for a 4:3 screen of the real height. `"Viewport"` and
+`"Screen"` positions and sizes are fractions of that 4:3 layout, `"Pixels"` ones are
+pixels of it, and a `BitmapRect` the same size both ways is square. The numbers are
+the same for every screen shape.
+
+To bring over a file tuned for the stock 16:9 look, so that it looks the same at 16:9,
+change its `"Viewport"` and `"Screen"` values like this (`"Pixels"` and `"Frame"` ones
+need working out by hand):
+
+| Line | Where | New value |
+|------|-------|-----------|
+| `Position` x, y | a piece: at the top, or in a plain container | x × 4/3 − slide, 1/18 + y × 8/9 |
+| `Position` x, y | anything inside a piece | x × 4/3, y × 8/9 |
+| `BitmapRect` width, height | any bitmap | width × 4/3, height × 32/27 |
+| `Rect` width, height | any group frame | width × 4/3, height × 8/9 |
+
+The slide is 0 for a piece in the left third of the old screen (x below 1/3), 1/6 for
+one in the middle third and 1/3 for one in the right third. Check that the new x lands
+in the same third of the new layout, or the piece keeps to a different edge than it
+did. Leave `TextScale` alone: text comes out a little taller, unsquashed. A group
+driven by one of the world-following events above keeps its own `Position`, since the
+event replaces it; convert what is inside it.
+
+The modtools HUD editor saves a TrueWidescreen file in its new numbers and keeps the
+`TrueWidescreen(1)` line, so a file only needs converting once.
+
+- A game without BF2GameExt logs `Error reading parameter` for the line and draws the
+  file the stock way, with its new numbers.
+- A piece cannot yet pick its edge by hand. It is always kept to the nearest one.

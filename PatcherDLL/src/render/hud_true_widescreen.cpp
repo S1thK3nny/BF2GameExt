@@ -64,37 +64,54 @@
 // TextBox, so it is lent the 4:3 width while they run on an opted-in element.
 //
 //                                     modtools    Steam       GOG
-//   FileInfo::ReadData                0x006B7F50
-//   HUD::Manager::Load                0x006B8480
-//   GetContainerViewWidth             0x006926B0
-//   relative-to-pixels conversion     0x00691120
-//   EventPosition handler             0x0069A350
-//   RedInterfaceElement draw          0x00816FA0
-//   HUD::Element::sList terminator    0x00AD7EE0
-//   gHudViewPorts cell                0x00BA4478
-//   interface frustum width t         0x00E5B504
-//   GetScreenAspectRatio              0x008059A0
-//   aspect call, bitmap rect setup    0x006988F9 (element in ESI)
-//   aspect calls, ElementMap          0x0069BA00, 0x0069BA4E, 0x0069BA66,
-//                                     0x0069BAA3 (element in EBX)
-//   FileInfo WriteData                0x006B8090
-//   FileInfo vtable                   0x00A60398
+//   FileInfo::ReadData                0x006B7F50  0x00564DB0  0x00565B30
+//   HUD::Manager::Load                0x006B8480  0x00565950  0x005666D0
+//   its read of a top-level item      0x006B8730  0x00565B5C  0x005668DC
+//   GetContainerViewWidth             0x006926B0  0x005490B0  0x00549E00
+//   relative-to-pixels conversion     0x00691120  0x00547010  0x00547D60
+//   EventPosition handler             0x0069A350  0x0054F110  0x0054FE60
+//   RedInterfaceElement draw          0x00816FA0  0x006C0DE0  0x006C1E70
+//   HUD::Element::sList terminator    0x00AD7EE0  0x007EBA18  0x007EC9E8
+//   gHudViewPorts cell                0x00BA4478  0x01E573C8  0x01E58878
+//   interface frustum width t         0x00E5B504  0x0093E4E0  0x0093F980
+//   GetScreenAspectRatio              0x008059A0  0x006B1890  0x006B2910
+//   aspect call, bitmap rect setup    0x006988F9  0x0054D738  0x0054E488
+//   aspect calls, ElementMap          0x0069BA00  0x005521AC  0x00552F0C
+//                                     0x0069BA4E  0x00552208  0x00552F68
+//                                     0x0069BA66  0x00552226  0x00552F86
+//                                     0x0069BAA3  0x0055227E  0x00552FDE
+//   aspect call, segmented bar        0x00696B97  0x0054C24C  0x0054CF9C
+//   FileInfo vtable                   0x00A60398  0x007A329C  0x007A4064
+//   HUD::Element::sViewportWidth      0x00BA38FC  0x01E56C34  0x01E580E4
+//   ElementTarget vtable              0x00A5E000  0x007A17FC  0x007A2658
+//   FileInfo WriteData                0x006B8090  (the editor's: modtools only)
 //   indent writer / format writer     0x006B5A20 / 0x006B5A50
 //   pixels-to-relative conversion     0x00691170
 //   gConfigFiles / count              0x00BA4070 / 0x00BA4480
-//   HUD::Element::sViewportWidth      0x00BA38FC
 //   ElementText Set/GetProperty       0x006AAE10 / 0x006A95C0
 //   ElementText WriteData             0x006A9A90
-//   ElementTarget vtable              0x00A5E000
-//   aspect call, segmented bar        0x00696B97 (element + 0x200 in EBX)
 //
-// Element layout (modtools): +0xB0 the RedInterfaceElement it draws with, +0xB4
-// its sList node (next at +0), +0x158 its RelativeMode. RedInterfaceElement:
-// local matrix at +0x30, the parent's child list at +0x1C (null when it has no
-// parent), which RedGroupElement keeps at +0x70; the pieces are found in that
-// tree, the one the draw walks, since HUD::Element's group (+0xF4) is only set
-// for some. An Event is { EventClass*, payload* }; an EventClass starts with
-// its name's PblHash and its type (9 = Vector3).
+// At the aspect calls the element is in ESI (bitmap rect setup, and
+// ElementMap on retail), in EBX (ElementMap on modtools), or 0x200 below the
+// ElementBar base in EBX (modtools) or EDI (retail) for the segmented bar.
+//
+// Retail is LTCG-built, and four of these have their own contracts there:
+// Manager::Load takes its PblConfig in ECX; GetContainerViewWidth returns in
+// XMM0 and keeps every register but EAX and ECX; the relative-to-pixels
+// conversion takes the mode in ECX, value, frame and view in XMM1-3 and the
+// screen width on the stack, returns in XMM0 and changes only XMM0 and XMM1;
+// and Load reads a top-level item with MOV ECX,ESI / CALL [EAX+8]. LTCG
+// callers keep values in registers a callee leaves alone, XMM ones too, so
+// the retail stand-ins give back every register but the result. The editor's
+// pieces are modtools only: GameExt keeps the editor off on retail.
+//
+// Element layout, the same on every build: +0xB0 the RedInterfaceElement it
+// draws with, +0xB4 its sList node (next at +0), +0x158 its RelativeMode.
+// RedInterfaceElement: local matrix at +0x30, the parent's child list at +0x1C
+// (null when it has no parent), which RedGroupElement keeps at +0x70; the
+// pieces are found in that tree, the one the draw walks, since HUD::Element's
+// group (+0xF4) is only set for some. An Event is { EventClass*, payload* };
+// an EventClass starts with its name's PblHash and its type (9 = Vector3).
 // =============================================================================
 
 namespace {
@@ -134,6 +151,7 @@ using ToPixelsFn  = float(__cdecl*)(int mode, float value, float frame, float vi
 using PositionFn  = void(__cdecl*)(const uint32_t* event, uint8_t* element);
 using DrawFn      = void(__fastcall*)(uint8_t* element, void* edx, const float* parent, uint32_t color);
 using AspectFn    = float(__cdecl*)();
+using LoadRetailFn = void(__fastcall*)(void* config);   // retail: the PblConfig in ECX
 
 ReadDataFn  s_readData  = nullptr;
 WriteDataFn s_writeData = nullptr;
@@ -149,6 +167,9 @@ TextCallFn  s_textWrite = nullptr;
 PositionFn  s_position  = nullptr;
 DrawFn      s_draw      = nullptr;
 AspectFn    s_aspect    = nullptr;
+LoadRetailFn s_loadRetail = nullptr;
+void*       s_viewWidthRetail = nullptr;   // reached only by JMP from its stand-in
+void*       s_toPixelsRetail  = nullptr;   // reached by JMP or CALL from its stand-in
 
 const int*            s_screen     = nullptr;   // s_screenFull: width, height
 const uintptr_t*      s_listEnd    = nullptr;   // HUD::Element::sList terminator
@@ -357,6 +378,20 @@ __declspec(naked) void read_top_item()
    }
 }
 
+// Retail: MOV ECX,ESI / CALL [EAX+8], the item in ESI and its vtable in EAX.
+__declspec(naked) void read_top_item_retail()
+{
+   __asm {
+      pushad
+      push esi
+      call note_top_item
+      add esp, 4
+      popad
+      mov ecx, esi
+      jmp dword ptr [eax + 8]
+   }
+}
+
 uintptr_t next_node(uintptr_t node)
 {
    return *reinterpret_cast<const uintptr_t*>(node);
@@ -545,7 +580,7 @@ bool __fastcall hooked_ReadData(void* self, void* edx, void* config, const Data*
                s_warnedFlag = true;
             }
          }
-         if (on) remember_file(self);
+         if (on && s_configFiles) remember_file(self);   // for the editor's writer: modtools
       } __except (EXCEPTION_EXECUTE_HANDLER) {
          on = false;
       }
@@ -574,22 +609,51 @@ void __fastcall hooked_WriteData(void* self, void* edx, void* file, int indent)
    s_format(file, "TrueWidescreen(1)\n");
 }
 
-void __cdecl hooked_Load(void* config)
+// Around each HUD::Manager::Load: which elements the file makes and, if it
+// opted in on a wide screen, where its pieces go.
+struct Loading {
+   float     width;
+   float     height;
+   bool      isWide;
+   uintptr_t tail;
+};
+
+Loading begin_load()
 {
-   float width = 0.0f, height = 0.0f;
-   const bool isWide = wide(width, height);
+   Loading l = {};
+   l.isWide = wide(l.width, l.height);
    if (s_placedCount) prune();
-   const uintptr_t tail = s_listEnd[1];   // the last node, or the terminator itself when empty
+   l.tail = s_listEnd[1];   // the last node, or the terminator itself when empty
    s_topItemCount = 0;
    s_loading = true;
-   s_loadingWide = isWide;
+   s_loadingWide = l.isWide;
    s_fileOptedIn = false;
-   s_load(config);
+   return l;
+}
+
+void end_load(const Loading& l)
+{
    return_viewport_width();
-   const bool optedIn = s_fileOptedIn && isWide;
+   const bool optedIn = s_fileOptedIn && l.isWide;
    s_loading = false;
    s_fileOptedIn = false;
-   if (optedIn) place(tail, width, height);
+   if (optedIn) place(l.tail, l.width, l.height);
+}
+
+void __cdecl hooked_Load(void* config)
+{
+   const Loading l = begin_load();
+   s_load(config);
+   end_load(l);
+}
+
+// Retail: the PblConfig in ECX, plain RET. Its one caller reloads every
+// register it uses after the call.
+void __fastcall hooked_LoadRetail(void* config)
+{
+   const Loading l = begin_load();
+   s_loadRetail(config);
+   end_load(l);
 }
 
 // GetContainerViewWidth and the two conversions are small helpers that leave
@@ -682,6 +746,112 @@ __declspec(naked) void hooked_ToRelative()
       pop edx
       pop ecx
       ret
+   }
+}
+
+// Retail GetContainerViewWidth: the element in ECX, the width in XMM0; the
+// original changes only EAX, ECX and XMM0, and its LTCG callers may keep
+// values in any other register across it (Element::WriteData keeps one in
+// EDX, Steam 0x005498BA). An opted-in element gets the 4:3 width; any other
+// goes on into the original as called.
+bool __cdecl retail_view_width(const uint8_t* element, float* out)
+{
+   float width, height;
+   if (!laid_out_wide(element) || !screen_size(width, height)) return false;
+   *out = layout_width(height);
+   return true;
+}
+
+__declspec(naked) void hooked_ViewWidthRetail()
+{
+   __asm {
+      pushad
+      sub    esp, 0x84                  // the width at [esp], then XMM0-7
+      movups [esp + 0x04], xmm0
+      movups [esp + 0x14], xmm1
+      movups [esp + 0x24], xmm2
+      movups [esp + 0x34], xmm3
+      movups [esp + 0x44], xmm4
+      movups [esp + 0x54], xmm5
+      movups [esp + 0x64], xmm6
+      movups [esp + 0x74], xmm7
+      mov    eax, esp
+      push   eax
+      push   ecx
+      call   retail_view_width
+      add    esp, 8
+      movups xmm1, [esp + 0x14]
+      movups xmm2, [esp + 0x24]
+      movups xmm3, [esp + 0x34]
+      movups xmm4, [esp + 0x44]
+      movups xmm5, [esp + 0x54]
+      movups xmm6, [esp + 0x64]
+      movups xmm7, [esp + 0x74]
+      test   al, al
+      jz     stock
+      movss  xmm0, dword ptr [esp]
+      add    esp, 0x84
+      popad
+      ret
+   stock:
+      movups xmm0, [esp + 0x04]
+      add    esp, 0x84
+      popad
+      jmp    dword ptr [s_viewWidthRetail]   // ECX as the caller set it
+   }
+}
+
+// Retail relative-to-pixels conversion: the mode in ECX, value, frame and
+// view in XMM1-3, the screen width on the stack (the caller pops), the result
+// in XMM0; the original changes only XMM0 and XMM1. A Screen-mode conversion
+// is handed the width screen_for picks, through a copy of the argument; the
+// rest go straight on.
+float __cdecl retail_screen_for(int mode, float view, float screen)
+{
+   return screen_for(mode, view, screen);
+}
+
+static_assert(kModeScreen == 1, "hooked_ToPixelsRetail's compare");
+__declspec(naked) void hooked_ToPixelsRetail()
+{
+   __asm {
+      cmp    ecx, 1
+      jne    stock
+      push   eax                        // becomes the screen width handed on
+      pushad
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      // Above the XMM registers: the 0x20 of PUSHAD, the copy at 0xA0, the
+      // return address at 0xA4 and the caller's screen width at 0xA8.
+      push   dword ptr [esp + 0xA8]
+      sub    esp, 4
+      movss  dword ptr [esp], xmm3      // view
+      push   ecx                        // mode
+      call   retail_screen_for
+      add    esp, 12
+      fstp   dword ptr [esp + 0xA0]
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      add    esp, 0x80
+      popad
+      call   dword ptr [s_toPixelsRetail]   // ECX and XMM1-3 as the caller set them
+      add    esp, 4
+      ret
+   stock:
+      jmp    dword ptr [s_toPixelsRetail]
    }
 }
 
@@ -828,6 +998,76 @@ __declspec(naked) void aspect_bar_segmented()
    }
 }
 
+// Retail: the same, keeping the XMM registers too. LTCG knows the original
+// changes nothing but ST0, so its callers may keep values in any register
+// across it. The element is in ESI at the bitmap rect setup's call and
+// ElementMap's; ElementBarSegmented::SetValue holds its ElementBar base in
+// EDI.
+__declspec(naked) void aspect_esi_retail()
+{
+   __asm {
+      pushfd
+      pushad
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      push   esi
+      call   aspect_for
+      add    esp, 4
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      add    esp, 0x80
+      popad
+      popfd
+      ret
+   }
+}
+
+__declspec(naked) void aspect_bar_segmented_retail()
+{
+   __asm {
+      pushfd
+      pushad
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      lea    eax, [edi - 0x200]
+      push   eax
+      call   aspect_for
+      add    esp, 4
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      add    esp, 0x80
+      popad
+      popfd
+      ret
+   }
+}
+
 // ---- install ---------------------------------------------------------------------
 
 bool code_is(uintptr_t base, uintptr_t va, const char* what, const char* bytes, size_t length)
@@ -840,22 +1080,62 @@ bool code_is(uintptr_t base, uintptr_t va, const char* what, const char* bytes, 
    return false;
 }
 
-// The element draw is shared: another detour on it (the HUD diagnostic) has
-// replaced its first three instructions, six bytes, with a JMP rel32 and
-// INT3s, and Detours chains onto that. The rest of the prologue still has to
-// match.
-constexpr size_t kDrawStolen = 6;
+// An absolute address in retail code: the loader has moved it with the exe,
+// so it is checked against the build-time address it names, moved the same.
+struct Moved {
+   size_t    at;   // its offset in the compared bytes
+   uintptr_t va;   // the build-time address it names; 0 for none
+};
 
-bool draw_is(uintptr_t base, uintptr_t va, const char* bytes, size_t length)
+// Retail code as the loader left it: `bytes` wherever `mask` has 'x' ('?'
+// marks a CALL's relative target, or an address that is not checked), and
+// each moved operand naming its address.
+bool retail_code_is(uintptr_t base, uintptr_t va, const char* what, const char* bytes, const char* mask,
+                    Moved first = {}, Moved second = {})
 {
+   bool same = true;
    __try {
       const uint8_t* code = static_cast<const uint8_t*>(resolve(base, va));
-      if (memcmp(code, bytes, length) == 0) return true;
-      if (code[0] == 0xE9 && memcmp(code + kDrawStolen, bytes + kDrawStolen, length - kDrawStolen) == 0) return true;
+      for (size_t i = 0; mask[i]; ++i)
+         if (mask[i] == 'x' && code[i] != static_cast<uint8_t>(bytes[i])) same = false;
+      const Moved moved[] = { first, second };
+      for (const Moved& m : moved) {
+         if (!m.va) continue;
+         const uint32_t want = (uint32_t)(uintptr_t)resolve(base, m.va);
+         uint32_t have;
+         memcpy(&have, code + m.at, sizeof(have));
+         if (have != want) same = false;
+      }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      same = false;
    }
-   install_log("[TrueWidescreen] NOT installed: unexpected code at RedInterfaceElement draw 0x%08X", (unsigned)va);
-   return false;
+   if (!same) install_log("[TrueWidescreen] NOT installed: unexpected code at %s 0x%08X", what, (unsigned)va);
+   return same;
+}
+
+// The element draw is shared: another detour on it (the HUD diagnostic) has
+// replaced its first three instructions, six bytes on every build, with a
+// JMP rel32 and INT3s, and Detours chains onto that. The rest of the prologue
+// still has to match. `mask` as for retail_code_is.
+constexpr size_t kDrawStolen = 6;
+
+bool draw_is(uintptr_t base, uintptr_t va, const char* bytes, const char* mask)
+{
+   bool same = false;
+   __try {
+      const uint8_t* code = static_cast<const uint8_t*>(resolve(base, va));
+      for (size_t from = 0; !same && from <= kDrawStolen; from += kDrawStolen) {
+         if (from && code[0] != 0xE9) break;
+         same = true;
+         for (size_t i = from; mask[i]; ++i)
+            if (mask[i] == 'x' && code[i] != static_cast<uint8_t>(bytes[i])) same = false;
+      }
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      same = false;
+   }
+   if (!same)
+      install_log("[TrueWidescreen] NOT installed: unexpected code at RedInterfaceElement draw 0x%08X", (unsigned)va);
+   return same;
 }
 
 // A CALL rel32 to GetScreenAspectRatio.
@@ -873,8 +1153,9 @@ bool aspect_call(uintptr_t base, uintptr_t site)
    return false;
 }
 
-// A vtable slot holding a function, directly or through an incremental-link
-// JMP rel32 (modtools).
+// A vtable slot holding a function, directly (retail) or through an
+// incremental-link JMP rel32 (modtools). Both are read as the loader left
+// them, so both sides are moved addresses.
 bool vtable_slot(uintptr_t base, uintptr_t vtable, uint32_t slot, uintptr_t function, const char* what)
 {
    __try {
@@ -887,7 +1168,7 @@ bool vtable_slot(uintptr_t base, uintptr_t vtable, uint32_t slot, uintptr_t func
       if (at == static_cast<const uint8_t*>(resolve(base, function))) return true;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
-   install_log("[TrueWidescreen] NOT installed: %s is not where the FileInfo vtable says", what);
+   install_log("[TrueWidescreen] NOT installed: %s is not where its vtable says", what);
    return false;
 }
 
@@ -916,47 +1197,93 @@ void name_hashes()
    }
 }
 
+// Every piece as modtools has it, the editor's included.
+bool modtools_code_matches(uintptr_t base)
+{
+   const auto& a = *g_addr;
+   return code_is(base, a.hud_file_info_read_data, "FileInfo::ReadData", "\x53\x55\x8B\x6C\x24\x10\x8B\x45\x00\x3D\xEC\x7E\xE3\x70", 14) &&
+          code_is(base, a.hud_manager_load, "HUD::Manager::Load", "\x8B\x44\x24\x04\x81\xEC\x98\x02\x00\x00\x53\x55\x56\x57", 14) &&
+          code_is(base, a.hud_container_view_width, "GetContainerViewWidth", "\x51\xE8\x14\xE7\xD7\xFF\x84\xC0\x74\x08\xD9\x05\xFC\x38\xBA\x00", 16) &&
+          code_is(base, a.hud_relative_to_pixels, "the relative-to-pixels conversion", "\x8B\x44\x24\x04\x83\xF8\x03\x77\x22\xFF\x24\x85\x50\x11\x69\x00", 16) &&
+          code_is(base, a.hud_event_position, "the EventPosition handler", "\x83\xEC\x10\x56\x8B\x74\x24\x18\x8B\xCE", 10) &&
+          draw_is(base, a.hud_element_draw, "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\x94\x00\x00\x00\x53\x8B\xD9", "xxxxxxxxxxxxxxx") &&
+          code_is(base, a.renderer_screen_aspect, "GetScreenAspectRatio", "\xD9\x05\x18\x2E\xD6\x00\xC3", 7) &&
+          code_is(base, a.hud_file_info_write_data, "FileInfo::WriteData", "\x53\x55\x56\x8B\xF1\x8B\x46\x30\x85\xC0\x57\x8B\x7C\x24\x14", 15) &&
+          code_is(base, a.hud_pixels_to_relative, "the pixels-to-relative conversion", "\x8B\x44\x24\x04\x83\xF8\x03\x77\x62\xFF\x24\x85\xE0\x11\x69\x00", 16) &&
+          code_is(base, a.hud_write_indent, "the .hud indent writer", "\x56\x8B\x74\x24\x08\x85\xF6\x57\x8B\xF9", 10) &&
+          code_is(base, a.hud_write_format, "the .hud format writer", "\x8B\x4C\x24\x08\x81\xEC\x00\x04\x00\x00", 10) &&
+          code_is(base, a.hud_text_set_property, "ElementText::SetProperty", "\x8B\x44\x24\x04\x83\xEC\x08\x3D\x5A\xFA\xF9\x75\x56\x57\x8B\xF1", 16) &&
+          code_is(base, a.hud_text_get_property, "ElementText::GetProperty", "\x51\x8B\x44\x24\x08\x3D\x5A\xFA\xF9\x75", 10) &&
+          code_is(base, a.hud_text_write_data, "ElementText::WriteData", "\x83\xEC\x14\x53\x55\x56\x57\x8B\xF1\x8D\x44\x24\x18\x50", 14) &&
+          vtable_slot(base, a.hud_file_info_vtable, 0x28, a.hud_file_info_write_data, "FileInfo WriteData") &&
+          code_is(base, a.hud_manager_load_read_call, "Manager::Load's read of a top-level item",
+                  "\x8B\xCF\xFF\x52\x08\x81\xFD\x97\xC7\xE0\xD4", 11);
+}
+
+// The runtime pieces as Steam and GOG have them, the same bytes on both but
+// for the addresses the loader moves. Load's guard runs to its first use of
+// gHudViewPorts and reads CameraManager's camera count (+0x1C) on the way;
+// GetContainerViewWidth's names sViewportWidth and the screen's width; the
+// conversion's jump table sits 0x2C into it.
+bool retail_code_matches(uintptr_t base)
+{
+   const auto& a = *g_addr;
+   return retail_code_is(base, a.hud_file_info_read_data, "FileInfo::ReadData",
+                         "\x55\x8B\xEC\x53\x56\x8B\xF1\x8B\x4D\x0C\x57\x8B\x01\x3D\xEC\x7E\xE3\x70",
+                         "xxxxxxxxxxxxxxxxxx") &&
+          retail_code_is(base, a.hud_manager_load, "HUD::Manager::Load",
+                         "\x55\x8B\xEC\x81\xEC\x9C\x02\x00\x00\x53\x56\x57\x51\x8D\x4D\xD0\xE8\x00\x00\x00\x00\xA1"
+                         "\x00\x00\x00\x00\x32\xD2\x8B\x58\x1C\x8B\xCB\xE8\x00\x00\x00\x00\x33\xFF\x85\xDB\x0F\x84"
+                         "\x41\x01\x00\x00\xBE\xA0\x00\x00\x00\xEB\x09\x8D\xA4\x24\x00\x00\x00\x00\x8B\xFF\x8B\x0D"
+                         "\x00\x00\x00\x00\x8D\x0C",
+                         "xxxxxxxxxxxxxxxxx????x????xxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxx????xx",
+                         { 0x16, a.camera_manager_instance }, { 0x42, a.hud_view_groups }) &&
+          retail_code_is(base, a.hud_manager_load_read_call, "Manager::Load's read of a top-level item",
+                         "\x8B\xCE\xFF\x50\x08\x81\xFF\x97\xC7\xE0\xD4", "xxxxxxxxxxx") &&
+          retail_code_is(base, a.hud_container_view_width, "GetContainerViewWidth",
+                         "\xE8\x00\x00\x00\x00\x84\xC0\x74\x09\xF3\x0F\x10\x05\x00\x00\x00\x00\xC3\xA1\x00\x00\x00\x00",
+                         "x????xxxxxxxx????xx????",
+                         { 0x0D, a.hud_viewport_width }, { 0x13, a.hud_screen_width }) &&
+          retail_code_is(base, a.hud_relative_to_pixels, "the relative-to-pixels conversion",
+                         "\x55\x8B\xEC\x83\xF9\x03\x77\x1E\xFF\x24\x8D\x00\x00\x00\x00\xF3\x0F\x59\xCB\x0F\x28\xC1"
+                         "\x5D\xC3\xF3\x0F\x59\x4D\x08\x0F\x28\xC1\x5D\xC3\xF3\x0F\x59\xCA\x0F\x28\xC1\x5D\xC3",
+                         "xxxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                         { 0x0B, a.hud_relative_to_pixels + 0x2C }) &&
+          retail_code_is(base, a.hud_event_position, "the EventPosition handler",
+                         "\x55\x8B\xEC\x8B\x55\x08\x83\xEC\x10\x8B\xCA\xE8\x00\x00\x00\x00\x8B\xC8\xE8\x00\x00\x00\x00"
+                         "\x83\xF8\x09",
+                         "xxxxxxxxxxxx????xxx????xxx") &&
+          draw_is(base, a.hud_element_draw,
+                  "\x53\x8B\xDC\x83\xEC\x08\x83\xE4\xF0\x83\xC4\x04\x55\x8B\x6B\x04\x89\x6C\x24\x04\x8B\xEC\x83\xEC"
+                  "\x58\xA1\x00\x00\x00\x00\x33\xC5\x89\x45\xFC\x8B\x43\x08\x56\x57\x8B\xF9",
+                  "xxxxxxxxxxxxxxxxxxxxxxxxxx????xxxxxxxxxxxx") &&
+          retail_code_is(base, a.renderer_screen_aspect, "GetScreenAspectRatio", "\xD9\x05\x00\x00\x00\x00\xC3",
+                         "xx????x");
+}
+
 } // namespace
 
 void hud_true_widescreen_install(uintptr_t base)
 {
-   if (g_build != GameBuild::Modtools) {
-      if (g_build == GameBuild::Steam || g_build == GameBuild::GOG)
-         install_log("[TrueWidescreen] not on this build yet: TrueWidescreen files keep the stock layout");
-      return;
-   }
+   const bool modtools = g_build == GameBuild::Modtools;
+   if (!modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
    const auto& a = *g_addr;
    if (!a.hud_file_info_read_data || !a.hud_manager_load || !a.hud_container_view_width ||
        !a.hud_relative_to_pixels || !a.hud_event_position || !a.hud_element_draw || !a.hud_element_list ||
        !a.hud_view_groups || !a.hud_interface_frustum || !a.renderer_screen_aspect || !a.hud_screen_width ||
        !a.camera_manager_instance || !a.hud_bitmap_rect_aspect_call || !a.hud_map_aspect_call_1 ||
        !a.hud_map_aspect_call_2 || !a.hud_map_aspect_call_3 || !a.hud_map_aspect_call_4 ||
-       !a.hud_file_info_write_data || !a.hud_file_info_vtable || !a.hud_write_indent || !a.hud_write_format ||
-       !a.hud_pixels_to_relative || !a.hud_config_files || !a.hud_config_file_count || !a.hud_viewport_width ||
-       !a.hud_text_set_property || !a.hud_text_get_property || !a.hud_text_write_data || !a.hud_target_vtable ||
-       !a.hud_target_update || !a.hud_bar_segmented_aspect_call || !a.hud_manager_load_read_call) {
+       !a.hud_file_info_vtable || !a.hud_viewport_width || !a.hud_target_vtable || !a.hud_target_update ||
+       !a.hud_bar_segmented_aspect_call || !a.hud_manager_load_read_call ||
+       (modtools && (!a.hud_file_info_write_data || !a.hud_write_indent || !a.hud_write_format ||
+                     !a.hud_pixels_to_relative || !a.hud_config_files || !a.hud_config_file_count ||
+                     !a.hud_text_set_property || !a.hud_text_get_property || !a.hud_text_write_data))) {
       install_log("[TrueWidescreen] NOT installed: no address set for this build");
       return;
    }
-   if (!code_is(base, a.hud_file_info_read_data, "FileInfo::ReadData", "\x53\x55\x8B\x6C\x24\x10\x8B\x45\x00\x3D\xEC\x7E\xE3\x70", 14) ||
-       !code_is(base, a.hud_manager_load, "HUD::Manager::Load", "\x8B\x44\x24\x04\x81\xEC\x98\x02\x00\x00\x53\x55\x56\x57", 14) ||
-       !code_is(base, a.hud_container_view_width, "GetContainerViewWidth", "\x51\xE8\x14\xE7\xD7\xFF\x84\xC0\x74\x08\xD9\x05\xFC\x38\xBA\x00", 16) ||
-       !code_is(base, a.hud_relative_to_pixels, "the relative-to-pixels conversion", "\x8B\x44\x24\x04\x83\xF8\x03\x77\x22\xFF\x24\x85\x50\x11\x69\x00", 16) ||
-       !code_is(base, a.hud_event_position, "the EventPosition handler", "\x83\xEC\x10\x56\x8B\x74\x24\x18\x8B\xCE", 10) ||
-       !draw_is(base, a.hud_element_draw, "\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\x94\x00\x00\x00\x53\x8B\xD9", 15) ||
-       !code_is(base, a.renderer_screen_aspect, "GetScreenAspectRatio", "\xD9\x05\x18\x2E\xD6\x00\xC3", 7) ||
-       !code_is(base, a.hud_file_info_write_data, "FileInfo::WriteData", "\x53\x55\x56\x8B\xF1\x8B\x46\x30\x85\xC0\x57\x8B\x7C\x24\x14", 15) ||
-       !code_is(base, a.hud_pixels_to_relative, "the pixels-to-relative conversion", "\x8B\x44\x24\x04\x83\xF8\x03\x77\x62\xFF\x24\x85\xE0\x11\x69\x00", 16) ||
-       !code_is(base, a.hud_write_indent, "the .hud indent writer", "\x56\x8B\x74\x24\x08\x85\xF6\x57\x8B\xF9", 10) ||
-       !code_is(base, a.hud_write_format, "the .hud format writer", "\x8B\x4C\x24\x08\x81\xEC\x00\x04\x00\x00", 10) ||
-       !code_is(base, a.hud_text_set_property, "ElementText::SetProperty", "\x8B\x44\x24\x04\x83\xEC\x08\x3D\x5A\xFA\xF9\x75\x56\x57\x8B\xF1", 16) ||
-       !code_is(base, a.hud_text_get_property, "ElementText::GetProperty", "\x51\x8B\x44\x24\x08\x3D\x5A\xFA\xF9\x75", 10) ||
-       !code_is(base, a.hud_text_write_data, "ElementText::WriteData", "\x83\xEC\x14\x53\x55\x56\x57\x8B\xF1\x8D\x44\x24\x18\x50", 14) ||
+   if (!(modtools ? modtools_code_matches(base) : retail_code_matches(base)) ||
        !vtable_slot(base, a.hud_file_info_vtable, 0x20, a.hud_file_info_read_data, "FileInfo ReadData") ||
-       !vtable_slot(base, a.hud_file_info_vtable, 0x28, a.hud_file_info_write_data, "FileInfo WriteData") ||
-       !vtable_slot(base, a.hud_target_vtable, 0x2C, a.hud_target_update, "ElementTarget::Update") ||
-       !code_is(base, a.hud_manager_load_read_call, "Manager::Load's read of a top-level item",
-                "\x8B\xCF\xFF\x52\x08\x81\xFD\x97\xC7\xE0\xD4", 11))
+       !vtable_slot(base, a.hud_target_vtable, 0x2C, a.hud_target_update, "ElementTarget::Update"))
       return;
    const uintptr_t aspectSites[] = { a.hud_bitmap_rect_aspect_call, a.hud_map_aspect_call_1, a.hud_map_aspect_call_2,
                                      a.hud_map_aspect_call_3, a.hud_map_aspect_call_4,
@@ -970,39 +1297,51 @@ void hud_true_widescreen_install(uintptr_t base)
    s_frustum    = static_cast<const float*>(resolve(base, a.hud_interface_frustum));
    s_cameras    = static_cast<const uint8_t* const*>(resolve(base, a.camera_manager_instance));
    s_aspect     = reinterpret_cast<AspectFn>(resolve(base, a.renderer_screen_aspect));
-   s_configFiles = static_cast<const void* const*>(resolve(base, a.hud_config_files));
-   s_configCount = static_cast<const int*>(resolve(base, a.hud_config_file_count));
    s_fileInfoVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_file_info_vtable);
    s_targetVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_target_vtable);
    s_viewportWidth = static_cast<float*>(resolve(base, a.hud_viewport_width));
-   s_indent     = reinterpret_cast<IndentFn>(resolve(base, a.hud_write_indent));
-   s_format     = reinterpret_cast<FormatFn>(resolve(base, a.hud_write_format));
    name_hashes();
 
    s_readData  = reinterpret_cast<ReadDataFn>(resolve(base, a.hud_file_info_read_data));
-   s_writeData = reinterpret_cast<WriteDataFn>(resolve(base, a.hud_file_info_write_data));
-   s_toRelative = reinterpret_cast<ToPixelsFn>(resolve(base, a.hud_pixels_to_relative));
-   s_load      = reinterpret_cast<LoadFn>(resolve(base, a.hud_manager_load));
-   s_viewWidth = reinterpret_cast<ViewWidthFn>(resolve(base, a.hud_container_view_width));
-   s_toPixels  = reinterpret_cast<ToPixelsFn>(resolve(base, a.hud_relative_to_pixels));
    s_position  = reinterpret_cast<PositionFn>(resolve(base, a.hud_event_position));
    s_draw      = reinterpret_cast<DrawFn>(resolve(base, a.hud_element_draw));
-   s_textSet   = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_set_property));
-   s_textGet   = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_get_property));
-   s_textWrite = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_write_data));
+   if (modtools) {
+      s_configFiles = static_cast<const void* const*>(resolve(base, a.hud_config_files));
+      s_configCount = static_cast<const int*>(resolve(base, a.hud_config_file_count));
+      s_indent     = reinterpret_cast<IndentFn>(resolve(base, a.hud_write_indent));
+      s_format     = reinterpret_cast<FormatFn>(resolve(base, a.hud_write_format));
+      s_load       = reinterpret_cast<LoadFn>(resolve(base, a.hud_manager_load));
+      s_viewWidth  = reinterpret_cast<ViewWidthFn>(resolve(base, a.hud_container_view_width));
+      s_toPixels   = reinterpret_cast<ToPixelsFn>(resolve(base, a.hud_relative_to_pixels));
+      s_writeData  = reinterpret_cast<WriteDataFn>(resolve(base, a.hud_file_info_write_data));
+      s_toRelative = reinterpret_cast<ToPixelsFn>(resolve(base, a.hud_pixels_to_relative));
+      s_textSet    = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_set_property));
+      s_textGet    = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_get_property));
+      s_textWrite  = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_write_data));
+   } else {
+      s_loadRetail      = reinterpret_cast<LoadRetailFn>(resolve(base, a.hud_manager_load));
+      s_viewWidthRetail = resolve(base, a.hud_container_view_width);
+      s_toPixelsRetail  = resolve(base, a.hud_relative_to_pixels);
+   }
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    LONG r = DetourAttach(&(PVOID&)s_readData, hooked_ReadData);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_load, hooked_Load);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_viewWidth, hooked_ViewWidth);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_toPixels, hooked_ToPixels);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_position, hooked_Position);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_draw, hooked_Draw);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_writeData, hooked_WriteData);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_toRelative, hooked_ToRelative);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textSet, hooked_TextSet);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textGet, hooked_TextGet);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textWrite, hooked_TextWrite);
+   if (modtools) {
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_load, hooked_Load);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_viewWidth, hooked_ViewWidth);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_toPixels, hooked_ToPixels);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_writeData, hooked_WriteData);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_toRelative, hooked_ToRelative);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textSet, hooked_TextSet);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textGet, hooked_TextGet);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textWrite, hooked_TextWrite);
+   } else {
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_loadRetail, hooked_LoadRetail);
+      if (r == NO_ERROR) r = DetourAttach(&s_viewWidthRetail, hooked_ViewWidthRetail);
+      if (r == NO_ERROR) r = DetourAttach(&s_toPixelsRetail, hooked_ToPixelsRetail);
+   }
    if (r != NO_ERROR) {
       DetourTransactionAbort();
       install_log("[TrueWidescreen] NOT installed: DetourAttach failed (%ld)", (long)r);
@@ -1012,15 +1351,26 @@ void hud_true_widescreen_install(uintptr_t base)
       install_log("[TrueWidescreen] NOT installed: the detour transaction failed");
       return;
    }
-   retarget(base, a.hud_bitmap_rect_aspect_call, aspect_esi);
-   retarget(base, a.hud_map_aspect_call_1, aspect_ebx);
-   retarget(base, a.hud_map_aspect_call_2, aspect_ebx);
-   retarget(base, a.hud_map_aspect_call_3, aspect_ebx);
-   retarget(base, a.hud_map_aspect_call_4, aspect_ebx);
-   retarget(base, a.hud_bar_segmented_aspect_call, aspect_bar_segmented);
-   // MOV ECX,EDI / CALL [EDX+8] (5 bytes) becomes CALL read_top_item.
+   if (modtools) {
+      retarget(base, a.hud_bitmap_rect_aspect_call, aspect_esi);
+      retarget(base, a.hud_map_aspect_call_1, aspect_ebx);
+      retarget(base, a.hud_map_aspect_call_2, aspect_ebx);
+      retarget(base, a.hud_map_aspect_call_3, aspect_ebx);
+      retarget(base, a.hud_map_aspect_call_4, aspect_ebx);
+      retarget(base, a.hud_bar_segmented_aspect_call, aspect_bar_segmented);
+   } else {
+      retarget(base, a.hud_bitmap_rect_aspect_call, aspect_esi_retail);
+      retarget(base, a.hud_map_aspect_call_1, aspect_esi_retail);
+      retarget(base, a.hud_map_aspect_call_2, aspect_esi_retail);
+      retarget(base, a.hud_map_aspect_call_3, aspect_esi_retail);
+      retarget(base, a.hud_map_aspect_call_4, aspect_esi_retail);
+      retarget(base, a.hud_bar_segmented_aspect_call, aspect_bar_segmented_retail);
+   }
+   // MOV ECX,EDI / CALL [EDX+8] (modtools) or MOV ECX,ESI / CALL [EAX+8]
+   // (retail), 5 bytes, becomes CALL read_top_item(_retail).
    uint8_t* readCall = static_cast<uint8_t*>(resolve(base, a.hud_manager_load_read_call));
-   const int32_t rel = (int32_t)((uintptr_t)&read_top_item - (uintptr_t)(readCall + 5));
+   void (*const readTop)() = modtools ? read_top_item : read_top_item_retail;
+   const int32_t rel = (int32_t)((uintptr_t)readTop - (uintptr_t)(readCall + 5));
    readCall[0] = 0xE8;
    memcpy(readCall + 1, &rel, sizeof(rel));
    install_log("[TrueWidescreen] installed: .hud files with TrueWidescreen(1) in their FileInfo are laid out "

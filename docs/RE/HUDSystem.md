@@ -55,6 +55,10 @@ are munged but never applied, which is why their `player2.*` / `player3.*` event
 have no counterpart in the engine's event registry (see [Built-in event
 catalogue](#built-in-event-catalogue)).
 
+GameExt adds a fourth `FileInfo` line, `TrueWidescreen(1)`, which changes how a file is
+laid out and drawn on a wide screen, not whether it loads; see
+[Wide screens](#wide-screens-built-2026-10-05-renderhud_true_widescreencpp).
+
 ---
 
 ## Object model
@@ -2026,6 +2030,158 @@ A `SubPixel(1)` property covering one element and everything inside it would nee
   group draws its children inside its own draw. The stand-in would call `floor` while
   the count is zero, and GameExt's position events could stop rounding altogether, as
   the draw rounds an unmarked element anyway.
+
+## Wide screens (built 2026-10-05, `render/hud_true_widescreen.cpp`)
+
+What the stock game does to a HUD on a screen wider than 4:3, and `TrueWidescreen(1)`,
+the per-file opt-out of it. Addresses are modtools (M), Steam (S) and GOG (G). The
+stock mapping was read on modtools and measured in game at 1280×720
+with a temporary diagnostic (2026-10-05); the user's own measurement agreed
+(`BitmapRect` 128 by 108 pixels looked square).
+
+### The stock mapping
+
+A screen is wide once height/width is below 0.75. Then:
+
+| Step | Where | Effect at 16:9 |
+|---|---|---|
+| Positions and sizes are fractions of the real screen | `HUD::Element::SetupViewportDimensions` (M `00692A30`, S `00549DE0`, G `0054AB30`) sets `sViewportWidth`/`Height` from `s_screenFull` | the layout spreads to the edges, a third wider than at 4:3 |
+| The HUD screen groups are drawn through a 640×480 mapping, and each group's local matrix is letterboxed | `RedInterfaceScreen::Render` (M `00817870`, S `006C0F70`, G `006C2000`); the letterbox is set by the loader for each group (M `006B7300`, S `00565060`, G `00565DE0`) | x exact, y = H/18 + 8/9 y: a band from 40 to 680 at 720p |
+| Each bitmap's drawable is scaled (1, 0.75 / aspect) | the bitmap rect setup (`ElementBitmapBase::PostReadSetup`) | 4/3 tall, 32/27 after the band: `BitmapRect` 128×108 is square |
+| The minimap is scaled by 1 + (0.75 / aspect − 1) / 4 | `ElementMap::PostReadSetup` | |
+| A segmented bar's ring is kept round | `ElementBarSegmented::SetValue` scales the ellipse's vertical radius by 0.75 / aspect | |
+| Text gets nothing | | 8/9 flat |
+
+All of it applies per screen group, and every `.hud` file shares the groups, so it
+cannot be turned off for one file at the group. `ReticleCorrection`
+(`render/hud_widescreen.cpp`) moves the stock reticule back onto the aim point
+inside the band.
+
+### `TrueWidescreen(1)`
+
+An opted-in file is laid out as on a 4:3 screen of the real height, W43 = 4H/3, and
+drawn one layout pixel to one screen pixel:
+
+1. **The flag.** `HUD::Manager::ConfigFile` (the `FileInfo` item) `ReadData`, its vtable
+   +20, is detoured for the PblHash of `TrueWidescreen`, `0xCA64BB16`.
+2. **Which elements are the file's.** `HUD::Manager::Load` (one call per file) is
+   detoured: the last node of `HUD::Element::sList` before the load against the list
+   after it gives the elements the file made (the element constructor appends; node at
+   +B4). Load's read of each top-level item (`MOV ECX,item / CALL [vtable+8]`) is
+   replaced by a CALL to a stand-in that notes the item and goes on into its `Read`.
+   While the file loads, `sViewportWidth` holds W43: `ElementMap`'s constructor and
+   `ElementText`'s `TextBox` read it directly.
+3. **The 4:3 width afterwards.** `GetContainerViewWidth` returns W43 for an element of a
+   placed piece, and the relative-to-pixels conversion is handed W43 as the Screen
+   width (mode 1) when the view width is W43, so events that move the file's elements
+   later use the layout too.
+4. **No stretch.** The six `GetScreenAspectRatio` calls in the bitmap rect setup,
+   `ElementMap::PostReadSetup` (four) and `ElementBarSegmented::SetValue` return 0.75 for
+   an opted-in element.
+5. **Placement.** After the load, each top-level item gets a slide: 0, (W − W43)/2 or
+   W − W43 by the third of W43 its x falls in. One at (0, 0) is a plain container: its
+   direct children are placed by the same rule instead. An `ElementTarget` (by vtable) is
+   never slid: `ElementTarget::Update` (its vtable +2C) places its markers from the real
+   width.
+6. **The draw.** A detour on the element draw counts depth under the HUD screen groups
+   (`gHudViewPorts`, five `RedScreenGroupElement`s 0xA0 apart). At depth 1 an opted-in
+   piece is drawn under a parent of its own instead of its group's letterboxed one: one
+   pixel to one pixel on the plane the groups are drawn on, z = 640/t, where the
+   interface camera (frustum width t at distance 1) sees 640 units across, so
+   k = 640/W units per pixel, and slid. At depth 2, under a plain container, a child's
+   parent gets its slide × k added.
+7. **The world.** The `EventPosition` handler (`ElementGroupBase`'s, cdecl(`Event*`,
+   element)) gets, for an opted-in element, a copy of the event whose x is
+   (v·W − slide)/W43, which lands on the real point v·W, for
+   `player1.weaponN.reticule.position`, `.lockOnPosition`, `.target.position` and
+   `player1.commandPostN.position`. A reticule's y has `ReticleCorrection` taken back
+   off (`hud_widescreen_reticle_uncorrect`).
+
+Only with one viewport (`CameraManager::m_iNumCam`, +1C, is 1) and on a wide screen;
+the screen is read as each file loads. A piece is found in the drawable tree, the one
+the draw walks: a drawable's parent is its link at +1C less 0x70 (`RedGroupElement`'s
+child list), checked by the link's item pointing back (node `{ list, next, prev, item }`).
+`HUD::Element`'s own group pointer (+F4) is only set for some, and a top-level drawable
+is only in its screen group while enabled (`HUD::Element::UpdateEnableState`, vtable
++34: M `00692860`, S `00549BF0`).
+
+The modtools HUD editor writes a file back through the same per-element width, so it
+writes the 4:3 numbers. Three gaps are closed on modtools: `ConfigFile::WriteData`
+(vtable +28) is followed by `TrueWidescreen(1)` for a `FileInfo` that read it and is
+still in `gConfigFiles`; the pixels-to-relative conversion gets W43 for Screen mode; and
+`ElementText`'s `SetProperty`, `GetProperty` and `WriteData`, which read
+`sViewportWidth` for `TextBox`, run with it lent. GameExt turns the editor off on Steam
+and GOG (see [The HUD editor](#the-hud-editor)), so those hooks are modtools only.
+
+### Addresses
+
+| | M | S | G |
+|---|---|---|---|
+| `ConfigFile::ReadData` | `006B7F50` | `00564DB0` | `00565B30` |
+| `HUD::Manager::Load` | `006B8480` | `00565950` | `005666D0` |
+| its read of a top-level item | `006B8730` | `00565B5C` | `005668DC` |
+| `GetContainerViewWidth` | `006926B0` | `005490B0` | `00549E00` |
+| relative-to-pixels conversion | `00691120` | `00547010` | `00547D60` |
+| `EventPosition` handler | `0069A350` | `0054F110` | `0054FE60` |
+| element draw | `00816FA0` | `006C0DE0` | `006C1E70` |
+| `HUD::Element::sList` terminator | `00AD7EE0` | `007EBA18` | `007EC9E8` |
+| `gHudViewPorts` cell | `00BA4478` | `01E573C8` | `01E58878` |
+| interface frustum width t | `00E5B504` | `0093E4E0` | `0093F980` |
+| `GetScreenAspectRatio` | `008059A0` | `006B1890` | `006B2910` |
+| aspect call, bitmap rect setup | `006988F9` | `0054D738` | `0054E488` |
+| aspect calls, `ElementMap` | `0069BA00`, `0069BA4E`, `0069BA66`, `0069BAA3` | `005521AC`, `00552208`, `00552226`, `0055227E` | `00552F0C`, `00552F68`, `00552F86`, `00552FDE` |
+| aspect call, segmented bar | `00696B97` | `0054C24C` | `0054CF9C` |
+| `ConfigFile` vtable | `00A60398` | `007A329C` | `007A4064` |
+| `HUD::Element::sViewportWidth` | `00BA38FC` | `01E56C34` | `01E580E4` |
+| `ElementTarget` vtable / `Update` | `00A5E000` / `006A9170` | `007A17FC` / `0055A340` | `007A2658` / `0055B0B0` |
+| `ConfigFile::WriteData`, indent and format writers | `006B8090`, `006B5A20`, `006B5A50` | | |
+| pixels-to-relative conversion | `00691170` | | |
+| `gConfigFiles` / count | `00BA4070` / `00BA4480` | | |
+| `ElementText` `SetProperty` / `GetProperty` / `WriteData` | `006AAE10` / `006A95C0` / `006A9A90` | | |
+
+Retail was found through RTTI, which Steam and GOG keep: `FileInfo` is
+`.?AVConfigFile@Manager@HUD@@`, and `ElementGroupBase`'s constructor (S `0054E3B0`,
+G `0054F100`) registers `EventPosition` with a `PUSH` of its address. The frustum width
+is not beside `s_screenFull` on retail as it is on modtools; it is the third argument
+of the interface camera's `SetFrustum` in `RedInterfaceScreen::Render`. GOG matches
+Steam byte for byte but for moved addresses in every function above.
+
+### Contracts
+
+Modtools and retail differ, LTCG-built retail in four places:
+
+| | M | S, G |
+|---|---|---|
+| `Manager::Load` | cdecl(`PblConfig*`) | the `PblConfig` in ECX, plain RET |
+| its read of an item | item in EDI, vtable in EDX | item in ESI, vtable in EAX |
+| `GetContainerViewWidth` | thiscall → ST0; keeps ECX (PUSH/POP) and EDX | ECX → XMM0; changes only EAX, ECX and XMM0 |
+| relative-to-pixels conversion | cdecl(mode, value, frame, view, screen) → ST0 | mode in ECX, value, frame and view in XMM1-3, screen on the stack (caller pops) → XMM0; changes only XMM0 and XMM1 |
+| aspect calls | element in ESI (bitmap), EBX (map); the bar's `ElementBar` base, element + 0x200, in EBX | element in ESI (bitmap and map); the bar's base in EDI |
+| `ConfigFile::ReadData`, `EventPosition`, the draw | thiscall, RET 8; cdecl; thiscall, RET 8 | the same |
+
+Callers on both kinds of build keep values in registers a small helper leaves alone:
+modtools' `HUD::Matrix::WritePosition` keeps the property name in ECX across two
+pixels-to-relative conversions (M `00691628` to `00691690`), and `ApplyRelativeMode`
+pushes the mode from ECX again after a conversion (M `006913B1`); retail's
+`Element::WriteData` keeps a value in EDX across `GetContainerViewWidth` (S `005498BA`).
+So every stand-in is naked and gives back every register but the result: ECX and EDX
+on modtools, and on retail every general and XMM register. Load, `ReadData`,
+`EventPosition` and the draw are C detours: their callers reload what they use after
+the call.
+
+### Checks
+
+The install compares each function's opening bytes; on retail, through a mask, with
+each address the loader moves inside them (Load's camera manager and `gHudViewPorts`,
+`GetContainerViewWidth`'s `sViewportWidth` and screen width, the conversion's own jump
+table) checked against the address it should name, moved with the exe. It checks the
+`ConfigFile` and `ElementTarget` vtable slots and that each aspect site is a `CALL` to
+`GetScreenAspectRatio`, and installs nothing if anything differs.
+`tests/hud_true_widescreen_abi_tests.py` audits all of it and the contracts above on
+all three builds, including that every moved address inside compared or written bytes
+is one the install handles; `tests/hud_true_widescreen_tests.cpp` tests the placement
+maths on five screen shapes. Played on modtools at 16:9; Steam and GOG are audited, not
+played.
 
 ## Colour gradients (researched 2026-09-30)
 
