@@ -187,6 +187,24 @@
     <ClInclude Include="src\entity\flyer_sound_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_anim_tables_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_jets.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_jets_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -454,6 +472,15 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_sound_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\directional_rolls.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\directional_jets.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">
