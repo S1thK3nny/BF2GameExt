@@ -103,10 +103,6 @@ which may work fine for a regular jetpack, but not if you want to do something a
 like Cad Banes jetpack boots, which would require the effect to be attached to bone_l_foot and bone_r_foot. 
 The fix is to add a new ODF property to the jetpack class that allows you to specify the bone name for the effect origin.
 
-**Jetpack Directional Animations** - The jetpack only has one animation: jetpack_hover. 
-The goal is to add directional animations based on the player's movement direction, similarly to how the flying
-or land animations for units have it.
-
 **Real riot shields** - A shield that actually stops shots by its shape rather than by a
 deflect rule. The engine already has almost everything this needs: a unit's collision can hold
 up to 64 shapes, each shape can block shots without being targetable, damage multipliers already
@@ -116,6 +112,22 @@ read collision properties from their ODF. The deciding question is whether a col
 can follow an animated bone. If not, the shield would be a fixed box in front of the unit, fine
 while holding a block stance and wrong as soon as the arm moves. Settle that first. Details in
 [docs/RE/SoldierCollisionSystem.md](docs/RE/SoldierCollisionSystem.md).
+
+**Backward rolls** - A roll is the crouch press while moving, and `CheckMoveControlForRoll`
+only rolls when the stick points forward or within 30 degrees of straight sideways, so pulling
+back and pressing crouch just crouches. Behind a soldier ODF switch, let a backward stick roll
+too, playing a `divebackward` found and fallen back like `UseDirectionalRolls`' side dives, its
+root aimed a half turn from the move as theirs is aimed a quarter turn. Unlike the side dives
+this changes movement, not only the animation, so it needs checking online. Details in
+[docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md).
+
+**One home for soldier animation features** - Animation modules change the same tables and
+lookups independently: ComboAnimIncrease moves every map's table and the bank and map lists,
+AnimBankAppend widens the banks behind the lookup, and the damage guard, first-person banks, prone,
+directional rolls and others read them. Each new one has to know which of the others are on, and
+the combinations multiply. Move them onto one layer that owns the tables and lookups, growing
+`entity/soldier_anim_tables`, which already reads both the stock layout and ComboAnimIncrease's.
+Details in [docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md).
 
 ## Weapons
 

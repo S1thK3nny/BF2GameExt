@@ -272,7 +272,10 @@ combat — a firefight on the far side of the map is graded purely on how far it
 from the one human, so AI fighting each other think at 0.25 Hz.
 
 Summing the tiers gives roughly 115 decisions/sec of demand against a supply of
-600/sec, which is why the budget never binds.
+600/sec, which is why the budget never binds. That supply assumes single player
+at 60 fps: the budget is per AI tick, and in single player a tick is one rendered
+frame. A multiplayer host ticks at 20 Hz and supplies 200/sec. See "Why more AI
+makes every AI worse" below.
 
 ### Tunables, all verified
 
@@ -387,6 +390,132 @@ All three are cheap to separate with a read-only poll of the controller list -
 print `agent`, `goal` and `command` per controller and look for the units where
 they are null.
 
+---
+
+## Why more AI makes every AI worse
+
+The community claim is that the more AI a map has, the dumber they get. It is
+true, but not because a unit thinks less often: the decision interval comes from
+distance to the player and nothing else (see above). What gets worse is that every
+AI on the map draws from the same few allowances, and those allowances are handed
+out per AI tick. Addresses are modtools; retail is not ported yet.
+
+### The clock: per frame in single player
+
+`ControllerManager::Update` (`0x005997A0`) runs once per simulation turn from the
+host arm of `GameLoop::Update`. What a turn is depends on the mode:
+
+- **Single player.** With `netEnabled` false, `NetGame::SubmitMove` (`0x006E71A0`)
+  adds exactly one turn per call, and it is called once per rendered frame.
+  `NetGame::GetTurnStep` returns the frame delta. **AI ticks once per rendered
+  frame.**
+- **Multiplayer host.** Ticks at `netTurnsPerSecond`, 20 by default.
+
+Demand is measured in mission-time seconds (the LOD intervals), so frame rate does
+not change it. Frame rate only changes supply. This is the loop behind the claim:
+more AI costs frame rate, lower frame rate means fewer AI ticks per second, and the
+same per-second demand is now split across fewer ticks.
+
+| Budget per tick | Value | Uber mode | SP 60 fps | SP 30 fps | MP host 20 Hz |
+|---|---|---|---|---|---|
+| High-level decisions | 10 | 100 | 600/s | 300/s | 200/s |
+| Vision rays | 10, or 20 when no path search is pending | 50 | 600-1200/s | 300-600/s | 200-400/s |
+| Path search | 10 cost units, a second slice when no ray was cast | 100 | | | |
+
+### Vision: one queue for the map, wiped every decision
+
+**Allowance per decision.** `VisionManager::UpdatePotentiallyVisible`
+(`0x005CA3E0`) gathers enemies in combat range (up to 1200), ranks them in a
+150-entry heap, and queues ray requests for the best ones. How many it may queue
+depends on the unit's LOD tier, built as stack immediates at `0x005CA9A0`:
+
+| Tier | WICKED_LOW | LOWER | LOW | NORMAL | HIGH |
+|---|---|---|---|---|---|
+| Rays per decision | 1 | 1 | 2 | 4 | 5 |
+| Uber mode | 0 | 0 | 1 | 2 | 3 |
+
+Uber mode gives the two farthest tiers no rays at all. Requests only queue when
+`AiQueueVisionRayTests` (`0x00ACFF44`) is set, which is the default; with it clear
+every ray is cast immediately with no budget.
+
+**The queue.** One global heap of 200. Each request's priority is its rank within
+the requesting unit's own list (150, 149, ...), so every unit's best candidate has
+the same priority and distance plays no part. When the heap is full, the
+lowest-priority entry is evicted, or the new request is dropped if it is not
+better.
+
+**Service.** The ray pass (`0x005CAC50`) pops requests until it has cast
+`min(budget, average of the last 8 passes + 1)` rays. The budget is
+`IDEAL_MAX_RAYCASTS_PER_UPDATE` (`0x00AD031C`, value 10, one reader) times 2 when the path manager is idle, or 50 in uber mode. The counter
+is **rays cast, not targets seen**: the vision test (`0x005CA000`) returns true
+whenever both the unit and the target are still valid. Stale requests are free.
+
+**The wipe.** `UnitController::UpdateHighLevel` (`0x005A0370`) calls
+`RemoveRequests` (`0x005CA2D0`) and then `UpdatePotentiallyVisible` on every
+decision, with no condition. Whatever that unit had queued and not yet served is
+thrown away, and the replacements land behind every equal-priority request already
+in the heap. A full heap takes about 20 ticks to drain. A HIGH-tier unit
+re-decides every 0.25 s, about 15 frames at 60 fps, so under a backlog the AI
+closest to the player are the ones most likely to have their requests reset
+before they reach the front.
+
+**How close to the limit.** With the 263-unit tier spread measured above, the
+upper bound on ray demand is about 224/s (2 x 20 + 5 x 4 + 123 x 1 + 93 x 1/3 + 40
+x 1/4). That is comfortable at 60 fps and saturated on a multiplayer host or at
+20 fps. It is an upper bound: a unit only queues rays for candidates that pass
+`ShouldRaytestUnit` and its own per-tier retest timer.
+
+### Pathing: one search at a time for the whole map
+
+**One queue, one search.** `PathManager::Update` (`0x005DD1B0`) serves one global
+request list and runs a single A* search at a time.
+`PathManager::GetNextPathRequest` (`0x005DD100`) takes the first request of the
+lowest priority, scanning priorities 0-4.
+
+**The budget.** The tick's float argument (1.0, or 10.0 in uber mode, pushed at
+`0x00599BCD`/`0x00599BD7`) is multiplied by 10.0 into `mCostConstraint`, and
+`IsWithinTimeConstraint` compares it to `PathFinder`'s cost counter. Cost is only
+added inside `Obstacle::IntersectionNewer` after the broad-phase check passes, so
+the unit is one detailed test against an obstacle near the route. Open terrain
+costs nearly nothing; maps dense with props and buildings pay for every search.
+The 10.0 at `0x00A33220` is a pooled literal with 103 readers and must not be
+patched. The QueryPerformanceCounter timer around the loop only accumulates, and
+`sWait`/`sWaitWorst` are zeroed in `Initialize` and never written: there is no
+engine-side measure of path latency.
+
+**Priority.** Short moves (under 50 m) request at priority 0; legs of a long route
+on the connectivity graph request at 1. To either, `RequestPath` (`0x005DD550`)
+adds the number of flagged nodes still ahead on the unit's current path, so a unit
+with plenty of path left waits; once that sum reaches 5 the request is not served
+at all until `PathFollower::GotoNextNode` lowers it as the unit walks.
+
+**Re-requesting loses your place.** `RequestPath` first calls
+`RemovePathRequest` (`0x005DD460`), which cancels the unit's own search if it is
+the one running and frees its queued request, then appends the new one at the
+tail. A new move order therefore throws away any partial work and starts again at
+the back. Move orders come mostly from agent `EnterState` handlers, so a unit
+that changes state often keeps resetting its own path.
+
+**Waiting means standing.** A short-move navigator does nothing while it waits for
+its result. A graph navigator stops at the end of the current leg until the next
+leg's path arrives.
+
+### Smaller limits
+
+- **Six threats per unit.** `UnitThreatManager` holds six slots. A new threat
+  replaces the lowest-priority one, and a replaced threat that comes back starts
+  unseen and needs another ray.
+- **Reservation pool.** 60 entries, raised to 127 by `ReservationPoolSize`
+  (`docs/RE/EngineLimits.md`).
+
+### Checked and not limited by unit count
+
+| System | Why it does not degrade |
+|---|---|
+| `ControllerManager::BroadcastEvent` (damage alerts) | Scans every controller, no cap |
+| `AudibleManager::UpdateAudience` (hearing) | 30 m radius, 1200-entry gather |
+| `ControllerManager::UpdateCrowd` | Counts soldiers within 9 m, linear, no cap |
+| Vision candidate gather | 1200 objects, 150-entry heap, far above real counts |
 
 ---
 

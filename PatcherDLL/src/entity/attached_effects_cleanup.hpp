@@ -18,6 +18,9 @@
 //
 // Fix: release the effects the class owns before the destructor runs, which is
 // what the destructor was always missing.  Always on - no INI toggle.
+//
+// Also switches a building's AttachOdf lights off when it is destroyed and back
+// on when it respawns, which EntityBuilding::Kill / Respawn never did.
 
 void attached_effects_cleanup_install(uintptr_t exe_base);
 void attached_effects_cleanup_uninstall();

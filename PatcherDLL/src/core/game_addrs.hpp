@@ -87,6 +87,12 @@ namespace modtools {
    // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
    constexpr uintptr_t aimer_set_soldier_info = 0x5EE9D0;
 
+   // PblMatrix basis builder: __cdecl(PblMatrix* out, PblVector3* fwd, PblVector3* up,
+   // PblVector3* pos), returns out. right = Normalize(cross(up, fwd)), so fwd parallel
+   // to up gives a broken matrix. Shared by aimers, cameras and collision; ILT thunk 0x402509.
+   // See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x004A35C0;
+
    // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70)
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
 
@@ -330,6 +336,13 @@ namespace modtools {
    constexpr uintptr_t explosion_class_read_prop_site = 0x00601fab;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x00605a4b;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0061e46c;
+   // The TYPE branch's Derive call in EntityClass::Read and WeaponClass::Read,
+   // child = parent->Derive(nameHash): load the vptr, push the hash, point ECX
+   // at the parent, CALL [vptr+4]; eight bytes each, signatures in
+   // odf_gameext_props.cpp. Hooked so the ODF property listeners can inherit
+   // their values through ClassParent.
+   constexpr uintptr_t entity_class_read_derive_site = 0x004D0992;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0061E55C;
 
    // Second self-piloted-hover crash: issuing a unit order crashes in
    // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
@@ -1536,12 +1549,54 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x004D2770;
+   constexpr uintptr_t entity_building_respawn = 0x004D2C80;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
    // (ECX = layer).  The reset clears the mesh count but not the layer's
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
+
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: thiscall(RedPose*), RET 4, the per-frame pose
+   // build that plays a roll's DIVE action; called from EntitySoldier::Render
+   // (0x00536E56, 0x00536E84) and SoldierElement::RenderUsingContext (0x00674C38).
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x0057C490;
+   // SoldierAnimatorClass::sInstance, a pointer cell, and the class's action
+   // table getters: thiscall(action, map), RET 8, reading
+   // [class + (map * 0x97 + action) * 8 + 0x24] (upper) and + 0x28 (lower).
+   constexpr uintptr_t soldier_animator_class_instance = 0x00B8D3C4;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x0057DCA0;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x0057DCC0;
+   // SoldierAnimationBank::s_aBank (0x2C each), s_aWeapon (0x30 each) and
+   // s_aMap (eBank, eWeapon): the names and parents AnimationFinder builds
+   // animation names from. Read by the table code at 0x005703C7, 0x005703FA
+   // and 0x00570775.
+   constexpr uintptr_t soldier_anim_banks              = 0x00ACECF8;
+   constexpr uintptr_t soldier_anim_weapons            = 0x00ACF198;
+   constexpr uintptr_t soldier_anim_maps               = 0x00ACF558;
+   // GameLoop::sClientDeltaTime, the frame time SoldierAnimator::SetAction
+   // (0x00575D50) reads first, at 0x00575D9B.
+   constexpr uintptr_t game_client_delta_time          = 0x00C6A9AC;
+
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices:
+   // thiscall(float dt), RET 4: the aim's spine and head turns, then the world
+   // matrices. SetupPose's one call of it, after every action and movement case
+   // has built the local pose, through the thunk 0x0040BE79.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00579F10;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x0057D3ED;
+   // ZephyrPoseStatic<32>::Blend(ZephyrPoseDyn<32>*, PblBitVector<32>* mask,
+   // float): thiscall, RET 0xC; how UpdateActionAnimation lays the lower body's
+   // animation on the pose (0x0057B2D4).
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0082D450;
 
 } // namespace modtools
 
@@ -1618,6 +1673,10 @@ namespace steam {
    // ---- Aimer / Weapon -------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
+
+   // PblMatrix basis builder, same signature as modtools. 54 call sites, among them
+   // Aimer::Update (0x0043E0DD). See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x0043CD40;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b05ec; // WeaponCannon vftable (0x7b057c) + slot 28*4
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b1314; // WeaponLauncher vftable (0x7b12a4) + 0x70
    constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
@@ -2290,6 +2349,9 @@ namespace steam {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f842d;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067a2b9;
+   // The Derive calls in EntityClass::Read and WeaponClass::Read, as on modtools.
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067A37D;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -2837,12 +2899,47 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
    // (ECX = layer).  The reset clears the mesh count but not the layer's
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
+
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: thiscall(RedPose*), RET 4 (with an SEH frame);
+   // called from 0x0048E023, 0x004E357A and 0x004E35AF.
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x0063FAA0;
+   // SoldierAnimatorClass::sInstance and the action table getters, as on modtools.
+   constexpr uintptr_t soldier_animator_class_instance = 0x01EAFB1C;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x00643940;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x00643960;
+   // SoldierAnimationBank::s_aBank, s_aWeapon and s_aMap (here the weapons come
+   // first in .data). Read by the table code at 0x0063C3C3, 0x0063C3E6 and
+   // 0x0063C980.
+   constexpr uintptr_t soldier_anim_banks              = 0x007E9440;
+   constexpr uintptr_t soldier_anim_weapons            = 0x007E9070;
+   constexpr uintptr_t soldier_anim_maps               = 0x007E9700;
+   // GameLoop::sClientDeltaTime: SoldierAnimator::SetAction (0x0063ED60) loads
+   // it into XMM3 first, at 0x0063ED66.
+   constexpr uintptr_t game_client_delta_time          = 0x01E56058;
+
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // SoldierAnimator::ApplyProceduralAnimationAndBuildWorldMatrices: ECX the
+   // animator and the frame time in XMM1, plain RET. SetupPose's one call of it.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00642860;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x006406DC;
+   // ZephyrPoseStatic<32>::Blend(dyn, mask, float): thiscall, RET 0xC, every
+   // argument on the stack; UpdateActionAnimation's lower-body call 0x00640B5F.
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072DB30;
 
 } // namespace steam
 
@@ -3116,6 +3213,9 @@ namespace gog {
    // ---- Aimer / Weapon ----------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info         = 0x0043d280;
+
+   // PblMatrix basis builder (tools/port_gog.py code: score 1.00, shift -0x10).
+   constexpr uintptr_t pbl_matrix_from_fwd_up         = 0x0043CD30;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b1564;
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b228c;
    constexpr uintptr_t weapon_override_aimer_impl     = 0x00678820;
@@ -3429,6 +3529,9 @@ namespace gog {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f94cd;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067b359;
+   // The Derive calls in EntityClass::Read and WeaponClass::Read, as on Steam.
+   constexpr uintptr_t entity_class_read_derive_site = 0x00491DE0;
+   constexpr uintptr_t weapon_class_read_derive_site = 0x0067B41D;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;
@@ -3853,12 +3956,43 @@ namespace gog {
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
    // (ECX = layer).  The reset clears the mesh count but not the layer's
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
+
+   // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
+   //      entity/directional_rolls.cpp) -----------------------------------------
+
+   // SoldierAnimator::SetupPose: Steam's code 0x10A0 later; called from the same
+   // three sites as on Steam.
+   constexpr uintptr_t soldier_animator_setup_pose     = 0x00640B40;
+   constexpr uintptr_t soldier_animator_class_instance = 0x01EB0FD0;
+   constexpr uintptr_t soldier_anim_get_upper_action   = 0x006449E0;
+   constexpr uintptr_t soldier_anim_get_lower_action   = 0x00644A00;
+   // SoldierAnimationBank::s_aBank, s_aWeapon and s_aMap. Read by the table
+   // code at 0x0063D463, 0x0063D486 and 0x0063DA20.
+   constexpr uintptr_t soldier_anim_banks              = 0x007EA070;
+   constexpr uintptr_t soldier_anim_weapons            = 0x007EA330;
+   constexpr uintptr_t soldier_anim_maps               = 0x007EA8E0;
+   // GameLoop::sClientDeltaTime, loaded first by SetAction (0x0063FE00) at 0x0063FE06.
+   constexpr uintptr_t game_client_delta_time          = 0x01E574F0;
+
+   // ---- Directional jets (entity/directional_jets.cpp) -----------------------
+
+   // As on Steam: ApplyProceduralAnimationAndBuildWorldMatrices (ECX, XMM1,
+   // plain RET) and SetupPose's call of it; the masked Blend, called by
+   // UpdateActionAnimation at 0x00641BFF.
+   constexpr uintptr_t soldier_animator_apply_procedural      = 0x00643900;
+   constexpr uintptr_t soldier_animator_apply_procedural_call = 0x0064177C;
+   constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072EC00;
 
 } // namespace gog
 

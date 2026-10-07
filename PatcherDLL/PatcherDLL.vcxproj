@@ -169,6 +169,12 @@
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp" />
     <ClInclude Include="src\entity\award_disable.hpp" />
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
+    <ClInclude Include="src\entity\directional_rolls.hpp" />
+    <ClInclude Include="src\entity\directional_rolls_core.hpp" />
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp" />
+    <ClInclude Include="src\entity\soldier_anim_tables_core.hpp" />
+    <ClInclude Include="src\entity\directional_jets.hpp" />
+    <ClInclude Include="src\entity\directional_jets_core.hpp" />
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp" />
     <ClInclude Include="src\entity\attached_effects_cleanup.hpp" />
     <ClInclude Include="src\entity\soldier_bone_effect_null_fix.hpp" />
@@ -183,6 +189,7 @@
     <ClInclude Include="src\util\ini_registry.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
     <ClInclude Include="src\util\snd_engine_open_fix.hpp" />
+    <ClInclude Include="src\util\matrix_basis_fix.hpp" />
     <ClInclude Include="src\util\sound_diag.hpp" />
     <ClInclude Include="src\util\game_log_lock.hpp" />
     <ClInclude Include="src\util\voice_limit.hpp" />
@@ -255,6 +262,9 @@
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp" />
     <ClCompile Include="src\entity\award_disable.cpp" />
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
+    <ClCompile Include="src\entity\directional_rolls.cpp" />
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp" />
+    <ClCompile Include="src\entity\directional_jets.cpp" />
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp" />
     <ClCompile Include="src\entity\attached_effects_cleanup.cpp" />
     <ClCompile Include="src\entity\soldier_bone_effect_null_fix.cpp" />
@@ -291,6 +301,7 @@
     <ClCompile Include="src\util\crash_logger.cpp" />
     <ClCompile Include="src\util\audio_stream_limit.cpp" />
     <ClCompile Include="src\util\snd_engine_open_fix.cpp" />
+    <ClCompile Include="src\util\matrix_basis_fix.cpp" />
     <ClCompile Include="src\util\sound_diag.cpp" />
     <ClCompile Include="src\util\voice_limit.cpp" />
     <ClCompile Include="src\util\mp_spawn_delay.cpp" />

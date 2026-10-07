@@ -190,6 +190,24 @@
     <ClInclude Include="src\entity\flyer_sound_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_rolls_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_anim_tables.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\soldier_anim_tables_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_jets.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
+    <ClInclude Include="src\entity\directional_jets_core.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\hover_pilot_null_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -221,6 +239,9 @@
       <Filter>util</Filter>
     </ClInclude>
     <ClInclude Include="src\util\snd_engine_open_fix.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\matrix_basis_fix.hpp">
       <Filter>util</Filter>
     </ClInclude>
     <ClInclude Include="src\util\enable_sound_warnings.hpp">
@@ -459,6 +480,15 @@
     <ClCompile Include="src\entity\flyer_sound_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
+    <ClCompile Include="src\entity\directional_rolls.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\soldier_anim_tables.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\directional_jets.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
     <ClCompile Include="src\entity\hover_pilot_null_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
@@ -484,6 +514,9 @@
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\util\snd_engine_open_fix.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\matrix_basis_fix.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\util\enable_sound_warnings.cpp">
