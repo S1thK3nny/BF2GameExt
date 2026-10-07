@@ -238,6 +238,16 @@ static const NamedValue s_actionNames[] = {
    { "SecondaryPrev",  ePROCESSEDINPUT_secondaryPrevButtonPressed },
    { "PlayerList",     ePROCESSEDINPUT_playerList },
    { "Map",            ePROCESSEDINPUT_map },
+   { "Chat",           ePROCESSEDINPUT_talk },
+   { "TeamChat",       ePROCESSEDINPUT_teamTalk },
+   { "CommSpotted",    ePROCESSEDINPUT_commSpotted },
+   { "CommMedic",      ePROCESSEDINPUT_commMedic },
+   { "CommRepair",     ePROCESSEDINPUT_commRepair },
+   { "CommAmmo",       ePROCESSEDINPUT_commAmmo },
+   { "CommPickup",     ePROCESSEDINPUT_commPickup },
+   { "CommBackup",     ePROCESSEDINPUT_commBackup },
+   { "CommAttack",     ePROCESSEDINPUT_commAttack },
+   { "CommDefend",     ePROCESSEDINPUT_commDefend },
    { "Roll",           ePROCESSEDINPUT_rollButtonDown },
    { "StrafeAxis",     ePROCESSEDINPUT_STRAFE_AXIS },
    { "MoveAxis",       ePROCESSEDINPUT_MOVE_AXIS },
@@ -501,7 +511,10 @@ static void pad_sync_profile()
    if (current[0] && sidecar_load()) return;
 
    for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++) pad_load_defaults(mode);
-   if (current[0]) sidecar_save();
+   if (current[0]) {
+      sidecar_save();
+      install_log("[Controller] Created the profile's .padbinds from the default pad layout");
+   }
 }
 
 static bool pad_connected() { return s_numPads && *s_numPads > 0; }
@@ -687,15 +700,24 @@ static int __cdecl hooked_SetBinding(lua_State* L)
 
       // One action per pad input and one pad input per action, as the
       // screen does for keys.
+      char nameBuf[16];
+      const char* input = input_name(raw, nameBuf, sizeof(nameBuf));
       int n = 0;
       for (int i = 0; i < s_padCount[mode]; i++) {
          const PadBinding& b = s_pad[mode][i];
-         if (b.action == action || (b.raw == raw && b.device == device)) continue;
+         if (b.action == action || (b.raw == raw && b.device == device)) {
+            if (b.action != action)
+               install_log("[Controller] %s: %s no longer %s", s_modeSectionNames[mode], input,
+                           controller_action_to_name(b.action));
+            continue;
+         }
          s_pad[mode][n++] = b;
       }
       s_padCount[mode] = n;
       pad_add(mode, raw, device, action);
       sidecar_save();
+      install_log("[Controller] %s: %s%s bound to %s", s_modeSectionNames[mode],
+                  device ? "second pad " : "", input, controller_action_to_name(action));
       return r;
    }
 
@@ -709,6 +731,8 @@ static int __cdecl hooked_SetBinding(lua_State* L)
       if (n != s_padCount[mode]) {
          s_padCount[mode] = n;
          sidecar_save();
+         install_log("[Controller] %s: pad cleared from %s", s_modeSectionNames[mode],
+                     controller_action_to_name(action));
       }
    }
    return r;
@@ -724,6 +748,7 @@ static int __cdecl hooked_ResetControls(lua_State* L)
       pad_sync_profile();
       pad_load_defaults(mode);
       sidecar_save();
+      install_log("[Controller] %s: pad bindings restored to defaults", s_modeSectionNames[mode]);
    }
    return r;
 }

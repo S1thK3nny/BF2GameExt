@@ -113,6 +113,16 @@ Valid on the right of the `=`, comma-separated.
 | `SecondaryPrev` | Previous secondary weapon |
 | `PlayerList` | Show the player list |
 | `Map` | Show the map |
+| `Chat` | Open chat |
+| `TeamChat` | Open team chat |
+| `CommSpotted` | Communication: spotted |
+| `CommMedic` | Communication: medic |
+| `CommRepair` | Communication: repair |
+| `CommAmmo` | Communication: ammo |
+| `CommPickup` | Communication: pickup |
+| `CommBackup` | Communication: backup |
+| `CommAttack` | Communication: attack |
+| `CommDefend` | Communication: defend |
 | `Roll` | Roll (flyers) |
 | `StrafeAxis` | Full strafe axis. Bind to a stick axis, not a button |
 | `MoveAxis` | Full forward and back axis. Bind to a stick axis, not a button |

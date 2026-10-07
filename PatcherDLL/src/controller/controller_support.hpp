@@ -83,7 +83,14 @@ enum ePROCESSEDINPUT_TYPE : int {
    // Extended boolean inputs (18-29)
    ePROCESSEDINPUT_talk                       = 18,
    ePROCESSEDINPUT_teamTalk                   = 19,
-   // 20-27 = command/bookmark slots (F5-F12)
+   ePROCESSEDINPUT_commSpotted                = 20,   // F5-F12 communication slots
+   ePROCESSEDINPUT_commMedic                  = 21,
+   ePROCESSEDINPUT_commRepair                 = 22,
+   ePROCESSEDINPUT_commAmmo                   = 23,
+   ePROCESSEDINPUT_commPickup                 = 24,
+   ePROCESSEDINPUT_commBackup                 = 25,
+   ePROCESSEDINPUT_commAttack                 = 26,
+   ePROCESSEDINPUT_commDefend                 = 27,
    ePROCESSEDINPUT_map                        = 28,
    ePROCESSEDINPUT_rollButtonDown             = 29,  // separate from crouch!
 
