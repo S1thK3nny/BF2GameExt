@@ -345,7 +345,8 @@ static int parse_action_list(const char* actionStr, int rawInput,
 }
 
 // ---------------------------------------------------------------------------
-// Binding setup -- reads per-mode INI config and writes to game binding tables
+// Binding setup -- the INI pad layout becomes the engine's default bindings,
+// and a profile mode with no pad bindings at all is given it
 // ---------------------------------------------------------------------------
 
 void controller_setup_bindings(uintptr_t exe_base)
@@ -354,13 +355,10 @@ void controller_setup_bindings(uintptr_t exe_base)
 
    g_log = get_gamelog();
 
-   // Build-aware.  The FLInputManager struct is byte-identical across builds:
-   // ctrlBase is controller_base_global+0x428 on both (modtools 0x00caef48 ->
-   // FLInputManager::Init 0x742870, Steam 0x1ebe078 -> 0x52a080), and six
-   // further fields in the same object land at the same deltas (0x25C8,
-   // 0x25CC, 0x25D0, 0x28A0, 0x28EC, 0x2A54) -- past both tables used below.
-   // The joystick config struct matches too (+0x30/+0x5f0/+0x638/+0xf94 and
-   // the 0x2c device stride are identical in joystick_sync on both builds).
+   // Build-aware. The tProfile layout is identical across builds
+   // (+0x30/+0x5f0/+0x638/+0xf94 and the 0x2c device stride match in
+   // joystick_sync), and tGameOpt::ResetBindings reads the default table with
+   // the same 0x102 mode stride on all three.
 
    // Check if a joystick is connected
    int* pNumJoysticks = (int*)resolve(exe_base, g_addr->num_joysticks_global);
@@ -371,20 +369,9 @@ void controller_setup_bindings(uintptr_t exe_base)
       return;
    }
 
-   if (g_log) g_log("[Controller] %d joystick(s) detected, setting up bindings...\n", numJoysticks);
-
-   // Enable joystick input processing.
+   // The current tProfile.
    uintptr_t joyConfig = (uintptr_t)resolve(exe_base, g_addr->joystick_config_base);
    if (!joyConfig) return;
-   *(char*)(joyConfig + 0xF94) = 1;
-
-   uintptr_t ctrlBase = (uintptr_t)resolve(exe_base, g_addr->controller_base_global) + 0x428;
-
-   // Table pointers and constants
-   constexpr int RT_ENTRIES_PER_MODE = 0x2B; // 43
-   constexpr int RT_ENTRY_SIZE = 6;
-   uintptr_t luaTable = ctrlBase + 0x1ACC;
-   uintptr_t rtTable  = ctrlBase + 0x20BC;
 
    // INI config (uses stored path from controller_set_ini_path, or null = defaults only)
    ini_config cfg{ s_storedIniPath[0] ? s_storedIniPath : nullptr };
@@ -453,62 +440,88 @@ void controller_setup_bindings(uintptr_t exe_base)
       modeCounts[mode] = count;
    }
 
-   // --- Write to 0x1ACC table (raw input -> action, for Lua API) ---
-   // This table is input-indexed, so for multi-bind (B=Crouch,Roll),
-   // only the last action is stored. This is fine -- 0x1ACC is Lua API only.
-   for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++) {
-      for (int i = 0; i < modeCounts[mode]; i++) {
-         int rawInput = modeBindings[mode][i].rawInput;
-         int action   = modeBindings[mode][i].processedAction;
-         if (rawInput >= 0 && rawInput < eCONTROLLERINPUT_MAX) {
-            uintptr_t entry = luaTable + (mode * 0x4C + rawInput) * 4;
-            *(int*)entry = action;
-         }
-      }
-   }
+   // --- The pad layout as engine data ---
+   // ActionKey = ushort mKey[2]; uchar mDevice[2]. A key below 0x100 is a
+   // scancode; (raw + 1) << 8 is raw input `raw`, on pad mDevice when raw is
+   // below 0x40 and the mouse above it. The controls screen writes keyboard and
+   // pad keys into whichever slot is free, so slot 1 is not reserved for the pad.
+   constexpr int kActionsPerMode = 0x2B;
+   constexpr int kModeStride     = 0x102;
+   constexpr int kActionKeySize  = 6;
+   constexpr int kPadRawInputs   = 0x40;
 
-   // --- Helper: write one mode's bindings to a table with 0x20BC format ---
-   auto writeModeBindings = [&](uintptr_t tableBase, int stride, int mode) {
-      // Clear slot 1 for all actions in this mode first (removes stale bindings)
-      for (int action = 0; action < RT_ENTRIES_PER_MODE; action++) {
-         uintptr_t entry = tableBase + mode * stride + action * RT_ENTRY_SIZE;
-         *(unsigned short*)(entry + 2) = 0;  // slot 1 scancode
-         *(unsigned char*)(entry + 5) = 0;   // slot 1 device index
-      }
-      // Write new bindings to slot 1
-      for (int i = 0; i < modeCounts[mode]; i++) {
-         int rawInput = modeBindings[mode][i].rawInput;
-         int action   = modeBindings[mode][i].processedAction;
-         if (action >= 0 && action < RT_ENTRIES_PER_MODE) {
-            unsigned short encoded = (unsigned short)((rawInput + 1) << 8);
-            uintptr_t entry = tableBase + mode * stride + action * RT_ENTRY_SIZE;
-            *(unsigned short*)(entry + 2) = encoded;  // slot 1 scancode
-            *(unsigned char*)(entry + 5) = 0;          // slot 1 device index
-         }
-      }
+   auto actionKey = [](uintptr_t table, int mode, int action) {
+      return table + mode * kModeStride + action * kActionKeySize;
+   };
+   auto isPadKey = [](unsigned short key) {
+      return key >= 0x100 && ((key >> 8) - 1) < kPadRawInputs;
    };
 
-   // Step 1: Write bindings to UI config FIRST (so sync preserves them)
-   {
-      uintptr_t uiBase = joyConfig + 0x4A;
-      for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++)
-         writeModeBindings(uiBase, 0x102, mode);
-      if (g_log) g_log("[Controller] Wrote bindings to UI config\n");
+   // Engine defaults: new profiles and the controls screen's Restore Defaults
+   // copy these. Slot 1 holds the stock secondary key and is only replaced on
+   // actions the pad layout uses. Once per run, like the static init it edits.
+   static bool s_defaultsPatched = false;
+   if (!s_defaultsPatched && g_addr->default_keyboard_bindings) {
+      uintptr_t defaults = (uintptr_t)resolve(exe_base, g_addr->default_keyboard_bindings);
+      for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++) {
+         for (int i = 0; i < modeCounts[mode]; i++) {
+            int action = modeBindings[mode][i].processedAction;
+            if (action < 0 || action >= kActionsPerMode) continue;
+            uintptr_t entry = actionKey(defaults, mode, action);
+            *(unsigned short*)(entry + 2) = (unsigned short)((modeBindings[mode][i].rawInput + 1) << 8);
+            *(unsigned char*)(entry + 5)  = 0;
+         }
+      }
+      s_defaultsPatched = true;
    }
 
-   // Step 2: Call the joystick init chain (discover device + sync bindings)
-   if (g_addr->joystick_discover && g_addr->joystick_sync) {
-      uintptr_t configBase = joyConfig;
-      auto discover = (fn_joystick_discover)resolve(exe_base, g_addr->joystick_discover);
-      auto sync     = (fn_joystick_sync)resolve(exe_base, g_addr->joystick_sync);
-      discover(configBase, nullptr);
-      sync(configBase, nullptr);
-      if (g_log) g_log("[Controller] Called joystick discover + sync\n");
+   // The player's profile belongs to the player. A mode only gets the pad
+   // layout when it has no pad binding at all (a profile made before a pad was
+   // used, or a mode put back by Restore Defaults, which resets one mode).
+   // Any mode with a pad binding is left exactly as the controls screen set it.
+   // Runs on every state init; the one before the profile loads is wasted, the
+   // one at mission start sees the real profile.
+   uintptr_t profileBindings = joyConfig + 0x4A;   // tProfile::mGameOptions.mKeyboardBindings
+
+   bool profileChanged = false;
+   if (*(char*)(joyConfig + 0xF94) == 0) {
+      *(char*)(joyConfig + 0xF94) = 1;
+      profileChanged = true;
    }
 
-   // Step 3: Write bindings to 0x20BC runtime table (in case sync reset them)
-   for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++)
-      writeModeBindings(rtTable, RT_ENTRIES_PER_MODE * RT_ENTRY_SIZE, mode);
+   char seededModes[128] = {};
+   for (int mode = 0; mode < CONTROL_MODE_COUNT; mode++) {
+      bool hasPadBinding = false;
+      for (int action = 0; action < kActionsPerMode && !hasPadBinding; action++) {
+         const unsigned short* key = (const unsigned short*)actionKey(profileBindings, mode, action);
+         hasPadBinding = isPadKey(key[0]) || isPadKey(key[1]);
+      }
+      if (hasPadBinding || modeCounts[mode] == 0) continue;
 
-   if (g_log) g_log("[Controller] Bindings applied for %d modes\n", CONTROL_MODE_COUNT);
+      for (int i = 0; i < modeCounts[mode]; i++) {
+         int action = modeBindings[mode][i].processedAction;
+         if (action < 0 || action >= kActionsPerMode) continue;
+         uintptr_t entry = actionKey(profileBindings, mode, action);
+         unsigned short* key = (unsigned short*)entry;
+         unsigned char* device = (unsigned char*)(entry + 4);
+         // Free slot first; with both taken, slot 1 as the defaults do.
+         int slot = (key[1] == 0) ? 1 : (key[0] == 0) ? 0 : 1;
+         key[slot] = (unsigned short)((modeBindings[mode][i].rawInput + 1) << 8);
+         device[slot] = 0;
+      }
+      profileChanged = true;
+      if (seededModes[0]) strcat_s(seededModes, ", ");
+      strcat_s(seededModes, s_modeSectionNames[mode] + strlen("Controller."));
+   }
+   if (seededModes[0] && g_log)
+      g_log("[Controller] No pad bindings in: %s. Added the default pad layout there\n", seededModes);
+
+   // Same calls the controls screen makes after a rebind: profile -> live
+   // tables, then mark the profile changed so it is saved.
+   if (profileChanged && g_addr->joystick_sync && g_addr->joystick_discover) {
+      auto applySettings = (fn_joystick_sync)resolve(exe_base, g_addr->joystick_sync);
+      auto updateProfCrc = (fn_joystick_discover)resolve(exe_base, g_addr->joystick_discover);
+      applySettings(joyConfig, nullptr);
+      updateProfCrc(joyConfig, nullptr);
+   }
 }

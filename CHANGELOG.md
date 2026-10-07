@@ -106,6 +106,11 @@ Scripts can check the running version through `GameExt.version`.
 - A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
   nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
   on every build.
+- With a pad connected, every map load reset part of your controls: second keys and
+  pad buttons bound in Options -> Controls were replaced by the INI pad layout. Your
+  bindings now stay as you set them.
+  The `[Controller.*]` sections are the default pad layout: a mode without pad
+  bindings gets it, and Restore Defaults loads it again.
 - Carriers (vehicle pads with `SetCarrierClass`):
   - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
   - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.

@@ -128,8 +128,9 @@ struct ButtonBinding {
 // Store the INI path for controller configuration (call once from init).
 void controller_set_ini_path(const char* ini_path);
 
-// Set up gamepad bindings for all control modes.
-// Reads per-mode overrides from [Controller.*] INI sections.
+// Make the [Controller.*] INI layout the engine's default pad bindings, and give
+// it to each mode of the current profile that has no pad bindings at all.
+// Bindings the player set on the controls screen are never overwritten.
 // Must be called after the game's input system is initialized.
 // exe_base = loaded image base for address resolution.
 void controller_setup_bindings(uintptr_t exe_base);

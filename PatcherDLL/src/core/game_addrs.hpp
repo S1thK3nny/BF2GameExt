@@ -934,6 +934,10 @@ namespace modtools {
    constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
    constexpr uintptr_t joystick_discover        = 0x007485F0;
    constexpr uintptr_t joystick_sync            = 0x007489A0;
+   // RawControllerInputs::sDefaultKeyboardBindings, ActionKey[5][0x2B] (6 bytes each,
+   // stride 0x102). Filled by a static initializer; tGameOpt::ResetBindings 0x00746EA0
+   // copies a mode of it into the profile (new profiles, Restore Defaults).
+   constexpr uintptr_t default_keyboard_bindings = 0x00CB2450;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -2089,6 +2093,8 @@ namespace steam {
    constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
    constexpr uintptr_t joystick_discover        = 0x0061D250;
    constexpr uintptr_t joystick_sync            = 0x0061D590;
+   // sDefaultKeyboardBindings, read by tGameOpt::ResetBindings 0x0061C5A0 (LEA ESI,[EDX+imm]).
+   constexpr uintptr_t default_keyboard_bindings = 0x01F9A928;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -2910,6 +2916,8 @@ namespace gog {
    constexpr uintptr_t joystick_config_base     = 0x01EFA590;
    constexpr uintptr_t joystick_discover        = 0x0061E2B0;
    constexpr uintptr_t joystick_sync            = 0x0061E5F0;
+   // sDefaultKeyboardBindings (tools/port_gog.py data: 3 votes, all score 1.00).
+   constexpr uintptr_t default_keyboard_bindings = 0x01F9BDD8;
 
    // ---- Rumble -------------------------------------------------------------------
 

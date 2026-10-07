@@ -358,6 +358,10 @@ def write_ini(entries, modes, version, path: Path):
         lines.append("; Omit a key or set it to empty to unbind.  Defaults are shown below.")
         lines.append("; Full list of input and action names: docs/user/CONTROLLER.md")
         lines.append(";")
+        lines.append("; This is the DEFAULT pad layout. A mode with no pad bindings in your")
+        lines.append("; profile gets it; after that your Options -> Controls rebinds are kept.")
+        lines.append("; To load an edited layout, press Restore Defaults on that screen.")
+        lines.append(";")
         lines.append("; These only decide WHICH button does what. If the stick drifts, is")
         lines.append("; twitchy, or moves you when you are not touching it, that is sensitivity")
         lines.append("; and deadzone - neither is set here. Use the game's own")
@@ -480,6 +484,23 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
         "commented keeps its default. Bindings are per mode and do not inherit, so "
         "rebinding jump for `Controller.Unit` does not change it for "
         "`Controller.Hero`."
+    )
+    L.append("")
+    L.append("## The INI layout and your own rebinds")
+    L.append("")
+    L.append(
+        "These sections are the **default** pad layout. When you start a mission "
+        "with a pad connected, every mode of your profile that has no pad "
+        "bindings yet gets it. From then on the game's own **Options -> Controls** "
+        "screen is in charge: rebind any action there, keyboard or pad, and it "
+        "stays rebound. BF2GameExt never overwrites a mode that has pad bindings."
+    )
+    L.append("")
+    L.append(
+        "New profiles start with the layout, and **Restore Defaults** on the "
+        "controls screen loads it again, together with the stock keyboard keys, "
+        "for the mode the screen is showing. That is also how an edited "
+        "`[Controller.*]` section reaches a mode that already has pad bindings."
     )
     L.append("")
     L.append(
