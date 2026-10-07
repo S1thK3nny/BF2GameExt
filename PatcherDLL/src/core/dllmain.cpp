@@ -35,6 +35,7 @@
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/fp_fire_animation_fix.hpp"
 #include "entity/command_post_null_fix.hpp"
+#include "util/matrix_basis_fix.hpp"
 #include "entity/command_post_overflow_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
@@ -377,6 +378,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
+   matrix_basis_fix_install(exe_base);
    command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);

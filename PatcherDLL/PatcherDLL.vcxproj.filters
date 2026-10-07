@@ -220,6 +220,9 @@
     <ClInclude Include="src\util\snd_engine_open_fix.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\matrix_basis_fix.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
     <ClInclude Include="src\util\enable_sound_warnings.hpp">
       <Filter>util</Filter>
     </ClInclude>
@@ -478,6 +481,9 @@
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\util\snd_engine_open_fix.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\matrix_basis_fix.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\util\enable_sound_warnings.cpp">

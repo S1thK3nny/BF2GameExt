@@ -87,6 +87,12 @@ namespace modtools {
    // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
    constexpr uintptr_t aimer_set_soldier_info = 0x5EE9D0;
 
+   // PblMatrix basis builder: __cdecl(PblMatrix* out, PblVector3* fwd, PblVector3* up,
+   // PblVector3* pos), returns out. right = Normalize(cross(up, fwd)), so fwd parallel
+   // to up gives a broken matrix. Shared by aimers, cameras and collision; ILT thunk 0x402509.
+   // See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x004A35C0;
+
    // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70)
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
 
@@ -1597,6 +1603,10 @@ namespace steam {
    // ---- Aimer / Weapon -------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
+
+   // PblMatrix basis builder, same signature as modtools. 54 call sites, among them
+   // Aimer::Update (0x0043E0DD). See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x0043CD40;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b05ec; // WeaponCannon vftable (0x7b057c) + slot 28*4
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b1314; // WeaponLauncher vftable (0x7b12a4) + 0x70
    constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
@@ -3076,6 +3086,9 @@ namespace gog {
    // ---- Aimer / Weapon ----------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info         = 0x0043d280;
+
+   // PblMatrix basis builder (tools/port_gog.py code: score 1.00, shift -0x10).
+   constexpr uintptr_t pbl_matrix_from_fwd_up         = 0x0043CD30;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b1564;
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b228c;
    constexpr uintptr_t weapon_override_aimer_impl     = 0x00678820;
