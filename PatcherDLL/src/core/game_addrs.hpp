@@ -87,6 +87,12 @@ namespace modtools {
    // Aimer::SetSoldierInfo(Aimer*, PblVector3* pos, PblVector3* dir)
    constexpr uintptr_t aimer_set_soldier_info = 0x5EE9D0;
 
+   // PblMatrix basis builder: __cdecl(PblMatrix* out, PblVector3* fwd, PblVector3* up,
+   // PblVector3* pos), returns out. right = Normalize(cross(up, fwd)), so fwd parallel
+   // to up gives a broken matrix. Shared by aimers, cameras and collision; ILT thunk 0x402509.
+   // See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x004A35C0;
+
    // WeaponCannon vtable entry for OverrideAimer (vtable slot 0x70)
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0xA524D8;
 
@@ -921,6 +927,19 @@ namespace modtools {
    constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
    constexpr uintptr_t joystick_discover        = 0x007485F0;
    constexpr uintptr_t joystick_sync            = 0x007489A0;
+   // Pad binding third slot (controller/controller_support.cpp).
+   // RawControllerInputs::StandardInputProcess, __fastcall(this). Reads 2 slots per
+   // action from the live row this+0x20BC+mode*0x102; mode at this+8.
+   constexpr uintptr_t standard_input_process   = 0x007455F0;
+   // Controls screen callbacks, lua_CFunction.
+   constexpr uintptr_t script_cb_set_binding    = 0x004639C0;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00465740;
+   constexpr uintptr_t script_cb_reset_controls = 0x00479E00;
+   // int[5][0x2B] screen row -> action, -1 = action hidden in that mode. Read by
+   // SetBinding, GetKeyBoardCmds and GetActionFromIdx only.
+   constexpr uintptr_t controls_row_actions     = 0x00AC7948;
+   // float, SetBinding's Escape hold timer; reaching 1.0 clears the binding.
+   constexpr uintptr_t set_binding_hold_timer   = 0x00B314A0;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -1629,6 +1648,11 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x004D2770;
+   constexpr uintptr_t entity_building_respawn = 0x004D2C80;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -1748,6 +1772,10 @@ namespace steam {
    // ---- Aimer / Weapon -------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info = 0x0043d290;
+
+   // PblMatrix basis builder, same signature as modtools. 54 call sites, among them
+   // Aimer::Update (0x0043E0DD). See util/matrix_basis_fix.cpp.
+   constexpr uintptr_t pbl_matrix_from_fwd_up = 0x0043CD40;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b05ec; // WeaponCannon vftable (0x7b057c) + slot 28*4
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b1314; // WeaponLauncher vftable (0x7b12a4) + 0x70
    constexpr uintptr_t weapon_override_aimer_impl  = 0x00677780;          // Weapon::OverrideAimer (default `return 0`)
@@ -2186,6 +2214,14 @@ namespace steam {
    constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
    constexpr uintptr_t joystick_discover        = 0x0061D250;
    constexpr uintptr_t joystick_sync            = 0x0061D590;
+   // Pad binding third slot. StandardInputProcess found by its +0x2600/+0x2601
+   // writes; callbacks from the ScriptCB name table at 0x007E7100.
+   constexpr uintptr_t standard_input_process   = 0x004153C0;
+   constexpr uintptr_t script_cb_set_binding    = 0x00586B70;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00587330;
+   constexpr uintptr_t script_cb_reset_controls = 0x00597C00;
+   constexpr uintptr_t controls_row_actions     = 0x00789DE0;  // byte-identical to modtools
+   constexpr uintptr_t set_binding_hold_timer   = 0x01E5771C;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -3028,6 +3064,11 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -3084,6 +3125,13 @@ namespace gog {
    constexpr uintptr_t joystick_config_base     = 0x01EFA590;
    constexpr uintptr_t joystick_discover        = 0x0061E2B0;
    constexpr uintptr_t joystick_sync            = 0x0061E5F0;
+   // Pad binding third slot (tools/port_gog.py: code score 1.00, data 5 and 6 votes).
+   constexpr uintptr_t standard_input_process   = 0x00415380;
+   constexpr uintptr_t script_cb_set_binding    = 0x00587B20;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x005882E0;
+   constexpr uintptr_t script_cb_reset_controls = 0x00598BB0;
+   constexpr uintptr_t controls_row_actions     = 0x0078AD90;
+   constexpr uintptr_t set_binding_hold_timer   = 0x01E58BCC;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -3399,6 +3447,9 @@ namespace gog {
    // ---- Aimer / Weapon ----------------------------------------------------------
 
    constexpr uintptr_t aimer_set_soldier_info         = 0x0043d280;
+
+   // PblMatrix basis builder (tools/port_gog.py code: score 1.00, shift -0x10).
+   constexpr uintptr_t pbl_matrix_from_fwd_up         = 0x0043CD30;
    constexpr uintptr_t weapon_cannon_vftable_override_aimer = 0x007b1564;
    constexpr uintptr_t weapon_launcher_vftable_override_aimer = 0x007b228c;
    constexpr uintptr_t weapon_override_aimer_impl     = 0x00678820;
@@ -4118,6 +4169,11 @@ namespace gog {
    // 0 = not derived on this build.
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
+
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
 
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 

@@ -36,14 +36,11 @@ Scripts can check the running version through `GameExt.version`.
   person. A shake is drawn on top of the game's camera without feeding into how it
   follows the unit, so it looks the same at any frame rate. There are no INI settings:
   the ODFs decide. See [ODF properties](docs/user/ODF_PROPERTIES.md#camera-shake).
-- **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
-  `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
-  so a `.hud` can show every command post's owner and capture progress in a row.
-  Slots follow `HUDIndex`; neutral posts use team 0's `SetTeamIcon`. Each slot also
-  floats a marker over its post: `.position` (pinned to the screen's edge off screen),
+- **Command post markers** - Each command post strip slot also floats a marker over its
+  post: `player1.commandPostN.position` (pinned to the screen's edge off screen),
   `.onScreen`/`.offScreen`, `.direction` for an edge arrow, and `.distance` in metres.
   Works on multiplayer clients; inert unless a `.hud` binds it.
-  See [HUD authoring](docs/user/HUD.md#command-post-strip).
+  See [HUD authoring](docs/user/HUD.md#markers-in-the-world).
 - **TrueWidescreen HUD files** - A `.hud` file with `TrueWidescreen(1)` in its
   `FileInfo` is laid out as on a 4:3 screen of the real height and drawn one to one on
   wider screens, instead of the stock stretch: no squeezed band at the top and bottom,
@@ -63,26 +60,6 @@ Scripts can check the running version through `GameExt.version`.
   while it is on. An element that comes to rest between two pixels looks slightly
   softer; `HudSubPixel=0` keeps the stock rounding. See
   [Configuration](docs/user/CONFIGURATION.md).
-- **`FillFrom` for HUD bars** - A `BarBitmap` can keep its right end and grow or
-  shrink at its left (`"Right"`), or fill vertically from its bottom or top (`"Bottom"`,
-  `"Top"`), showing the same part of its texture the full bar shows there, so an
-  upright icon fills without being rotated. `"Right"` keeps the bar flash; the vertical
-  modes have none. Inert unless a `.hud` uses it.
-  See [HUD authoring](docs/user/HUD.md#fillfrom).
-- **Weapon icon textures** - `player1.weapon1.iconTexture` and
-  `player1.weapon2.iconTexture` carry the stock `IconTexture` of the weapon in each
-  slot, following the same weapon as the stock weapon events, with Disable twins.
-  Inert unless a `.hud` binds them.
-  See [HUD authoring](docs/user/HUD.md#weapon-icons).
-- **Class, stance and vehicle health icons** - HUD events carrying the health icon of
-  what the local player controls, taken from the class's stock `HealthTexture`:
-  `player1.unit.healthTexture` follows the stance through `<name>_crouch`,
-  `<name>_prone` and `<name>_ball` (prone falls back to crouch, then standing),
-  `player1.unit.stance` carries the stance itself, and `player1.vehicle.healthTexture`
-  carries the entered vehicle or turret's icon. The texture events have Disable twins.
-  Published from the HUD update, so they work on multiplayer clients; inert unless a
-  `.hud` binds them. Modtools, Steam and GOG.
-  See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
 - **Unit and weapon state events** - HUD Floats that are 1 while the local player is
   in a state and 0 otherwise: `player1.unit.state.sprint`, `.jump`, `.fall`, `.roll`,
   `.jet`, `.hover` and `.tumble`, plus `.land` for one update on touching down; and
@@ -104,12 +81,95 @@ Scripts can check the running version through `GameExt.version`.
   or a shot, with `OutputIsAlpha(1)` for a group's `EventAlpha`. Inert unless a `.hud`
   declares one.
   See [HUD authoring](docs/user/HUD.md#transformnumberlerp).
+- **`OutputIsAlpha(1)` for `TransformNumberMath`** - Sends the result every update,
+  which a group's `EventAlpha` needs to hold.
+  See [HUD authoring](docs/user/HUD.md#transformnumbermath).
+- **`player1.weaponN.target.distance`** - The current target's distance in metres, for
+  the floating target bar. Inert unless a `.hud` binds it.
+  See [HUD authoring](docs/user/HUD.md#floating-target-bars).
+- **`GameExt_TestVersion(major, minor, patch)`** - True if the running BF2GameExt is
+  that version or newer, as Shader Patch's `SP_TestVersion` is for SP, so a script can
+  gate what it loads on a minimum version in one line:
+  `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
+  See [Lua API](docs/user/LUA_API.md#detection).
+- **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
+  foot of the walker you drive: how far it came down, the biggest drop in a single
+  update, and whether BF2 counted the landing, which is what plays the stomp effect,
+  the footstep sound and `StepShake`. Off by default.
+  See [Features](docs/user/FEATURES.md#diagnostics).
+
+### Fixed
+
+- `GameExtContentCensus()`, the name the documentation gives for the content budget
+  report, did not exist: the report was registered for Lua as `ContentCensus()`. Both
+  names now work.
+- Holding the throttle while rolling no longer slows a flyer down or weakens its roll.
+  BF2 read the two as one stick and scaled both to 71%, the rule meant to stop soldiers
+  running faster diagonally. `[Fixes] FlyerRollThrottleFix`, on by default; not yet
+  tested online.
+- Walkers with `StompDetectionType = "1"` land their steps at any frame rate. BF2
+  counted a step only after a foot dropped more than 0.1 m in a single frame, so the
+  higher the frame rate, the fewer steps played their stomp effect and footstep sound:
+  at 60 fps most of an AT-TE's walking steps never landed. The test is now the foot's
+  speed, 3 m/s, which is the stock test at 30 fps. `[Fixes] WalkerStompFix`, on by
+  default.
+
+## 1.1.0
+
+### Added
+
+- **`GetMissionName()`** - Returns the mission-script name the match was launched
+  from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
+  script, so a mission could not tell which map or mode it was running as without
+  the name being hardcoded. See the
+  [Lua API](docs/user/LUA_API.md#match-info).
+- **`SetInstanceProperty(name, property, value)`** - Changes a world object's
+  instance properties after the map has loaded. Works on vehicle spawners, which no
+  stock Lua function could reach, so a script can now change which vehicle a
+  spawner produces or how quickly it respawns. See the
+  [Lua API](docs/user/LUA_API.md#world-objects).
+- **`@GameExt` ODF suffix** - A property written as `Name@GameExt` replaces the
+  plain `Name` line only when BF2GameExt is installed, so one ODF serves both stock
+  and extended players. See [ODF Properties](docs/user/ODF_PROPERTIES.md).
+- **`HeldOrdnanceEffectBone`** - A cannon weapon can show its projectile trail at a
+  soldier bone while preparing to fire, then carry it into flight. INI:
+  `[Fixes] HeldOrdnanceEffect`.
+- **`ExtendedBladeBase`** - The visible lightsaber blade extends 8% behind its base
+  instead of 4%, matching the Classic Collection. Combat reach is unchanged. INI:
+  `[Lightsaber] ExtendedBladeBase`.
+- A `Since` column in the Lua API and ODF property references, naming the version
+  each entry first appeared in.
+- **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
+  `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
+  so a `.hud` can show every command post's owner and capture progress in a row.
+  Slots follow `HUDIndex`; neutral posts use team 0's `SetTeamIcon`. Works on
+  multiplayer clients; inert unless a `.hud` binds it.
+  See [HUD authoring](docs/user/HUD.md#command-post-strip).
+- **`FillFrom` for HUD bars** - A `BarBitmap` can keep its right end and grow or
+  shrink at its left (`"Right"`), or fill vertically from its bottom or top (`"Bottom"`,
+  `"Top"`), showing the same part of its texture the full bar shows there, so an
+  upright icon fills without being rotated. `"Right"` keeps the bar flash; the vertical
+  modes have none. Inert unless a `.hud` uses it.
+  See [HUD authoring](docs/user/HUD.md#fillfrom).
+- **Weapon icon textures** - `player1.weapon1.iconTexture` and
+  `player1.weapon2.iconTexture` carry the stock `IconTexture` of the weapon in each
+  slot, following the same weapon as the stock weapon events, with Disable twins.
+  Inert unless a `.hud` binds them.
+  See [HUD authoring](docs/user/HUD.md#weapon-icons).
+- **Class, stance and vehicle health icons** - HUD events carrying the health icon of
+  what the local player controls, taken from the class's stock `HealthTexture`:
+  `player1.unit.healthTexture` follows the stance through `<name>_crouch`,
+  `<name>_prone` and `<name>_ball` (prone falls back to crouch, then standing),
+  `player1.unit.stance` carries the stance itself, and `player1.vehicle.healthTexture`
+  carries the entered vehicle or turret's icon. The texture events have Disable twins.
+  Published from the HUD update, so they work on multiplayer clients; inert unless a
+  `.hud` binds them. Modtools, Steam and GOG.
+  See [HUD authoring](docs/user/HUD.md#class-stance-and-vehicle-icons).
 - **`TransformNumberMath`** - A HUD transform that adds, subtracts, multiplies,
   divides or takes the minimum or maximum of two events or constants, optionally
   clamped, and publishes the result as a new event, for values the stock transforms
-  cannot make, such as missing health or a ticket lead. `OutputIsAlpha(1)` sends the
-  result every update, which a group's `EventAlpha` needs to hold. Inert unless a
-  `.hud` declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
+  cannot make, such as missing health or a ticket lead. Inert unless a `.hud`
+  declares one. See [HUD authoring](docs/user/HUD.md#transformnumbermath).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
@@ -158,98 +218,26 @@ Scripts can check the running version through `GameExt.version`.
   pixels. While selected, the anchor stays inside the screen's safe area, so a big
   vehicle up close keeps its bar; otherwise the bar leaves the screen with its target.
   Bar sizes, scales, labels and offsets stay in the `.hud`.
-  `player1.weaponN.target.distance` carries the target's distance in metres.
 - **Foley regions** - A `foleyfx <group>` region now changes the footstep, landing
   and impact sounds on the ground inside it to that foley group. In stock BF2 these
   regions did nothing. See [Features](docs/user/FEATURES.md).
 - **Foley sounds from several sound files** - Soldiers no longer lose their footstep
   and impact sounds when a mission script loads world sound files from more than one
   map. Missions that load a single one are unchanged.
-- **`GameExt_TestVersion(major, minor, patch)`** - True if the running BF2GameExt is
-  that version or newer, as Shader Patch's `SP_TestVersion` is for SP, so a script can
-  gate what it loads on a minimum version in one line:
-  `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
-  See [Lua API](docs/user/LUA_API.md#detection).
-- **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
-  foot of the walker you drive: how far it came down, the biggest drop in a single
-  update, and whether BF2 counted the landing, which is what plays the stomp effect,
-  the footstep sound and `StepShake`. Off by default.
-  See [Features](docs/user/FEATURES.md#diagnostics).
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
 
-### Fixed
-
-- Carriers (vehicle pads with `SetCarrierClass`):
-  - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
-  - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.
-  - Every carrier after the first from the same pad now descends with its cargo bay closed.
-  - Extra vehicles on multi-cargo carriers now get their team back when dropped.
-  - Carriers no longer look skewed while climbing away.
-  - Carrier turrets keep cooling down and reloading while searching for a target.
-  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
-    hovering over the pad.
-  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
-    longer crashes the game.
-  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
-    ceiling.
-  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
-  - A carrier shot down in the air now explodes on the spot instead of spinning all the
-    way to the ground.
-- Floating target bars keep their last screen position when a target dies or is
-  removed, allowing the existing HUD fade to finish without dropping onto the
-  corpse. Living targets still track normally; new targets reset the cached anchor.
-- A map rotation no longer crashes when a map with `foleyfx` regions follows another
-  map that has them.
-- `GameExtContentCensus()`, the name the documentation gives for the content budget
-  report, did not exist: the report was registered for Lua as `ContentCensus()`. Both
-  names now work.
-- Holding the throttle while rolling no longer slows a flyer down or weakens its roll.
-  BF2 read the two as one stick and scaled both to 71%, the rule meant to stop soldiers
-  running faster diagonally. `[Fixes] FlyerRollThrottleFix`, on by default; not yet
-  tested online.
-- Walkers with `StompDetectionType = "1"` land their steps at any frame rate. BF2
-  counted a step only after a foot dropped more than 0.1 m in a single frame, so the
-  higher the frame rate, the fewer steps played their stomp effect and footstep sound:
-  at 60 fps most of an AT-TE's walking steps never landed. The test is now the foot's
-  speed, 3 m/s, which is the stock test at 30 fps. `[Fixes] WalkerStompFix`, on by
-  default.
-- The game no longer crashes, usually on the first spawn, on a map whose terrain
-  paints a foliage layer its props do not define when a map that did define that
-  layer was played earlier in the session.
-- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
-  has no `ExplosionDestruct` is removed.
-- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
-  fired from a weapon that is not a grappling hook weapon.
-
-## 1.1.0
-
-### Added
-
-- **`GetMissionName()`** - Returns the mission-script name the match was launched
-  from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
-  script, so a mission could not tell which map or mode it was running as without
-  the name being hardcoded. See the
-  [Lua API](docs/user/LUA_API.md#match-info).
-- **`SetInstanceProperty(name, property, value)`** - Changes a world object's
-  instance properties after the map has loaded. Works on vehicle spawners, which no
-  stock Lua function could reach, so a script can now change which vehicle a
-  spawner produces or how quickly it respawns. See the
-  [Lua API](docs/user/LUA_API.md#world-objects).
-- **`@GameExt` ODF suffix** - A property written as `Name@GameExt` replaces the
-  plain `Name` line only when BF2GameExt is installed, so one ODF serves both stock
-  and extended players. See [ODF Properties](docs/user/ODF_PROPERTIES.md).
-- **`HeldOrdnanceEffectBone`** - A cannon weapon can show its projectile trail at a
-  soldier bone while preparing to fire, then carry it into flight. INI:
-  `[Fixes] HeldOrdnanceEffect`.
-- **`ExtendedBladeBase`** - The visible lightsaber blade extends 8% behind its base
-  instead of 4%, matching the Classic Collection. Combat reach is unchanged. INI:
-  `[Lightsaber] ExtendedBladeBase`.
-- A `Since` column in the Lua API and ODF property references, naming the version
-  each entry first appeared in.
-
 ### Changed
+
+- **Pad bindings moved out of `BF2GameExt.ini`.** Pad buttons now have their own
+  binding slot, so they no longer take a keyboard key, and they are rebound on the
+  game's own Options -> Controls screen like any key. Each profile keeps them in
+  `SaveGames\<profile>.padbinds`. The `[Controller.Unit]` to `[Controller.Turret]`
+  sections are no longer read; copy any custom lines into the new file (same
+  `Input=Action` format, sections named `[Unit]` to `[Turret]`). Older versions left
+  pad buttons in the normal key slots, so press Restore Defaults once per mode to
+  get the stock keys back.
 
 - **`OnCharacterExitVehicle` now runs on the engine's own event manager.** The
   callback names, arguments and handles are unchanged, but registration, filtering,
@@ -279,6 +267,12 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
+  nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
+  on every build.
+- With a pad connected, every map load reset part of your controls: second keys and
+  pad buttons bound in Options -> Controls were replaced by the pad layout. Your
+  keyboard bindings now stay as you set them.
 - **The `OnCharacterExitVehicle*` filter arguments were documented in the wrong
   order.** The 1.0.0 Lua API reference listed `OnCharacterExitVehicleName(name, fn)`;
   the functions have always taken `(fn, name)`, matching the stock `On*` events, and
@@ -315,6 +309,36 @@ Scripts can check the running version through `GameExt.version`.
   cannot start at all, the game runs without sound instead of crashing.
 - While looking through a scope, shots left the barrel instead of the centre of the
   scope, so they visibly angled in towards the target.
+- A light attached to a building with `AttachOdf` kept shining after the building
+  was destroyed. It now goes out with the building and comes back on when it respawns.
+- Carriers (vehicle pads with `SetCarrierClass`):
+  - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
+  - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.
+  - Every carrier after the first from the same pad now descends with its cargo bay closed.
+  - Extra vehicles on multi-cargo carriers now get their team back when dropped.
+  - Carriers no longer look skewed while climbing away.
+  - Carrier turrets keep cooling down and reloading while searching for a target.
+  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
+    hovering over the pad.
+  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
+    longer crashes the game.
+  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
+    ceiling.
+  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
+  - A carrier shot down in the air now explodes on the spot instead of spinning all the
+    way to the ground.
+- Floating target bars keep their last screen position when a target dies or is
+  removed, allowing the existing HUD fade to finish without dropping onto the
+  corpse. Living targets still track normally; new targets reset the cached anchor.
+- A map rotation no longer crashes when a map with `foleyfx` regions follows another
+  map that has them.
+- The game no longer crashes, usually on the first spawn, on a map whose terrain
+  paints a foliage layer its props do not define when a map that did define that
+  layer was played earlier in the session.
+- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
+  has no `ExplosionDestruct` is removed.
+- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
+  fired from a weapon that is not a grappling hook weapon.
 
 ## 1.0.0
 

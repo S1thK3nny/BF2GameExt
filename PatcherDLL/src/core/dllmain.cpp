@@ -36,6 +36,7 @@
 #include "entity/hero_team_switch_fix.hpp"
 #include "entity/fp_fire_animation_fix.hpp"
 #include "entity/command_post_null_fix.hpp"
+#include "util/matrix_basis_fix.hpp"
 #include "entity/command_post_overflow_fix.hpp"
 #include "entity/branch_region_debug.hpp"
 #include "entity/branch_region_fix.hpp"
@@ -323,7 +324,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
       deadBodyAllFactions = cfg.get_bool("Features", "DeadBodyShootingAllFactions", false);
-      controller_set_ini_path(ini_path);
       aim_assist_load_config(ini_path);
    } else {
       g_useBarrelFireOrigin = true;
@@ -396,6 +396,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    walker_foot_diag_install(exe_base);        // Detours .text — needs the RW window
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
+   matrix_basis_fix_install(exe_base);
+   controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
    command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);

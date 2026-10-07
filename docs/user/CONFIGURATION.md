@@ -70,7 +70,7 @@ Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 h
 
 ## Controller
 
-Gamepad support. The button and axis bindings live in the `[Controller.<Mode>]` sections and are documented separately in [CONTROLLER.md](CONTROLLER.md).
+Gamepad support. Pad buttons are rebound on the game's own controls screen and kept per profile; see [CONTROLLER.md](CONTROLLER.md).
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -161,6 +161,6 @@ Engine limit patches. Most only raise a ceiling and do not change behaviour belo
 
 ## Controller bindings
 
-The `[Controller.Unit]`, `[Controller.Vehicle]`, `[Controller.Flyer]`, `[Controller.Hero]` and `[Controller.Turret]` sections map physical buttons and axes to in-game actions. Every default is written into the shipped INI as a commented-out line. See [CONTROLLER.md](CONTROLLER.md) for the input and action names and the full default tables.
+Pad buttons are not set in this file. Rebind them in the game's own **Options -> Controls** screen; each profile keeps its pad bindings in `SaveGames\<profile>.padbinds`. See [CONTROLLER.md](CONTROLLER.md) for that file, the input and action names and the default layout.
 
 Not everything is configured here. Gameplay features also read `load.cfg` parameters, ODF properties and Lua functions; see [FEATURES.md](FEATURES.md).

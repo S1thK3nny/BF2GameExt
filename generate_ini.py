@@ -3,8 +3,8 @@
 
 Reads:
   - PatcherDLL/src/util/ini_registry.hpp   (simple toggle entries)
-  - PatcherDLL/src/controller/controller_support.cpp  (per-mode button defaults,
-    raw input names, action names)
+  - PatcherDLL/src/controller/controller_support.cpp  (per-mode pad defaults,
+    raw input names, action names; documented, not written to the INI)
   - version.h
 
 Writes:
@@ -47,7 +47,6 @@ DOC_HEADER = (
 
 # The registry section the [Controller.*] binding blocks are emitted after, so
 # the pad's settings and its bindings stay together.
-BINDINGS_AFTER_SECTION = "AimAssist"
 
 SECTION_BLURBS = OrderedDict([
     ("General",
@@ -83,9 +82,8 @@ SECTION_BLURBS = OrderedDict([
      "that path force-sets the attacker as the target and re-broadcasts to "
      "nearby squadmates; it is deliberate and is left alone."),
     ("Controller",
-     "Gamepad support. The button and axis bindings live in the "
-     "`[Controller.<Mode>]` sections and are documented separately in "
-     "[CONTROLLER.md](CONTROLLER.md)."),
+     "Gamepad support. Pad buttons are rebound on the game's own controls "
+     "screen and kept per profile; see [CONTROLLER.md](CONTROLLER.md)."),
     ("AimAssist",
      "Xbox-style aim assist for gamepad players, singleplayer only. **Off by "
      "default** - set `Enabled=1` to turn it on, since it changes how aiming "
@@ -102,11 +100,11 @@ SECTION_BLURBS = OrderedDict([
 
 
 MODE_DESCRIPTIONS = OrderedDict([
-    ("Controller.Unit", "On foot, the default for infantry"),
-    ("Controller.Vehicle", "Ground vehicles and walkers"),
-    ("Controller.Flyer", "Flyers, adds `Roll`"),
-    ("Controller.Hero", "Heroes and villains"),
-    ("Controller.Turret", "Mounted and emplaced turrets"),
+    ("Unit", "On foot, the default for infantry"),
+    ("Vehicle", "Ground vehicles and walkers"),
+    ("Flyer", "Flyers, adds `Roll`"),
+    ("Hero", "Heroes and villains"),
+    ("Turret", "Mounted and emplaced turrets"),
 ])
 
 INPUT_DESCRIPTIONS = {
@@ -164,6 +162,16 @@ ACTION_DESCRIPTIONS = {
     "SecondaryPrev": "Previous secondary weapon",
     "PlayerList": "Show the player list",
     "Map": "Show the map",
+    "Chat": "Open chat",
+    "TeamChat": "Open team chat",
+    "CommSpotted": "Communication: spotted",
+    "CommMedic": "Communication: medic",
+    "CommRepair": "Communication: repair",
+    "CommAmmo": "Communication: ammo",
+    "CommPickup": "Communication: pickup",
+    "CommBackup": "Communication: backup",
+    "CommAttack": "Communication: attack",
+    "CommDefend": "Communication: defend",
     "Roll": "Roll (flyers)",
     "StrafeAxis": "Full strafe axis. Bind to a stick axis, not a button",
     "MoveAxis": "Full forward and back axis. Bind to a stick axis, not a button",
@@ -350,30 +358,6 @@ def write_ini(entries, modes, version, path: Path):
     lines.append("; To regenerate, run python generate_ini.py")
     lines.append("")
 
-    def emit_bindings():
-        # The per-mode binding sections belong immediately after the pad's own
-        # settings; splitting them with unrelated sections reads as a mistake.
-        lines.append("; Controller button/axis bindings per mode.")
-        lines.append("; Keys are raw input names, values are comma-separated action names.")
-        lines.append("; Omit a key or set it to empty to unbind.  Defaults are shown below.")
-        lines.append("; Full list of input and action names: docs/user/CONTROLLER.md")
-        lines.append(";")
-        lines.append("; These only decide WHICH button does what. If the stick drifts, is")
-        lines.append("; twitchy, or moves you when you are not touching it, that is sensitivity")
-        lines.append("; and deadzone - neither is set here. Use the game's own")
-        lines.append("; Options -> Controls screen for those.")
-        lines.append("")
-
-        for sec_name, bindings in modes.items():
-            lines.append(f"[{sec_name}]")
-            for input_name, actions in bindings:
-                if actions:
-                    lines.append(f";{input_name}={actions}")
-                # Skip empty defaults (unbound by default)
-            lines.append("")
-
-    # Registry sections, with the binding blocks dropped in right after the last
-    # controller-related one so the pad's settings and its bindings stay together.
     for section, keys in group_sections(entries).items():
         lines.append(f"[{section}]")
         for key, default, comment in keys:
@@ -381,8 +365,6 @@ def write_ini(entries, modes, version, path: Path):
                 lines.append(f"; {comment}")
             lines.append(f"{key}={default}")
         lines.append("")
-        if section == BINDINGS_AFTER_SECTION:
-            emit_bindings()
 
 
     write_generated(path, "\n".join(lines) + "\n")
@@ -419,12 +401,10 @@ def write_configuration_md(entries, version, path: Path):
     L.append("## Controller bindings")
     L.append("")
     L.append(
-        "The `[Controller.Unit]`, `[Controller.Vehicle]`, `[Controller.Flyer]`, "
-        "`[Controller.Hero]` and `[Controller.Turret]` sections map physical "
-        "buttons and axes to in-game actions. Every default is written into the "
-        "shipped INI as a commented-out line. See "
-        "[CONTROLLER.md](CONTROLLER.md) for the input and action names and the "
-        "full default tables."
+        "Pad buttons are not set in this file. Rebind them in the game's own "
+        "**Options -> Controls** screen; each profile keeps its pad bindings in "
+        "`SaveGames\\<profile>.padbinds`. See [CONTROLLER.md](CONTROLLER.md) for "
+        "that file, the input and action names and the default layout."
     )
     L.append("")
     L.append(
@@ -449,37 +429,60 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     )
     L.append("")
     L.append(
-        "> **Stick feel is not set here.** These sections decide *which* button "
+        "> **Stick feel is not set here.** Pad bindings decide *which* button "
         "does *what*, nothing more. If the stick drifts, feels twitchy or too "
         "slow, or moves you when you are not touching it, that is sensitivity "
         "and deadzone - set those in the game's own **Options -> Controls** "
-        "screen. Rebinding will not fix it, and no INI key here changes it."
+        "screen. Rebinding will not fix it."
     )
     L.append("")
 
-    L.append("## How a binding works")
+    L.append("## Where pad bindings live")
     L.append("")
     L.append(
-        "Each binding is one line in a `[Controller.<Mode>]` section. The **key** "
-        "is a raw input (a physical button or axis) and the **value** is a "
-        "comma-separated list of **actions** to fire:"
+        "The game gives every action two keys, shared by keyboard and pad. "
+        "BF2GameExt adds a third slot for the pad, so pad buttons never take a "
+        "keyboard key away. Rebind them on the game's own **Options -> Controls** "
+        "screen: select an action and press a pad button or move a stick. The "
+        "list shows pad bindings after the keyboard keys, for example "
+        "`SPACE, NUMPAD 0, PAD A`. Holding Escape clears the action, pad included, "
+        "and **Restore Defaults** resets the mode on screen, pad included."
+    )
+    L.append("")
+    L.append(
+        "Each profile keeps its pad bindings in `SaveGames\\<profile>.padbinds`, "
+        "next to the game's `<profile>.profile`. A profile without one starts from "
+        "the default layout below, and the file is written the first time the "
+        "profile is used with BF2GameExt."
+    )
+    L.append("")
+    L.append(
+        "> **After updating from an older BF2GameExt**, your profile may still "
+        "carry pad buttons in its normal key slots. Press **Restore Defaults** once "
+        "per mode on the controls screen to get the stock keys back."
+    )
+    L.append("")
+
+    L.append("## Editing the file")
+    L.append("")
+    L.append(
+        "The file can also be edited by hand while the game is closed. Each line "
+        "in a mode section is one input, then the actions it fires:"
     )
     L.append("")
     L.append("```ini")
-    L.append("[Controller.Unit]")
+    L.append("[Unit]")
     L.append("A=Jump              ; one button, one action")
-    L.append("LB=Crouch,Zoom      ; one button, two actions at once")
+    L.append("B=Crouch,Roll       ; one button, two actions at once")
     L.append("LY-=MoveAxis        ; a stick axis driving a full movement axis")
     L.append("DPadUp=MoveNeg      ; a button driving one half of an axis")
-    L.append("Back=               ; empty value unbinds it")
+    L.append("Pad2.A=Jump         ; a second pad")
     L.append("```")
     L.append("")
     L.append(
-        "In the shipped INI every default line is commented out with a leading "
-        "`;`. Uncomment a line to override that binding; anything you leave "
-        "commented keeps its default. Bindings are per mode and do not inherit, so "
-        "rebinding jump for `Controller.Unit` does not change it for "
-        "`Controller.Hero`."
+        "An input or action missing from a section is unbound. Modes do not "
+        "inherit, so `[Unit]` and `[Hero]` are set separately. The controls screen "
+        "binds one pad input per action; by hand an action can have several."
     )
     L.append("")
     L.append(
@@ -513,9 +516,8 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     )
     L.append("")
     L.append(
-        "Write only one spelling per button. A section that sets both keeps the "
-        "one listed first in this table and ignores the other, rather than "
-        "binding the button to both."
+        "The file is written with `A`/`B`/`X`/`Y`, `LT` and `RT`; the other "
+        "spellings are read the same way."
     )
     L.append("")
     L.append("| Name | Control |")
@@ -543,9 +545,12 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
         L.append(f"| `{name}` | {md_cell(ACTION_DESCRIPTIONS[name])} |")
     L.append("")
 
-    L.append("## Default bindings")
+    L.append("## Default layout")
     L.append("")
-    L.append("Blank means unbound by default.")
+    L.append(
+        "What a profile without a `.padbinds` file starts with, and what Restore "
+        "Defaults puts back. Blank means unbound."
+    )
     L.append("")
     for sec_name, bindings in modes.items():
         L.append(f"### {sec_name}")

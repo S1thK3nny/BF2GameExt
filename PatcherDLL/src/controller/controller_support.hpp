@@ -3,11 +3,12 @@
 #include "pch.h"
 
 // =============================================================================
-// Controller Support -- Default gamepad binding setup
+// Controller Support -- pad bindings
 // =============================================================================
-// BF2 (2005) has a complete controller input pipeline from its console port but
-// the PC version never populates the button->action binding table. This module
-// fills the binding table with default Xbox mappings so gamepads work in gameplay.
+// BF2 (2005) has a complete controller input pipeline from its console port, but
+// the PC game gives each action only two keys, shared by keyboard and pad. This
+// module adds a third, pad-only slot per action, kept per profile in
+// SaveGames\<profile>.padbinds and edited on the game's own controls screen.
 
 // ---------------------------------------------------------------------------
 // eRAWINPUTS_CONTROLLER -- raw input IDs (binding table keys)
@@ -82,7 +83,14 @@ enum ePROCESSEDINPUT_TYPE : int {
    // Extended boolean inputs (18-29)
    ePROCESSEDINPUT_talk                       = 18,
    ePROCESSEDINPUT_teamTalk                   = 19,
-   // 20-27 = command/bookmark slots (F5-F12)
+   ePROCESSEDINPUT_commSpotted                = 20,   // F5-F12 communication slots
+   ePROCESSEDINPUT_commMedic                  = 21,
+   ePROCESSEDINPUT_commRepair                 = 22,
+   ePROCESSEDINPUT_commAmmo                   = 23,
+   ePROCESSEDINPUT_commPickup                 = 24,
+   ePROCESSEDINPUT_commBackup                 = 25,
+   ePROCESSEDINPUT_commAttack                 = 26,
+   ePROCESSEDINPUT_commDefend                 = 27,
    ePROCESSEDINPUT_map                        = 28,
    ePROCESSEDINPUT_rollButtonDown             = 29,  // separate from crouch!
 
@@ -113,28 +121,18 @@ enum eControlMode : int {
 };
 
 // ---------------------------------------------------------------------------
-// Button/action binding entry
-// ---------------------------------------------------------------------------
-
-struct ButtonBinding {
-   int rawInput;        // eRAWINPUTS_CONTROLLER value
-   int processedAction; // ePROCESSEDINPUT_TYPE value
-};
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-// Store the INI path for controller configuration (call once from init).
-void controller_set_ini_path(const char* ini_path);
+// Hook the input loop and the controls screen for the pad slot. All builds.
+void controller_bindings_install(uintptr_t exe_base);
+void controller_bindings_uninstall();
 
-// Set up gamepad bindings for all control modes.
-// Reads per-mode overrides from [Controller.*] INI sections.
-// Must be called after the game's input system is initialized.
-// exe_base = loaded image base for address resolution.
+// Switch the engine's pad input on for the current profile. Call on every state
+// init, after the input system is up.
 void controller_setup_bindings(uintptr_t exe_base);
 
-// String-to-enum lookups for the Lua API.
+// String-to-enum lookups for .padbinds names.
 // Returns -2 on unknown string (distinct from NONE=-1).
 int controller_raw_input_from_name(const char* name);
 int controller_action_from_name(const char* name);

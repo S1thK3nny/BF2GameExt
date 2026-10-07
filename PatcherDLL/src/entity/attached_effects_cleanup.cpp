@@ -4,6 +4,9 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 
+#include <cstring>
+#include <detours.h>
+
 // =============================================================================
 // ODF AttachEffect outliving the entity that owned it.
 //
@@ -136,6 +139,8 @@ void* s_origDtor = nullptr;
 // The vftable slot we overwrote, so uninstall can put it back.
 void** s_slot = nullptr;
 
+void building_lights_install(uintptr_t exe_base);
+
 // Destroy every live effect this AttachedEffects owns, then blank the records so
 // nothing downstream can find them again. Runs before the engine's destructor.
 //
@@ -210,6 +215,7 @@ void attached_effects_cleanup_install(uintptr_t exe_base)
    default:
       return; // unknown build
    }
+   building_lights_install(exe_base);
    if (vftableVA == 0 || dtorSlotVA == 0) return; // not derived on this build
 
    void** slot     = (void**)resolve(exe_base, vftableVA);
@@ -227,8 +233,126 @@ void attached_effects_cleanup_install(uintptr_t exe_base)
    *slot      = (void*)&attached_effects_dtor_hook;
 }
 
+// =============================================================================
+// Attached ODF lights on a destroyed building.
+//
+// EntityBuilding::Kill swaps in the destroyed model and turns the hologram off,
+// but never touches m_pAttachedEffects, so an `AttachOdf` light keeps shining
+// over the wreck. Switch those lights off after Kill and back on after Respawn.
+// Both run on MP clients too, from EntityBuilding::ReadObject.
+// =============================================================================
+
+namespace {
+
+// EntityBuilding: Kill/Respawn get the object + 0x140 subobject
+constexpr uint32_t kBuildingThisAdjust = 0x140;
+constexpr uint32_t kOffBuildingState   = 0x104;  // relative to that `this`, 0 = alive
+// EntityGeometry
+constexpr uint32_t kOffAttachedEffects = 0x138;
+// AttachedEffectsClass / AttachClassData
+constexpr uint32_t kOffEntries      = 0x00;
+constexpr uint32_t kEntryStride     = 0x14;
+constexpr uint32_t kOffEntryFlags   = 0x08;
+constexpr uint32_t kEntryFlagOdf    = 0x01;  // AttachOdf, always an EntityLight
+// FLEffectObject vftable
+constexpr uint32_t kActivateSlot   = 0x18;
+constexpr uint32_t kDeactivateSlot = 0x1C;
+
+typedef void(__thiscall* BuildingFn_t)(void* self);
+BuildingFn_t s_origKill    = nullptr;
+BuildingFn_t s_origRespawn = nullptr;
+
+void set_attached_lights(uint8_t* self, bool on)
+{
+   uint8_t* geometry = self - kBuildingThisAdjust;
+   uint8_t* effects  = *(uint8_t**)(geometry + kOffAttachedEffects);
+   if (!effects) return;
+
+   uint8_t* cls  = *(uint8_t**)(effects + kOffClass);
+   uint8_t* data = *(uint8_t**)(effects + kOffAttachData);
+   if (!cls || !data) return;
+
+   uint8_t* entries = *(uint8_t**)(cls + kOffEntries);
+   const uint32_t count = *(uint8_t*)(cls + kOffCount);
+   if (!entries) return;
+
+   for (uint32_t i = 0; i < count; ++i) {
+      if (!(*(uint32_t*)(entries + i * kEntryStride + kOffEntryFlags) & kEntryFlagOdf))
+         continue;
+
+      uint8_t* rec = data + i * kAttachDataStride;
+      uint8_t* fx  = *(uint8_t**)rec;
+      if (!fx || *(uint32_t*)(fx + kOffEffectId) != *(uint32_t*)(rec + kOffSavedId))
+         continue;
+
+      // EntityLight's TurnOn/TurnOff, both no-ops when already in that state
+      void** vtbl = *(void***)fx;
+      typedef void(__thiscall* Toggle_t)(void*);
+      ((Toggle_t)vtbl[(on ? kActivateSlot : kDeactivateSlot) / sizeof(void*)])(fx);
+   }
+}
+
+void __fastcall hooked_building_kill(uint8_t* self, void* /*edx*/)
+{
+   s_origKill(self);
+   if (*(uint32_t*)(self + kOffBuildingState) != 0) set_attached_lights(self, false);
+}
+
+void __fastcall hooked_building_respawn(uint8_t* self, void* /*edx*/)
+{
+   s_origRespawn(self);
+   if (*(uint32_t*)(self + kOffBuildingState) == 0) set_attached_lights(self, true);
+}
+
+// Function prologues, checked before detouring so a non-stock exe no-ops
+const uint8_t kKillModtools[]    = {0x83, 0xEC, 0x38, 0x56, 0x8B, 0xF1};  // SUB ESP,0x38 / PUSH ESI / MOV ESI,ECX
+const uint8_t kRespawnModtools[] = {0x83, 0xEC, 0x1C, 0x56, 0x8B, 0xF1};  // SUB ESP,0x1C / PUSH ESI / MOV ESI,ECX
+const uint8_t kKillRetail[]      = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C};  // PUSH EBP / MOV EBP,ESP / SUB ESP,0x2C
+const uint8_t kRespawnRetail[]   = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C};  // PUSH EBP / MOV EBP,ESP / SUB ESP,0x0C
+
+void building_lights_install(uintptr_t exe_base)
+{
+   if (g_addr->entity_building_kill == 0 || g_addr->entity_building_respawn == 0) return;
+
+   const bool modtools = (g_build == GameBuild::Modtools);
+   void* kill    = resolve(exe_base, g_addr->entity_building_kill);
+   void* respawn = resolve(exe_base, g_addr->entity_building_respawn);
+   if (std::memcmp(kill, modtools ? kKillModtools : kKillRetail, sizeof(kKillRetail)) != 0 ||
+       std::memcmp(respawn, modtools ? kRespawnModtools : kRespawnRetail, sizeof(kRespawnRetail)) != 0)
+      return;
+
+   s_origKill    = (BuildingFn_t)kill;
+   s_origRespawn = (BuildingFn_t)respawn;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)s_origKill, hooked_building_kill);
+   DetourAttach(&(PVOID&)s_origRespawn, hooked_building_respawn);
+   if (DetourTransactionCommit() != NO_ERROR) {
+      s_origKill    = nullptr;
+      s_origRespawn = nullptr;
+   }
+}
+
+void building_lights_uninstall()
+{
+   if (!s_origKill) return;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourDetach(&(PVOID&)s_origKill, hooked_building_kill);
+   DetourDetach(&(PVOID&)s_origRespawn, hooked_building_respawn);
+   DetourTransactionCommit();
+   s_origKill    = nullptr;
+   s_origRespawn = nullptr;
+}
+
+} // namespace
+
 void attached_effects_cleanup_uninstall()
 {
+   building_lights_uninstall();
+
    if (!s_slot) return;
 
    protected_write(s_slot, &s_origDtor, sizeof(void*));
