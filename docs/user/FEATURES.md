@@ -182,7 +182,7 @@ retail builds have no command console to add them to.
 
 ## Controller Support
 
-- **Gamepad Bindings** - Five control modes (Unit, Vehicle, Flyer, Hero, Turret) with configurable button layouts. Does not affect keyboard and mouse bindings. INI: `[Controller.*]` sections
+- **Gamepad Bindings** - Pad buttons get their own binding slot, so they never take a keyboard key away. Rebind them on the game's **Options -> Controls** screen like any key; the list shows them after the keyboard keys. Each profile keeps its pad bindings in `SaveGames\<profile>.padbinds`, which starts from a default Xbox layout and can be edited by hand. See [CONTROLLER.md](CONTROLLER.md)
 - **Aim Assist** - Xbox style aim assist ported from the console version's dead code. Proximity friction, auto lock on hit, target tracking and directional friction. Controller only, singleplayer only. Off by default. INI: `[AimAssist] Enabled=1`
 - **Rumble** - Controller vibration on weapon fire, weapon charge and taking damage. Damage rumble works on every unit. Fire and charge rumble read the weapon's own ODF rumble values, and most stock weapons never set them, so a weapon that stays silent while firing needs those values added rather than fixing. ODF (weapon): `RecoilStrengthLight`/`Heavy`, `RecoilLengthLight`/`Heavy`, `RecoilDelayLight`/`Heavy`, `RecoilDecayLight`/`Heavy`, `ChargeRateLight`/`Heavy`, `MaxChargeStrengthLight`/`Heavy`, `ChargeDelayLight`/`Heavy`, `TimeAtMaxCharge`. INI: `[Controller] Rumble=1`
 

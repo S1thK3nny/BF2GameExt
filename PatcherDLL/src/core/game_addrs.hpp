@@ -934,10 +934,19 @@ namespace modtools {
    constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
    constexpr uintptr_t joystick_discover        = 0x007485F0;
    constexpr uintptr_t joystick_sync            = 0x007489A0;
-   // RawControllerInputs::sDefaultKeyboardBindings, ActionKey[5][0x2B] (6 bytes each,
-   // stride 0x102). Filled by a static initializer; tGameOpt::ResetBindings 0x00746EA0
-   // copies a mode of it into the profile (new profiles, Restore Defaults).
-   constexpr uintptr_t default_keyboard_bindings = 0x00CB2450;
+   // Pad binding third slot (controller/controller_support.cpp).
+   // RawControllerInputs::StandardInputProcess, __fastcall(this). Reads 2 slots per
+   // action from the live row this+0x20BC+mode*0x102; mode at this+8.
+   constexpr uintptr_t standard_input_process   = 0x007455F0;
+   // Controls screen callbacks, lua_CFunction.
+   constexpr uintptr_t script_cb_set_binding    = 0x004639C0;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00465740;
+   constexpr uintptr_t script_cb_reset_controls = 0x00479E00;
+   // int[5][0x2B] screen row -> action, -1 = action hidden in that mode. Read by
+   // SetBinding, GetKeyBoardCmds and GetActionFromIdx only.
+   constexpr uintptr_t controls_row_actions     = 0x00AC7948;
+   // float, SetBinding's Escape hold timer; reaching 1.0 clears the binding.
+   constexpr uintptr_t set_binding_hold_timer   = 0x00B314A0;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -2093,8 +2102,14 @@ namespace steam {
    constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
    constexpr uintptr_t joystick_discover        = 0x0061D250;
    constexpr uintptr_t joystick_sync            = 0x0061D590;
-   // sDefaultKeyboardBindings, read by tGameOpt::ResetBindings 0x0061C5A0 (LEA ESI,[EDX+imm]).
-   constexpr uintptr_t default_keyboard_bindings = 0x01F9A928;
+   // Pad binding third slot. StandardInputProcess found by its +0x2600/+0x2601
+   // writes; callbacks from the ScriptCB name table at 0x007E7100.
+   constexpr uintptr_t standard_input_process   = 0x004153C0;
+   constexpr uintptr_t script_cb_set_binding    = 0x00586B70;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00587330;
+   constexpr uintptr_t script_cb_reset_controls = 0x00597C00;
+   constexpr uintptr_t controls_row_actions     = 0x00789DE0;  // byte-identical to modtools
+   constexpr uintptr_t set_binding_hold_timer   = 0x01E5771C;
 
    // ---- Rumble -------------------------------------------------------------------
 
@@ -2916,8 +2931,13 @@ namespace gog {
    constexpr uintptr_t joystick_config_base     = 0x01EFA590;
    constexpr uintptr_t joystick_discover        = 0x0061E2B0;
    constexpr uintptr_t joystick_sync            = 0x0061E5F0;
-   // sDefaultKeyboardBindings (tools/port_gog.py data: 3 votes, all score 1.00).
-   constexpr uintptr_t default_keyboard_bindings = 0x01F9BDD8;
+   // Pad binding third slot (tools/port_gog.py: code score 1.00, data 5 and 6 votes).
+   constexpr uintptr_t standard_input_process   = 0x00415380;
+   constexpr uintptr_t script_cb_set_binding    = 0x00587B20;
+   constexpr uintptr_t script_cb_get_keyboard_cmds = 0x005882E0;
+   constexpr uintptr_t script_cb_reset_controls = 0x00598BB0;
+   constexpr uintptr_t controls_row_actions     = 0x0078AD90;
+   constexpr uintptr_t set_binding_hold_timer   = 0x01E58BCC;
 
    // ---- Rumble -------------------------------------------------------------------
 

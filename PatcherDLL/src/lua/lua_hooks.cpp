@@ -224,6 +224,18 @@ void lua_set_global_string(lua_State* L, const char* name, const char* value)
    g_lua.settable(L, -10001);
 }
 
+// The lua_tolstring entry is luaL_checklstring on modtools but plain Lua 5.0
+// lua_tostring(L, idx) on Steam/GOG, which never writes a length. There the
+// length comes from the TString header: data at +0x10, len (size_t) at +0xC.
+static fn_lua_tolstring s_rawToString = nullptr;
+
+static const char* __cdecl tostring_with_len(lua_State* L, int idx, size_t* len)
+{
+   const char* s = s_rawToString(L, idx, nullptr);
+   if (len) *len = s ? *(const size_t*)(s - 4) : 0;
+   return s;
+}
+
 void lua_hooks_install(uintptr_t exe_base)
 {
    // Requires the Lua VM API + init_state; no-ops on builds that lack them.
@@ -234,6 +246,10 @@ void lua_hooks_install(uintptr_t exe_base)
    g_lua.pushlstring  = (fn_lua_pushlstring) resolve(exe_base, g_addr->lua_pushlstring);
    g_lua.settable     = (fn_lua_settable)    resolve(exe_base, g_addr->lua_settable);
    g_lua.tolstring    = (fn_lua_tolstring)   resolve(exe_base, g_addr->lua_tolstring);
+   if (g_build != GameBuild::Modtools) {
+      s_rawToString   = g_lua.tolstring;
+      g_lua.tolstring = tostring_with_len;
+   }
    g_lua.pushnumber   = (fn_lua_pushnumber)  resolve(exe_base, g_addr->lua_pushnumber);
    g_lua.tonumber     = (fn_lua_tonumber)    resolve(exe_base, g_addr->lua_tonumber);
    g_lua.gettop       = (fn_lua_gettop)      resolve(exe_base, g_addr->lua_gettop);
@@ -325,6 +341,7 @@ void lua_hooks_uninstall()
    particle_density_uninstall();
    command_post_null_fix_uninstall();
    matrix_basis_fix_uninstall();
+   controller_bindings_uninstall();
    branch_region_debug_uninstall();
    branch_region_fix_uninstall();
    anim_bank_append_uninstall();

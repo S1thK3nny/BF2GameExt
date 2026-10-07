@@ -6,28 +6,30 @@
 
 Gamepad binding reference for BF2GameExt v1.1.0. Enable the pad itself with `[Controller] Enabled=1`. Aim assist is separate and is **off by default** - turn it on with `[AimAssist] Enabled=1`. See [CONFIGURATION.md](CONFIGURATION.md#controller) for both and for the aim assist tuning values.
 
-> **Stick feel is not set here.** These sections decide *which* button does *what*, nothing more. If the stick drifts, feels twitchy or too slow, or moves you when you are not touching it, that is sensitivity and deadzone - set those in the game's own **Options -> Controls** screen. Rebinding will not fix it, and no INI key here changes it.
+> **Stick feel is not set here.** Pad bindings decide *which* button does *what*, nothing more. If the stick drifts, feels twitchy or too slow, or moves you when you are not touching it, that is sensitivity and deadzone - set those in the game's own **Options -> Controls** screen. Rebinding will not fix it.
 
-## How a binding works
+## Where pad bindings live
 
-Each binding is one line in a `[Controller.<Mode>]` section. The **key** is a raw input (a physical button or axis) and the **value** is a comma-separated list of **actions** to fire:
+The game gives every action two keys, shared by keyboard and pad. BF2GameExt adds a third slot for the pad, so pad buttons never take a keyboard key away. Rebind them on the game's own **Options -> Controls** screen: select an action and press a pad button or move a stick. The list shows pad bindings after the keyboard keys, for example `SPACE, NUMPAD 0, PAD A`. Holding Escape clears the action, pad included, and **Restore Defaults** resets the mode on screen, pad included.
+
+Each profile keeps its pad bindings in `SaveGames\<profile>.padbinds`, next to the game's `<profile>.profile`. A profile without one starts from the default layout below, and the file is written the first time the profile is used with BF2GameExt.
+
+> **After updating from an older BF2GameExt**, your profile may still carry pad buttons in its normal key slots. Press **Restore Defaults** once per mode on the controls screen to get the stock keys back.
+
+## Editing the file
+
+The file can also be edited by hand while the game is closed. Each line in a mode section is one input, then the actions it fires:
 
 ```ini
-[Controller.Unit]
+[Unit]
 A=Jump              ; one button, one action
-LB=Crouch,Zoom      ; one button, two actions at once
+B=Crouch,Roll       ; one button, two actions at once
 LY-=MoveAxis        ; a stick axis driving a full movement axis
 DPadUp=MoveNeg      ; a button driving one half of an axis
-Back=               ; empty value unbinds it
+Pad2.A=Jump         ; a second pad
 ```
 
-In the shipped INI every default line is commented out with a leading `;`. Uncomment a line to override that binding; anything you leave commented keeps its default. Bindings are per mode and do not inherit, so rebinding jump for `Controller.Unit` does not change it for `Controller.Hero`.
-
-## The INI layout and your own rebinds
-
-These sections are the **default** pad layout. When you start a mission with a pad connected, every mode of your profile that has no pad bindings yet gets it. From then on the game's own **Options -> Controls** screen is in charge: rebind any action there, keyboard or pad, and it stays rebound. BF2GameExt never overwrites a mode that has pad bindings.
-
-New profiles start with the layout, and **Restore Defaults** on the controls screen loads it again, together with the stock keyboard keys, for the mode the screen is showing. That is also how an edited `[Controller.*]` section reaches a mode that already has pad bindings.
+An input or action missing from a section is unbound. Modes do not inherit, so `[Unit]` and `[Hero]` are set separately. The controls screen binds one pad input per action; by hand an action can have several.
 
 Full axes (`MoveAxis`, `TurnAxis`, `StrafeAxis`, `PitchAxis`) expect a stick axis on the left side. The half-axis actions (`MovePos`/`MoveNeg` and friends) exist so you can drive movement from a digital button such as a d-pad direction.
 
@@ -35,11 +37,11 @@ Full axes (`MoveAxis`, `TurnAxis`, `StrafeAxis`, `PitchAxis`) expect a stick axi
 
 | Section | Applies to |
 |---------|------------|
-| `[Controller.Unit]` | On foot, the default for infantry |
-| `[Controller.Vehicle]` | Ground vehicles and walkers |
-| `[Controller.Flyer]` | Flyers, adds `Roll` |
-| `[Controller.Hero]` | Heroes and villains |
-| `[Controller.Turret]` | Mounted and emplaced turrets |
+| `[Unit]` | On foot, the default for infantry |
+| `[Vehicle]` | Ground vehicles and walkers |
+| `[Flyer]` | Flyers, adds `Roll` |
+| `[Hero]` | Heroes and villains |
+| `[Turret]` | Mounted and emplaced turrets |
 
 ## Raw input names
 
@@ -47,7 +49,7 @@ Valid on the left of the `=`.
 
 The four face buttons have two spellings for the same button. `A`/`B`/`X`/`Y` are the Xbox labels. `FaceDown`/`FaceRight`/`FaceLeft`/`FaceUp` name the button by **where it sits on the pad in your hands**, which is the unambiguous form: a DualShock prints different symbols in those positions, and a Nintendo pad swaps A with B and X with Y, so `B` means a different physical button depending on the pad. Either spelling works and both always drive the same button.
 
-Write only one spelling per button. A section that sets both keeps the one listed first in this table and ignores the other, rather than binding the button to both.
+The file is written with `A`/`B`/`X`/`Y`, `LT` and `RT`; the other spellings are read the same way.
 
 | Name | Control |
 |------|---------|
@@ -126,11 +128,11 @@ Valid on the right of the `=`, comma-separated.
 | `PitchNeg` | Pitch up. Half-axis, for binding a button to an axis |
 | `None` | Explicitly unbound |
 
-## Default bindings
+## Default layout
 
-Blank means unbound by default.
+What a profile without a `.padbinds` file starts with, and what Restore Defaults puts back. Blank means unbound.
 
-### Controller.Unit
+### Unit
 
 | Input | Actions |
 |-------|---------|
@@ -155,7 +157,7 @@ Blank means unbound by default.
 | `RX+` | `TurnAxis` |
 | `RY-` | `PitchAxis` |
 
-### Controller.Vehicle
+### Vehicle
 
 | Input | Actions |
 |-------|---------|
@@ -180,7 +182,7 @@ Blank means unbound by default.
 | `RX+` | `TurnAxis` |
 | `RY-` | `PitchAxis` |
 
-### Controller.Flyer
+### Flyer
 
 | Input | Actions |
 |-------|---------|
@@ -205,7 +207,7 @@ Blank means unbound by default.
 | `RX+` | `TurnAxis` |
 | `RY-` | `PitchAxis` |
 
-### Controller.Hero
+### Hero
 
 | Input | Actions |
 |-------|---------|
@@ -230,7 +232,7 @@ Blank means unbound by default.
 | `RX+` | `TurnAxis` |
 | `RY-` | `PitchAxis` |
 
-### Controller.Turret
+### Turret
 
 | Input | Actions |
 |-------|---------|

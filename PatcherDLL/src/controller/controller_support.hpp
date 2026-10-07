@@ -3,11 +3,12 @@
 #include "pch.h"
 
 // =============================================================================
-// Controller Support -- Default gamepad binding setup
+// Controller Support -- pad bindings
 // =============================================================================
-// BF2 (2005) has a complete controller input pipeline from its console port but
-// the PC version never populates the button->action binding table. This module
-// fills the binding table with default Xbox mappings so gamepads work in gameplay.
+// BF2 (2005) has a complete controller input pipeline from its console port, but
+// the PC game gives each action only two keys, shared by keyboard and pad. This
+// module adds a third, pad-only slot per action, kept per profile in
+// SaveGames\<profile>.padbinds and edited on the game's own controls screen.
 
 // ---------------------------------------------------------------------------
 // eRAWINPUTS_CONTROLLER -- raw input IDs (binding table keys)
@@ -113,29 +114,18 @@ enum eControlMode : int {
 };
 
 // ---------------------------------------------------------------------------
-// Button/action binding entry
-// ---------------------------------------------------------------------------
-
-struct ButtonBinding {
-   int rawInput;        // eRAWINPUTS_CONTROLLER value
-   int processedAction; // ePROCESSEDINPUT_TYPE value
-};
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-// Store the INI path for controller configuration (call once from init).
-void controller_set_ini_path(const char* ini_path);
+// Hook the input loop and the controls screen for the pad slot. All builds.
+void controller_bindings_install(uintptr_t exe_base);
+void controller_bindings_uninstall();
 
-// Make the [Controller.*] INI layout the engine's default pad bindings, and give
-// it to each mode of the current profile that has no pad bindings at all.
-// Bindings the player set on the controls screen are never overwritten.
-// Must be called after the game's input system is initialized.
-// exe_base = loaded image base for address resolution.
+// Switch the engine's pad input on for the current profile. Call on every state
+// init, after the input system is up.
 void controller_setup_bindings(uintptr_t exe_base);
 
-// String-to-enum lookups for the Lua API.
+// String-to-enum lookups for .padbinds names.
 // Returns -2 on unknown string (distinct from NONE=-1).
 int controller_raw_input_from_name(const char* name);
 int controller_action_from_name(const char* name);

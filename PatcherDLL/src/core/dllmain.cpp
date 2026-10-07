@@ -314,7 +314,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
       deadBodyAllFactions = cfg.get_bool("Features", "DeadBodyShootingAllFactions", false);
-      controller_set_ini_path(ini_path);
       aim_assist_load_config(ini_path);
    } else {
       g_useBarrelFireOrigin = true;
@@ -383,6 +382,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
+   controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
    command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);

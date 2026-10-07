@@ -269,22 +269,21 @@ only been verified in play on Modtools.
 ## Gamepad problems
 
 - The pad needs `[Controller] Enabled=1`.
-- Bindings are per mode and do not inherit. Rebinding jump under
-  `[Controller.Unit]` does not change it for `[Controller.Hero]`.
-- In the shipped INI every default is commented out with a leading `;`.
-  Uncomment a line to override it.
-- **Edited a `[Controller.*]` line and nothing changed?** The INI is the
-  default layout. A mode that already has pad bindings keeps them, so press
-  **Restore Defaults** in **Options -> Controls** to load the edited layout.
-  It resets the mode the screen is showing.
+- Rebind pad buttons in **Options -> Controls**. Bindings are per mode and do
+  not inherit, so rebinding jump on foot does not change it for heroes.
+- **Pad buttons sitting in your normal key slots after updating?** Older
+  versions put them there. Press **Restore Defaults** once per mode on the
+  controls screen; it resets the mode the screen is showing.
+- Pad bindings are kept per profile in `SaveGames\<profile>.padbinds`. Delete
+  that file to start the profile over from the default pad layout.
 - Aim assist is off by default. It needs `[AimAssist] Enabled=1` of its own,
   separately from `[Controller] Enabled=1`, and it is singleplayer only and
   controller only.
 - **Stick drifting, twitchy, too slow, or moving you when you are not touching
   it?** That is sensitivity and deadzone, and BF2GameExt does not set either.
   Change them in the game's own **Options -> Controls** screen. Nothing in
-  `BF2GameExt.ini` affects stick feel; the `[Controller.*]` sections only decide
-  which button does what.
+  `BF2GameExt.ini` affects stick feel, and pad bindings only decide which
+  button does what.
 
 Full reference: [CONTROLLER.md](CONTROLLER.md).
 
