@@ -81,6 +81,8 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- A light attached to a building with `AttachOdf` kept shining after the building
+  was destroyed. It now goes out with the building and comes back on when it respawns.
 - Carriers (vehicle pads with `SetCarrierClass`):
   - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
   - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.

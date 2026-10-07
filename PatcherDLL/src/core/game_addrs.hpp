@@ -1510,6 +1510,11 @@ namespace modtools {
    constexpr uintptr_t attached_effects_vftable   = 0x00A3873C;
    constexpr uintptr_t attached_effects_dtor_slot = 0x0040812F;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x004D2770;
+   constexpr uintptr_t entity_building_respawn = 0x004D2C80;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -2787,6 +2792,11 @@ namespace steam {
    constexpr uintptr_t attached_effects_vftable   = 0x00796EF0;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F40;  // slot 0's stored value
 
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -3785,6 +3795,11 @@ namespace gog {
    // 0 = not derived on this build.
    constexpr uintptr_t attached_effects_vftable   = 0x00797E90;
    constexpr uintptr_t attached_effects_dtor_slot = 0x00446F20;  // slot 0's stored value
+
+   // EntityBuilding::Kill / Respawn, `this` = object + 0x140. Attached ODF lights
+   // are switched off and back on around them. See attached_effects_cleanup.cpp.
+   constexpr uintptr_t entity_building_kill    = 0x00492B00;
+   constexpr uintptr_t entity_building_respawn = 0x00492F30;
 
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
