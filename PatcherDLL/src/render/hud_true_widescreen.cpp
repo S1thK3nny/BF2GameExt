@@ -27,21 +27,30 @@
 //     16:9; ElementMap scales the minimap by 1 + (that - 1) / 4; text gets none.
 // Those apply to whole screen groups, and every .hud file shares the groups.
 //
-// A file with TrueWidescreen(1) in its FileInfo opts its own pieces out:
-//   - FileInfo::ReadData reads the flag. HUD::Manager::Load (one call per
+// A file with AuthoredRatio(w, h) in its FileInfo, the screen shape its numbers
+// were written for, opts its own pieces out; TrueWidescreen(1) is
+// AuthoredRatio(4, 3):
+//   - FileInfo::ReadData reads the lines. HUD::Manager::Load (one call per
 //     file) notes which elements the file made by comparing HUD::Element::sList
-//     before and after, and while the file loads its elements are laid out with
-//     a 4:3 width (GetContainerViewWidth, the Screen-mode width the
-//     relative-to-pixels conversion is handed, and sViewportWidth itself, lent
-//     until the file is loaded, which ElementMap's constructor and ElementText's
-//     TextBox read directly) and see a 4:3 aspect at the bitmap, minimap and
-//     segmented-bar calls, so nothing is stretched;
+//     before and after, and while the file loads its elements are laid out on
+//     a screen of the authored ratio at the real height, the layout
+//     (GetContainerViewWidth, the Screen-mode width the relative-to-pixels
+//     conversion is handed, and sViewportWidth itself, lent until the file is
+//     loaded, which ElementMap's constructor and ElementText's TextBox read
+//     directly) and see a 4:3 aspect at the bitmap, minimap and segmented-bar
+//     calls, so nothing is stretched;
 //   - afterwards each top-level piece is given a slide from where it sits:
-//     none, half or all of the width beyond 4:3 (left, middle and right third
-//     of the layout). A piece written at the corner with no position is a
-//     plain container: its children are slid one by one instead. A Target
-//     element is never slid: ElementTarget::Update places its markers from the
-//     real viewport width;
+//     none, half or all of the width the screen has beyond the layout (left,
+//     middle and right third of the layout), negative on a screen narrower than
+//     it. A piece written at the corner with no position is a plain container:
+//     its children are slid one by one instead. A Target element is never
+//     slid: ElementTarget::Update places its markers from the real viewport
+//     width;
+//   - a piece with ScreenAnchor("Left", "Center" or "Right"), or a share of
+//     that width from 0 to 1, is slid by that share wherever it sits, and at
+//     the corner it is one piece, not a plain container. HUD::Element::ReadData
+//     reads the line: every element type's reader ends up there for a property
+//     it does not know, and nothing before it reads this one;
 //   - the element draw (the one every interface element goes through) draws an
 //     opted-in top-level piece under a 1:1 parent of its own, slid, instead of
 //     its screen group's squashed one; its children inherit it;
@@ -49,19 +58,35 @@
 //     screen: reticule, lock-on, GameExt's target bar and command posts) into
 //     the layout fraction that lands on the real point, and takes
 //     ReticleCorrection back off the reticule's y;
-//   - GetContainerViewWidth keeps the 4:3 width for the file's elements later,
-//     when events move them.
-// Only with one viewport (split screen keeps the stock HUD) and only on a
-// screen the engine treats as wide. Everything is read when a file loads.
+//   - GetContainerViewWidth keeps the layout width for the file's elements
+//     later, when events move them.
+// Only with one viewport (split screen keeps the stock HUD). A 4:3 file only on
+// a screen the engine treats as wide, since on a 4:3 one the stock layout is
+// its own; any other ratio on every screen. Everything is read when a file
+// loads.
 //
 // The modtools HUD editor writes a .hud back through the same per-element
-// width, so it writes an opted-in file's 4:3 numbers. The gaps are closed:
-// FileInfo's writer only knows SplitMode, Viewports and Widescreen, so it is
-// followed by TrueWidescreen(1) for a FileInfo that read it; a Screen-mode
-// position is written against the real width, so the pixels-to-relative
-// conversion gets the 4:3 one for an opted-in element, as on the way in; and
-// ElementText's SetProperty, GetProperty and WriteData read sViewportWidth for
-// TextBox, so it is lent the 4:3 width while they run on an opted-in element.
+// width, so it writes an opted-in file's numbers for its authored ratio,
+// whatever screen it runs on. An element has that width if the file made it
+// while it loaded, which takes in the templates the draw never sees (a
+// BarSegmented's Segment, VehicleSeating's Empty, Self, Player and AI: only
+// copies of them are drawn), or if it is drawn under one of the file's pieces,
+// which takes in what is made later, such as segments the editor makes again.
+// The gaps are closed: FileInfo's writer only knows SplitMode, Viewports and
+// Widescreen, so it is followed by the TrueWidescreen and AuthoredRatio lines
+// the FileInfo read; a Screen-mode position is written against the real width,
+// so the pixels-to-relative conversion gets the layout's for an opted-in
+// element, as on the way in; ElementText's SetProperty, GetProperty and
+// WriteData read sViewportWidth for TextBox, so it is lent the layout width
+// while they run on an opted-in element; and Element::WriteData, which writes
+// what every element has, is followed by the element's ScreenAnchor line.
+// Slides are worked out when a file loads, so a piece an event moves keeps
+// its edge; a piece the editor moves (it changes the selected element's
+// properties inside Editor::Update) is placed again at once, as the next load
+// would place it, so what the editor shows is what the file gives. The
+// editor's panel reads and changes a piece's ScreenAnchor through Element's
+// GetProperty and SetProperty, where every element type's end up for a
+// property they do not know; hud_editor_properties lists it.
 //
 //                                     modtools    Steam       GOG
 //   FileInfo::ReadData                0x006B7F50  0x00564DB0  0x00565B30
@@ -84,7 +109,12 @@
 //   FileInfo vtable                   0x00A60398  0x007A329C  0x007A4064
 //   HUD::Element::sViewportWidth      0x00BA38FC  0x01E56C34  0x01E580E4
 //   ElementTarget vtable              0x00A5E000  0x007A17FC  0x007A2658
+//   HUD::Element::ReadData            0x00693790  0x00549250  0x00549FA0
 //   FileInfo WriteData                0x006B8090  (the editor's: modtools only)
+//   HUD::Element::WriteData           0x00693F20
+//   HUD::Editor::Update               0x0068FAC0
+//   HUD::Element::GetProperty         0x006932E0
+//   HUD::Element::SetProperty         0x006946B0
 //   indent writer / format writer     0x006B5A20 / 0x006B5A50
 //   pixels-to-relative conversion     0x00691170
 //   gConfigFiles / count              0x00BA4070 / 0x00BA4480
@@ -100,7 +130,9 @@
 // XMM0 and keeps every register but EAX and ECX; the relative-to-pixels
 // conversion takes the mode in ECX, value, frame and view in XMM1-3 and the
 // screen width on the stack, returns in XMM0 and changes only XMM0 and XMM1;
-// and Load reads a top-level item with MOV ECX,ESI / CALL [EAX+8]. LTCG
+// and Load reads a top-level item with MOV ECX,ESI / CALL [EAX+8].
+// Element::ReadData keeps its contract, and each of its callers returns what
+// it returns straight away, so it keeps nothing in a register across it. LTCG
 // callers keep values in registers a callee leaves alone, XMM ones too, so
 // the retail stand-ins give back every register but the result. The editor's
 // pieces are modtools only: GameExt keeps the editor off on retail.
@@ -112,6 +144,7 @@
 // pieces are found in that tree, the one the draw walks, since HUD::Element's
 // group (+0xF4) is only set for some. An Event is { EventClass*, payload* };
 // an EventClass starts with its name's PblHash and its type (9 = Vector3).
+// HUD::Editor keeps its selected element at +0x14.
 // =============================================================================
 
 namespace {
@@ -120,6 +153,8 @@ using namespace hud_true_widescreen;
 using Data = hud_number_math::Data;
 
 constexpr uint32_t kTrueWidescreen = pbl_hash("TrueWidescreen");
+constexpr uint32_t kAuthoredRatio  = pbl_hash("AuthoredRatio");
+constexpr uint32_t kScreenAnchor   = pbl_hash("ScreenAnchor");
 
 constexpr uint32_t kRed         = 0xB0;
 constexpr uint32_t kNode        = 0xB4;
@@ -137,8 +172,12 @@ constexpr float    kFourThreeAspect = 0.75f;   // height / width of a 4:3 screen
 constexpr int      kMaxDepth    = 64;          // a group chain longer than this is not a HUD
 constexpr int      kMaxList     = 100000;      // a longer sList is not one
 constexpr int      kMaxPlaced   = 512;
+constexpr int      kMaxMade     = 4096;        // a power of two; filled to three quarters
 constexpr int      kMaxFiles    = 64;
+constexpr int      kMaxRatios   = 8;           // authored ratios in use at once
+constexpr int      kMaxAnchors  = 512;         // ScreenAnchor lines in the loaded files
 constexpr uint32_t kBarSegmentedBase = 0x200;  // ElementBarSegmented's ElementBar base
+constexpr uint32_t kEditorElement = 0x14;      // HUD::Editor: the selected element
 
 using ReadDataFn  = bool(__fastcall*)(void* self, void* edx, void* config, const Data* data);
 using WriteDataFn = void(__fastcall*)(void* self, void* edx, void* file, int indent);
@@ -152,6 +191,8 @@ using PositionFn  = void(__cdecl*)(const uint32_t* event, uint8_t* element);
 using DrawFn      = void(__fastcall*)(uint8_t* element, void* edx, const float* parent, uint32_t color);
 using AspectFn    = float(__cdecl*)();
 using LoadRetailFn = void(__fastcall*)(void* config);   // retail: the PblConfig in ECX
+using EditorUpdateFn = void(__fastcall*)(uint8_t* editor, void* edx, void* inputs, float dt);
+using PropertyFn  = bool(__fastcall*)(void* self, void* edx, uint32_t property, void* value);
 
 ReadDataFn  s_readData  = nullptr;
 WriteDataFn s_writeData = nullptr;
@@ -168,6 +209,11 @@ PositionFn  s_position  = nullptr;
 DrawFn      s_draw      = nullptr;
 AspectFn    s_aspect    = nullptr;
 LoadRetailFn s_loadRetail = nullptr;
+ReadDataFn  s_elementRead  = nullptr;   // HUD::Element::ReadData
+WriteDataFn s_elementWrite = nullptr;   // HUD::Element::WriteData (the editor's)
+EditorUpdateFn s_editorUpdate = nullptr;
+PropertyFn  s_elementGet   = nullptr;   // HUD::Element::GetProperty (the editor's panel)
+PropertyFn  s_elementSet   = nullptr;   // HUD::Element::SetProperty
 void*       s_viewWidthRetail = nullptr;   // reached only by JMP from its stand-in
 void*       s_toPixelsRetail  = nullptr;   // reached by JMP or CALL from its stand-in
 
@@ -181,12 +227,19 @@ const int*            s_configCount = nullptr;
 uint32_t              s_fileInfoVtable = 0;
 uint32_t              s_targetVtable   = 0;
 float*                s_viewportWidth  = nullptr;   // HUD::Element::sViewportWidth
-bool                  s_viewportLent   = false;     // holds the 4:3 width while a file loads
+bool                  s_viewportLent   = false;     // holds the layout width while a file loads
 float                 s_viewportOwn    = 0.0f;      // what it held before
 
-// FileInfos that read TrueWidescreen(1), for the editor's writer.
-const void* s_optedFiles[kMaxFiles];
-int         s_optedFileCount = 0;
+// FileInfos that read TrueWidescreen(1) or AuthoredRatio(w, h), and what they
+// read, for the editor's writer.
+struct OptedFile {
+   const void* info;
+   bool        trueWidescreen;   // read TrueWidescreen(1)
+   float       ratioW;           // read AuthoredRatio(ratioW, ratioH); 0 for none
+   float       ratioH;
+};
+OptedFile s_optedFiles[kMaxFiles];
+int       s_optedFileCount = 0;
 
 // A piece the draw slides: a top-level element of an opted-in file, or a child
 // of one that is a plain container. red and vtable, taken when it was placed,
@@ -198,15 +251,46 @@ struct Placed {
    const uint8_t* container;   // the plain container it was placed under, or null at the top
    float          slide;
    bool           isContainer;
+   float          ratio;       // its file's authored ratio
 };
 
 Placed s_placed[kMaxPlaced];
 int    s_placedCount = 0;
 bool   s_warnedFull  = false;
-bool s_loading      = false;   // inside HUD::Manager::Load
-bool s_loadingWide  = false;   // the screen was wide when this file began loading
-bool s_fileOptedIn  = false;   // this file's FileInfo has TrueWidescreen(1)
-bool s_warnedFlag   = false;
+
+// An element's ScreenAnchor line, read in any file: the share of the width
+// beyond the layout it moves by, and whether it named an edge, for the
+// editor's writer. red and vtable as for Placed.
+struct Anchored {
+   const uint8_t* element;
+   const uint8_t* red;
+   uint32_t       vtable;
+   float          share;
+   bool           named;
+};
+
+Anchored s_anchors[kMaxAnchors];
+int      s_anchorCount = 0;
+int      s_anchorsRead = 0;   // lines the file being loaded had
+bool     s_warnedAnchorLine    = false;
+bool     s_warnedAnchorsFull   = false;
+bool     s_warnedAnchorsUnused = false;
+
+// Every element an opted-in file made while it loaded, templates included.
+MadeSet<kMaxMade> s_made;
+bool s_warnedMadeFull = false;
+bool  s_loading      = false;   // inside HUD::Manager::Load
+float s_loadWidth    = 0.0f;    // the screen when this file began loading, 0 if unknown
+float s_loadHeight   = 0.0f;    //   or with more than one viewport
+bool  s_fileTrueWidescreen = false;   // this file's FileInfo has TrueWidescreen(1)
+float s_fileRatio    = 0.0f;    // its AuthoredRatio, 0 for none
+float s_loadingRatio = 0.0f;    // the ratio this file's elements are laid out for, 0 when they are not
+bool  s_warnedFlag   = false;
+bool  s_warnedRatio  = false;
+
+// The authored ratios of the files laid out, for screen_for.
+float s_ratios[kMaxRatios];
+int   s_ratioCount   = 0;
 int  s_drawDepth    = 0;       // draw nesting under the screen groups
 bool s_inViewGroup  = false;   // drawing under one of the HUD screen groups
 const Placed* s_drawContainer = nullptr;   // drawing under an opted-in plain container
@@ -231,10 +315,19 @@ bool one_viewport()
    return cameras && *reinterpret_cast<const int*>(cameras + kNumCameras) == 1;
 }
 
-// Wide and one viewport: the only case opted-in pieces are treated at all.
-bool wide(float& width, float& height)
+// One viewport, on a screen a file of this ratio is laid out on: the only case
+// its pieces are treated at all.
+bool laid_out_now(float ratio, float& width, float& height)
 {
-   return screen_size(width, height) && is_wide(width, height) && one_viewport();
+   return screen_size(width, height) && laid_out_on(width, height, ratio) && one_viewport();
+}
+
+// A ratio a laid-out file uses, kept for screen_for.
+void note_ratio(float ratio)
+{
+   for (int i = 0; i < s_ratioCount; ++i)
+      if (s_ratios[i] == ratio) return;
+   if (s_ratioCount < kMaxRatios) s_ratios[s_ratioCount++] = ratio;
 }
 
 // ---- elements ----------------------------------------------------------------
@@ -251,13 +344,28 @@ void local_position(const uint8_t* red, float& x, float& y)
    y = local[13];
 }
 
-bool current(const Placed& p)
+// Still the element it was: the same vtable and drawable.
+bool still(const uint8_t* element, const void* red, uint32_t vtable)
 {
    __try {
-      return *reinterpret_cast<const uint32_t*>(p.element) == p.vtable && red_of(p.element) == p.red;
+      return *reinterpret_cast<const uint32_t*>(element) == vtable && red_of(element) == red;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return false;
    }
+}
+
+bool current(const Placed& p)
+{
+   return still(p.element, p.red, p.vtable);
+}
+
+// An element's ScreenAnchor, or null.
+const Anchored* anchor_of(const uint8_t* element)
+{
+   for (int i = 0; i < s_anchorCount; ++i)
+      if (s_anchors[i].element == element)
+         return still(element, s_anchors[i].red, s_anchors[i].vtable) ? &s_anchors[i] : nullptr;
+   return nullptr;
 }
 
 const Placed* placed_element(const uint8_t* element)
@@ -318,16 +426,27 @@ const Placed* placed_top_of(const uint8_t* red, const uint8_t** underTop)
    return nullptr;
 }
 
-// Laid out on 4:3: an element of the opted-in file being loaded, or one that
-// is part of a placed top-level piece.
-bool laid_out_wide(const uint8_t* element)
+// Still the element the file made.
+bool made_as(const uint8_t* element, const MadeSet<kMaxMade>::Entry& made)
 {
-   if (s_loading) return s_fileOptedIn && s_loadingWide;
-   if (!s_placedCount || !element) return false;
+   return still(element, made.red, made.vtable);
+}
+
+// The ratio an element is laid out for, 0 for none: that of the opted-in file
+// being loaded, of the opted-in file that made it, or of the placed top-level
+// piece it is part of.
+float layout_ratio(const uint8_t* element)
+{
+   if (s_loading) return s_loadingRatio;
+   if (!element || (!s_placedCount && !s_made.count)) return 0.0f;
    __try {
-      return placed_top_of(red_of(element), nullptr) != nullptr;
+      const MadeSet<kMaxMade>::Entry* made = s_made.find(element);
+      if (made && made_as(element, *made)) return made->ratio;
+      if (!s_placedCount) return 0.0f;
+      const Placed* p = placed_top_of(red_of(element), nullptr);
+      return p ? p->ratio : 0.0f;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      return false;
+      return 0.0f;
    }
 }
 
@@ -397,21 +516,38 @@ uintptr_t next_node(uintptr_t node)
    return *reinterpret_cast<const uintptr_t*>(node);
 }
 
-// Drops entries whose element is gone: the HUD unloads between missions.
-void prune()
+// Drops the entries whose element is gone: the HUD unloads between missions.
+template <class Entry, int Max>
+void keep_listed(Entry (&entries)[Max], int& count)
 {
-   bool alive[kMaxPlaced] = {};
+   bool alive[Max] = {};
    const uintptr_t end = reinterpret_cast<uintptr_t>(s_listEnd);
    int n = 0;
    for (uintptr_t node = *s_listEnd; node && node != end && n < kMaxList; node = next_node(node), ++n) {
       const uint8_t* element = reinterpret_cast<const uint8_t*>(node - kNode);
-      for (int i = 0; i < s_placedCount; ++i)
-         if (s_placed[i].element == element) alive[i] = true;
+      for (int i = 0; i < count; ++i)
+         if (entries[i].element == element) alive[i] = true;
    }
    int kept = 0;
-   for (int i = 0; i < s_placedCount; ++i)
-      if (alive[i] && current(s_placed[i])) s_placed[kept++] = s_placed[i];
-   s_placedCount = kept;
+   for (int i = 0; i < count; ++i)
+      if (alive[i] && still(entries[i].element, entries[i].red, entries[i].vtable)) entries[kept++] = entries[i];
+   count = kept;
+}
+
+// The same for the elements opted-in files made: keeps the ones still in the
+// list, as they were made.
+void prune_made()
+{
+   static MadeSet<kMaxMade> kept;
+   kept.clear();
+   const uintptr_t end = reinterpret_cast<uintptr_t>(s_listEnd);
+   int n = 0;
+   for (uintptr_t node = *s_listEnd; node && node != end && n < kMaxList; node = next_node(node), ++n) {
+      const uint8_t* element = reinterpret_cast<const uint8_t*>(node - kNode);
+      const MadeSet<kMaxMade>::Entry* made = s_made.find(element);
+      if (made && made_as(element, *made)) kept.add(made->element, made->red, made->vtable, made->ratio);
+   }
+   s_made = kept;
 }
 
 // The elements made since `tail` was the list's last node: the element
@@ -430,7 +566,7 @@ bool for_each_made(uintptr_t tail, Visit visit)
    return after;
 }
 
-bool add(const uint8_t* element, const uint8_t* container, float slide, bool isContainer)
+bool add(const uint8_t* element, const uint8_t* container, float slide, bool isContainer, float ratio)
 {
    if (s_placedCount == kMaxPlaced) {
       if (!s_warnedFull)
@@ -439,32 +575,36 @@ bool add(const uint8_t* element, const uint8_t* container, float slide, bool isC
       return false;
    }
    s_placed[s_placedCount++] = { element, red_of(element), *reinterpret_cast<const uint32_t*>(element), container,
-                                 slide, isContainer };
+                                 slide, isContainer, ratio };
    return true;
 }
 
 // After an opted-in file loads: a slide for each of its top-level pieces, or
-// for each child of a plain container.
-void place(uintptr_t tail, float width, float height)
+// for each child of a plain container, by its ScreenAnchor if it has one and
+// else by the third of the layout it sits in.
+void place(uintptr_t tail, float width, float height, float ratio)
 {
-   const float layout = layout_width(height);
+   const float layout = layout_width(height, ratio);
    const int first = s_placedCount;
-   int counts[3] = {}, containers = 0, markers = 0;
+   int counts[3] = {}, anchored = 0, containers = 0, markers = 0;
+   const auto piece = [&](const uint8_t* element, const uint8_t* red, const uint8_t* container) {
+      float x, y;
+      local_position(red, x, y);
+      const Anchored* a = anchor_of(element);
+      const Placement at = placement(x, y, !container, a ? &a->share : nullptr, width, layout);
+      const int added = add(element, container, at.slide, at.container, ratio);
+      if (at.container) containers += added;
+      else if (a) anchored += added;
+      else counts[(int)anchor_for(x, layout)] += added;
+   };
    const bool known = for_each_made(tail, [&](const uint8_t* element) {
       const uint8_t* red = red_of(element);
       if (!red || !is_top_item(element)) return;
       if (*reinterpret_cast<const uint32_t*>(element) == s_targetVtable) {
-         markers += add(element, nullptr, 0.0f, false);   // its markers are placed on the real screen
+         markers += add(element, nullptr, 0.0f, false, ratio);   // its markers are placed on the real screen
          return;
       }
-      float x, y;
-      local_position(red_of(element), x, y);
-      if (is_origin(x, y)) {
-         containers += add(element, nullptr, 0.0f, true);
-         return;
-      }
-      const Anchor anchor = anchor_for(x, layout);
-      counts[(int)anchor] += add(element, nullptr, slide_for(anchor, width, layout), false);
+      piece(element, red, nullptr);
    });
    const int tops = s_placedCount;
    for_each_made(tail, [&](const uint8_t* element) {
@@ -473,21 +613,80 @@ void place(uintptr_t tail, float width, float height)
       if (!parent) return;
       bool inContainer = false;
       for (int i = first; i < tops; ++i) inContainer |= s_placed[i].isContainer && s_placed[i].red == parent;
-      if (!inContainer) return;
-      float x, y;
-      local_position(red, x, y);
-      const Anchor anchor = anchor_for(x, layout);
-      counts[(int)anchor] += add(element, parent, slide_for(anchor, width, layout), false);
+      if (inContainer) piece(element, red, parent);
    });
+   // A ScreenAnchor anywhere else does nothing: what is inside a piece moves
+   // with it, and a Target element never moves.
+   int ignored = 0;
+   if (s_anchorCount && known)
+      for_each_made(tail, [&](const uint8_t* element) {
+         if (!anchor_of(element)) return;
+         const Placed* p = placed_element(element);
+         if (!p || p->isContainer || *reinterpret_cast<const uint32_t*>(element) == s_targetVtable) ++ignored;
+      });
    auto log = get_gamelog();
    if (!log) return;
-   if (!known)
+   if (!known) {
       log("[TrueWidescreen] a .hud file opted in, but which elements it made could not be told; it keeps the "
           "stock layout\n");
-   else
-      log("[TrueWidescreen] a .hud file laid out for %.0fx%.0f as on %.0fx%.0f: %d pieces kept to the left, "
-          "%d centred, %d to the right (%d plain containers, %d Target elements)\n", width, height, layout,
-          height, counts[0], counts[1], counts[2], containers, markers);
+      return;
+   }
+   log("[TrueWidescreen] a .hud file laid out for %.0fx%.0f as on %.0fx%.0f: %d pieces kept to the left, "
+       "%d centred, %d to the right, %d by their ScreenAnchor (%d plain containers, %d Target elements)\n", width,
+       height, layout, height, counts[0], counts[1], counts[2], anchored, containers, markers);
+   if (ignored)
+      log("[TrueWidescreen] %d ScreenAnchor lines in it do nothing: only a piece (a top-level item, or a child of a "
+          "top-level group at (0, 0) without one) moves by its anchor, and a Target element never moves\n", ignored);
+}
+
+// After an opted-in file loads: every element it made keeps the layout width,
+// drawn or not.
+void note_made(uintptr_t tail, float ratio)
+{
+   for_each_made(tail, [&](const uint8_t* element) {
+      if (s_made.add(element, red_of(element), *reinterpret_cast<const uint32_t*>(element), ratio) ||
+          s_warnedMadeFull)
+         return;
+      s_warnedMadeFull = true;
+      if (auto log = get_gamelog())
+         log("[TrueWidescreen] over %d elements in opted-in files; the HUD editor may save templates past that "
+             "against the full width\n", kMaxMade / 4 * 3);
+   });
+}
+
+// The modtools HUD editor moved a piece or changed its ScreenAnchor: it is
+// placed as a load would place it now, by its anchor or else by the third of
+// the layout it is in, and a top-level group moved onto or off the corner, or
+// given or relieved of an anchor there, becomes a piece or a plain container.
+// Not a Target element.
+void repick(const uint8_t* element)
+{
+   Placed* p = nullptr;
+   for (int i = 0; i < s_placedCount && !p; ++i)
+      if (s_placed[i].element == element && current(s_placed[i])) p = &s_placed[i];
+   if (!p || p->vtable == s_targetVtable) return;
+   float width, height;
+   if (!laid_out_now(p->ratio, width, height)) return;
+   const float layout = layout_width(height, p->ratio);
+   float x, y;
+   local_position(p->red, x, y);
+   const Anchored* anchor = anchor_of(element);
+   const Placement at = placement(x, y, !p->container, anchor ? &anchor->share : nullptr, width, layout);
+   if (at.container && !p->isContainer) {
+      // Its children become pieces; those it had as a container still are.
+      const uint8_t* const red = p->red;
+      const float ratio = p->ratio;
+      for_each_made(reinterpret_cast<uintptr_t>(s_listEnd), [&](const uint8_t* child) {
+         const uint8_t* childRed = red_of(child);
+         if (!childRed || red_parent(childRed) != red || placed_red(childRed, red)) return;
+         float cx, cy;
+         local_position(childRed, cx, cy);
+         const Anchored* a = anchor_of(child);
+         add(child, red, placement(cx, cy, false, a ? &a->share : nullptr, width, layout).slide, false, ratio);
+      });
+   }
+   p->isContainer = at.container;
+   p->slide = at.slide;
 }
 
 // ---- FileInfos that opted in, for the editor's writer -------------------------
@@ -500,35 +699,64 @@ bool is_loaded_file(const void* fileInfo)
    return false;
 }
 
-// Keeps the files the HUD still has: a FileInfo is freed with its HUD.
-void remember_file(const void* fileInfo)
+// The entry for a FileInfo, added if `add` and need be. Drops the files the
+// HUD no longer has on the way, since a FileInfo is freed with its HUD; null
+// when there is none or the table is full.
+OptedFile* file_entry(const void* fileInfo, bool add)
 {
    int kept = 0;
-   for (int i = 0; i < s_optedFileCount; ++i)
-      if (s_optedFiles[i] != fileInfo && is_loaded_file(s_optedFiles[i])) s_optedFiles[kept++] = s_optedFiles[i];
+   OptedFile* found = nullptr;
+   for (int i = 0; i < s_optedFileCount; ++i) {
+      const OptedFile f = s_optedFiles[i];
+      if (f.info != fileInfo && !is_loaded_file(f.info)) continue;
+      s_optedFiles[kept] = f;
+      if (f.info == fileInfo) found = &s_optedFiles[kept];
+      ++kept;
+   }
    s_optedFileCount = kept;
-   if (s_optedFileCount < kMaxFiles) s_optedFiles[s_optedFileCount++] = fileInfo;
+   if (found || !add || s_optedFileCount == kMaxFiles) return found;
+   s_optedFiles[s_optedFileCount] = { fileInfo, false, 0.0f, 0.0f };
+   return &s_optedFiles[s_optedFileCount++];
 }
 
-bool opted_file(const void* fileInfo)
+const OptedFile* opted_file(const void* fileInfo)
 {
-   if (*static_cast<const uint32_t*>(fileInfo) != s_fileInfoVtable || !is_loaded_file(fileInfo)) return false;
+   if (*static_cast<const uint32_t*>(fileInfo) != s_fileInfoVtable || !is_loaded_file(fileInfo)) return nullptr;
    for (int i = 0; i < s_optedFileCount; ++i)
-      if (s_optedFiles[i] == fileInfo) return true;
-   return false;
+      if (s_optedFiles[i].info == fileInfo) return &s_optedFiles[i];
+   return nullptr;
+}
+
+// FileInfos are made again for each mission, often at the same addresses. A
+// load that read neither line forgets any entry left at the address of a
+// FileInfo it made, so the editor writes no line the file does not have.
+void forget_new_files(int firstNew)
+{
+   if (!s_configFiles) return;
+   const int count = *s_configCount;
+   for (int i = firstNew < 0 ? 0 : firstNew; i < count && i < 1024; ++i) {
+      for (int j = 0; j < s_optedFileCount; ++j) {
+         if (s_optedFiles[j].info != s_configFiles[i]) continue;
+         s_optedFiles[j] = s_optedFiles[--s_optedFileCount];
+         break;
+      }
+   }
 }
 
 // ---- sViewportWidth ------------------------------------------------------------
 
-// While a file with TrueWidescreen(1) loads, sViewportWidth holds the 4:3 width:
-// ElementMap's constructor and ElementText's TextBox read it directly.
+// While an opted-in file loads, sViewportWidth holds its layout width:
+// ElementMap's constructor and ElementText's TextBox read it directly. Lent
+// again with the new width if a second line changes the ratio.
 void lend_viewport_width()
 {
    float width, height;
-   if (s_viewportLent || !s_loadingWide || !screen_size(width, height)) return;
-   s_viewportOwn = *s_viewportWidth;
-   *s_viewportWidth = layout_width(height);
-   s_viewportLent = true;
+   if (s_loadingRatio <= 0.0f || !screen_size(width, height)) return;
+   if (!s_viewportLent) {
+      s_viewportOwn = *s_viewportWidth;
+      s_viewportLent = true;
+   }
+   *s_viewportWidth = layout_width(height, s_loadingRatio);
 }
 
 void return_viewport_width()
@@ -539,13 +767,15 @@ void return_viewport_width()
 }
 
 // ElementText's SetProperty, GetProperty and WriteData read sViewportWidth for
-// TextBox too: for an opted-in element it holds the 4:3 width while they run.
+// TextBox too: for an opted-in element it holds the layout width while they
+// run.
 uint32_t text_call(TextCallFn original, void* self, void* edx, void* a, void* b)
 {
-   float width, height;
-   const bool lend = !s_viewportLent && laid_out_wide(static_cast<const uint8_t*>(self)) && wide(width, height);
+   float width = 0.0f, height = 0.0f;
+   const float ratio = s_viewportLent ? 0.0f : layout_ratio(static_cast<const uint8_t*>(self));
+   const bool lend = ratio > 0.0f && laid_out_now(ratio, width, height);
    const float own = *s_viewportWidth;
-   if (lend) *s_viewportWidth = layout_width(height);
+   if (lend) *s_viewportWidth = layout_width(height, ratio);
    const uint32_t result = original(self, edx, a, b);
    if (lend) *s_viewportWidth = own;
    return result;
@@ -568,76 +798,313 @@ uint32_t __fastcall hooked_TextWrite(void* self, void* edx, void* a, void* b)
 
 // ---- hooks ---------------------------------------------------------------------
 
+// The FileInfo whose lines this load has seen. Its entry for the editor's
+// writer is started afresh at the first one, in case a freed FileInfo left one
+// at its address.
+const void* s_loadingInfo = nullptr;
+
+// What the file being loaded asks for, from its lines so far: AuthoredRatio's
+// ratio, else 4:3 for TrueWidescreen(1).
+void file_lines_read()
+{
+   const float ratio = s_fileRatio > 0.0f ? s_fileRatio : s_fileTrueWidescreen ? kFourThree : 0.0f;
+   s_loadingRatio =
+      ratio > 0.0f && s_loadWidth > 0.0f && laid_out_on(s_loadWidth, s_loadHeight, ratio) ? ratio : 0.0f;
+   if (s_loadingRatio > 0.0f) lend_viewport_width();
+   else return_viewport_width();
+}
+
+// AuthoredRatio(width, height): two positive numbers whose ratio GameExt takes.
+bool read_ratio(const Data* data, float& w, float& h)
+{
+   return data->arguments() == 2 && data->number(0, w) && data->number(1, h) && w > 0.0f && h > 0.0f &&
+          valid_ratio(w / h);
+}
+
 bool __fastcall hooked_ReadData(void* self, void* edx, void* config, const Data* data)
 {
-   if (data && data->id == kTrueWidescreen) {
-      bool on = false;
-      __try {
+   if (!data || (data->id != kTrueWidescreen && data->id != kAuthoredRatio))
+      return s_readData(self, edx, config, data);
+   __try {
+      OptedFile* entry = nullptr;
+      if (s_configFiles) {   // for the editor's writer: modtools
+         if (s_loading && s_loadingInfo != self) {
+            s_loadingInfo = self;
+            if ((entry = file_entry(self, false))) *entry = { self, false, 0.0f, 0.0f };
+         }
+         entry = file_entry(self, true);
+      }
+      if (data->id == kTrueWidescreen) {
+         bool on = false;
          if (!data->flag(0, on)) {
             on = false;
             if (!s_warnedFlag) {
-               install_log("[TrueWidescreen] TrueWidescreen takes 1 or 0; that file keeps the stock layout");
+               install_log("[TrueWidescreen] TrueWidescreen takes 1 or 0; that line is ignored");
                s_warnedFlag = true;
             }
          }
-         if (on && s_configFiles) remember_file(self);   // for the editor's writer: modtools
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-         on = false;
+         if (entry) entry->trueWidescreen = on;
+         if (s_loading) s_fileTrueWidescreen = on;
+      } else {
+         float w = 0.0f, h = 0.0f;
+         if (!read_ratio(data, w, h)) {
+            w = h = 0.0f;
+            if (!s_warnedRatio) {
+               install_log("[TrueWidescreen] AuthoredRatio takes a width and a height, such as "
+                           "AuthoredRatio(16, 9), from 1:1 to 4:1; that line is ignored");
+               s_warnedRatio = true;
+            }
+         }
+         if (entry) {
+            entry->ratioW = w;
+            entry->ratioH = h;
+         }
+         if (s_loading) s_fileRatio = w > 0.0f ? w / h : 0.0f;
       }
-      if (s_loading) {
-         s_fileOptedIn = on;
-         if (on) lend_viewport_width();
-         else return_viewport_width();
-      }
-      return true;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
-   return s_readData(self, edx, config, data);
+   if (s_loading) file_lines_read();
+   return true;
 }
 
-// The editor writes a FileInfo with the lines the engine knows; add ours.
+// The editor writes a FileInfo with the lines the engine knows; add the ones
+// this FileInfo read.
 void __fastcall hooked_WriteData(void* self, void* edx, void* file, int indent)
 {
    s_writeData(self, edx, file, indent);
-   bool opted = false;
+   OptedFile lines = {};
    __try {
-      opted = opted_file(self);
+      if (const OptedFile* f = opted_file(self)) lines = *f;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      opted = false;
+      lines = {};
    }
-   if (!opted) return;
+   if (lines.trueWidescreen) {
+      s_indent(file, nullptr, indent);
+      s_format(file, "TrueWidescreen(1)\n");
+   }
+   if (lines.ratioW > 0.0f) {
+      s_indent(file, nullptr, indent);
+      s_format(file, "AuthoredRatio(%g, %g)\n", lines.ratioW, lines.ratioH);
+   }
+}
+
+// ScreenAnchor("Left", "Center" or "Right"), quoted or not, or a share from 0
+// to 1.
+bool read_anchor(const Data* data, float& share, bool& named)
+{
+   if (data->arguments() != 1) return false;
+   Anchor anchor;
+   if (const char* name = data->string(0)) {
+      if (!anchor_named(name, anchor)) return false;
+      share = share_of(anchor);
+      named = true;
+      return true;
+   }
+   for (Anchor a : { Anchor::Left, Anchor::Center, Anchor::Right }) {
+      if (data->args[0] == pbl_hash(anchor_name(a))) {   // unquoted, hashed like a name
+         share = share_of(a);
+         named = true;
+         return true;
+      }
+   }
+   named = false;
+   return data->number(0, share) && valid_share(share);
+}
+
+// Kept for any element, whatever its file: whether it moves the element is
+// worked out when its file has loaded.
+void note_anchor(const uint8_t* element, const Data* data)
+{
+   Anchored line = { element, red_of(element), *reinterpret_cast<const uint32_t*>(element), 0.0f, false };
+   if (!read_anchor(data, line.share, line.named)) {
+      if (!s_warnedAnchorLine)
+         install_log("[TrueWidescreen] ScreenAnchor takes \"Left\", \"Center\", \"Right\" or a share from 0 to 1, "
+                     "such as ScreenAnchor(0.25); that line is ignored");
+      s_warnedAnchorLine = true;
+      return;
+   }
+   if (s_loading) ++s_anchorsRead;
+   for (int i = 0; i < s_anchorCount; ++i) {
+      if (s_anchors[i].element != element) continue;
+      s_anchors[i] = line;   // a second line, or a new element where a freed one was
+      return;
+   }
+   if (s_anchorCount == kMaxAnchors) {
+      if (!s_warnedAnchorsFull)
+         install_log("[TrueWidescreen] over %d ScreenAnchor lines in the loaded .hud files; the rest are ignored",
+                     kMaxAnchors);
+      s_warnedAnchorsFull = true;
+      return;
+   }
+   s_anchors[s_anchorCount++] = line;
+}
+
+// Every element type's reader ends up here for a property it does not know.
+bool __fastcall hooked_ElementRead(void* self, void* edx, void* config, const Data* data)
+{
+   if (!data || data->id != kScreenAnchor) return s_elementRead(self, edx, config, data);
+   __try {
+      note_anchor(static_cast<const uint8_t*>(self), data);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   return true;
+}
+
+// ScreenAnchor in the HUD editor's panel (modtools), one of kAnchorChoices,
+// the names hud_editor_properties gives them: shown only for a piece of a
+// file laid out on this screen, where it does something. Every element type's
+// GetProperty and SetProperty end up in Element's for a property they do not
+// know.
+bool editor_piece(const uint8_t* element)
+{
+   return placed_element(element) && *reinterpret_cast<const uint32_t*>(element) != s_targetVtable;
+}
+
+void set_anchor(const uint8_t* element, int index)
+{
+   if (index == 0) {
+      for (int i = 0; i < s_anchorCount; ++i) {
+         if (s_anchors[i].element != element) continue;
+         s_anchors[i] = s_anchors[--s_anchorCount];
+         break;
+      }
+      return;
+   }
+   const Anchored line = { element, red_of(element), *reinterpret_cast<const uint32_t*>(element), anchor_share(index),
+                           anchor_index_named(index) };
+   for (int i = 0; i < s_anchorCount; ++i) {
+      if (s_anchors[i].element != element) continue;
+      s_anchors[i] = line;
+      return;
+   }
+   if (s_anchorCount < kMaxAnchors) s_anchors[s_anchorCount++] = line;
+}
+
+bool __fastcall hooked_ElementGet(void* self, void* edx, uint32_t property, void* value)
+{
+   if (property != kScreenAnchor || !value) return s_elementGet(self, edx, property, value);
+   __try {
+      const uint8_t* element = static_cast<const uint8_t*>(self);
+      if (!editor_piece(element)) return false;
+      const Anchored* a = anchor_of(element);
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(anchor_index(a != nullptr, a ? a->share : 0.0f));
+      return true;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
+bool __fastcall hooked_ElementSet(void* self, void* edx, uint32_t property, void* value)
+{
+   if (property != kScreenAnchor || !value) return s_elementSet(self, edx, property, value);
+   __try {
+      const uint8_t* element = static_cast<const uint8_t*>(self);
+      const uint32_t index = *static_cast<const uint32_t*>(value);
+      if (!editor_piece(element) || index >= static_cast<uint32_t>(kAnchorChoices)) return false;
+      set_anchor(element, static_cast<int>(index));
+      repick(element);
+      return true;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
+// The editor writes what every element has; add the element's ScreenAnchor,
+// as it was written.
+void __fastcall hooked_ElementWrite(void* self, void* edx, void* file, int indent)
+{
+   s_elementWrite(self, edx, file, indent);
+   const Anchored* a = anchor_of(static_cast<const uint8_t*>(self));
+   if (!a) return;
    s_indent(file, nullptr, indent);
-   s_format(file, "TrueWidescreen(1)\n");
+   if (a->named)
+      s_format(file, "ScreenAnchor(\"%s\")\n", anchor_name(named_anchor(a->share)));
+   else
+      s_format(file, "ScreenAnchor(%g)\n", a->share);
+}
+
+// The editor changes its selected element's properties through the element's
+// SetProperty, inside Editor::Update; a piece whose x that changes is placed
+// again, as the next load would place it. Events move elements outside it, in
+// Element::UpdateAll, so the pieces they move keep the edge they loaded with.
+void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, float dt)
+{
+   const uint8_t* selected = nullptr;
+   float before = 0.0f, y;
+   if (s_placedCount) {
+      __try {
+         selected = *reinterpret_cast<const uint8_t* const*>(editor + kEditorElement);
+         if (selected && placed_element(selected)) local_position(red_of(selected), before, y);
+         else selected = nullptr;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         selected = nullptr;
+      }
+   }
+   s_editorUpdate(editor, edx, inputs, dt);
+   if (!selected) return;
+   __try {
+      float x;
+      if (*reinterpret_cast<const uint8_t* const*>(editor + kEditorElement) != selected ||
+          !placed_element(selected))
+         return;
+      local_position(red_of(selected), x, y);
+      if (x != before) repick(selected);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
 }
 
 // Around each HUD::Manager::Load: which elements the file makes and, if it
-// opted in on a wide screen, where its pieces go.
+// opted in and is laid out on this screen, where its pieces go.
 struct Loading {
-   float     width;
+   float     width;    // 0 when the screen is unknown or has more than one viewport
    float     height;
-   bool      isWide;
+   int       files;    // gConfigFiles' count before the load (modtools)
    uintptr_t tail;
 };
 
 Loading begin_load()
 {
    Loading l = {};
-   l.isWide = wide(l.width, l.height);
-   if (s_placedCount) prune();
+   if (!screen_size(l.width, l.height) || !one_viewport()) l.width = l.height = 0.0f;
+   if (s_placedCount) keep_listed(s_placed, s_placedCount);
+   if (s_anchorCount) keep_listed(s_anchors, s_anchorCount);
+   if (s_made.count) prune_made();
+   s_anchorsRead = 0;
    l.tail = s_listEnd[1];   // the last node, or the terminator itself when empty
+   l.files = s_configCount ? *s_configCount : 0;
    s_topItemCount = 0;
    s_loading = true;
-   s_loadingWide = l.isWide;
-   s_fileOptedIn = false;
+   s_loadWidth = l.width;
+   s_loadHeight = l.height;
+   s_fileTrueWidescreen = false;
+   s_fileRatio = 0.0f;
+   s_loadingRatio = 0.0f;
+   s_loadingInfo = nullptr;
    return l;
 }
 
 void end_load(const Loading& l)
 {
    return_viewport_width();
-   const bool optedIn = s_fileOptedIn && l.isWide;
+   const float ratio = s_loadingRatio;
+   const bool readLines = s_loadingInfo != nullptr;
+   if (s_anchorsRead && s_fileRatio <= 0.0f && !s_fileTrueWidescreen && !s_warnedAnchorsUnused) {
+      install_log("[TrueWidescreen] a .hud file has ScreenAnchor lines but neither AuthoredRatio nor "
+                  "TrueWidescreen(1) in its FileInfo; they do nothing there");
+      s_warnedAnchorsUnused = true;
+   }
+   s_anchorsRead = 0;
    s_loading = false;
-   s_fileOptedIn = false;
-   if (optedIn) place(l.tail, l.width, l.height);
+   s_fileTrueWidescreen = false;
+   s_fileRatio = 0.0f;
+   s_loadingRatio = 0.0f;
+   s_loadingInfo = nullptr;
+   if (!readLines) forget_new_files(l.files);
+   if (ratio > 0.0f) {
+      note_ratio(ratio);
+      place(l.tail, l.width, l.height, ratio);
+      note_made(l.tail, ratio);
+   }
 }
 
 void __cdecl hooked_Load(void* config)
@@ -669,18 +1136,29 @@ float __cdecl view_width_hook(const uint8_t* element)
 {
    const float stock = s_viewWidth(element, nullptr);
    float width, height;
-   if (!laid_out_wide(element) || !screen_size(width, height)) return stock;
-   return layout_width(height);
+   const float ratio = layout_ratio(element);
+   if (ratio <= 0.0f || !screen_size(width, height)) return stock;
+   return layout_width(height, ratio);
+}
+
+// A view width GetContainerViewWidth gives only an opted-in element: the
+// layout width of the file loading or of one laid out.
+bool is_layout_width(float view, float height)
+{
+   if (s_loading && s_loadingRatio > 0.0f && view == layout_width(height, s_loadingRatio)) return true;
+   for (int i = 0; i < s_ratioCount; ++i)
+      if (view == layout_width(height, s_ratios[i])) return true;
+   return false;
 }
 
 // The Screen-mode width is handed in as the real one; an element whose view
-// width is the 4:3 layout width is opted in, and gets that instead. Both ways:
+// width is a layout width is opted in, and gets that instead. Both ways:
 // reading a .hud and the editor writing one.
 float screen_for(int mode, float view, float screen)
 {
-   if (mode == kModeScreen && view != screen && (s_loading || s_placedCount)) {
+   if (mode == kModeScreen && view != screen && (s_loading || s_placedCount || s_made.count)) {
       float width, height;
-      if (screen_size(width, height) && screen == width && view == layout_width(height)) return view;
+      if (screen_size(width, height) && screen == width && is_layout_width(view, height)) return view;
    }
    return screen;
 }
@@ -752,13 +1230,14 @@ __declspec(naked) void hooked_ToRelative()
 // Retail GetContainerViewWidth: the element in ECX, the width in XMM0; the
 // original changes only EAX, ECX and XMM0, and its LTCG callers may keep
 // values in any other register across it (Element::WriteData keeps one in
-// EDX, Steam 0x005498BA). An opted-in element gets the 4:3 width; any other
+// EDX, Steam 0x005498BA). An opted-in element gets its layout width; any other
 // goes on into the original as called.
 bool __cdecl retail_view_width(const uint8_t* element, float* out)
 {
    float width, height;
-   if (!laid_out_wide(element) || !screen_size(width, height)) return false;
-   *out = layout_width(height);
+   const float ratio = layout_ratio(element);
+   if (ratio <= 0.0f || !screen_size(width, height)) return false;
+   *out = layout_width(height, ratio);
    return true;
 }
 
@@ -877,11 +1356,12 @@ bool retarget_position(const uint32_t* event, uint8_t* element, float out[3])
       if (!cls || cls[1] != kTypeVector3 || !tracked(cls[0])) return false;
       const uint8_t mode = element[kMode];
       if (mode != kModeScreen && mode != kModeViewport) return false;
-      if (!laid_out_wide(element)) return false;
+      const float ratio = layout_ratio(element);
+      if (ratio <= 0.0f) return false;
       float width, height;
-      if (!wide(width, height)) return false;
+      if (!laid_out_now(ratio, width, height)) return false;
       const float* v = reinterpret_cast<const float*>(event[1]);
-      out[0] = tracked_fraction(v[0], width, layout_width(height), slide_above(element));
+      out[0] = tracked_fraction(v[0], width, layout_width(height, ratio), slide_above(element));
       out[1] = is_reticule(cls[0]) ? hud_widescreen_reticle_uncorrect(v[1]) : v[1];
       out[2] = v[2];
       return true;
@@ -918,7 +1398,7 @@ void __fastcall hooked_Draw(uint8_t* element, void* edx, const float* parent, ui
    } else if (depth == 1) {
       s_drawContainer = nullptr;
       const Placed* p = s_inViewGroup ? placed_red(element, nullptr) : nullptr;
-      if (p && wide(width, height)) {
+      if (p && laid_out_now(p->ratio, width, height)) {
          pixel_parent(matrix, width, height, *s_frustum, p->isContainer ? 0.0f : p->slide);
          use = matrix;
          if (p->isContainer) s_drawContainer = p;
@@ -941,11 +1421,11 @@ void __fastcall hooked_Draw(uint8_t* element, void* edx, const float* parent, ui
 // ---- the aspect -------------------------------------------------------------------
 
 // Stands in for GetScreenAspectRatio where an element's bitmap or minimap is
-// set up: 4:3 for an opted-in element, so nothing is stretched, else the real
-// ratio.
+// set up: 4:3 for an opted-in element, which cancels the stretch the engine
+// gives a wider screen, so nothing is stretched; else the real ratio.
 float __cdecl aspect_for(const uint8_t* element)
 {
-   return laid_out_wide(element) ? kFourThreeAspect : s_aspect();
+   return layout_ratio(element) > 0.0f ? kFourThreeAspect : s_aspect();
 }
 
 // cdecl -> ST0 like GetScreenAspectRatio, which touches nothing else: keeps
@@ -1217,7 +1697,17 @@ bool modtools_code_matches(uintptr_t base)
           code_is(base, a.hud_text_write_data, "ElementText::WriteData", "\x83\xEC\x14\x53\x55\x56\x57\x8B\xF1\x8D\x44\x24\x18\x50", 14) &&
           vtable_slot(base, a.hud_file_info_vtable, 0x28, a.hud_file_info_write_data, "FileInfo WriteData") &&
           code_is(base, a.hud_manager_load_read_call, "Manager::Load's read of a top-level item",
-                  "\x8B\xCF\xFF\x52\x08\x81\xFD\x97\xC7\xE0\xD4", 11);
+                  "\x8B\xCF\xFF\x52\x08\x81\xFD\x97\xC7\xE0\xD4", 11) &&
+          code_is(base, a.hud_element_read_data, "HUD::Element::ReadData",
+                  "\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x54\x53\x8B\x5D\x0C\x8B\x03\x3D\x23\x29\x3E\x8E", 20) &&
+          code_is(base, a.hud_element_write_data, "HUD::Element::WriteData",
+                  "\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x44\x53\x56\x8B\xD9\x8B\xB3\xB0\x00\x00\x00\x57\x83\xC6\x30", 23) &&
+          code_is(base, a.hud_editor_update, "HUD::Editor::Update",
+                  "\x83\xEC\x14\x53\x55\x56\x8B\xF1\xF6\x86\x2B\x18\x00\x00\x04\x57", 16) &&
+          code_is(base, a.hud_element_get_property, "HUD::Element::GetProperty",
+                  "\x8B\x44\x24\x04\x3D\x71\x1C\x97\x82\x0F\x87\x99\x01\x00\x00", 15) &&
+          code_is(base, a.hud_element_set_property, "HUD::Element::SetProperty",
+                  "\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x44\x8B\x45\x08\x3D\x71\x1C\x97\x82", 17);
 }
 
 // The runtime pieces as Steam and GOG have them, the same bytes on both but
@@ -1258,7 +1748,10 @@ bool retail_code_matches(uintptr_t base)
                   "\x58\xA1\x00\x00\x00\x00\x33\xC5\x89\x45\xFC\x8B\x43\x08\x56\x57\x8B\xF9",
                   "xxxxxxxxxxxxxxxxxxxxxxxxxx????xxxxxxxxxxxx") &&
           retail_code_is(base, a.renderer_screen_aspect, "GetScreenAspectRatio", "\xD9\x05\x00\x00\x00\x00\xC3",
-                         "xx????x");
+                         "xx????x") &&
+          retail_code_is(base, a.hud_element_read_data, "HUD::Element::ReadData",
+                         "\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x48\x56\x57\x8B\x7D\x0C\x8B\xF1\x8B\x07\x3D\x84\xC4\x8D\x79",
+                         "xxxxxxxxxxxxxxxxxxxxxxx");
 }
 
 } // namespace
@@ -1274,10 +1767,12 @@ void hud_true_widescreen_install(uintptr_t base)
        !a.camera_manager_instance || !a.hud_bitmap_rect_aspect_call || !a.hud_map_aspect_call_1 ||
        !a.hud_map_aspect_call_2 || !a.hud_map_aspect_call_3 || !a.hud_map_aspect_call_4 ||
        !a.hud_file_info_vtable || !a.hud_viewport_width || !a.hud_target_vtable || !a.hud_target_update ||
-       !a.hud_bar_segmented_aspect_call || !a.hud_manager_load_read_call ||
+       !a.hud_bar_segmented_aspect_call || !a.hud_manager_load_read_call || !a.hud_element_read_data ||
        (modtools && (!a.hud_file_info_write_data || !a.hud_write_indent || !a.hud_write_format ||
                      !a.hud_pixels_to_relative || !a.hud_config_files || !a.hud_config_file_count ||
-                     !a.hud_text_set_property || !a.hud_text_get_property || !a.hud_text_write_data))) {
+                     !a.hud_text_set_property || !a.hud_text_get_property || !a.hud_text_write_data ||
+                     !a.hud_element_write_data || !a.hud_editor_update || !a.hud_element_get_property ||
+                     !a.hud_element_set_property))) {
       install_log("[TrueWidescreen] NOT installed: no address set for this build");
       return;
    }
@@ -1305,6 +1800,7 @@ void hud_true_widescreen_install(uintptr_t base)
    s_readData  = reinterpret_cast<ReadDataFn>(resolve(base, a.hud_file_info_read_data));
    s_position  = reinterpret_cast<PositionFn>(resolve(base, a.hud_event_position));
    s_draw      = reinterpret_cast<DrawFn>(resolve(base, a.hud_element_draw));
+   s_elementRead = reinterpret_cast<ReadDataFn>(resolve(base, a.hud_element_read_data));
    if (modtools) {
       s_configFiles = static_cast<const void* const*>(resolve(base, a.hud_config_files));
       s_configCount = static_cast<const int*>(resolve(base, a.hud_config_file_count));
@@ -1318,6 +1814,10 @@ void hud_true_widescreen_install(uintptr_t base)
       s_textSet    = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_set_property));
       s_textGet    = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_get_property));
       s_textWrite  = reinterpret_cast<TextCallFn>(resolve(base, a.hud_text_write_data));
+      s_elementWrite = reinterpret_cast<WriteDataFn>(resolve(base, a.hud_element_write_data));
+      s_editorUpdate = reinterpret_cast<EditorUpdateFn>(resolve(base, a.hud_editor_update));
+      s_elementGet   = reinterpret_cast<PropertyFn>(resolve(base, a.hud_element_get_property));
+      s_elementSet   = reinterpret_cast<PropertyFn>(resolve(base, a.hud_element_set_property));
    } else {
       s_loadRetail      = reinterpret_cast<LoadRetailFn>(resolve(base, a.hud_manager_load));
       s_viewWidthRetail = resolve(base, a.hud_container_view_width);
@@ -1328,6 +1828,7 @@ void hud_true_widescreen_install(uintptr_t base)
    LONG r = DetourAttach(&(PVOID&)s_readData, hooked_ReadData);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_position, hooked_Position);
    if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_draw, hooked_Draw);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_elementRead, hooked_ElementRead);
    if (modtools) {
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_load, hooked_Load);
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_viewWidth, hooked_ViewWidth);
@@ -1337,6 +1838,10 @@ void hud_true_widescreen_install(uintptr_t base)
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textSet, hooked_TextSet);
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textGet, hooked_TextGet);
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_textWrite, hooked_TextWrite);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_elementWrite, hooked_ElementWrite);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_editorUpdate, hooked_EditorUpdate);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_elementGet, hooked_ElementGet);
+      if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_elementSet, hooked_ElementSet);
    } else {
       if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_loadRetail, hooked_LoadRetail);
       if (r == NO_ERROR) r = DetourAttach(&s_viewWidthRetail, hooked_ViewWidthRetail);
@@ -1373,6 +1878,7 @@ void hud_true_widescreen_install(uintptr_t base)
    const int32_t rel = (int32_t)((uintptr_t)readTop - (uintptr_t)(readCall + 5));
    readCall[0] = 0xE8;
    memcpy(readCall + 1, &rel, sizeof(rel));
-   install_log("[TrueWidescreen] installed: .hud files with TrueWidescreen(1) in their FileInfo are laid out "
-               "4:3 at the screen's height and kept to their nearest edge on wide screens");
+   install_log("[TrueWidescreen] installed: .hud files with AuthoredRatio(w, h) or TrueWidescreen(1) (4:3) in "
+               "their FileInfo are laid out at that ratio and the screen's height, each piece kept to its "
+               "ScreenAnchor or nearest edge");
 }

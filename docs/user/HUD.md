@@ -573,6 +573,8 @@ BarBitmap("player1health_missing")
 - `"Right"` keeps the bar flash. The vertical modes have none.
 - The modtools HUD editor shows, changes and saves a `FillFrom` bar's `BitmapRect`,
   `TexCoords` and fade times as the file has them, and saves the line with the bar.
+  Every bar's property list also has `FillFrom`: change it there and the bar fills
+  the new way at once, and is saved with the new line (none for `"Left"`).
 - A game without BF2GameExt logs `Error reading parameter` for the line and fills
   from the left.
 
@@ -585,26 +587,37 @@ At 16:9 a bitmap comes out about a fifth taller than it is wide, so `BitmapRect(
 108, ...)` looks square, and text is a ninth flatter. All of it changes with the
 screen's shape, so a layout tuned at 16:9 looks different at 16:10 or 21:9.
 
-A `.hud` file that puts `TrueWidescreen(1)` in its `FileInfo` gets none of that:
+A `.hud` file that says in its `FileInfo` which screen shape its numbers were written
+for gets none of that:
 
 ```
 FileInfo("mymod_hud")
 {
     Viewports(1)
-    TrueWidescreen(1)
+    AuthoredRatio(16, 9)
 }
 ```
 
-- **Laid out at 4:3, drawn one to one.** The file is laid out as on a 4:3 screen of
-  the real height, 960×720 at 1280×720, and drawn at full height, one layout pixel to
-  one screen pixel. A square is square and text keeps its shape on every screen.
-- **Kept to the nearest edge.** Each piece at the top of the file keeps its distance
-  from the screen edge nearest to it. Where its position falls across the 4:3 layout
-  decides which: the left third stays at the left, the middle third keeps to the
-  centre and the right third keeps to the right. At 1280×720 the middle third moves
-  160 pixels right and the right third 320.
+`AuthoredRatio(width, height)` is the shape you wrote the file for, usually the screen
+you build it on. `TrueWidescreen(1)` is the same as `AuthoredRatio(4, 3)`.
+
+- **Laid out at its ratio, drawn one to one.** The file is laid out as on a screen of
+  its ratio and the real height, 1280×720 for `AuthoredRatio(16, 9)` at 720 pixels
+  high, and drawn at full height, one layout pixel to one screen pixel. On a screen of
+  that shape it draws exactly as written. A square is square and text keeps its shape
+  on every screen, and everything scales with the screen's height.
+- **Kept to the nearest edge.** On a screen of another shape, each piece at the top of
+  the file keeps its distance from the screen edge nearest to it. Where its position
+  falls across the layout decides which: the left third stays at the left, the middle
+  third keeps to the centre and the right third keeps to the right. A wider screen
+  moves them out: a 16:9 file at 2560×1080 moves the middle third 320 pixels right and
+  the right third 640. A narrower screen moves them in: the same file at 1024×768
+  moves the right third 341 pixels left. Sizes never change, so the gaps between the
+  groups grow and shrink instead. A piece can also name its edge with a
+  [`ScreenAnchor`](#screenanchor).
 - **Plain containers.** A top-level group at (0, 0), or with no position, holds pieces
-  rather than being one. Each of its children is kept to its own nearest edge instead.
+  rather than being one, unless it has a `ScreenAnchor`. Each of its children is kept
+  to its own nearest edge instead.
 - **Things that follow the world** land exactly on their points: the reticules
   (`player1.weaponN.reticule.position`), lock-ons (`player1.weaponN.lockOnPosition`),
   the [floating target bar](#floating-target-bars) and the
@@ -614,19 +627,84 @@ FileInfo("mymod_hud")
   already lands on the real screen, so they are never moved.
 - **Only this file.** Other files, stock or modded, draw exactly as before, even beside
   this one. There is no INI setting: the file decides.
-- **Only wide screens, one player.** At 4:3 or narrower, or in split screen, the file
-  draws the stock way.
+- **One player.** In split screen the file draws the stock way. A 4:3 file also draws
+  the stock way on a screen no wider than 4:3, which already shows it as written; any
+  other ratio is laid out on every screen.
+
+### ScreenAnchor
+
+Going by thirds leaves two bands where a piece cannot sit on a screen of another shape:
+a piece between them changes edge, and jumps sideways, depending on the screen. A 4:3
+file at 16:9 has them from 25% to 37.5% and from 62.5% to 75% of the screen. A piece can
+instead say how it moves, wherever it sits:
+
+```
+Group("player1weapon_group")
+{
+    ScreenAnchor("Right")
+    Position(0.95, 0.92, 0.0, "Viewport")
+    Group("player1ammo")           // moves with its piece: no anchor here
+    {
+        ...
+    }
+}
+```
+
+- `"Left"`, `"Center"` and `"Right"` keep the piece's distance from that edge, or from
+  the centre.
+- A number from 0 to 1 moves the piece by that share of the width the screen gains or
+  loses: 0 is `"Left"`, 0.5 `"Center"` and 1 `"Right"`. Give it where the piece sits as
+  a fraction of the width, and that point of it stays at the same fraction of every
+  screen: `ScreenAnchor(0.3)` on a piece centred 30% of the way across keeps it centred
+  there.
+- Only pieces take one: a top-level item, or a child of a top-level group at (0, 0).
+  Everything inside a piece moves with it, so a deeper anchor does nothing, and the
+  game log counts any when the file loads. `Target` elements never move.
+- A top-level group at (0, 0) with an anchor is one piece, not a plain container: its
+  children move together.
+- A piece without one keeps to the edge of its third, so most need none. Add one where
+  the third gives the wrong edge, or for a piece in one of the bands.
 
 ### Writing the numbers
 
-Write a TrueWidescreen file for a 4:3 screen of the real height. `"Viewport"` and
-`"Screen"` positions and sizes are fractions of that 4:3 layout, `"Pixels"` ones are
-pixels of it, and a `BitmapRect` the same size both ways is square. The numbers are
-the same for every screen shape.
+Write the file for a screen of its ratio and the real height. `"Viewport"` and
+`"Screen"` positions and sizes are fractions of that layout: x across its width, y down
+the full height. They scale with the screen's height and are the same on every shape.
+`"Pixels"` ones are screen pixels, the same size at every resolution, so they shrink on
+a bigger screen while the rest grows: use `"Viewport"`.
 
-To bring over a file tuned for the stock 16:9 look, so that it looks the same at 16:9,
-change its `"Viewport"` and `"Screen"` values like this (`"Pixels"` and `"Frame"` ones
-need working out by hand):
+A `BitmapRect` is square in `"Viewport"` when its width is its height times the ratio's
+height over its width: × 9/16 for `AuthoredRatio(16, 9)`, × 3/4 for 4:3.
+
+Some rules make a file hold up on every shape:
+
+- Give each part of the screen its own top-level group: health at the bottom left,
+  weapon at the bottom right, reticule in the centre, minimap at the top right.
+- Put a group's position near the edge it should keep to, in that third of the layout,
+  or give it a `ScreenAnchor`, and align what is in it away from that edge, so it never
+  hangs off the screen.
+- A group that only shares events or alpha between pieces goes at (0, 0), so each piece
+  in it keeps to its own edge.
+- Leave room between the groups if the file should fit screens narrower than its ratio.
+- `BitmapRect` takes `"Pixels"`, `"Screen"` or `"Viewport"`. The game reads `"Frame"`
+  there as `"Viewport"`.
+
+To bring over a file tuned for the stock 16:9 look as `AuthoredRatio(16, 9)`, so that
+it looks the same at 16:9, change its `"Viewport"` and `"Screen"` values like this
+(`"Pixels"` and `"Frame"` ones need working out by hand):
+
+| Line | Where | New value |
+|------|-------|-----------|
+| `Position` x, y | a piece: at the top, or in a plain container | x, 1/18 + y × 8/9 |
+| `Position` x, y | anything inside a piece | x, y × 8/9 |
+| `BitmapRect` width, height | any bitmap | width, height × 32/27 |
+| `Rect` width, height | any group frame | width, height × 8/9 |
+
+Leave `TextScale` alone: text comes out a little taller, unsquashed. A group driven by
+one of the world-following events above keeps its own `Position`, since the event
+replaces it; convert what is inside it.
+
+For `TrueWidescreen(1)` (4:3), the same file needs its widths changed too:
 
 | Line | Where | New value |
 |------|-------|-----------|
@@ -638,13 +716,34 @@ need working out by hand):
 The slide is 0 for a piece in the left third of the old screen (x below 1/3), 1/6 for
 one in the middle third and 1/3 for one in the right third. Check that the new x lands
 in the same third of the new layout, or the piece keeps to a different edge than it
-did. Leave `TextScale` alone: text comes out a little taller, unsquashed. A group
-driven by one of the world-following events above keeps its own `Position`, since the
-event replaces it; convert what is inside it.
+did.
 
-The modtools HUD editor saves a TrueWidescreen file in its new numbers and keeps the
-`TrueWidescreen(1)` line, so a file only needs converting once.
+To move a `TrueWidescreen(1)` file to `AuthoredRatio(16, 9)` and keep its look at 16:9,
+multiply its `"Viewport"` and `"Screen"` widths and x positions by 3/4, then add 1/8 to
+the x of a piece in the middle third and 1/4 to one in the right third. Heights and y
+stay.
 
-- A game without BF2GameExt logs `Error reading parameter` for the line and draws the
-  file the stock way, with its new numbers.
-- A piece cannot yet pick its edge by hand. It is always kept to the nearest one.
+### The HUD editor
+
+The modtools HUD editor shows the file laid out for the screen it runs on and saves the
+numbers for the file's own ratio, with its `AuthoredRatio` or `TrueWidescreen` line, so
+editing on a screen of another shape does not change them. On a screen of the file's
+ratio it shows the file exactly as written. On another shape, a piece you move is
+placed again at once, the way the next load will place it: one without a
+`ScreenAnchor` keeps to the edge of the third it is moved into, so it jumps sideways
+as it crosses into another third, and a top-level group moved onto or off (0, 0)
+becomes a plain container or a piece. A piece with a `ScreenAnchor` keeps it wherever
+it goes. Pieces that events move keep the edge they loaded with. The editor saves each
+`ScreenAnchor` line as it was written.
+
+A piece's property list also has `ScreenAnchor`, shown only on pieces of a file laid
+out on that screen, where it does something. It steps through `None` (keep to its
+third), `Left`, 0.05 to 0.45, `Center`, 0.55 to 0.95 and `Right`. The piece moves as
+you change it, and the line is saved: the edges by name, the others as numbers, none
+for `None`. An anchor written between the steps, such as 0.33, is shown at the
+nearest one, 0.35, and saved unchanged unless you change it.
+
+- The editor lists only elements, so the `FileInfo` lines and transforms are still
+  edited in the file itself.
+- A game without BF2GameExt logs `Error reading parameter` for each of these lines and
+  draws the file the stock way, with its new numbers.

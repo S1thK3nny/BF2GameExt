@@ -224,6 +224,7 @@
     <ClInclude Include="src\render\hud_sub_pixel.hpp" />
     <ClInclude Include="src\render\hud_true_widescreen.hpp" />
     <ClInclude Include="src\render\hud_true_widescreen_core.hpp" />
+    <ClInclude Include="src\render\hud_editor_properties.hpp" />
     <ClInclude Include="src\render\hud_editor_disable.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\light_projected_texture_fix.hpp" />
@@ -387,6 +388,7 @@
     <ClCompile Include="src\render\hud_bar_fill_from.cpp" />
     <ClCompile Include="src\render\hud_sub_pixel.cpp" />
     <ClCompile Include="src\render\hud_true_widescreen.cpp" />
+    <ClCompile Include="src\render\hud_editor_properties.cpp" />
     <ClCompile Include="src\render\hud_editor_disable.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\light_projected_texture_fix.cpp" />

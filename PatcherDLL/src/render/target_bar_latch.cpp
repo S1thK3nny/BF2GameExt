@@ -5,6 +5,7 @@
 #include "hud_class_icons.hpp"
 #include "hud_command_posts.hpp"
 #include "hud_bar_fill_from.hpp"
+#include "hud_editor_properties.hpp"
 #include "hud_sub_pixel.hpp"
 #include "target_bar_geometry.hpp"
 #include "target_bar_fade.hpp"
@@ -737,6 +738,7 @@ static void __cdecl hooked_Open()
    hud_class_icons_open();
    hud_command_posts_open();
    hud_bar_fill_from_open();
+   hud_editor_properties_open();   // after every item factory is made
 
    // A new mission.  Every GameObject pointer from the last one is dead memory.
    clear_all_objects();

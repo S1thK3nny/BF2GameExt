@@ -223,7 +223,8 @@ cause issues with vehicles, especially hovers, due to being tied to the framerat
 Research and addresses for these are in
 [docs/RE/HUDSystem.md](docs/RE/HUDSystem.md#candidate-events-researched-2026-09-25-not-built),
 [world markers and distances](docs/RE/HUDSystem.md#world-markers-and-distances-researched-2026-09-28),
-[Lua and the HUD](docs/RE/HUDSystem.md#lua-and-the-hud-researched-2026-09-28) and
+[Lua and the HUD](docs/RE/HUDSystem.md#lua-and-the-hud-researched-2026-09-28),
+[the HUD editor](docs/RE/HUDSystem.md#controls-and-what-the-panel-shows-read-in-phantom-2026-10-08) and
 [docs/RE/HUDElementProperties.md](docs/RE/HUDElementProperties.md).
 
 **HUD shake** - The HUD stays still while the camera shakes, so a strong shake leaves the
@@ -279,16 +280,42 @@ Add a `SubPixel(1)` property covering an element and everything inside it; the r
 a spare flag bit and the draw are in
 [pixel snapping](docs/RE/HUDSystem.md#pixel-snapping-built-2026-09-29).
 
-**Screen anchor per element** - A `TrueWidescreen(1)` file picks each top-level piece's edge
-from where it is written (left, middle or right third), so a piece near a boundary can keep
-to the wrong edge, and a full-screen overlay covers only the 4:3 middle. Add
-`ScreenAnchor("Left" | "Center" | "Right" | "Full")` on top-level elements, `"Full"` laying
-that element out across the real width.
+**Full-width elements** - An `AuthoredRatio` file is laid out at its own ratio, so a
+full-screen overlay in it covers only that width on a wider screen. Add
+`ScreenAnchor("Full")`, laying that element out across the real width.
+
+**HUD editor: preview other screen shapes** - Checking how an `AuthoredRatio` file looks
+at 4:3, 16:10 or 21:9 means changing resolution. Add a key that cycles those shapes and
+lays the file out as on that screen, inside a frame on the real one.
 
 **HUD editor guides** - The modtools HUD editor's only overlay is the safe-area frame its
-Update draws on a key. Add more toggles: a grid, the screen centre, and for a
-`TrueWidescreen(1)` file the 4:3 area and the third lines where pieces change edge;
-possibly nudges that snap to the grid.
+Update draws on a key. Add more toggles: a grid, the screen centre, and for an opted-in
+file its layout area, the third lines where pieces change edge, and each piece's edge or
+`ScreenAnchor`; possibly nudges that snap to the grid.
+
+**HUD editor comfort** - The editor's keys are mapped from a gamepad and listed nowhere,
+a value moves by how long its key is held, the panel shows pixels while the file gets
+fractions, and saves land in `GameData\Data\` to be copied back. Add a key help overlay,
+1-pixel nudges (Shift for 10), the value to be saved beside the pixels, and an INI folder
+to save into with a backup.
+
+**HUD editor: show hidden elements** - Elements that only show in a vehicle, as a hero or
+with a jetpack can only be edited in that state. Add a toggle that keeps the selected
+element, or its whole file, shown while editing.
+
+**HUD editor: find and undo** - The editor steps through every element in one flat list
+and has no undo. Add picking by name or by parent and child, and restore the last
+changes' old values on a key.
+
+**HUD editor: reference images** - A picture to line a HUD up against has to be hidden
+with `Alpha(0)` and shown by hand. Show the stock `EditOnly(1)` layer while the editor is
+open, laid out like the rest of the file.
+
+**HUD editor: mouse** - Everything is done with keys. Add click to select and drag to
+move, through the editor's own property path so saving is unchanged.
+
+**Reload a .hud in place** - Every change needs a munge and a restart. Research whether
+one file's elements can be torn down and loaded again from a fresh munge in game.
 
 **Colour gradients** - An element is drawn in one tint, so an icon or bar can only show a
 gradient baked into its texture. Add a `Gradient` property for bitmaps and bars that draws

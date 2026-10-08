@@ -59,11 +59,11 @@ assert layout == {"kRed": 0xB0, "kNode": 0xB4, "kRedParentList": 0x1C, "kRedChil
 modtools_body = body_of("modtools_code_matches")
 retail_body = body_of("retail_code_matches")
 modtools_guards = re.findall(r'\bcode_is\(base, a\.(\w+), "([^"]*)",\s*' + LITERALS + r',\s*(\d+)\)', modtools_body)
-assert len(modtools_guards) == 14, len(modtools_guards)
+assert len(modtools_guards) == 19, len(modtools_guards)
 MOVED = r'(?:,\s*\{ (0x[0-9A-Fa-f]+), a\.(\w+)(?: \+ (0x[0-9A-Fa-f]+))? \})?'
 retail_guards = re.findall(r'retail_code_is\(base, a\.(\w+), "([^"]*)",\s*' + LITERALS + r',\s*' + LITERALS +
                            MOVED + MOVED + r'\)', retail_body)
-assert len(retail_guards) == 7, len(retail_guards)
+assert len(retail_guards) == 8, len(retail_guards)
 draws = {kind: re.search(r'draw_is\(base, a\.hud_element_draw,\s*' + LITERALS + r',\s*' + LITERALS + r'\)', body)
          for kind, body in (("modtools", modtools_body), ("retail", retail_body))}
 assert all(draws.values())
@@ -121,6 +121,54 @@ for hook in ("s_loadRetail, hooked_LoadRetail", "&s_viewWidthRetail, hooked_View
     assert hook in install, hook
 assert "using LoadRetailFn = void(__fastcall*)(void* config);" in source
 assert "void __fastcall hooked_LoadRetail(void* config)" in source
+
+# ScreenAnchor: Element::ReadData on every build, thiscall(config, data), RET 8;
+# Element::WriteData on modtools only, thiscall(file, indent), RET 8.
+assert "using ReadDataFn  = bool(__fastcall*)(void* self, void* edx, void* config, const Data* data);" in source
+assert "using WriteDataFn = void(__fastcall*)(void* self, void* edx, void* file, int indent);" in source
+assert "bool __fastcall hooked_ElementRead(void* self, void* edx, void* config, const Data* data)" in source
+assert "void __fastcall hooked_ElementWrite(void* self, void* edx, void* file, int indent)" in source
+assert "ReadDataFn  s_elementRead  = nullptr;" in source and "WriteDataFn s_elementWrite = nullptr;" in source
+modtools_branch = install[install.index("if (modtools) { if (r == NO_ERROR)"):install.index("} else { if (r == NO_ERROR)")]
+assert install.count("DetourAttach(&(PVOID&)s_elementRead, hooked_ElementRead)") == 1
+assert "DetourAttach(&(PVOID&)s_elementRead, hooked_ElementRead)" not in modtools_branch
+assert "DetourAttach(&(PVOID&)s_elementWrite, hooked_ElementWrite)" in modtools_branch
+assert install.count("hooked_ElementWrite") == 1
+
+# The editor's re-pick: Editor::Update on modtools only, thiscall(inputs, dt),
+# RET 8, with the selected element at +0x14.
+assert "using EditorUpdateFn = void(__fastcall*)(uint8_t* editor, void* edx, void* inputs, float dt);" in source
+assert "void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, float dt)" in source
+assert "DetourAttach(&(PVOID&)s_editorUpdate, hooked_EditorUpdate)" in modtools_branch
+assert install.count("hooked_EditorUpdate") == 1
+assert const("kEditorElement") == 0x14
+
+# ScreenAnchor in the editor's panel: Element's GetProperty and SetProperty on modtools only,
+# thiscall(hash, value*) -> bool, RET 8.
+assert "using PropertyFn  = bool(__fastcall*)(void* self, void* edx, uint32_t property, void* value);" in source
+assert "bool __fastcall hooked_ElementGet(void* self, void* edx, uint32_t property, void* value)" in source
+assert "bool __fastcall hooked_ElementSet(void* self, void* edx, uint32_t property, void* value)" in source
+for hook in ("DetourAttach(&(PVOID&)s_elementGet, hooked_ElementGet)",
+             "DetourAttach(&(PVOID&)s_elementSet, hooked_ElementSet)"):
+    assert hook in modtools_branch and install.count(hook) == 1, hook
+
+
+def pbl_hash(text):
+    h = 0x811C9DC5
+    for c in text.encode():
+        h = ((h ^ (c | 0x20)) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+assert 'constexpr uint32_t kScreenAnchor   = pbl_hash("ScreenAnchor");' in source
+screen_anchor = pbl_hash("ScreenAnchor")
+assert screen_anchor == 0x80D0E400
+# The element types a .hud file can make (their factories' names), whose
+# readers must all end up in Element::ReadData.
+element_types = ["BorderedBox", "ElementBarBitmap", "ElementBarSegmented", "ElementBitmap", "ElementBitmapMasked",
+                 "ElementGroup", "ElementGroupPlayer", "ElementMap", "ElementModel3D", "ElementMultilineText",
+                 "ElementTarget", "ElementText", "ElementVehicleSeating", "ObjectiveList", "ProceduralBarBitmap",
+                 "Target@ElementTarget"]
 
 # Where each aspect call's element lives, read off the disassembly: the
 # function puts it (or the ElementBar base 0x200 above it) in a register once,
@@ -314,6 +362,117 @@ for build, filename in builds:
                 assert at(descriptor + 8, len(name) + 1) == name + b"\0", (build, vtable)
         read_data = until_ret(table["hud_file_info_read_data"])
         assert read_data[-1].bytes == b("C2 08 00"), (build, "ReadData returns with RET 8")
+
+        # ---- HUD::Element::ReadData and WriteData: ScreenAnchor -------------------------
+        element_read = table["hud_element_read_data"]
+        assert until_ret(element_read)[-1].bytes == b("C2 08 00"), (build, "Element::ReadData returns with RET 8")
+        # No reader compares ScreenAnchor's hash: nothing takes the line before it.
+        assert struct.pack("<I", screen_anchor) not in image, build
+        # Its four callers (the group, bitmap, text and model readers) return what
+        # it returns straight away, so they keep nothing in a register across it.
+        readers = calls_to(element_read)
+        assert len(readers) == 4, (build, [hex(c) for c in readers])
+        for call in readers:
+            after = until_ret(call + 5, 0x20)
+            assert after[-1].mnemonic == "ret" and len(after) <= 8, (build, hex(call))
+            for x in after[:-1]:
+                assert x.mnemonic == "pop" or (x.mnemonic, x.op_str) == ("mov", "esp, ebp") or \
+                    (x.mnemonic == "add" and x.op_str.startswith("esp, ")), (build, hex(call), x.mnemonic, x.op_str)
+                assert "eax" not in written(x), (build, hex(call))
+
+        def calls_in(fn, limit=0x2000):
+            """The functions fn calls or tail-jumps to: a linear sweep to the last RET
+            no branch inside it jumps past."""
+            out, reach = [], fn
+            for x in decoder.disasm(at(fn, limit), fn):
+                imm = x.operands[0].imm if x.operands and x.operands[0].type == capstone.x86.X86_OP_IMM else None
+                if x.bytes[0] == 0xE8:
+                    out.append(target(x.address))
+                elif x.mnemonic == "jmp" and imm is not None and not fn <= imm < fn + limit:
+                    out.append(target(x.address))   # a tail call
+                    if x.address >= reach:
+                        break
+                elif x.mnemonic.startswith("j") and imm is not None:
+                    reach = max(reach, imm)
+                if x.mnemonic == "ret" and x.address >= reach:
+                    break
+            return out
+
+        def reaches(fn, goal, depth=4):
+            seen, frontier = set(), [fn]
+            for _ in range(depth):
+                if goal in frontier:
+                    return True
+                seen |= set(frontier)
+                frontier = [c for f in frontier for c in calls_in(f) if c not in seen]
+            return goal in frontier
+
+        if not mt:
+            # Every element type's reader (its primary vtable's +0x20) ends up in
+            # it, through its bases' readers.
+            def primary_vtable(name):
+                descriptor = image.find(b".?AV" + name + b"@HUD@@\0") + base - 8
+                assert descriptor > base, (build, name)
+                cols = [base + m.start() - 12 for m in re.finditer(re.escape(struct.pack("<I", descriptor)), image)]
+                cols = [c for c in cols if u32(c) == 0 and u32(c + 4) == 0]
+                assert len(cols) == 1, (build, name, [hex(c) for c in cols])
+                refs = [base + m.start() + 4 for m in re.finditer(re.escape(struct.pack("<I", cols[0])), image)]
+                assert len(refs) == 1, (build, name)
+                return refs[0]
+
+            for name in element_types:
+                reader = u32(primary_vtable(name.encode()) + 0x20)
+                assert reaches(reader, element_read), (build, name, hex(reader))
+        else:
+            writer = table["hud_element_write_data"]
+            assert until_ret(writer)[-1].bytes == b("C2 08 00"), (build, "Element::WriteData returns with RET 8")
+            # Called by the group, bitmap, text and model writers alone.
+            assert len(calls_to(writer)) == 4, (build, [hex(c) for c in calls_to(writer)])
+            # thiscall(file, indent): the file at [EBP+8] is the property writers'
+            # this and the indent at [EBP+0xC] their second argument, EditOnly
+            # first.
+            assert at(writer + 0x36, 6) == b("8B 75 0C 8B 7D 08"), build   # MOV ESI,[EBP+0xC] / MOV EDI,[EBP+8]
+            assert at(writer + 0x4D, 2) == b("56 68") and at(u32(writer + 0x4F), 9) == b"EditOnly\0", build
+            assert at(writer + 0x53, 2) == b("8B CF"), build                 # MOV ECX,EDI
+
+            # ---- HUD::Editor::Update -------------------------------------------------------
+            editor_update = table["hud_editor_update"]
+            body_ = until_ret(editor_update, 0x1800)
+            assert body_[-1].bytes == b("C2 08 00") and len([x for x in body_ if x.mnemonic == "ret"]) == 1, build
+            assert body_[4].bytes == b("8B F1"), (build, "this in ESI")      # MOV ESI,ECX
+            # Once a frame from HUD::Manager::Update, which reloads ECX from gEditor
+            # straight after.
+            callers = calls_to(editor_update)
+            assert len(callers) == 1, (build, [hex(c) for c in callers])
+            assert at(callers[0] + 5, 2) == b("8B 0D"), build
+            # Its one property change: SetProperty (+0x14) on the selected element,
+            # read from +0x14, with the property's hash, then GetProperty (+0x18).
+            code_ = b"".join(x.bytes for x in body_)
+            at_set = code_.find(b("8B 4E 14 50 FF 53 14"))
+            assert at_set > 0 and code_.count(b("FF 53 14")) == 1, build
+            assert b("8B 46 14 8B 4E 18 8B 18") in code_[at_set - 0x18:at_set], (build, "the vtable of [ESI+0x14]")
+            assert code_.find(b("8B 4E 14 50 FF 53 18"), at_set) > at_set, build
+
+            # ---- Element::GetProperty and SetProperty -------------------------------------
+            # thiscall(hash, value*), RET 8, the hash read off the stack first; each of their
+            # callers (the element types that answer their own properties) returns what they
+            # return, or jumps to them.
+            for name, count in (("hud_element_get_property", 5), ("hud_element_set_property", 6)):
+                fn = table[name]
+                rets = [x for x in until_ret(fn, 0x900) if x.mnemonic == "ret"]
+                assert rets and rets[-1].bytes == b("C2 08 00"), (build, name)
+                sites = [va for va in find_all(b"\xE8") + find_all(b"\xE9")
+                         if target(va) == fn and va > 0x00420000]
+                assert len(sites) == count, (build, name, [hex(s) for s in sites])
+                for va in sites:
+                    if at(va, 1) == b"\xE9":
+                        continue   # a tail jump: their caller gets the answer
+                    after = until_ret(va + 5, 0x20)
+                    assert after[-1].mnemonic == "ret" and len(after) <= 8, (build, name, hex(va))
+                    for x in after[:-1]:
+                        assert x.mnemonic == "pop" or (x.mnemonic, x.op_str) == ("mov", "esp, ebp") or \
+                            (x.mnemonic == "add" and x.op_str.startswith("esp, ")), (build, name, hex(va), x.op_str)
+                        assert "eax" not in written(x), (build, name, hex(va))
 
         # ---- HUD::Manager::Load ----------------------------------------------------------
         load = table["hud_manager_load"]
@@ -552,6 +711,7 @@ for build, filename in builds:
               f"{'no moved addresses' if mt else 'every moved address in them'}, the written CALLs, "
               f"FileInfo/ElementTarget slots, Load, its read call, GetContainerViewWidth, the conversion's "
               f"modes, EventPosition, the draw, sList, AddChild, the frustum, six aspect calls and "
-              f"their registers passed")
+              f"their registers, Element::ReadData, its callers and "
+              f"{'Element::WriteData and Editor::Update' if mt else 'every element type reaching it'} passed")
     finally:
         pe.close()

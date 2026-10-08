@@ -59,6 +59,15 @@ constexpr Bar fill(const Bar& b, float value)
    return fill(b, value, true, true);
 }
 
+// A stock bar as its setup left it, from what it draws at any value: the fill
+// only moves the right edge and U1, and the bar keeps the full width and the
+// U1 it multiplies by the value.
+constexpr Bar unfilled(const Bar& drawn)
+{
+   return { { drawn.rect.left, drawn.rect.top, drawn.rect.left + drawn.width, drawn.rect.bottom },
+            { drawn.uv.u0, drawn.uv.v0, drawn.spanU, drawn.uv.v1 }, drawn.width, drawn.spanU };
+}
+
 // FillFrom("Bottom") and FillFrom("Top"). The stock fill can only move the
 // right edge, so a vertical bar has its ScaleTexture and rectangle-scaling
 // flags cleared (the stock fill then leaves it alone) and is laid out from the

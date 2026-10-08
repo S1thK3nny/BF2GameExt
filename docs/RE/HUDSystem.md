@@ -638,6 +638,39 @@ Phantom.
 
 The editor writes its output to `GameData\Data\` (or the VirtualStore redirect).
 
+### Controls and what the panel shows (read in Phantom, 2026-10-08)
+
+Groundwork for the editor ideas on the ROADMAP. `Editor::GetControlValue` (P `005EF7D0`)
+reads gamepad-style controls straight off the keyboard (DirectInput scan codes):
+
+| Control | Key | In the editor |
+|---|---|---|
+| left stick | arrows | step through elements, properties or a value's first two numbers |
+| right stick | numpad 4, 6, 8, 2 | a value's third and fourth numbers |
+| R1 / L1 | Page Up / Home | go in a level (element → property → value) / back out |
+| L2 | End | toggles a display flag (`Editor` +1817 bit 1) |
+| R2 | Page Down | the safe-area frame |
+| Select | Insert | save (`Manager::Write`) |
+| Start | Delete | |
+
+Nothing on screen lists them. `Editor::Update` (P `005F05C0`, M `0068FAC0`) picks elements
+one by one from a flat list (`NextElement`/`PrevElement`), and changes a value by
+`GetFloatStep` (P `005EF910`: the seconds the key has been held, at most 100) times the
+property's own step, so a tap barely moves it and holding speeds up; nothing types a
+value. It applies the value through the element's `SetProperty` and reads it back with
+`GetProperty`. `Editor::PropertyString` (P `005F0060`) prints floats with `%f` but
+vectors with `%.2f`. `Element::GetProperty` (P `005F3800`) answers `Position` with the
+drawable's local translation, in pixels, so the panel shows pixels while the file is
+written in the element's relative mode.
+
+`EditOnly(1)` (PblHash `0xCA0B9CCB`, `Element` +E0 bit 3 on Phantom, +FC on modtools)
+makes `UpdateEnableState` (P `005F5C00`) add the element to `gScreenGroupEdit` (P
+`00B274C4`) instead of `gScreenGroup`. `Manager::Load`, `ToggleAllDisplay` and
+`PauseMenu::_SetPaused` enable those groups only while `gScreenGroupEditEnabled`
+(P `00A91C60`) is set, and nothing in the editor touches it. The draw detour only lays
+out pieces under `gHudViewPorts`, so an opted-in file's `EditOnly` element is not laid
+out yet.
+
 ### How it saves a file (read on modtools, 2026-10-07)
 
 `HUD::Manager::Write` (M `006B88D0`) walks every item in `HUD::Item`'s list, in the
@@ -692,6 +725,53 @@ them, for this writer and the panel.
 
 `tests/hud_number_math_abi_tests.py` and `tests/hud_bar_fill_from_abi_tests.py` check all
 of these on modtools.
+
+### GameExt's properties in the panel (built 2026-10-09)
+
+The panel lists an element's properties from its `Item::Factory` (`render/hud_editor_properties.cpp`).
+On modtools a factory keeps its property list's terminator at +4 (`PropertyGetFirst`,
+M `006B6A50`), its type's PblHash at +8 and its node on the list of factories at +C;
+that list's terminator is M `00AD87BC` (`FindByHashID`, M `006B6AE0`). A property is
+`{ next, Data* }` on a singly linked list closed by the terminator, and `Data` is
+`{ name, PblHash, type, enum names, min, max, ... }`, 0x3C bytes, type 2 an enum
+(`Property::Init` for an enum, M `006B6810`). Phantom has the same layout.
+
+For each property, `Editor::PropertyString` (M `0068E3B0`, P `005F0060`) asks the
+selected element's `GetProperty` (vtable +18) and shows nothing if it says no; it then
+switches on the type (jump table M `0068E6D0`), and names an enum's value with
+`PropertyTranslateEnum` (+1C). The edit line (`DisplayProperty`) prints the same string.
+Changing a value calls `SetProperty` (+14), then `GetProperty`. Every element type ends
+up in `Element`'s three for a property it does not know: `GetProperty` (M `006932E0`,
+five callers, each returning its answer or jumping to it), `SetProperty` (M `006946B0`,
+six) and `PropertyTranslateEnum` (M `00692670`, jumped to by the bitmap, group and text
+types with the hash put back). All three are thiscall(hash, value), RET 8.
+
+- **The lists.** `HUD::Manager::Open` (M `006B8A00`) makes the factories and calls
+  `GameEvents::Open` last, after them and `gEditor`, so GameExt's hook on that (in
+  `target_bar_latch.cpp`) links the properties in: first off any list still holding
+  them, then at the end of each. `ScreenAnchor` goes on every factory, since any element
+  can be a piece, and `FillFrom` on `BarBitmap`'s and `ProceduralBarBitmap`'s. A freed
+  factory's own properties unlink themselves by walking the list round, through
+  GameExt's nodes, which sit in the DLL.
+- **The names.** A detour on `Element::PropertyTranslateEnum` names both enums:
+  `ScreenAnchor` 0 `None`, 1 `Left`, then 0.05 steps with 11 `Center` and 21 `Right`;
+  `FillFrom` `Left`, `Right`, `Bottom`, `Top`.
+- **`ScreenAnchor`.** Detours on `Element::GetProperty` and `SetProperty`
+  (`render/hud_true_widescreen.cpp`) answer for a placed piece that is not a `Target`,
+  and say no elsewhere, which hides the line. A change sets or clears the piece's
+  anchor (a name for the three edges) and places the piece again at once, with the rule
+  a load uses.
+- **`FillFrom`.** The bar's own `GetProperty` and `SetProperty` detours
+  (`render/hud_bar_fill_from.cpp`) answer for every bar. A switch lays the bar out
+  again from the state the file has, kept for a `FillFrom` bar; a stock bar gives it
+  back from what it draws, since the stock fill moves only the right edge and U1 and
+  the bar keeps the full width and U1 (+47C, +480). `Left` restores the stock fill.
+
+The editor only ever lists elements (`Element::GetFirst`/`GetNext`), so `FileInfo` lines
+and transforms cannot be offered. Stepping past the last line shown on a non-piece lands
+on the hidden `ScreenAnchor` for one press. `tests/hud_editor_properties_abi_tests.py`
+checks the lists, the layout, the panel's line and the order the HUD opens in;
+`tests/hud_true_widescreen_abi_tests.py` the two `Element` detours. Modtools only.
 
 ### It is still live on retail
 
@@ -2088,10 +2168,10 @@ A `SubPixel(1)` property covering one element and everything inside it would nee
 
 ## Wide screens (built 2026-10-05, `render/hud_true_widescreen.cpp`)
 
-What the stock game does to a HUD on a screen wider than 4:3, and `TrueWidescreen(1)`,
-the per-file opt-out of it. Addresses are modtools (M), Steam (S) and GOG (G). The
-stock mapping was read on modtools and measured in game at 1280×720
-with a temporary diagnostic (2026-10-05); the user's own measurement agreed
+What the stock game does to a HUD on a screen wider than 4:3, and `AuthoredRatio` (with
+`TrueWidescreen(1)`, its 4:3 form), the per-file opt-out of it. Addresses are modtools
+(M), Steam (S) and GOG (G). The stock mapping was read on modtools and measured in game
+at 1280×720 with a temporary diagnostic (2026-10-05); the user's own measurement agreed
 (`BitmapRect` 128 by 108 pixels looked square).
 
 ### The stock mapping
@@ -2112,32 +2192,40 @@ cannot be turned off for one file at the group. `ReticleCorrection`
 (`render/hud_widescreen.cpp`) moves the stock reticule back onto the aim point
 inside the band.
 
-### `TrueWidescreen(1)`
+### `AuthoredRatio` and `TrueWidescreen(1)`
 
-An opted-in file is laid out as on a 4:3 screen of the real height, W43 = 4H/3, and
-drawn one layout pixel to one screen pixel:
+An opted-in file is laid out as on a screen of its authored ratio R and the real
+height, WL = R·H, and drawn one layout pixel to one screen pixel. `AuthoredRatio(w, h)`
+gives R = w/h, from 1 to 4; `TrueWidescreen(1)` gives 4/3, W43 = 4H/3, and
+`AuthoredRatio` wins if a file has both. On a screen of ratio R the file draws exactly
+as written.
 
-1. **The flag.** `HUD::Manager::ConfigFile` (the `FileInfo` item) `ReadData`, its vtable
-   +20, is detoured for the PblHash of `TrueWidescreen`, `0xCA64BB16`.
+1. **The lines.** `HUD::Manager::ConfigFile` (the `FileInfo` item) `ReadData`, its vtable
+   +20, is detoured for the PblHashes of `TrueWidescreen`, `0xCA64BB16`, and
+   `AuthoredRatio`, `0x10FF1782`. The `FileInfo` comes first in a file, so R is known
+   before its elements are read.
 2. **Which elements are the file's.** `HUD::Manager::Load` (one call per file) is
    detoured: the last node of `HUD::Element::sList` before the load against the list
    after it gives the elements the file made (the element constructor appends; node at
    +B4). Load's read of each top-level item (`MOV ECX,item / CALL [vtable+8]`) is
    replaced by a CALL to a stand-in that notes the item and goes on into its `Read`.
-   While the file loads, `sViewportWidth` holds W43: `ElementMap`'s constructor and
+   While the file loads, `sViewportWidth` holds WL: `ElementMap`'s constructor and
    `ElementText`'s `TextBox` read it directly.
-3. **The 4:3 width afterwards.** `GetContainerViewWidth` returns W43 for an element of a
-   placed piece, and the relative-to-pixels conversion is handed W43 as the Screen
-   width (mode 1) when the view width is W43, so events that move the file's elements
+3. **The layout width afterwards.** `GetContainerViewWidth` returns WL for an element
+   the file made (each is kept with its vtable, drawable and R as `sList` grew, and
+   dropped once it leaves the list) or one drawn under a placed piece, and the
+   relative-to-pixels conversion is handed WL as the Screen width (mode 1) when the view
+   width is the layout width of a file in use, so events that move the file's elements
    later use the layout too.
 4. **No stretch.** The six `GetScreenAspectRatio` calls in the bitmap rect setup,
    `ElementMap::PostReadSetup` (four) and `ElementBarSegmented::SetValue` return 0.75 for
-   an opted-in element.
-5. **Placement.** After the load, each top-level item gets a slide: 0, (W − W43)/2 or
-   W − W43 by the third of W43 its x falls in. One at (0, 0) is a plain container: its
-   direct children are placed by the same rule instead. An `ElementTarget` (by vtable) is
-   never slid: `ElementTarget::Update` (its vtable +2C) places its markers from the real
-   width.
+   an opted-in element, which cancels the widening stretch whatever R is.
+5. **Placement.** After the load, each top-level item gets a slide: 0, (W − WL)/2 or
+   W − WL by the third of WL its x falls in, negative on a screen narrower than WL, or
+   its `ScreenAnchor`'s share of W − WL (below). One at (0, 0) without an anchor is a
+   plain container: its direct children are placed by the same rule instead. An
+   `ElementTarget` (by vtable) is never slid: `ElementTarget::Update` (its vtable +2C)
+   places its markers from the real width.
 6. **The draw.** A detour on the element draw counts depth under the HUD screen groups
    (`gHudViewPorts`, five `RedScreenGroupElement`s 0xA0 apart). At depth 1 an opted-in
    piece is drawn under a parent of its own instead of its group's letterboxed one: one
@@ -2147,26 +2235,86 @@ drawn one layout pixel to one screen pixel:
    parent gets its slide × k added.
 7. **The world.** The `EventPosition` handler (`ElementGroupBase`'s, cdecl(`Event*`,
    element)) gets, for an opted-in element, a copy of the event whose x is
-   (v·W − slide)/W43, which lands on the real point v·W, for
+   (v·W − slide)/WL, which lands on the real point v·W, for
    `player1.weaponN.reticule.position`, `.lockOnPosition`, `.target.position` and
    `player1.commandPostN.position`. A reticule's y has `ReticleCorrection` taken back
-   off (`hud_widescreen_reticle_uncorrect`).
+   off (`hud_widescreen_reticle_uncorrect`, which is exact, and the identity on a screen
+   no wider than 4:3).
 
-Only with one viewport (`CameraManager::m_iNumCam`, +1C, is 1) and on a wide screen;
-the screen is read as each file loads. A piece is found in the drawable tree, the one
-the draw walks: a drawable's parent is its link at +1C less 0x70 (`RedGroupElement`'s
-child list), checked by the link's item pointing back (node `{ list, next, prev, item }`).
-`HUD::Element`'s own group pointer (+F4) is only set for some, and a top-level drawable
-is only in its screen group while enabled (`HUD::Element::UpdateEnableState`, vtable
-+34: M `00692860`, S `00549BF0`).
+Only with one viewport (`CameraManager::m_iNumCam`, +1C, is 1). A 4:3 file only on a
+wide screen, since on a 4:3 one the stock layout is its own; any other R on every
+screen, narrower ones included. The screen is read as each file loads. A piece is found
+in the drawable tree, the one the draw walks: a drawable's parent is its link at +1C
+less 0x70 (`RedGroupElement`'s child list), checked by the link's item pointing back
+(node `{ list, next, prev, item }`). `HUD::Element`'s own group pointer (+F4) is only
+set for some, and a top-level drawable is only in its screen group while enabled
+(`HUD::Element::UpdateEnableState`, vtable +34: M `00692860`, S `00549BF0`).
 
 The modtools HUD editor writes a file back through the same per-element width, so it
-writes the 4:3 numbers. Three gaps are closed on modtools: `ConfigFile::WriteData`
-(vtable +28) is followed by `TrueWidescreen(1)` for a `FileInfo` that read it and is
-still in `gConfigFiles`; the pixels-to-relative conversion gets W43 for Screen mode; and
+writes the numbers for the file's R whatever screen it runs on. Templates have that
+width because the file made them, though the drawable tree never holds them: a
+`BarSegmented`'s `Segment` (`mSegmentAll`, built inside the bar, which draws `NewArray`
+copies of it) and `VehicleSeating`'s `Empty`, `Self`, `Player` and `AI`. Found by the
+tree alone, as before 2026-10-08, they were written against the real width, so each
+save multiplied their `"Viewport"` widths and x positions by 3/4 at 16:9. What is made
+later, such as segments the editor makes again, is found by the tree. Three gaps are
+closed on modtools: `ConfigFile::WriteData` (vtable +28) is followed by the
+`TrueWidescreen` and `AuthoredRatio` lines the `FileInfo` read, while it is still in
+`gConfigFiles`; the pixels-to-relative conversion gets WL for Screen mode; and
 `ElementText`'s `SetProperty`, `GetProperty` and `WriteData`, which read
-`sViewportWidth` for `TextBox`, run with it lent. GameExt turns the editor off on Steam
-and GOG (see [The HUD editor](#the-hud-editor)), so those hooks are modtools only.
+`sViewportWidth` for `TextBox`, run with it lent. A `FileInfo`'s lines are kept from
+the first of them it reads in a load, and dropped for a `FileInfo` a load makes that
+reads neither: `FileInfo`s are made again for each mission, often at the same
+addresses. GameExt turns the editor off on Steam and GOG (see
+[The HUD editor](#the-hud-editor)), so those hooks are modtools only.
+
+### `ScreenAnchor` (built 2026-10-08)
+
+A piece can name how it moves: `ScreenAnchor("Left" | "Center" | "Right")`, shares 0,
+0.5 and 1, or a share from 0 to 1, giving a slide of share × (W − WL) wherever it sits.
+Only a piece takes it; an anchored top-level item at (0, 0) is one piece, not a plain
+container. Anywhere else the line does nothing, and the game log counts such lines when
+the file loads.
+
+- **The reader.** `HUD::Element::ReadData` (thiscall(`PblConfig*`, `Data*`) → bool,
+  RET 8) is where every element type's reader ends up for a property it does not take
+  (read in Phantom): `ElementGroupBase`'s, `ElementBitmapBase`'s, `ElementText`'s and
+  `ElementModel3D`'s readers call it last, and every other element type's reader calls
+  one of those for what it does not take: `BorderedBox`, `ElementGroupPlayer` (and
+  through it `ElementMap`, `ElementTarget` and `ElementVehicleSeating`),
+  `ElementMultilineText` and `ObjectiveList` (the group base's own) on the group side,
+  `ElementBitmapMasked` and `ElementTarget::Target` on the bitmap side, and
+  `ElementBarBitmap` and `ElementBarSegmented` after `ElementBar`'s reader, which
+  returns false for anything it does not take (`ProceduralBarBitmap` through
+  `ElementBarBitmap`'s). No reader compares `ScreenAnchor`'s PblHash, `0x80D0E400`: it
+  is in none of the three exes. The four callers return its result at once, so it
+  keeps nothing in a register across it (M through the incremental-link JMP `0040CCA7`:
+  `00698AB8`, `0069A0B3`, `006A4633`, `006AB813`; S `0054D827`, `0054EC45`, `00556D36`,
+  `0055C03A`; G `0054E577`, `0054F995`, `00557AA6`, `0055CDBA`).
+- **The record.** The detour keeps the element, its drawable, its vtable, the share
+  and whether a name gave it, for an element of any file, and drops it once the
+  element leaves `sList`. Placement looks it up after the file loads; it has no effect
+  in a file that is not laid out.
+- **The writer.** `HUD::Element::WriteData` (M `00693F20`; thiscall(`PblFile*`, indent),
+  RET 8) writes what every element has, from the same four classes' `WriteData`, a
+  group's before its children. A detour adds the element's line after it, as it was
+  written: the name, or the number with `%g`.
+
+### The editor places a piece it moves again
+
+Slides are worked out as a file loads, so a piece an event moves keeps the edge it
+loaded with (the command post strip's centring transform, for one). On a screen of
+another shape that would leave the modtools editor showing a moved piece where it
+loaded, not where the next load puts it. `HUD::Editor::Update` (M `0068FAC0`,
+thiscall(`RawControllerInputs*`, dt), RET 8) changes a property of the selected
+element (`Editor` +14) through that element's `SetProperty` (vtable +14, M `00690827`;
+`ElementMap` and `ElementModel3D` set their position in their own), once a frame from
+`HUD::Manager::Update`, which reloads ECX from `gEditor` (M `00BA4488`) after it.
+Events move elements in `Element::UpdateAll`, outside it. A detour notes the selected
+piece's x before it and, if the same piece's x differs after, places it again with the
+rule a load uses: by its third, unless it has an anchor; a top-level group moved onto
+(0, 0) becomes a plain container, its children placed as pieces, and one moved off it a
+piece.
 
 ### Addresses
 
@@ -2189,7 +2337,10 @@ and GOG (see [The HUD editor](#the-hud-editor)), so those hooks are modtools onl
 | `ConfigFile` vtable | `00A60398` | `007A329C` | `007A4064` |
 | `HUD::Element::sViewportWidth` | `00BA38FC` | `01E56C34` | `01E580E4` |
 | `ElementTarget` vtable / `Update` | `00A5E000` / `006A9170` | `007A17FC` / `0055A340` | `007A2658` / `0055B0B0` |
+| `HUD::Element::ReadData` | `00693790` | `00549250` | `00549FA0` |
 | `ConfigFile::WriteData`, indent and format writers | `006B8090`, `006B5A20`, `006B5A50` | | |
+| `HUD::Element::WriteData` | `00693F20` | | |
+| `HUD::Editor::Update` | `0068FAC0` | | |
 | pixels-to-relative conversion | `00691170` | | |
 | `gConfigFiles` / count | `00BA4070` / `00BA4480` | | |
 | `ElementText` `SetProperty` / `GetProperty` / `WriteData` | `006AAE10` / `006A95C0` / `006A9A90` | | |
@@ -2213,6 +2364,7 @@ Modtools and retail differ, LTCG-built retail in four places:
 | relative-to-pixels conversion | cdecl(mode, value, frame, view, screen) → ST0 | mode in ECX, value, frame and view in XMM1-3, screen on the stack (caller pops) → XMM0; changes only XMM0 and XMM1 |
 | aspect calls | element in ESI (bitmap), EBX (map); the bar's `ElementBar` base, element + 0x200, in EBX | element in ESI (bitmap and map); the bar's base in EDI |
 | `ConfigFile::ReadData`, `EventPosition`, the draw | thiscall, RET 8; cdecl; thiscall, RET 8 | the same |
+| `Element::ReadData` | thiscall, RET 8 | the same |
 
 Callers on both kinds of build keep values in registers a small helper leaves alone:
 modtools' `HUD::Matrix::WritePosition` keeps the property name in ECX across two
@@ -2220,9 +2372,9 @@ pixels-to-relative conversions (M `00691628` to `00691690`), and `ApplyRelativeM
 pushes the mode from ECX again after a conversion (M `006913B1`); retail's
 `Element::WriteData` keeps a value in EDX across `GetContainerViewWidth` (S `005498BA`).
 So every stand-in is naked and gives back every register but the result: ECX and EDX
-on modtools, and on retail every general and XMM register. Load, `ReadData`,
-`EventPosition` and the draw are C detours: their callers reload what they use after
-the call.
+on modtools, and on retail every general and XMM register. Load, both `ReadData`s,
+`EventPosition`, the draw, `Element::WriteData` and `Editor::Update` are C detours:
+their callers reload what they use after the call.
 
 ### Checks
 
@@ -2234,9 +2386,12 @@ table) checked against the address it should name, moved with the exe. It checks
 `GetScreenAspectRatio`, and installs nothing if anything differs.
 `tests/hud_true_widescreen_abi_tests.py` audits all of it and the contracts above on
 all three builds, including that every moved address inside compared or written bytes
-is one the install handles; `tests/hud_true_widescreen_tests.cpp` tests the placement
-maths on five screen shapes. Played on modtools at 16:9; Steam and GOG are audited, not
-played.
+is one the install handles, that `Element::ReadData`'s callers return its result at
+once, that no exe holds `ScreenAnchor`'s hash, and on retail, through RTTI, that the
+reader of each of the 16 element types a file can make reaches `Element::ReadData`;
+`tests/hud_true_widescreen_tests.cpp` tests the placement maths on five screen shapes.
+Played on modtools at 16:9; Steam and GOG are audited, not played. `ScreenAnchor` and
+`AuthoredRatio` are not played yet anywhere.
 
 ## Colour gradients (researched 2026-09-30)
 

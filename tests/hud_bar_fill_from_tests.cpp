@@ -136,6 +136,25 @@ int main()
       assert(edge.width == full.width && crop.spanU == full.spanU);
    }
 
+   // The HUD editor switching a stock bar to another FillFrom: the bar as its
+   // setup left it comes back from what it draws at any value, with either
+   // flag, and fills to the same drawing again.
+   for (const Rect& rect : rects)
+      for (const TexCoords& uv : uvs)
+         for (int flags = 0; flags < 4; ++flags)
+            for (int step = 0; step <= 10; ++step) {
+               const bool crop = (flags & 1) != 0, edge = (flags & 2) != 0;
+               const Bar set = stock(rect, uv);
+               const Bar drawn = fill(set, step / 10.0f, crop, edge);
+               const Bar back = unfilled(drawn);
+               assert(back.rect.left == rect.left && back.rect.top == rect.top && near(back.rect.right, rect.right) &&
+                      back.rect.bottom == rect.bottom);
+               assert(back.uv.u0 == uv.u0 && back.uv.v0 == uv.v0 && near(back.uv.u1, uv.u1) && back.uv.v1 == uv.v1);
+               assert(back.width == set.width && back.spanU == set.spanU);
+               const Bar again = fill(back, step / 10.0f, crop, edge);
+               assert(near(again.rect.right, drawn.rect.right) && near(again.uv.u1, drawn.uv.u1));
+            }
+
    std::puts("Bar FillFrom tests passed (right anchor, bottom and top, texture alignment, complementary "
-             "pairs, U offsets and flips, the fill's two flags).");
+             "pairs, U offsets and flips, the fill's two flags, a stock bar unfilled for the editor).");
 }

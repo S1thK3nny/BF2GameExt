@@ -41,25 +41,34 @@ Scripts can check the running version through `GameExt.version`.
   `.onScreen`/`.offScreen`, `.direction` for an edge arrow, and `.distance` in metres.
   Works on multiplayer clients; inert unless a `.hud` binds it.
   See [HUD authoring](docs/user/HUD.md#markers-in-the-world).
-- **TrueWidescreen HUD files** - A `.hud` file with `TrueWidescreen(1)` in its
-  `FileInfo` is laid out as on a 4:3 screen of the real height and drawn one to one on
-  wider screens, instead of the stock stretch: no squeezed band at the top and bottom,
-  no bitmaps a fifth too tall at 16:9, no flattened text, and the same look on every
-  screen shape. Each top-level piece keeps to its nearest screen edge (by which third of
-  the 4:3 layout it sits in); a top-level group at (0, 0) is a plain container whose
-  children do so instead, and `Target` elements stay put. Reticules, lock-ons, the
+- **TrueWidescreen HUD files** - A `.hud` file with `AuthoredRatio(width, height)` in
+  its `FileInfo`, the screen shape it was written for, is laid out as on a screen of
+  that shape and the real height and drawn one to one, instead of the stock stretch:
+  no squeezed band at the top and bottom, no bitmaps a fifth too tall at 16:9, no
+  flattened text, and the same look on every screen shape. On its own shape it draws
+  exactly as written. On others each top-level piece keeps to its nearest screen edge
+  (by which third of the layout it sits in), out on a wider screen and in on a narrower
+  one; a top-level group at (0, 0) is a plain container whose children do so instead,
+  and `Target` elements stay put. A piece can name its edge instead with
+  `ScreenAnchor("Left" | "Center" | "Right")`, or a share from 0 to 1 of the width the
+  screen gains or loses, wherever it sits. `TrueWidescreen(1)` is `AuthoredRatio(4, 3)`,
+  left to the stock layout on screens no wider than 4:3. Reticules, lock-ons, the
   floating target bar and command post markers land exactly on their points, and
   `ReticleCorrection` is not applied to those reticules. Only that file changes: stock
-  and other modded files draw as before. No INI setting; split screen and 4:3 screens
-  keep the stock layout. The modtools HUD editor saves such a file in its 4:3 numbers
-  and keeps the line. See [HUD authoring](docs/user/HUD.md#truewidescreen).
+  and other modded files draw as before. No INI setting; split screen keeps the stock
+  layout. The modtools HUD editor saves such a file in its own numbers, whatever screen
+  it runs on, `Segment` and `VehicleSeating` templates included, and keeps the
+  `FileInfo` and `ScreenAnchor` lines; a piece moved in it is placed again at once, as
+  the next load will place it. See [HUD authoring](docs/user/HUD.md#truewidescreen).
 - **HUD editor support** - The modtools HUD editor saves GameExt's `.hud` lines.
   `TransformNumberMath`, `TransformNumberLerp` and `TransformNumberCompare` blocks come
   back with every line the transform accepted, in the order read; before, the editor
   dropped them at the top of a file and inside a `ViewPort` wrote stock transform lines
   that switched them off on the next load. A `FillFrom` bar keeps its `FillFrom` line,
   and the editor shows, changes and saves its size, texture coordinates and fade times
-  as the file has them; a change draws straight away.
+  as the file has them; a change draws straight away. GameExt's own properties are in
+  the editor's property list too: `FillFrom` on every bar, and `ScreenAnchor` on the
+  pieces of an opted-in file, each changing the HUD as you step through it.
 - **Sub-pixel HUD** - `[Features] HudSubPixel`, on by default, draws every HUD and menu
   element at its exact position instead of the nearest whole pixel, so floating
   markers, target bars and anything else that moves glide instead of stepping a pixel

@@ -270,6 +270,24 @@ Authored* find_authored(const void* bar)
    return nullptr;
 }
 
+void forget_authored(const void* bar)
+{
+   for (int i = 0; i < s_authoredCount; ++i) {
+      if (s_authored[i].bar != bar) continue;
+      s_authored[i] = s_authored[--s_authoredCount];
+      return;
+   }
+}
+
+void forget_vertical(const void* bar)
+{
+   for (int i = 0; i < s_verticalCount; ++i) {
+      if (s_vertical[i].bar != bar) continue;
+      s_vertical[i] = s_vertical[--s_verticalCount];
+      return;
+   }
+}
+
 const char* mode_name(Mode mode)
 {
    return mode == kRight ? "Right" : mode == kBottom ? "Bottom" : "Top";
@@ -413,14 +431,68 @@ void __fastcall hooked_WriteData(void* self, void* edx, void* file, int indent)
    write_state(bar, bitmap, live);
 }
 
+// FillFrom in the HUD editor's panel (modtools): a list of Left (the stock
+// fill), Right, Bottom and Top, the names hud_editor_properties gives it.
+constexpr uint32_t kFillChoices = 4;
+
+uint32_t fill_index(const void* bar)
+{
+   const Authored* authored = find_authored(bar);
+   if (!authored) return 0;
+   return authored->mode == kRight ? 1 : authored->mode == kBottom ? 2 : 3;
+}
+
+// A bar switched to another FillFrom in the editor: laid out again from the
+// bar as the file has it, which a stock bar gives back from the full width and
+// U1 it keeps; Left puts the stock fill back.
+bool set_fill_from(uint8_t* bar, uint32_t index)
+{
+   void* bitmap = *reinterpret_cast<void**>(bar + kBitmap);
+   if (!bitmap || index >= kFillChoices) return false;
+   const Authored* authored = find_authored(bar);
+   if (!authored && index == 0) return true;
+   Stored state;
+   if (authored) {
+      state = authored->state;
+   } else {
+      state = read_state(bar, bitmap);
+      const Bar full = unfilled({ state.rect, state.uv, state.width, state.spanU });
+      state.rect = full.rect;
+      state.uv = full.uv;
+   }
+   forget_vertical(bar);
+   write_state(bar, bitmap, state);
+   if (index == 0) {
+      forget_authored(bar);
+      const float value = *reinterpret_cast<float*>(bar + kBarBase + kValue);
+      const Bar b = fill(stock(state.rect, state.uv), value, (state.flags & kFlagScaleTexture) != 0,
+                         (state.flags & kFlagScaleRect) != 0);
+      set_rect(bitmap, b.rect);
+      s_setUV(bitmap, nullptr, b.uv.u0, b.uv.v0, b.uv.u1, b.uv.v1, false);
+      return true;
+   }
+   const Mode mode = index == 1 ? kRight : index == 2 ? kBottom : kTop;
+   remember_authored(bar, mode, state);
+   if (!find_authored(bar)) return false;   // the table is full: the bar keeps the stock fill
+   apply_fill_from(bar, bitmap, mode, state, true);
+   return true;
+}
+
 // The HUD editor changing a property of a bar (modtools): the bar's
 // SetProperty, which hands BitmapRect, TexCoords and the like on to the
 // bitmap's. On a FillFrom bar the change is made to the bar as the file had
 // it, while the bar's own SetValue is held off it, which keeps the result as
 // the bar the file now has; FillFrom is then laid out from that again, filled
-// to the bar's value.
+// to the bar's value. FillFrom itself is GameExt's to set.
 bool __fastcall hooked_SetProperty(void* self, void* edx, uint32_t property, const void* value)
 {
+   if (property == kFillFrom && value) {
+      __try {
+         return set_fill_from(static_cast<uint8_t*>(self), *static_cast<const uint32_t*>(value));
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         return false;
+      }
+   }
    Authored* authored = find_authored(self);
    uint8_t* bar = static_cast<uint8_t*>(self);
    void* bitmap = authored ? *reinterpret_cast<void**>(bar + kBitmap) : nullptr;
@@ -435,9 +507,14 @@ bool __fastcall hooked_SetProperty(void* self, void* edx, uint32_t property, con
 }
 
 // The HUD editor reading a property of a bar for its panel (modtools): a
-// FillFrom bar answers as the file has it, not as FillFrom draws it.
+// FillFrom bar answers as the file has it, not as FillFrom draws it. Every
+// bar answers FillFrom.
 bool __fastcall hooked_GetProperty(void* self, void* edx, uint32_t property, void* value)
 {
+   if (property == kFillFrom && value) {
+      *static_cast<uint32_t*>(value) = fill_index(self);
+      return true;
+   }
    const Authored* authored = find_authored(self);
    uint8_t* bar = static_cast<uint8_t*>(self);
    void* bitmap = authored ? *reinterpret_cast<void**>(bar + kBitmap) : nullptr;

@@ -130,7 +130,9 @@ Slots follow each post's `HUDIndex`, lowest first, then posts without one in map
 | Property | Element | Value | Description | Since |
 |----------|---------|-------|-------------|-------|
 | `FillFrom` | `BarBitmap` | `"Left"`, `"Right"`, `"Bottom"` or `"Top"` | Which end of the bar stays put while its value changes. `"Left"` is the stock fill and the default. `"Right"` keeps the right end and grows to the left, `"Bottom"` keeps the bottom edge and grows upward, and `"Top"` keeps the top edge and grows downward. | 1.2.0 |
-| `TrueWidescreen` | `FileInfo` | `1` or `0` | `1` lays the file's elements out as on a 4:3 screen of the real height and draws them one to one, with no stretching, each piece kept to its nearest screen edge, on screens wider than 4:3 with one player. The file's numbers are written for that 4:3 layout. Other files draw as before. `0` is the default. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
+| `AuthoredRatio` | `FileInfo` | width, height | The screen shape the file's numbers were written for, such as `16, 9`. The file's elements are laid out as on a screen of that shape and the real height and drawn one to one, with no stretching, each piece kept to its nearest screen edge or its `ScreenAnchor`, with one player. On a screen of that shape the file draws exactly as written. Other files draw as before. From 1:1 to 4:1. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
+| `TrueWidescreen` | `FileInfo` | `1` or `0` | `1` is `AuthoredRatio(4, 3)`, except that the file keeps the stock layout on screens no wider than 4:3, which already show it as written. `AuthoredRatio` wins if a file has both. `0` is the default. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
+| `ScreenAnchor` | any, on a piece | `"Left"`, `"Center"`, `"Right"` or a number from 0 to 1 | In a file with `AuthoredRatio` or `TrueWidescreen(1)`, how the piece moves on a screen of another shape, wherever it sits: it keeps its distance from that edge, or with a number moves by that share of the width the screen gains or loses (0 is `"Left"`, 0.5 `"Center"`, 1 `"Right"`). A piece without one keeps to the edge of the third it sits in. A piece is a top-level item, or a child of a top-level group at (0, 0); such a group with an anchor moves as a whole. See [ScreenAnchor](HUD.md#screenanchor). | 1.2.0 |
 
 The texture is never stretched or flipped: each point of the bar shows the part of the picture the full bar shows there. So two bars can share one picture, such as a health silhouette with the missing part in another colour, and an upright icon fills from the bottom without being rotated.
 
@@ -145,17 +147,29 @@ BarBitmap("player1health_missing")
 
 "Right" is the bar's own far end, not the screen's right, so a rotated bar turns with it. Any `TexCoords` work, including flipped ones the stock fill gets wrong. `"Right"` keeps the bar flash; the vertical modes have none. Case does not matter, and any other value is logged once under `[BarFillFrom]` and fills from the left.
 
-`TrueWidescreen(1)` goes in the file's `FileInfo`, beside `Viewports`:
+`AuthoredRatio` or `TrueWidescreen(1)` goes in the file's `FileInfo`, beside `Viewports`:
 
 ```
 FileInfo("mymod_hud")
 {
     Viewports(1)
-    TrueWidescreen(1)
+    AuthoredRatio(16, 9)
 }
 ```
 
-Any other number counts as `1`, and `true` and `false` work too. A quoted value or an empty line is logged once under `[TrueWidescreen]` and the file keeps the stock layout. A game without BF2GameExt logs "Error reading parameter" for the line and draws the file the stock way.
+`AuthoredRatio` takes two numbers, the ratio's width and height; `AuthoredRatio(21, 9)` and `AuthoredRatio(1.6, 1)` work too. Anything else, or a ratio outside 1:1 to 4:1, is logged once under `[TrueWidescreen]` and the line is ignored. For `TrueWidescreen`, any other number counts as `1`, and `true` and `false` work too; a quoted value or an empty line is logged once and the line is ignored. A game without BF2GameExt logs "Error reading parameter" for each line and draws the file the stock way.
+
+`ScreenAnchor` goes in a piece, beside its `Position`:
+
+```
+Group("player1weapon_group")
+{
+    ScreenAnchor("Right")
+    Position(0.95, 0.92, 0.0, "Viewport")
+}
+```
+
+The names work in any case, quoted or not. Any other value, or a number outside 0 to 1, is logged once under `[TrueWidescreen]` and the line is ignored. When a file loads, the game log counts its anchors on elements that are not pieces, which do nothing, and a file with anchors but neither `FileInfo` line is logged once. A game without BF2GameExt logs "Error reading parameter" for the line.
 
 ## Transforms
 

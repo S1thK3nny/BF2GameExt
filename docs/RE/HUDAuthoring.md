@@ -10,8 +10,9 @@ the detail behind it, every parameter and edge case, in five parts:
   states, floating target bar positions, a horizon-levelled reticule angle and the
   command post strip.
 - **Bar fill direction**: `FillFrom` on a `BarBitmap`.
-- **TrueWidescreen files**: `TrueWidescreen(1)` in a `FileInfo`, a whole file laid out
-  at 4:3 and drawn without the stock wide-screen stretch.
+- **TrueWidescreen files**: `AuthoredRatio(w, h)` or `TrueWidescreen(1)` in a
+  `FileInfo`, a whole file laid out at the screen shape it was written for and drawn
+  without the stock wide-screen stretch, and `ScreenAnchor` on a piece.
 - **Transforms**: `TransformNumberMath`, `TransformNumberLerp`,
   `TransformNumberCompare` and the four native transforms they sit beside, with
   math recipes and an input event catalogue.
@@ -681,41 +682,60 @@ BarBitmap("player1cpstrip_slot1_fill")
 
 ## TrueWidescreen files
 
-`TrueWidescreen(1)` in a file's `FileInfo` takes that file out of the stock wide-screen
-handling. Any number other than 0 turns it on, and `true` and `false` work too; a quoted
-value or an empty line is logged once under `[TrueWidescreen]` in `BF2GameExt.log` and the
-file keeps the stock layout. It applies on a screen the game treats as wide (height
-below 3/4 of the width) with one viewport, both read as the file loads; otherwise the
-file draws the stock way.
+`AuthoredRatio(width, height)` in a file's `FileInfo`, the screen shape the file was
+written for, takes that file out of the stock wide-screen handling. It takes two
+positive numbers whose ratio is from 1:1 to 4:1, such as `AuthoredRatio(16, 9)`;
+anything else is logged once under `[TrueWidescreen]` in `BF2GameExt.log` and the line
+is ignored. `TrueWidescreen(1)` is `AuthoredRatio(4, 3)`: any number other than 0 turns
+it on, and `true` and `false` work too; a quoted value or an empty line is logged once
+and the line is ignored. `AuthoredRatio` wins if a file has both.
+
+It applies with one viewport. A 4:3 file applies only on a screen the game treats as
+wide (height below 3/4 of the width), since a 4:3 screen already shows it as written;
+any other ratio applies on every screen. Both are read as the file loads; otherwise
+the file draws the stock way.
 
 ### What the stock game does at 16:9
 
-| | Stock | TrueWidescreen |
+| | Stock | Opted in (R = the authored ratio) |
 |---|---|---|
-| `"Viewport"`/`"Screen"` x and widths | fractions of the real width | fractions of W43 = 4/3 × the height (960 at 720p) |
-| `"Pixels"` | screen pixels | pixels of the 4:3 layout |
+| `"Viewport"`/`"Screen"` x and widths | fractions of the real width | fractions of WL = R × the height (1280 at 720p for 16:9, 960 for 4:3) |
+| `"Pixels"` | screen pixels | screen pixels, one to one with the layout |
 | Heights | in a band of 8/9 the height, 40 pixels short at top and bottom at 720p | the full height |
 | Bitmaps | 32/27 as tall as wide for a square `BitmapRect` | as written |
 | Minimap and segmented-bar rings | stretched to make up for the width | as written |
 | Text | 8/9 as tall | as written |
 
+On a screen of ratio R the file draws exactly as written.
+
 ### Where each piece goes
 
 An element at the top of the file is a piece. After the file loads, each piece is kept
-to the edge nearest where its position puts it in the 4:3 layout: left of W43/3 it stays
-where the layout puts it, right of 2/3 × W43 it moves right by the width beyond the
-layout (320 pixels at 1280×720), and between them by half that. An element inside a
-piece moves with it.
+to the edge nearest where its position puts it in the layout: left of WL/3 it stays
+where the layout puts it, right of 2/3 × WL it moves right by the width the screen has
+beyond the layout, and between them by half that. On a screen narrower than the layout
+that width is negative and the pieces move left instead: a 16:9 file at 1024×768 moves
+its right-hand pieces 341 pixels in. An element inside a piece moves with it.
 
 A top-level element whose position is exactly (0, 0), written so or left out, is a
 plain container rather than a piece: each element directly inside it is placed as a
 piece instead. A `Target` element is never moved: `ElementTarget` places its markers
 over their targets on the real screen.
 
+A piece with `ScreenAnchor` moves the way it says instead, wherever it sits:
+`"Left"`, `"Center"` and `"Right"` (any case, quoted or not) keep it to that edge, and
+a number from 0 to 1 moves it by that share of the width the screen has beyond the
+layout, so 0.5 is `"Center"`. A top-level element at (0, 0) with an anchor is one
+piece, not a plain container. An anchor on anything but a piece does nothing, and on a
+`Target` element neither; the game log counts them as the file loads. Any other value,
+or a number outside 0 to 1, is logged once under `[TrueWidescreen]` in
+`BF2GameExt.log` and the line is ignored, and a file with anchors but neither
+`FileInfo` line is logged once there too.
+
 Positions sent later through `EventPosition` are read in the layout too, so a
 `TransformNumberVector3` output means the same on every screen. Four kinds of position
-follow the world instead, and arrive as fractions of the real screen; for a piece in a
-TrueWidescreen file each is turned into the layout fraction that lands on the real point,
+follow the world instead, and arrive as fractions of the real screen; for a piece in an
+opted-in file each is turned into the layout fraction that lands on the real point,
 whatever edge the piece keeps to:
 
 - `player1.weapon1.reticule.position`, `player1.weapon2.reticule.position`, with
@@ -724,23 +744,35 @@ whatever edge the piece keeps to:
 - `player1.weapon1.target.position`, `player1.weapon2.target.position`
 - `player1.commandPost1.position` to `player1.commandPost16.position`
 
-Each opted-in file logs one line to the game's log as it loads on a wide screen, for
-example
-`[TrueWidescreen] a .hud file laid out for 1280x720 as on 960x720: 17 pieces kept to the
-left, 5 centred, 0 to the right (1 plain containers, 0 Target elements)`.
+Each opted-in file logs one line to the game's log as it loads, for example
+`[TrueWidescreen] a .hud file laid out for 2560x1080 as on 1920x1080: 17 pieces kept to
+the left, 5 centred, 2 to the right, 1 by their ScreenAnchor (1 plain containers, 0
+Target elements)`.
 
 ### Limits
 
-- A piece always keeps to its nearest edge; it cannot pick another.
+- Without a `ScreenAnchor`, a piece keeps to the edge of the third it sits in, so two
+  bands of a screen of another shape cannot hold one: a 4:3 file at 16:9 has them from
+  25% to 37.5% and from 62.5% to 75% of the width.
+- 512 `ScreenAnchor` lines across the loaded files; more are logged once and ignored.
+- Sizes do not change with the screen's shape, only the gaps between pieces, so a file
+  meant for screens narrower than its ratio needs room between its pieces.
 - 512 pieces across all opted-in files; more are logged once and keep the stock layout.
-- Other files are not affected, so a TrueWidescreen file and a stock one can be loaded
+- 3,072 elements across all opted-in files are remembered for the HUD editor; past that
+  it is logged once, and a template past it (a `BarSegmented`'s `Segment`,
+  `VehicleSeating`'s seats) is saved against the full width.
+- Other files are not affected, so an opted-in file and a stock one can be loaded
   together, but their elements line up differently on a wide screen.
-- The modtools HUD editor saves a TrueWidescreen file in its 4:3 numbers and keeps the
-  line. GameExt keeps the editor off on Steam and GOG.
-- A game without BF2GameExt logs `Error reading parameter` for the line and draws the
-  file the stock way, which looks off: its numbers are for the 4:3 layout.
+- The modtools HUD editor saves an opted-in file in the numbers for its ratio, whatever
+  screen it runs on, and keeps its `FileInfo` and `ScreenAnchor` lines. On a screen of
+  another shape, a piece it moves is placed again at once, as the next load will place
+  it, so one without an anchor jumps as it crosses a third line. GameExt keeps the
+  editor off on Steam and GOG.
+- A game without BF2GameExt logs `Error reading parameter` for each of these lines and
+  draws the file the stock way, which looks off: its numbers are for the layout.
 
-[HUD.md](../user/HUD.md#writing-the-numbers) has the conversion from stock 16:9 numbers.
+[HUD.md](../user/HUD.md#writing-the-numbers) has the conversions from stock 16:9 numbers
+and from a `TrueWidescreen(1)` file to `AuthoredRatio(16, 9)`.
 
 ## Transforms
 
@@ -1613,22 +1645,37 @@ read-only.
 ### TrueWidescreen checks
 
 Look for `[TrueWidescreen] installed` in `BF2GameExt.log`. At a 16:9 resolution, load a
-map with a `TrueWidescreen(1)` file: the game's log should show one
+map with an `AuthoredRatio(16, 9)` file: the game's log should show one
 `[TrueWidescreen] a .hud file laid out ...` line for it, with its counts of pieces per
-edge. A square `BitmapRect` should look square, pieces should sit against the edges
-they were written near, and the stock files, if any are loaded beside it, should look
-as before. Aim at things with the reticule, lock on, and bring up the floating target
-bar and command post markers: each should sit on its point, at the screen's edges too.
-Load a map at a 4:3 resolution: the file should draw the stock way, as written. On
-modtools, move a
-piece in the HUD editor and save: the file should keep `TrueWidescreen(1)` and come
-back in the same place. `tests/hud_true_widescreen_tests.cpp` covers the layout, edges,
-slides and world-following positions on five screen shapes, the parent matrix through
-the interface camera, and the stock mapping it replaces.
+edge, and the file should draw exactly as written. A square `BitmapRect` should look
+square, and the stock files, if any are loaded beside it, should look as before. Aim at
+things with the reticule, lock on, and bring up the floating target bar and command
+post markers: each should sit on its point, at the screen's edges too. At 2560×1080 the
+pieces should keep to the edges they were written near, with wider gaps between them;
+at 1024×768 they should move in, the right-hand ones by 341 pixels. Load a
+`TrueWidescreen(1)` file at a 4:3 resolution: it should draw the stock way, as written.
+Give a piece in one of the bands `ScreenAnchor(0.3)` and another `ScreenAnchor("Right")`:
+at 2560×1080 the first should move right by 0.3 of the width the screen has beyond the
+layout and the second by all of it, each counted in the load line, and an anchor put
+inside a piece should be counted as doing nothing.
+On modtools, move a piece in the HUD editor and save: the file should keep its
+`AuthoredRatio` or `TrueWidescreen(1)` line and its `ScreenAnchor` lines as written,
+and come back in the same place. On a screen of another shape, a piece without an
+anchor moved across a third line should jump to that third's edge as it crosses, and
+stay there after saving and loading again, while a group an event moves keeps its
+edge. Saving on a screen of another shape should not change the numbers of what was
+not moved. Save
+a file with a `BarSegmented` or a `VehicleSeating` without changing it: the `Segment`
+block's `BitmapRect` and the seats' `Position` should come out with the numbers the
+file has, not 3/4 of their width. `tests/hud_true_widescreen_tests.cpp` covers the
+layout, edges, slides and world-following positions on five screen shapes, authored
+ratios on wider and narrower screens, `ScreenAnchor`'s names and shares, the parent
+matrix through the interface camera, the stock mapping it replaces, and the set that
+remembers the elements opted-in files made.
 `tests/hud_true_widescreen_abi_tests.py "path\to\GameData"` checks every guard, the
 addresses the loader moves inside them, the vtable slots, the contracts of the
-detoured functions and the register each stand-in reads, on all three executables,
-read-only.
+detoured functions, the register each stand-in reads, and that every element type's
+reader reaches the one `ScreenAnchor` is read in, on all three executables, read-only.
 
 ### Math transform checks
 

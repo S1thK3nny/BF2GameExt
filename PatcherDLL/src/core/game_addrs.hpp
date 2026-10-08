@@ -1193,6 +1193,37 @@ namespace modtools {
    constexpr uintptr_t hud_target_vtable            = 0x00A5E000;
    constexpr uintptr_t hud_target_update            = 0x006A9170;   // its +0x2C
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x00696B97;
+   // ScreenAnchor: HUD::Element::ReadData, thiscall(PblConfig*,
+   // PblConfig::Data*) -> bool, RET 8, where every element type's reader ends
+   // up for a property it does not know (called by ElementGroupBase's,
+   // ElementBitmapBase's, ElementText's and ElementModel3D's ReadData, each
+   // returning what it returns); and Element::WriteData, thiscall(PblFile*,
+   // int indent), RET 8, which the same four WriteDatas call for the
+   // properties every element has, a group before its children.
+   constexpr uintptr_t hud_element_read_data        = 0x00693790;
+   constexpr uintptr_t hud_element_write_data       = 0x00693F20;
+   // HUD::Editor::Update, thiscall(RawControllerInputs*, float dt), RET 8,
+   // once a frame from HUD::Manager::Update, which reloads ECX from gEditor
+   // after it. It changes a property of the selected element (Editor +0x14)
+   // through that element's SetProperty (vtable +0x14, at 0x00690827).
+   constexpr uintptr_t hud_editor_update            = 0x0068FAC0;
+   // GameExt's properties in the editor's panel (render/hud_editor_properties.cpp
+   // and the modules that own them). Element's GetProperty and SetProperty,
+   // thiscall(PblHash, value*) -> bool, RET 8, and PropertyTranslateEnum,
+   // thiscall(PblHash, uint) -> const char*, RET 8: every element type's
+   // vtable +0x18, +0x14 and +0x1C ends up there for a property it does not
+   // know. Item::Factory objects are kept on a list (terminator below, node at
+   // factory + 0xC, type hash at + 8; FindByHashID walks it), each with its
+   // panel's properties on a singly linked list whose terminator is at
+   // factory + 4 (PropertyGetFirst reads it); a property is { next, Data* },
+   // Data { name, hash, type (2 = enum), enum names, min, max }.
+   constexpr uintptr_t hud_element_get_property     = 0x006932E0;
+   constexpr uintptr_t hud_element_set_property     = 0x006946B0;
+   constexpr uintptr_t hud_element_translate_enum   = 0x00692670;
+   constexpr uintptr_t hud_factory_find             = 0x006B6AE0;
+   constexpr uintptr_t hud_factory_property_first   = 0x006B6A50;
+   constexpr uintptr_t hud_factory_list             = 0x00AD87BC;
+   constexpr uintptr_t hud_property_init_enum       = 0x006B6810;   // Property::Init(name, list, names, min, max)
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
@@ -2632,6 +2663,9 @@ namespace steam {
    constexpr uintptr_t hud_target_vtable            = 0x007A17FC;
    constexpr uintptr_t hud_target_update            = 0x0055A340;   // its +0x2C
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054C24C;
+   // ScreenAnchor: HUD::Element::ReadData keeps its contract here
+   // (thiscall, RET 8); its four callers return what it returns.
+   constexpr uintptr_t hud_element_read_data        = 0x00549250;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
@@ -3308,6 +3342,7 @@ namespace gog {
    constexpr uintptr_t hud_target_vtable            = 0x007A2658;
    constexpr uintptr_t hud_target_update            = 0x0055B0B0;   // its +0x2C
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054CF9C;
+   constexpr uintptr_t hud_element_read_data        = 0x00549FA0;
    // Command post strip (render/hud_command_posts.cpp) also reads the
    // command_post_* pointers and team_array_base above. IsNearLocalPlayer is
    // cdecl(const PblVector3*) -> bool in AL, caller pops: the test
