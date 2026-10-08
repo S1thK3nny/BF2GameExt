@@ -188,7 +188,7 @@ TransformNumberMath("player1example_healthpercent")
 }
 ```
 
-Declare a transform after whatever sends its inputs and before anything that uses its output: a later declaration cannot be found. Each parameter appears once. A repeated or unknown parameter switches that transform off and writes the reason to `BF2GameExt.log` under `[HudNumberMath]`. Dividing by zero, or any other invalid result, sends nothing, so the bound element keeps its last value. A `// comment` after a parameter is fine with a space after the `//`; written `//comment`, it counts as a value and switches the transform off. The HUD editor's export drops these blocks, so keep your source file.
+Declare a transform after whatever sends its inputs and before anything that uses its output: a later declaration cannot be found. Each parameter appears once. A repeated or unknown parameter switches that transform off and writes the reason to `BF2GameExt.log` under `[HudNumberMath]`. Dividing by zero, or any other invalid result, sends nothing, so the bound element keeps its last value. A `// comment` after a parameter is fine with a space after the `//`; written `//comment`, it counts as a value and switches the transform off. The modtools HUD editor saves these blocks as they were read, without their comments.
 
 `EventAlpha` exists only on groups, and a value sent to it holds for one frame, because the group repaints its own alpha every frame. So a transform feeding one needs `OutputIsAlpha(1)`, and the group needs the stock `PropagateAlpha(1)` for its alpha to reach what is inside it. Leave `OutputIsAlpha` off otherwise: with `EventChanged` it would fire every frame.
 

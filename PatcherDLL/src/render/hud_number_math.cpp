@@ -58,11 +58,16 @@ using DestroyItem = void*(__fastcall*)(Shell*, void*, unsigned);
 using FactoryCtor = void*(__fastcall*)(void*, void*, uint32_t);
 using Send = void(__fastcall*)(Event*, void*);
 using NativeCreateEvent = EventClass*(__cdecl*)(int, const char*, ...);
+// The HUD editor's .hud writer (modtools): the indent writer is thiscall(count)
+// on the file, RET 4; the format writer cdecl(file, format, ...).
+using WriteIndent = void(__fastcall*)(void* file, void*, unsigned count);
+using WriteFormat = void(__cdecl*)(void* file, const char* format, ...);
 
 enum class Kind { Math, Lerp, Compare };
 
 constexpr int kBool = 1;    // HUD::EventClass::Type
 constexpr int kFloat = 4;
+constexpr unsigned kMaxLines = 16;   // more than any kind has properties
 
 // TransformNumberLerp has up to five event inputs where the shell has two
 // handlers: the shell's inputA carries EventInput and inputB EventInputA, and
@@ -81,6 +86,9 @@ struct Node {
    EventClass* outputFalse = nullptr;
    bool outputIsAlpha = false;   // OutputIsAlpha: send every update, not only on change
    unsigned fields = 0;
+   unsigned failures = 0;        // fail() calls, to tell which properties were read cleanly
+   char* lines[kMaxLines]{};     // what the HUD editor writes back, in the order read
+   unsigned lineCount = 0;
    bool invalid = false;
    bool ready = false;
    bool active = false;
@@ -102,6 +110,8 @@ void* filterName = nullptr;
 void* findEvent = nullptr;
 NativeCreateEvent createEvent = nullptr;
 Send sendEvent = nullptr;
+WriteIndent writeIndent = nullptr;
+WriteFormat writeFormat = nullptr;
 void* factoryVtable[2]{};
 void* lerpFactoryVtable[2]{};
 void* compareFactoryVtable[2]{};
@@ -145,6 +155,7 @@ void fail(Node& n, const char* message)
 {
    log("%s: disabled: %s", name(n), message);
    n.invalid = true;
+   ++n.failures;
 }
 
 EventClass* find(uint32_t id)
@@ -458,21 +469,10 @@ Arity arity(Kind kind, uint32_t key)
    }
 }
 
-bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
+// TransformNumberMath's properties. Claim bits: 1 Operation, 2 A, 4 B,
+// 8 EventOutput, 16 Clamp, 64 OutputIsAlpha.
+bool read_math(Shell* shell, Node& n, const Data* data)
 {
-   Node& n = node(shell);
-   // Data::arguments() has already dropped a "// comment". Anything still
-   // extra is almost always a comment with no space after its "//", which the
-   // munger hashes into one word with the comment's first.
-   const Arity want = arity(n.kind, data->id);
-   if (want.count && data->arguments() > want.count) {
-      log("%s: disabled: %s has more arguments than it takes; a comment after it on the "
-          "same line needs a space after //", name(n), want.name);
-      n.invalid = true;
-      return true;
-   }
-   if (n.kind == Kind::Lerp) return read_lerp(shell, n, data);
-   if (n.kind == Kind::Compare) return read_compare(shell, n, data);
    const uint32_t key = data->id;
    const unsigned args = data->arguments();
    const char* text = args == 1 ? data->string(0) : nullptr;
@@ -522,6 +522,78 @@ bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
    return true;
 }
 
+// A property as the HUD editor writes it back: Name(args), strings quoted,
+// numbers as the stock writer prints them (%f), OutputIsAlpha as 1 or 0.
+void remember_line(Node& n, const char* property, const Data* data)
+{
+   if (n.lineCount == kMaxLines) return;
+   char line[640];
+   int used = std::snprintf(line, sizeof(line), "%s(", property);
+   const unsigned args = data->arguments();
+   for (unsigned i = 0; i < args; ++i) {
+      if (used <= 0 || used >= static_cast<int>(sizeof(line))) return;
+      const char* separator = i ? ", " : "";
+      const size_t room = sizeof(line) - used;
+      int wrote;
+      if (const char* text = data->string(i)) {
+         wrote = std::snprintf(line + used, room, "%s\"%s\"", separator, text);
+      } else if (data->id == hash("OutputIsAlpha")) {
+         bool on = false;
+         data->flag(i, on);
+         wrote = std::snprintf(line + used, room, "%s%d", separator, on ? 1 : 0);
+      } else {
+         float number = 0.0f;
+         data->number(i, number);
+         wrote = std::snprintf(line + used, room, "%s%f", separator, number);
+      }
+      if (wrote < 0) return;
+      used += wrote;
+   }
+   if (used <= 0 || used + 2 > static_cast<int>(sizeof(line))) return;
+   line[used++] = ')';
+   line[used] = '\0';
+   char* copy = new (std::nothrow) char[used + 1];
+   if (!copy) return;
+   std::memcpy(copy, line, used + 1);
+   n.lines[n.lineCount++] = copy;
+}
+
+bool __fastcall read_data(Shell* shell, void*, void*, const Data* data)
+{
+   Node& n = node(shell);
+   // Data::arguments() has already dropped a "// comment". Anything still
+   // extra is almost always a comment with no space after its "//", which the
+   // munger hashes into one word with the comment's first.
+   const Arity want = arity(n.kind, data->id);
+   if (want.count && data->arguments() > want.count) {
+      log("%s: disabled: %s has more arguments than it takes; a comment after it on the "
+          "same line needs a space after //", name(n), want.name);
+      n.invalid = true;
+      return true;
+   }
+   const unsigned failures = n.failures;
+   const bool read = n.kind == Kind::Lerp    ? read_lerp(shell, n, data)
+                   : n.kind == Kind::Compare ? read_compare(shell, n, data)
+                                             : read_math(shell, n, data);
+   // Each property read cleanly is kept for the HUD editor, as written.
+   if (read && want.count && n.failures == failures) remember_line(n, want.name, data);
+   return read;
+}
+
+// The HUD editor's writer for these items, in place of the stock transform's,
+// whose lines (InputFactor, EventInput and the rest) these kinds do not read.
+// HUD::Item::Write has written the header, Kind("name") from the factory's
+// name, and its opening brace, and writes the closing one.
+void __fastcall write_data(Shell* shell, void*, void* file, unsigned indent)
+{
+   if (!writeIndent || !writeFormat) return;
+   const Node& n = node(shell);
+   for (unsigned i = 0; i < n.lineCount; ++i) {
+      writeIndent(file, nullptr, indent);
+      writeFormat(file, "%s\n", n.lines[i]);
+   }
+}
+
 void __fastcall post_read(Shell* shell, void*)
 {
    Node& n = node(shell);
@@ -560,6 +632,7 @@ void* __fastcall destroy(Shell* shell, void*, unsigned flags)
    unbindHandler(&dead->rangeEnd[1]);
    // Native destructor unregisters BOTH shell handlers and removes both list nodes.
    void* result = destroyItem(shell, nullptr, flags);
+   for (unsigned i = 0; i < dead->lineCount; ++i) delete[] dead->lines[i];
    delete dead;
    return result;
 }
@@ -657,6 +730,22 @@ bool entry_guard(uintptr_t base, void* entry, const char* bytes, const char* mas
    }
    return in_image(address) && guard(base, address - base + 0x400000, bytes, mask);
 }
+
+// The HUD editor's .hud writers, the ones its stock items write with. Modtools
+// only: GameExt keeps the editor off on Steam and GOG.
+void resolve_writers(uintptr_t base)
+{
+   if (!modtools || !g_addr->hud_write_indent || !g_addr->hud_write_format) return;
+   const auto* indent = static_cast<const unsigned char*>(resolve(base, g_addr->hud_write_indent));
+   const auto* format = static_cast<const unsigned char*>(resolve(base, g_addr->hud_write_format));
+   if (std::memcmp(indent, "\x56\x8b\x74\x24\x08\x85\xf6\x57\x8b\xf9", 10) != 0
+       || std::memcmp(format, "\x8b\x4c\x24\x08\x81\xec\x00\x04\x00\x00", 10) != 0) {
+      log("the HUD editor's writers are not where expected; it will not save these transforms");
+      return;
+   }
+   writeIndent = reinterpret_cast<WriteIndent>(resolve(base, g_addr->hud_write_indent));
+   writeFormat = reinterpret_cast<WriteFormat>(resolve(base, g_addr->hud_write_format));
+}
 #endif
 } // namespace
 
@@ -701,11 +790,19 @@ void hud_number_math_resolve(uintptr_t base)
    factoryVtable[1] = reinterpret_cast<void*>(create);
    lerpFactoryVtable[1] = reinterpret_cast<void*>(create_lerp);
    compareFactoryVtable[1] = reinterpret_cast<void*>(create_compare);
+   // The HUD editor saves a file by walking every item: one at the top of a
+   // file is written when its write flag (+0x18 bit 0, set by HUD::Item's
+   // constructor) is on, and a ViewPort writes its own items whatever theirs.
+   // write_data writes these items' own lines; without the editor's writers it
+   // writes none, and the items are then kept off the top level, so a save
+   // never writes the stock transform's lines in their place.
+   resolve_writers(base);
    itemVtable[0] = reinterpret_cast<void*>(destroy);
    itemVtable[2] = resolve(base, g_addr->hud_item_read);
-   itemVtable[4] = reinterpret_cast<void*>(write_enabled); // No lossy stock-editor write.
+   if (!writeIndent) itemVtable[4] = reinterpret_cast<void*>(write_enabled);
    itemVtable[8] = reinterpret_cast<void*>(read_data);
    itemVtable[9] = reinterpret_cast<void*>(post_read);
+   itemVtable[10] = reinterpret_cast<void*>(write_data);
    factoryAlloc = resolve(base, g_addr->hud_math_factory_alloc);
    factoryCtor = reinterpret_cast<FactoryCtor>(resolve(base, g_addr->hud_item_factory_ctor));
    readEvent = resolve(base, g_addr->hud_item_read_event);
@@ -715,7 +812,7 @@ void hud_number_math_resolve(uintptr_t base)
    sendEvent = reinterpret_cast<Send>(resolve(base, g_addr->hud_event_send));
    resolved = true;
    log("available: TransformNumberMath (Add/Subtract/Multiply/Divide/Min/Max), TransformNumberLerp, "
-       "TransformNumberCompare");
+       "TransformNumberCompare%s", writeIndent ? "; the HUD editor saves them" : "");
 }
 #endif
 

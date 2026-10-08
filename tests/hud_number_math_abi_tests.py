@@ -40,6 +40,36 @@ unlink_sites = {
 }
 assert 'static_cast<char*>(h->next) + 4) = h->prev' in source, 'unlink_handler changed shape'
 
+# The HUD editor's writer (modtools; GameExt keeps the editor off on Steam and
+# GOG). The module writes these items' own lines through the writers HUD::Item::
+# Write uses, in place of the stock transform's WriteData (+0x28), and leaves the
+# stock write flag check (+0x10) alone when it has them; without them it keeps
+# the items off the top level and writes nothing.
+writers = re.search(r'memcmp\(indent, "([^"]*)", 10\) != 0\s*\|\| std::memcmp\(format, "([^"]*)", 10\)', source)
+assert writers, 'Update the audit if resolve_writers changes shape'
+assert 'itemVtable[10] = reinterpret_cast<void*>(write_data);' in source
+assert 'if (!writeIndent) itemVtable[4] = reinterpret_cast<void*>(write_enabled);' in source
+assert 'writeIndent(file, nullptr, indent);' in source and 'writeFormat(file, "%s\\n", n.lines[i]);' in source
+# Read off the disassembly (modtools): HUD::Item's constructor turns the write
+# flag (+0x18 bit 0) on; ViewPort::Read turns it off for each item it reads, and
+# ViewPort::WriteData writes its items itself; Manager::Write writes an item
+# whose flag is on; Item::Write writes the header from the factory's name, then
+# calls WriteData through +0x28. Item::Write is the Vector3 vtable's +0x0C and
+# the flag check its +0x10.
+editor_sites = [
+    (0x006B6FDC, '8A 56 18 80 CA 01'),      # Item ctor: MOV DL,[ESI+0x18]; OR DL,1
+    (0x006B6FE4, '88 56 18'),               #            MOV [ESI+0x18],DL
+    (0x006BDDF8, 'FF 52 08 8A 4E 18 80 E1 FE'),   # ViewPort::Read: the item's Read, then flag off
+    (0x006BDE03, '88 4E 18'),
+    (0x006BD749, 'FF 52 0C'),               # ViewPort::WriteData: CALL [EDX+0xC], Write
+    (0x006B8958, 'FF 52 10'),               # Manager::Write: CALL [EDX+0x10], the flag
+    (0x006B896C, 'FF 50 0C'),               #                 CALL [EAX+0xC], Write
+    (0x006B6206, '68 F4 00 A6 00'),         # Item::Write: PUSH "%s(\"%s\")\n"
+    (0x006B622F, 'FF 50 28'),               #              CALL [EAX+0x28], WriteData
+    (0x006B624A, 'C2 0C 00'),               #              RET 0xC
+]
+viewport_vtable = 0x00A611DC   # ViewPort's: +0x08 Read, +0x28 WriteData
+
 for build, filename in builds.items():
     body = re.search(r'namespace '+build+r'\s*\{(.*?)\n\s*\}\s*//\s*namespace '+build,
                      addresses, re.S).group(1)
@@ -73,4 +103,31 @@ for build, filename in builds.items():
     # prev->next = next at +0.
     unlink = unlink_sites[build]
     assert image[unlink[0]-base:unlink[0]-base+len(unlink[1])] == unlink[1], (build, 'unlink')
-    print(f'{build}: all 9 native entry fingerprints and the handler unlink passed')
+    editor = ''
+    if mt:
+        def target(address):
+            while image[address-base] == 0xe9:
+                address += 5 + struct.unpack_from('<i', image, address-base+1)[0]
+            return address
+
+        def entry(vtable, offset):
+            return target(struct.unpack_from('<I', image, vtable-base+offset)[0])
+
+        def call(address):
+            assert image[address-base] == 0xe8, (build, hex(address))
+            return target(address + 5 + struct.unpack_from('<i', image, address-base+1)[0])
+
+        check(table['hud_write_indent'], writers.group(1), 'x' * 10)
+        check(table['hud_write_format'], writers.group(2), 'x' * 10)
+        for address, text in editor_sites:
+            want = bytes.fromhex(text.replace(' ', ''))
+            assert image[address-base:address-base+len(want)] == want, (build, hex(address))
+        assert image[0x00A600F4-base:0x00A600F4-base+10] == b'%s("%s")\n\0'
+        vector3 = table['hud_vector3_vtable']
+        assert entry(vector3, 0x0C) == 0x006B61D0, 'Item::Write'
+        flag = entry(vector3, 0x10)
+        assert image[flag-base:flag-base+6] == bytes.fromhex('8A4118 2401 C3'), 'the write flag check'
+        assert call(0x006B61E0) == table['hud_write_indent'] and call(0x006B620C) == table['hud_write_format']
+        assert entry(viewport_vtable, 0x08) == 0x006BDC20 and entry(viewport_vtable, 0x28) == 0x006BD560
+        editor = ', the editor writers and its write path'
+    print(f'{build}: all 9 native entry fingerprints and the handler unlink{editor} passed')

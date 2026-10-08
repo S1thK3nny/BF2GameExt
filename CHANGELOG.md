@@ -53,6 +53,13 @@ Scripts can check the running version through `GameExt.version`.
   and other modded files draw as before. No INI setting; split screen and 4:3 screens
   keep the stock layout. The modtools HUD editor saves such a file in its 4:3 numbers
   and keeps the line. See [HUD authoring](docs/user/HUD.md#truewidescreen).
+- **HUD editor support** - The modtools HUD editor saves GameExt's `.hud` lines.
+  `TransformNumberMath`, `TransformNumberLerp` and `TransformNumberCompare` blocks come
+  back with every line the transform accepted, in the order read; before, the editor
+  dropped them at the top of a file and inside a `ViewPort` wrote stock transform lines
+  that switched them off on the next load. A `FillFrom` bar keeps its `FillFrom` line,
+  and the editor shows, changes and saves its size, texture coordinates and fade times
+  as the file has them; a change draws straight away.
 - **Sub-pixel HUD** - `[Features] HudSubPixel`, on by default, draws every HUD and menu
   element at its exact position instead of the nearest whole pixel, so floating
   markers, target bars and anything else that moves glide instead of stepping a pixel

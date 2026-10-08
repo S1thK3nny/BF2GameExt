@@ -43,14 +43,20 @@ constexpr Bar anchor_right(const Rect& r, const TexCoords& t)
             r.left - r.right, t.u0 - t.u1 };
 }
 
-// ElementBarBitmap::SetValue's geometry for a value, with the default
-// ScaleTexture and rectangle-scaling flags both on.
-constexpr Bar fill(const Bar& b, float value)
+// ElementBarBitmap::SetValue's geometry for a value: the rectangle-scaling
+// flag (ScaleSize) moves the edge, ScaleTexture crops U.
+constexpr Bar fill(const Bar& b, float value, bool scaleTexture, bool scaleSize)
 {
    Bar out = b;
-   out.rect.right = b.rect.left + value * b.width;
-   out.uv.u1      = b.uv.u0 + value * b.spanU;
+   if (scaleSize)    out.rect.right = b.rect.left + value * b.width;
+   if (scaleTexture) out.uv.u1      = b.uv.u0 + value * b.spanU;
    return out;
+}
+
+// The same with both flags on, their defaults.
+constexpr Bar fill(const Bar& b, float value)
+{
+   return fill(b, value, true, true);
 }
 
 // FillFrom("Bottom") and FillFrom("Top"). The stock fill can only move the

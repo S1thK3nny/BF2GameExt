@@ -1007,6 +1007,108 @@ void compare_adapter_tests(bool mt)
    assert(node(loop).invalid);
    clear_mission();
 }
+
+// The modtools HUD editor's writers, faked: the indent writer prefixes a tab
+// per level, the format writer appends.
+std::string written;
+void __fastcall fake_indent(void* file, void*, unsigned count)
+{
+   assert(file == &written);
+   written.append(count, '\t');
+}
+void __cdecl fake_format(void* file, const char* format, ...)
+{
+   assert(file == &written);
+   char line[1024];
+   va_list args;
+   va_start(args, format);
+   vsprintf_s(line, format, args);
+   va_end(args);
+   written += line;
+}
+std::string write(Shell* shell, unsigned indent)
+{
+   written.clear();
+   write_data(shell, nullptr, &written, indent);
+   return written;
+}
+
+void editor_writer_tests()
+{
+   setup(true);
+   writeIndent = fake_indent;
+   writeFormat = fake_format;
+   fake_create(4, "%s", "player1.health");
+   fake_create(4, "%s", "player1.maxHealth");
+
+   // Each property as read, in the order read: strings quoted, numbers as the
+   // stock writer prints them, OutputIsAlpha's word as 1, a comment dropped.
+   Shell* missing = create(nullptr, nullptr, "missing", nullptr, nullptr);
+   text_property(missing, "Operation", "subtract");
+   constant(missing, "ConstantA", 1.0f);
+   text_property(missing, "EventInputB", "player1.health");
+   property(missing, with_comment(args_data("Clamp", {{0.0f, nullptr}, {1.0f, nullptr}}), "// keep it in range"));
+   property(missing, word_data("OutputIsAlpha", "true"));
+   text_property(missing, "EventOutput", "player1.missing");
+   post_read(missing, nullptr);
+   assert(!node(missing).invalid);
+   assert(write(missing, 1) ==
+          "\tOperation(\"subtract\")\n"
+          "\tConstantA(1.000000)\n"
+          "\tEventInputB(\"player1.health\")\n"
+          "\tClamp(0.000000, 1.000000)\n"
+          "\tOutputIsAlpha(1)\n"
+          "\tEventOutput(\"player1.missing\")\n");
+
+   // A lerp's range ends, one a number and one an event, and its times.
+   Shell* fade = lerp_node("player1.health", "player1.fade");
+   constant(fade, "ConstantA", 0.0f);
+   constant(fade, "ConstantB", 1.0f);
+   constant(fade, "RiseTime", 0.25f);
+   property(fade, args_data("InputRange", {{0.0f, nullptr}, {0.0f, "player1.maxHealth"}}));
+   post_read(fade, nullptr);
+   assert(!node(fade).invalid);
+   assert(write(fade, 2) ==
+          "\t\tEventInput(\"player1.health\")\n"
+          "\t\tEventOutput(\"player1.fade\")\n"
+          "\t\tConstantA(0.000000)\n"
+          "\t\tConstantB(1.000000)\n"
+          "\t\tRiseTime(0.250000)\n"
+          "\t\tInputRange(0.000000, \"player1.maxHealth\")\n");
+
+   // A comparison's Bool outputs and hysteresis.
+   Shell* low = compare_node("Less", "player1.low");
+   text_property(low, "EventInputA", "player1.health");
+   constant(low, "ConstantB", 25.0f);
+   constant(low, "Hysteresis", 5.0f);
+   text_property(low, "EventOutputTrue", "player1.lowOn");
+   text_property(low, "EventOutputFalse", "player1.lowOff");
+   post_read(low, nullptr);
+   assert(!node(low).invalid);
+   assert(write(low, 0) ==
+          "Operation(\"Less\")\n"
+          "EventInputA(\"player1.health\")\n"
+          "ConstantB(25.000000)\n"
+          "Hysteresis(5.000000)\n"
+          "EventOutputTrue(\"player1.lowOn\")\n"
+          "EventOutputFalse(\"player1.lowOff\")\n");
+
+   // A property its reader turned down is not written; the rest still are,
+   // and a second copy of one already read is not.
+   Shell* bad = create(nullptr, nullptr, "bad", nullptr, nullptr);
+   text_property(bad, "Operation", "Multiplie");
+   constant(bad, "ConstantA", 2.0f);
+   constant(bad, "ConstantA", 3.0f);
+   constant(bad, "Factor", 1.0f);
+   assert(node(bad).invalid);
+   assert(write(bad, 0) == "ConstantA(2.000000)\n");
+
+   // Without the editor's writers (Steam and GOG) nothing is written.
+   writeIndent = nullptr;
+   assert(write(missing, 1).empty());
+   writeFormat = nullptr;
+   clear_mission();
+}
 } // namespace
 
 int main()
@@ -1023,6 +1125,7 @@ int main()
    range_adapter_tests(false);
    compare_adapter_tests(true);
    compare_adapter_tests(false);
+   editor_writer_tests();
    assert(destroyed > 400);
-   std::puts("HUD NumberMath: arithmetic, parser, trailing comments, lerp easing, ends, ranges and resends, comparisons with hysteresis, both ABIs, event chains, feedback, and 400 reloads passed.");
+   std::puts("HUD NumberMath: arithmetic, parser, trailing comments, lerp easing, ends, ranges and resends, comparisons with hysteresis, both ABIs, event chains, feedback, 400 reloads and the editor's writer passed.");
 }

@@ -602,6 +602,11 @@ changes:
 exists with GameExt: a game without it logs `Error reading parameter` for that line
 and the bar fills from the left.
 
+The modtools HUD editor saves the `FillFrom` line with the bar. Its property panel
+shows the bar's `BitmapRect`, `TexCoords`, `ScaleTexture`, `ScaleSize` and flash fade
+times as the file has them, not as `FillFrom` rearranges them for drawing; a change
+made there is drawn straight away, filled to the bar's value, and saved.
+
 ### Filling from the right
 
 `FillFrom("Right")` makes the bar keep its right end and move its left edge with the
@@ -893,8 +898,10 @@ not repair invalid inputs or division by zero.
   is forbidden; a runtime guard also caps nested synchronous math dispatch at
   32 levels. This is not a limit of 32 transforms in the whole HUD.
 
-Math is currently **source-authored only**. Native HUD-editor export omits these
-blocks. Do not overwrite the source transform file with an editor export.
+The modtools HUD editor saves Math, Lerp and Compare blocks: each property the
+transform accepted, in the order it was read, strings quoted, numbers to six decimal
+places, `OutputIsAlpha` as 1 or 0. A property the transform turned down is not
+written, and neither is any comment.
 
 ### TransformNumberLerp
 
@@ -1699,7 +1706,7 @@ state mapping, landings and shots, and `tests/hud_number_math_tests.cpp` the ler
 | Rotation changes artwork proportions | Put rotation on a unit-scale pivot and authored sizing on a child |
 | Math class does nothing or is unknown | DLL contains this implementation, extension is loaded, installer guards passed, HUD was munged and loaded |
 | `[HudNumberMath] ... disabled` | Read the following log reason: missing/duplicate field, unknown operation, invalid clamp/type/name, output collision or unresolved input |
-| Editor export loses Math blocks | Source-authoring only for Math; preserve source rather than overwriting it with the export |
+| A transform line is missing from an editor save | The transform turned that line down when the file loaded; `[HudNumberMath]` in `BF2GameExt.log` says why |
 | A transform is silent | Source event exists **and sends**; output exists before consumer binds; native table is nonempty |
 | Result stays at a default/old value | Waiting for a source, source context inactive, invalid operand, zero divisor, or result unchanged |
 | Factor/colour-weight changes do not refresh | Native factor, Blend and Alpha inputs only cache; primary EventInput must fire |

@@ -1116,6 +1116,14 @@ namespace modtools {
    constexpr uintptr_t hud_bar_bitmap_read_data     = 0x00695900;
    constexpr uintptr_t hud_bar_bitmap_post_read     = 0x00696340;
    constexpr uintptr_t hud_bar_bitmap_set_value     = 0x00696090;
+   // ElementBarBitmap::WriteData, the bar vtable's +0x28: thiscall(PblFile*,
+   // int indent), RET 8; how the HUD editor saves a bar. SetProperty (+0x14)
+   // and GetProperty (+0x18): thiscall(PblHash, value pointer) -> bool, RET 8;
+   // how its panel changes and reads one. Modtools only, like the editor:
+   // GameExt keeps the editor off on Steam and GOG.
+   constexpr uintptr_t hud_bar_bitmap_write_data    = 0x00695B10;
+   constexpr uintptr_t hud_bar_bitmap_set_property  = 0x006952F0;
+   constexpr uintptr_t hud_bar_bitmap_get_property  = 0x00695490;
    constexpr uintptr_t red_bitmap_get_rect          = 0x00838E50;
    constexpr uintptr_t red_bitmap_get_tex_coords    = 0x008392A0;
    constexpr uintptr_t red_bitmap_set_tex_coords    = 0x00839220;

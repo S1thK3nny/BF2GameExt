@@ -638,6 +638,61 @@ Phantom.
 
 The editor writes its output to `GameData\Data\` (or the VirtualStore redirect).
 
+### How it saves a file (read on modtools, 2026-10-07)
+
+`HUD::Manager::Write` (M `006B88D0`) walks every item in `HUD::Item`'s list, in the
+order they were made. Each `FileInfo` in `gConfigFiles` it reaches opens
+`data\<its name>.hud`, and from then on every item whose write flag is on (+18 bit 0,
+vtable +10) is written through `Item::Write` (vtable +0C, M `006B61D0`): the indent,
+`Kind("name")` with the kind taken from the item's factory, `{`, the item's own
+`WriteData` (vtable +28) one level in, and `}`. `HUD::Item`'s constructor turns the flag
+on (M `006B6FDC`); `ViewPort::Read` turns it off for each item it reads (M `006BDDFB`),
+and `ViewPort::WriteData` (M `006BD560`) writes those items itself, whatever their
+flag. Bars, maps and multiline texts turn it off for the items they make for
+themselves. The writers every `WriteData` uses are the indent writer (M `006B5A20`,
+thiscall(count) on the file, RET 4) and the format writer (M `006B5A50`,
+cdecl(file, format, ...)). A `WriteData` writes an item from its live state, and only
+the properties its class reads.
+
+GameExt's own lines go through the same writers:
+
+- **`TrueWidescreen(1)`**: `ConfigFile::WriteData` (M `006B8090`) is followed by the line
+  for a `FileInfo` that read it (`render/hud_true_widescreen.cpp`).
+- **`TransformNumberMath`, `TransformNumberLerp`, `TransformNumberCompare`**: these are
+  `TransformNumberVector3` items with GameExt's own factory, whose name gives the header.
+  The stock `WriteData` would write `TransformNumberType`'s lines (`InputFactor`,
+  `EventInputFactor` from the second input, `WrapInput`, then `EventInput` and
+  `EventOutput`), which these kinds turn down, so the item vtable's +28 is GameExt's
+  writer: each property the transform accepted, kept as it was read, in that order
+  (`render/hud_number_math.cpp`). With the writers found the stock flag check stays;
+  before, the flag check returned false, so the editor dropped a transform at the top of
+  a file and wrote the stock lines for one inside a `ViewPort`.
+- **`FillFrom`**: `ElementBarBitmap::WriteData` writes a bar from its live state, which
+  `FillFrom` changed (below). Its detour hands the stock writer the bar as the stock setup
+  left it, adds the line, and puts the bar back (`render/hud_bar_fill_from.cpp`). The
+  editor's panel reads and changes a bar through its `GetProperty` (vtable +18, M
+  `00695490`) and `SetProperty` (+14, M `006952F0`), thiscall(PblHash, value pointer) →
+  bool, RET 8, which hand what they do not know (`BitmapRect`'s size, `TexCoords`, the
+  alignments) on to the bitmap's. Both work on the live bar too, so on a `FillFrom` bar
+  each is handed the bar as the file has it. A change is kept as the file's new state,
+  with the bar's own `SetValue` held off it while the change is made (the `ScaleTexture`
+  and `ScaleSize` branches call it), and `FillFrom` is laid out again from it, filled to
+  the bar's value by GameExt itself: `SetValue` does nothing for an unchanged value
+  (M `006960B5`).
+
+`ElementBarBitmap::WriteData` (M `00695B10`, the bar vtable's +28, thiscall(PblFile*,
+int), RET 8) writes `TexCoords` with U1 from `mBarU1` (+480), the `ScaleRect` and
+`ScaleTexture` flags (+484), `FlashyScale` (+470) and the two fade times (+474, +478),
+then widens the rectangle to `mBarWidth` (+47C) through `SetRect` (+4C) while the bitmap
+base writes `BitmapRect`, and narrows it again. `FillFrom("Right")` stores the bar end
+for end, with its own U span and the fade times swapped; the vertical modes clear both
+flag bits and lay the rectangle out per value. So GameExt keeps each `FillFrom` bar's
+rectangle, coordinates, width, U span, fade times and flags from before it changed
+them, for this writer and the panel.
+
+`tests/hud_number_math_abi_tests.py` and `tests/hud_bar_fill_from_abi_tests.py` check all
+of these on modtools.
+
 ### It is still live on retail
 
 The whole editor is present and reachable on Steam and GOG. `Manager::Open` builds

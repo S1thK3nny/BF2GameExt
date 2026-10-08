@@ -121,6 +121,21 @@ int main()
       assert(near(lower.uv.v0, upper.uv.v1));
    }
 
+   // The stock fill's two flags, as a bar edited in the HUD editor is cropped
+   // again: ScaleSize moves the edge, ScaleTexture crops U, each on its own.
+   for (const TexCoords& uv : uvs) {
+      const Bar full = anchor_right(r, uv);
+      const Bar both = fill(full, 0.25f, true, true);
+      const Bar edge = fill(full, 0.25f, false, true);
+      const Bar crop = fill(full, 0.25f, true, false);
+      const Bar none = fill(full, 0.25f, false, false);
+      assert(near(both.rect.right, fill(full, 0.25f).rect.right) && near(both.uv.u1, fill(full, 0.25f).uv.u1));
+      assert(near(edge.rect.right, both.rect.right) && edge.uv.u1 == full.uv.u1);
+      assert(crop.rect.right == full.rect.right && near(crop.uv.u1, both.uv.u1));
+      assert(none.rect.right == full.rect.right && none.uv.u1 == full.uv.u1);
+      assert(edge.width == full.width && crop.spanU == full.spanU);
+   }
+
    std::puts("Bar FillFrom tests passed (right anchor, bottom and top, texture alignment, complementary "
-             "pairs, U offsets and flips).");
+             "pairs, U offsets and flips, the fill's two flags).");
 }

@@ -61,7 +61,9 @@ with `FloatFormat("%.0f")` on a text element.
   the value is sent every update, and give the group `PropagateAlpha(1)` so the
   alpha reaches what is inside it. Leave `OutputIsAlpha` off for anything else, and
   never use it with `EventChanged`, which would then fire every frame.
-- The HUD editor's export drops these blocks, so keep your source file.
+- The modtools HUD editor saves Math, Lerp and Compare blocks as they were read: every
+  line the transform accepted, in the same order, with numbers written to six decimal
+  places. Comments are not kept, as for any line the editor saves.
 
 ## TransformNumberLerp
 
@@ -569,6 +571,8 @@ BarBitmap("player1health_missing")
 - `"Bottom"` lets an upright icon, such as a team emblem, fill without being rotated.
 - Any `TexCoords` works, including flipped ones the stock fill gets wrong.
 - `"Right"` keeps the bar flash. The vertical modes have none.
+- The modtools HUD editor shows, changes and saves a `FillFrom` bar's `BitmapRect`,
+  `TexCoords` and fade times as the file has them, and saves the line with the bar.
 - A game without BF2GameExt logs `Error reading parameter` for the line and fills
   from the left.
 
