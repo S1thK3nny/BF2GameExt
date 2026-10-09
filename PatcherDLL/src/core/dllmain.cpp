@@ -6,6 +6,7 @@
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "controller/menu_navigation.hpp"
 #include "controller/aim_assist.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "weapon/disguise_model_override.hpp"
@@ -383,6 +384,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
    controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
+   menu_navigation_install(exe_base);        // Detours + a .data table - needs the RW window
    command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);

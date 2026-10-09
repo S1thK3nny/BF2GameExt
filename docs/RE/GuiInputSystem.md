@@ -83,3 +83,58 @@ Fill the pad rows of `s_defUIBindings` after checking the whole 608-byte table m
 LeftTrigger2/RightTrigger2 (unused by keyboard and mouse), `0x06` View->Select, `0x07` Start->Start,
 `0x20..0x23` hat Up/Right/Down/Left, `0x30` X axis->xAxis, `0x33` Y axis->yAxis (DirectInput Y is
 negative-up, so the negative half-axis means up).
+
+## The Lua pad layer
+
+`controller/menu_navigation_shell.inc` runs once in the shell's Lua state (after `ShellLoop::Init`)
+and once in game (after `ReadDataFile("ingame.lvl")`). PC screens act on whatever the mouse is
+over (`this.CurButton`, `gMouseListBox` + `Layout.CursorIdx`, `gMouseOverImage`), so the pad layer
+keeps its own focus per screen and shows it with the same calls mouse hover uses. Activating
+something sets `CurButton` and calls the screen's own `Input_Accept`, so mods keep their click
+rules. Rules that matter when touching it:
+
+- The mouse wheel sends Up/Down too. Up/Down over a hovered list only go to the list when
+  `GameExt_PadDir()` reports no d-pad or stick held.
+- The right mouse button is Misc1. Pad X/Y shortcuts check `GameExt_PadButton(n)`.
+- Screens built later (the Galactic Conquest purchase screens are built when a game starts)
+  must be looked up when used, not when the script runs.
+- A screen opened from inside an Accept handler can call its own `Input_Accept` while A is
+  still down (1.3's battle mode screen does). Only the outermost Accept counts as the pad's.
+
+## Spawn screen
+
+`SpawnDisplay::UpdateInput` (modtools `0x0068C6E0`, Steam `0x0042B0C0`, GOG `0x0042B080`) only
+knows "Accept while the mouse is over a hotspot". A pad press becomes exactly that for one call:
+the mouse is moved into the target's hotspot (a point found with `RedHotSpot::IsPointInside`) and
+Accept is held, so the engine's own class, team and post logic runs.
+
+Command posts come from the map's own list, the one `SpawnDisplay::FindPost` walks. Map objects
+hang off a list (modtools `0x00AD8274`, Steam `0x007EB9FC`, GOG `0x007EC9CC`): the map is
+`node - 0x24C68` and its player index sits at `node - 0x24B00`. Post records are a static array
+of 16 entries of `0x30` bytes (modtools `0x00B47148`, Steam `0x01F76410`, GOG `0x01F778C0`),
+the first field a post pointer; `+0x2C` of that is the CommandPost, valid while its `+0x204`
+matches the record's `+0x30`, team in the low 4 bits (signed) of `+0x234`. Post `i`'s hotspot is
+`map + 0x1ECA8 + i * 0x100`, shown when bit 8 of the dword before it is set. The selected post
+is `SpawnDisplay + 0x2094` (modtools) / `+0x2058` (Steam, GOG).
+
+## Galactic Conquest
+
+The GC screens are console code with PC branches. On PC every GC screen's `Input_Accept` only
+acts when `CurButton == "_accept"`; anything else is treated as a mouse click (the purchase
+screens step toward the cursor, the summary ignores it). The console stick planet picker,
+`ifs_freeform_main:UpdateNextPlanet()`, is still there but `ifs_freeform_fleet` only calls it
+when `gPlatformStr ~= "PC"`; it expects `ScriptCB_ReadLeftstick` to report up as positive.
+Menu-list GC screens (battle mode, pause menu, cheats, scenario pick, new/load) use
+`CurButton` for the highlighted entry instead.
+
+## The reverted 2021 controller build
+
+The Steam update of February 2021 (reverted a day later) added native pad support by compiling
+the console pad code into the PC exe: one XInput pad only, XInput buttons converted to the PS2
+pad bitmask (LT/RT become L1/R1, LB/RB L2/R2), and a "pad in use" flag set by whichever device
+was used last, which is what its `ScriptCB_IsJoyUsed` reports. Its shell scripts show a
+pad button icon (atlas `gamepad_xbox360`) next to buttons that carry `xicon = "A"` and toggle
+them all when that flag changes, give options screens X/Y shortcuts, let the spawn screen cycle
+command posts with LB/RB, and swap HUD prompts to pad wording. It ships as SteamStub-wrapped,
+so it has to be unpacked before it can be read. The pad support here took the spawn screen,
+the shortcuts and the Galactic Conquest handling from it.

@@ -33,8 +33,8 @@ static const ModeBindingDef s_unitDefaults[] = {
    { "Y",         "Use" },
    { "LB",        "SecondaryNext" },
    { "RB",        "PrimaryNext" },
-   { "Back",      "PlayerList" },
-   { "Start",     "View" },
+   { "Back",      "Map" },
+   { "Start",     "" },        // opens the pause menu
    { "L3",        "Sprint" },
    { "R3",        "Zoom" },
    { "DPadUp",    "SquadCommand" },
@@ -59,7 +59,7 @@ static const ModeBindingDef s_vehicleDefaults[] = {
    { "LB",        "SecondaryNext" },
    { "RB",        "PrimaryNext" },
    { "Back",      "Map" },
-   { "Start",     "View" },
+   { "Start",     "" },        // opens the pause menu
    { "L3",        "Sprint" },
    { "R3",        "Zoom" },
    { "DPadUp",    "SquadCommand" },
@@ -84,7 +84,7 @@ static const ModeBindingDef s_flyerDefaults[] = {
    { "LB",        "StrafeNeg" },
    { "RB",        "StrafePos" },
    { "Back",      "Map" },
-   { "Start",     "View" },
+   { "Start",     "" },        // opens the pause menu
    { "L3",        "Sprint" },
    { "R3",        "Zoom" },
    { "DPadUp",    "SquadCommand" },
@@ -109,7 +109,7 @@ static const ModeBindingDef s_heroDefaults[] = {
    { "LB",        "SecondaryNext" },
    { "RB",        "PrimaryNext" },
    { "Back",      "Map" },
-   { "Start",     "View" },
+   { "Start",     "" },        // opens the pause menu
    { "L3",        "Sprint" },
    { "R3",        "Zoom" },
    { "DPadUp",    "SquadCommand" },
@@ -134,7 +134,7 @@ static const ModeBindingDef s_turretDefaults[] = {
    { "LB",        "" },
    { "RB",        "" },
    { "Back",      "Map" },
-   { "Start",     "View" },
+   { "Start",     "" },        // opens the pause menu
    { "L3",        "" },
    { "R3",        "Zoom" },
    { "DPadUp",    "SquadCommand" },
@@ -739,17 +739,30 @@ static int __cdecl hooked_SetBinding(lua_State* L)
 }
 
 static lua_CFunction s_origResetControls = nullptr;
+static lua_CFunction s_origResetControl  = nullptr;
+
+static void pad_reset_mode()
+{
+   int mode = screen_mode();
+   if (mode < 0) return;
+   pad_sync_profile();
+   pad_load_defaults(mode);
+   sidecar_save();
+   install_log("[Controller] %s: pad bindings restored to defaults", s_modeSectionNames[mode]);
+}
 
 static int __cdecl hooked_ResetControls(lua_State* L)
 {
    int r = s_origResetControls(L);
-   int mode = screen_mode();
-   if (mode >= 0) {
-      pad_sync_profile();
-      pad_load_defaults(mode);
-      sidecar_save();
-      install_log("[Controller] %s: pad bindings restored to defaults", s_modeSectionNames[mode]);
-   }
+   pad_reset_mode();
+   return r;
+}
+
+// The PC controls screen's Reset button.
+static int __cdecl hooked_ResetControl(lua_State* L)
+{
+   int r = s_origResetControl(L);
+   pad_reset_mode();
    return r;
 }
 
@@ -796,6 +809,7 @@ void controller_bindings_install(uintptr_t exe_base)
    if (!g_controllerEnabled) return;
    if (!g_addr->standard_input_process || !g_addr->script_cb_set_binding ||
        !g_addr->script_cb_get_keyboard_cmds || !g_addr->script_cb_reset_controls ||
+       !g_addr->script_cb_reset_control ||
        !g_addr->controls_row_actions || !g_addr->set_binding_hold_timer ||
        !g_addr->joystick_config_base || !g_addr->controller_base_global)
       return;
@@ -816,9 +830,10 @@ void controller_bindings_install(uintptr_t exe_base)
    attach(s_origSetBinding,      g_addr->script_cb_set_binding,       hooked_SetBinding,      exe_base);
    attach(s_origGetKeyBoardCmds, g_addr->script_cb_get_keyboard_cmds, hooked_GetKeyBoardCmds, exe_base);
    attach(s_origResetControls,   g_addr->script_cb_reset_controls,    hooked_ResetControls,   exe_base);
+   attach(s_origResetControl,    g_addr->script_cb_reset_control,     hooked_ResetControl,    exe_base);
    if (DetourTransactionCommit() != NO_ERROR) {
       s_origStandardInput = nullptr;
-      s_origSetBinding = s_origGetKeyBoardCmds = s_origResetControls = nullptr;
+      s_origSetBinding = s_origGetKeyBoardCmds = s_origResetControls = s_origResetControl = nullptr;
       install_log("[Controller] pad binding hooks failed to install");
       return;
    }
@@ -834,6 +849,7 @@ void controller_bindings_uninstall()
    DetourDetach(&(PVOID&)s_origSetBinding,      hooked_SetBinding);
    DetourDetach(&(PVOID&)s_origGetKeyBoardCmds, hooked_GetKeyBoardCmds);
    DetourDetach(&(PVOID&)s_origResetControls,   hooked_ResetControls);
+   DetourDetach(&(PVOID&)s_origResetControl,    hooked_ResetControl);
    DetourTransactionCommit();
    s_origStandardInput = nullptr;
 }

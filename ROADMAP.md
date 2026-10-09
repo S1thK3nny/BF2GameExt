@@ -312,15 +312,18 @@ paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
 ## Controller
 
-**Shell and menu navigation** - The pad does nothing in the menus: main menu, spawn screen, map
-and unit selection and the pause menu all still need mouse and keyboard. The menus themselves
-were built for a controller, but PC ships the table that turns pad buttons into menu inputs
-almost empty, with the first four buttons all set to Accept. A few PC screens also only work
-with the mouse: the profile screen only accepts a mouse click, and the top tab row cannot be
-reached from the buttons at all. A fix for both is written and stashed
-(`Controller Menu Navigation`): it fills in the table and adds a small Lua patch to the shell
-that fixes the profile screen and lets the pad triggers switch tabs. It has not been tested yet.
+**Button prompts** - Menu buttons only say what they do, never which pad button does it, so
+a pad player has to know that X resets and Y confirms. The reverted February 2021 Steam update
+drew a small A, B, X or Y icon next to each button and hid them all again as soon as the mouse
+or keyboard was used. That needs our own icon texture loaded in the shell and in game, and the
+icons added to screens that are already built when our script runs, which is untested.
 Details in [docs/RE/GuiInputSystem.md](docs/RE/GuiInputSystem.md).
+
+**Pad bindings page** - Pad bindings can only be changed one action at a time on the keyboard
+controls screen, or by editing the `.padbinds` file. A page listing every pad input per mode
+(Unit, Vehicle, Flyer, Hero, Turret), with left and right cycling the action, would make it a
+single screen. It can be built from the same form widgets the options screens use, which the
+pad can already drive, and writes straight to `.padbinds`.
 
 ## Lua API
 

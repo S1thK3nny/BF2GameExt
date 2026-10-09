@@ -934,6 +934,21 @@ namespace modtools {
    constexpr uintptr_t joystick_config_base     = 0x00CB2A78;
    constexpr uintptr_t joystick_discover        = 0x007485F0;
    constexpr uintptr_t joystick_sync            = 0x007489A0;
+   // Menu navigation (controller/menu_navigation.cpp).
+   // RawControllerInputs::s_defUIBindings: raw input -> GUI input, {int,int}[0x4C].
+   constexpr uintptr_t gui_ui_bindings_table    = 0x00ADC7C0;
+   // ShellLoop::Init; its return is the first moment every shell screen exists.
+   constexpr uintptr_t shell_loop_init          = 0x00738E60;
+   // lua_dobuffer(L, buff, size, chunkname).
+   constexpr uintptr_t lua_dobuffer             = 0x007B78B0;
+   // SpawnDisplay::UpdateInput, thiscall(this). Mouse hotspots + Accept only.
+   constexpr uintptr_t spawn_display_update_input = 0x0068C6E0;
+   // RedHotSpot::IsPointInside, thiscall(hotspot, float x, float y).
+   constexpr uintptr_t red_hotspot_is_point_inside = 0x00837810;
+   // Spawn map: list of per-player map objects (map = node - 0x24C68, player at
+   // node - 0x24B00) and the static post record array FindPost walks.
+   constexpr uintptr_t spawn_map_list           = 0x00AD8274;
+   constexpr uintptr_t spawn_map_posts          = 0x00B47148;
    // Pad binding third slot (controller/controller_support.cpp).
    // RawControllerInputs::StandardInputProcess, __fastcall(this). Reads 2 slots per
    // action from the live row this+0x20BC+mode*0x102; mode at this+8.
@@ -942,6 +957,8 @@ namespace modtools {
    constexpr uintptr_t script_cb_set_binding    = 0x004639C0;
    constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00465740;
    constexpr uintptr_t script_cb_reset_controls = 0x00479E00;
+   // ScriptCB_ResetControl: the PC controls screen's Reset button, current mode only.
+   constexpr uintptr_t script_cb_reset_control  = 0x00463950;
    // int[5][0x2B] screen row -> action, -1 = action hidden in that mode. Read by
    // SetBinding, GetKeyBoardCmds and GetActionFromIdx only.
    constexpr uintptr_t controls_row_actions     = 0x00AC7948;
@@ -2102,12 +2119,25 @@ namespace steam {
    constexpr uintptr_t joystick_config_base     = 0x01EF90D0;
    constexpr uintptr_t joystick_discover        = 0x0061D250;
    constexpr uintptr_t joystick_sync            = 0x0061D590;
+   // Menu navigation. UI table byte-scanned (unique) and confirmed by ReadLatest's
+   // xrefs; UpdateInput found through SpawnDisplay::Update.
+   constexpr uintptr_t gui_ui_bindings_table    = 0x007EB000;
+   constexpr uintptr_t shell_loop_init          = 0x00635D70;
+   constexpr uintptr_t lua_dobuffer             = 0x0069B700;
+   constexpr uintptr_t spawn_display_update_input = 0x0042B0C0;
+   constexpr uintptr_t red_hotspot_is_point_inside = 0x006D6760;
+   // Spawn map: list of per-player map objects (map = node - 0x24C68, player at
+   // node - 0x24B00) and the static post record array FindPost walks.
+   constexpr uintptr_t spawn_map_list           = 0x007EB9FC;
+   constexpr uintptr_t spawn_map_posts          = 0x01F76410;
    // Pad binding third slot. StandardInputProcess found by its +0x2600/+0x2601
    // writes; callbacks from the ScriptCB name table at 0x007E7100.
    constexpr uintptr_t standard_input_process   = 0x004153C0;
    constexpr uintptr_t script_cb_set_binding    = 0x00586B70;
    constexpr uintptr_t script_cb_get_keyboard_cmds = 0x00587330;
    constexpr uintptr_t script_cb_reset_controls = 0x00597C00;
+   // ScriptCB_ResetControl: the PC controls screen's Reset button, current mode only.
+   constexpr uintptr_t script_cb_reset_control  = 0x00586B20;
    constexpr uintptr_t controls_row_actions     = 0x00789DE0;  // byte-identical to modtools
    constexpr uintptr_t set_binding_hold_timer   = 0x01E5771C;
 
@@ -2931,11 +2961,23 @@ namespace gog {
    constexpr uintptr_t joystick_config_base     = 0x01EFA590;
    constexpr uintptr_t joystick_discover        = 0x0061E2B0;
    constexpr uintptr_t joystick_sync            = 0x0061E5F0;
+   // Menu navigation (tools/port_gog.py code score 1.00).
+   constexpr uintptr_t gui_ui_bindings_table    = 0x007EC000;
+   constexpr uintptr_t shell_loop_init          = 0x00636E10;
+   constexpr uintptr_t lua_dobuffer             = 0x0069C790;
+   constexpr uintptr_t spawn_display_update_input = 0x0042B080;
+   constexpr uintptr_t red_hotspot_is_point_inside = 0x006D7800;
+   // Spawn map: list of per-player map objects (map = node - 0x24C68, player at
+   // node - 0x24B00) and the static post record array FindPost walks.
+   constexpr uintptr_t spawn_map_list           = 0x007EC9CC;
+   constexpr uintptr_t spawn_map_posts          = 0x01F778C0;
    // Pad binding third slot (tools/port_gog.py: code score 1.00, data 5 and 6 votes).
    constexpr uintptr_t standard_input_process   = 0x00415380;
    constexpr uintptr_t script_cb_set_binding    = 0x00587B20;
    constexpr uintptr_t script_cb_get_keyboard_cmds = 0x005882E0;
    constexpr uintptr_t script_cb_reset_controls = 0x00598BB0;
+   // ScriptCB_ResetControl: the PC controls screen's Reset button, current mode only.
+   constexpr uintptr_t script_cb_reset_control  = 0x00587AD0;
    constexpr uintptr_t controls_row_actions     = 0x0078AD90;
    constexpr uintptr_t set_binding_hold_timer   = 0x01E58BCC;
 

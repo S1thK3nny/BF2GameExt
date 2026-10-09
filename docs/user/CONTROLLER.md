@@ -16,6 +16,26 @@ Each profile keeps its pad bindings in `SaveGames\<profile>.padbinds`, next to t
 
 > **After updating from an older BF2GameExt**, your profile may still carry pad buttons in its normal key slots. Press **Restore Defaults** once per mode on the controls screen to get the stock keys back.
 
+## Menus
+
+Menus have their own fixed layout, separate from the bindings, and follow `[Controller] Enabled`. The mouse cursor hides while you use the pad, and moving the mouse brings it back and hands control back to the mouse.
+
+| Input | In menus |
+|-------|----------|
+| A / B | Accept / Back |
+| Start | Pause menu in game |
+| D-pad, left stick | Move the selection, shown the same way as mouse hover |
+| LB / RB | First row of tabs: Single Player, Multiplayer, Options, Profile (in game: the Options tabs) |
+| LT / RT | The row below it, for example Campaign, Galactic Conquest, Instant Action, Career |
+| X / Y | Instant Action: add the ticked maps / launch. Options screens: reset / OK |
+| B on an options screen | Cancel: your changes on that screen are undone, the same as the Cancel button |
+
+In **Instant Action**, left and right move between the columns (settings, maps, mode and era, playlist, buttons) and up and down move inside one. In the buttons under the lists, the d-pad moves to the nearest button in that direction. A clicks the map, box or button, exactly like the mouse, and View adds another map the way Ctrl+click does. On its **settings pages** and the **Options** screens, up and down pick a setting, left and right change it, and moving down past the last setting reaches the buttons under the list. On the settings pages, B steps back to the page list on the left, and LT and RT step through the pages. On the **Controls** screen the bindings list sits between the settings and the buttons; A on a binding waits for the next key or pad button, like a click does.
+
+On the **spawn screen**, up and down pick the class, left and right step through the command posts you can spawn at, LB and RB switch team, A spawns and B goes to team select.
+
+In **Galactic Conquest**, A always does what the screen's Accept button does: select or build a fleet and confirm a move on the map, buy the bonus or unit in the middle on the purchase screens, start the new turn on the summary. On the map the left stick or d-pad jumps to the nearest planet in that direction and B cancels a fleet move. On the purchase screens left and right pick the bonus or unit. X ends the turn from the map and both purchase screens, LB and RB zoom, and LT and RT switch between Move, Bonus and Units.
+
 ## Editing the file
 
 The file can also be edited by hand while the game is closed. Each line in a mode section is one input, then the actions it fires:
@@ -152,8 +172,8 @@ What a profile without a `.padbinds` file starts with, and what Restore Defaults
 | `Y` | `Use` |
 | `LB` | `SecondaryNext` |
 | `RB` | `PrimaryNext` |
-| `Back` | `PlayerList` |
-| `Start` | `View` |
+| `Back` | `Map` |
+| `Start` | - |
 | `L3` | `Sprint` |
 | `R3` | `Zoom` |
 | `DPadUp` | `SquadCommand` |
@@ -178,7 +198,7 @@ What a profile without a `.padbinds` file starts with, and what Restore Defaults
 | `LB` | `SecondaryNext` |
 | `RB` | `PrimaryNext` |
 | `Back` | `Map` |
-| `Start` | `View` |
+| `Start` | - |
 | `L3` | `Sprint` |
 | `R3` | `Zoom` |
 | `DPadUp` | `SquadCommand` |
@@ -203,7 +223,7 @@ What a profile without a `.padbinds` file starts with, and what Restore Defaults
 | `LB` | `StrafeNeg` |
 | `RB` | `StrafePos` |
 | `Back` | `Map` |
-| `Start` | `View` |
+| `Start` | - |
 | `L3` | `Sprint` |
 | `R3` | `Zoom` |
 | `DPadUp` | `SquadCommand` |
@@ -228,7 +248,7 @@ What a profile without a `.padbinds` file starts with, and what Restore Defaults
 | `LB` | `SecondaryNext` |
 | `RB` | `PrimaryNext` |
 | `Back` | `Map` |
-| `Start` | `View` |
+| `Start` | - |
 | `L3` | `Sprint` |
 | `R3` | `Zoom` |
 | `DPadUp` | `SquadCommand` |
@@ -253,7 +273,7 @@ What a profile without a `.padbinds` file starts with, and what Restore Defaults
 | `LB` | - |
 | `RB` | - |
 | `Back` | `Map` |
-| `Start` | `View` |
+| `Start` | - |
 | `L3` | - |
 | `R3` | `Zoom` |
 | `DPadUp` | `SquadCommand` |

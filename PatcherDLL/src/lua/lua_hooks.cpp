@@ -56,6 +56,7 @@
 #include "render/water_texture_count_fix.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "controller/menu_navigation.hpp"
 #include "controller/aim_assist.hpp"
 #include "game/Battlefront2/Source/Character.h"
 
@@ -342,6 +343,7 @@ void lua_hooks_uninstall()
    command_post_null_fix_uninstall();
    matrix_basis_fix_uninstall();
    controller_bindings_uninstall();
+   menu_navigation_uninstall();
    branch_region_debug_uninstall();
    branch_region_fix_uninstall();
    anim_bank_append_uninstall();

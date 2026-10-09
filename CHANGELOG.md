@@ -119,6 +119,11 @@ Scripts can check the running version through `GameExt.version`.
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
+- **Menu navigation with a pad** - The menus, Instant Action, the profile screen,
+  the options screens, the spawn screen and Galactic Conquest can be driven with a
+  gamepad. LB/RB and LT/RT switch the two tab rows, X and Y reset or confirm the
+  options screens, left/right pick the command post on the spawn screen, and the stick picks
+  planets in Galactic Conquest. See [Controller](docs/user/CONTROLLER.md#menus).
 
 ### Changed
 
@@ -129,7 +134,8 @@ Scripts can check the running version through `GameExt.version`.
   sections are no longer read; copy any custom lines into the new file (same
   `Input=Action` format, sections named `[Unit]` to `[Turret]`). Older versions left
   pad buttons in the normal key slots, so press Restore Defaults once per mode to
-  get the stock keys back.
+  get the stock keys back. In the default layout Start only opens the pause menu and Back (View)
+  opens the map.
 
 - **`OnCharacterExitVehicle` now runs on the engine's own event manager.** The
   callback names, arguments and handles are unchanged, but registration, filtering,
