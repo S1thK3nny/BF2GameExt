@@ -495,8 +495,8 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     )
     L.append("")
     L.append(
-        "On the **spawn screen**, up and down pick the class, left and right switch team, "
-        "LB and RB step through the command posts you can spawn at, A spawns and B goes to "
+        "On the **spawn screen**, up and down pick the class, left and right step through "
+        "the command posts you can spawn at, LB and RB switch team, A spawns and B goes to "
         "team select."
     )
     L.append("")
