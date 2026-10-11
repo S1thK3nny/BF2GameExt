@@ -1291,6 +1291,10 @@ namespace modtools {
    // (entity/walker_stomp_fix.cpp).
    constexpr uintptr_t walker_update_state          = 0x0055B3C0;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00555D0F;
+   // EntitySoldier::UpdateIndirect: thiscall(float dt), bool in AL, RET 4;
+   // `this` the soldier's Controllable. An AI soldier's per-update stance
+   // switch on AILowLevel::mHeight. AI sprint detours it (ai/ai_sprint.cpp).
+   constexpr uintptr_t entity_soldier_update_indirect = 0x0053B920;
    // EntityHover::CollisionCallback: thiscall(CollisionResult*, CollisionObject*
    // other, Restrictor*), RET 0xC, bool in AL; `this` is the hover + 0xC, its
    // CollisionObject part. Slot 6 (+0x18) of the CollisionObject vtable of
@@ -2749,6 +2753,9 @@ namespace steam {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntitySoldier::UpdateIndirect, as on modtools; reached only through the
+   // soldier's Controllable vtable (slot +0xC4 at 0x0079CF2C).
+   constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
    // EntityHover::CollisionCallback, as on modtools: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079BC98) and CommandHover
    // (0x0079834C).
@@ -3441,6 +3448,8 @@ namespace gog {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntitySoldier::UpdateIndirect, at Steam's address.
+   constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
    // EntityHover::CollisionCallback, at Steam's address: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079CC38) and CommandHover
    // (0x007992EC).

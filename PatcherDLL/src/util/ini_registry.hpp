@@ -70,6 +70,8 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("AI", "PlayerVisionFairness",   "1", "AI spot you at the same range they spot a bot. Stock BF2 doubles its view range for human players. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerPriorityFairness", "1", "AI rank you the same as a bot at equal distance. Stock BF2 ranks you as if you were half as far away. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerThreatFairness",   "0", "AI stop treating you as extra dangerous while you are aiming at them. OFF by default: it is the one fairness option that makes AI feel unresponsive, since they no longer react to being aimed at. Set 1 to enable"),
+   INI_ENTRY("AI", "AISprint", "1", "AI soldiers sprint on long runs out of combat. Stock AI only sprint to catch up with a squad leader, so they always run across the map to an objective. A sprint stops at the soldier's energy limit, as a player's does. Set 0 for stock"),
+   INI_ENTRY("AI", "AISprintDistance", "30", "How far from where it is going, in metres, an AI starts a sprint. It stops at half this distance. Range above 0"),
    INI_ENTRY("AI", "PlayerAwarenessFairness","1", "AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock"),
 
    // [Controller] — gamepad support

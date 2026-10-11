@@ -242,6 +242,8 @@
     <ClInclude Include="src\ai\ai_decision_rate.hpp" />
     <ClInclude Include="src\ai\ai_fairness.hpp" />
     <ClInclude Include="src\ai\ai_update_budget.hpp" />
+    <ClInclude Include="src\ai\ai_sprint.hpp" />
+    <ClInclude Include="src\ai\ai_sprint_core.hpp" />
     <ClInclude Include="src\ai\reservation_pool.hpp" />
     <ClInclude Include="src\core\build_field.hpp" />
     <ClInclude Include="src\core\entity_layout.hpp" />
@@ -303,6 +305,7 @@
     <ClCompile Include="src\util\content_census.cpp" />
     <ClCompile Include="src\util\game_log_lock.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
+    <ClCompile Include="src\ai\ai_sprint.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\instance_props.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />

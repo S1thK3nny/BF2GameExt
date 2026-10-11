@@ -427,13 +427,12 @@ list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
 
-**New AI behaviours** - AI sprint only to catch up with a squad leader, never to cross the
-map, melee units trade blows with little blocking or spacing, and general behaviour
-has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its 14
-behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
-be added there, starting with sprinting to distant goals out of combat and blocking and backing
-off in melee duels. Needs the goal and combat layers mapped first (AI systems documentation,
-below). Details in [docs/RE/AISystem.md](docs/RE/AISystem.md).
+**New AI behaviours** - Melee units trade blows with little blocking or spacing, and general
+behaviour has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its
+14 behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
+be added there, starting with blocking and backing off in melee duels. Needs the goal and combat
+layers mapped first (AI systems documentation, below). Details in
+[docs/RE/AISystem.md](docs/RE/AISystem.md).
 
 **Flyers on maps with no flyer paths** - A flyer on a map with no flyer paths just circles. The
 engine already has a movement mode that needs no path, used for strafing runs. The idea is to

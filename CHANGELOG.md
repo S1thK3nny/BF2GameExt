@@ -108,6 +108,9 @@ Scripts can check the running version through `GameExt.version`.
   gate what it loads on a minimum version in one line:
   `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
   See [Lua API](docs/user/LUA_API.md#detection).
+- **AI sprint** - AI soldiers out of combat sprint on long runs, starting 30 m from where they
+  are going and stopping at half that, until their energy runs out. Stock AI only sprint to catch
+  up with a squad leader. `[AI] AISprint=1`, `[AI] AISprintDistance=30`; not yet tested in play.
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

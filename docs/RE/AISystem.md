@@ -717,7 +717,7 @@ Why a commanded squad still clumps (inferred):
 - `ReserveOffset` could gain a line-abreast layout and a column that starts one slot back.
 - `UpdateTarget` could turn the slots with the leader's direction of travel instead of the camera.
 
-## AI sprinting (researched 2026-10-11, not built)
+## AI sprinting (researched 2026-10-11, built 2026-10-12)
 
 AI never touch `mControlSprint`, but they do sprint. `AILowLevel::mHeight` set to `HEIGHT_SPRINT` (3)
 makes `EntitySoldier::UpdateIndirect` (P `0x00588E10`, M `0x0053B920`, S and G `0x004F0110`) call the
@@ -744,11 +744,24 @@ What a sprint does, read in P and M:
 - **Being shot at:** a sprinter's target bubble grows and its stance modifier doubles, so enemy AI hit
   it less (inferred).
 
-A traversal sprint could set `mHeight` to sprint in a detour of `UpdateIndirect`, just before the
-original reads it, and put it back afterwards: only with no target and no recent threat, a far
-destination, a long current leg with a shallow next turn, and the energy to cover the leg
-(`EnergyMinSprint` and the class's drain). The height jump table itself must stay as it is:
-`soldier_prone` patches entries in it.
+**Built as `[AI] AISprint`** (`ai/ai_sprint.cpp`). A detour of `EntitySoldier::UpdateIndirect` raises
+`mHeight` from stand to sprint for one update and puts it back afterwards, unless the AI set a height
+of its own meanwhile, so the AI's own state never keeps it. The height jump table is left alone
+(`soldier_prone` patches entries in it). It sprints when:
+
+- the AI asked to stand, and the soldier is standing or already sprinting (`Sprint()`'s own test);
+- its controller is not in combat (`UnitController` state 2, read at +0x7C) and `AILowLevel::mTarget`
+  holds nothing;
+- it travels a path of its own: a `NavigatorGraphFollower` (to `mGlobalDest`, +0x24) or a
+  `NavigatorPathFollower` (to its path follower's `mFinalPoint`), not following a leader;
+- that destination is at least `AISprintDistance` away on the ground (30 m), or half that once
+  sprinting;
+- its energy bar is not overheated, and to start a sprint it is at least half full.
+
+`EntitySoldier::Update` drains any soldier in the sprint state (P `0x00583112`, the bar at Controllable
++0x7E0 on P and M, +0x7D0 on retail), so a sprint ends at the bar's overheat latch and resumes once it
+clears, as a player's does. Every read and call is listed per build in `ai/ai_sprint.hpp` and checked by
+`tests/ai_sprint_abi_tests.py`. Not yet tried in play.
 
 ## Path following (researched 2026-10-11)
 

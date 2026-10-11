@@ -55,6 +55,7 @@
 #include "weapon/impact_sound_water_fix.hpp"
 #include "entity/foleyfx_region_fix.hpp"
 #include "ai/ai_update_budget.hpp"
+#include "ai/ai_sprint.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
@@ -307,6 +308,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
       g_contentCensusNames        = cfg.get_bool("Diagnostic", "ContentCensusNames", false);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
+      g_aiSprint                  = cfg.get_bool("AI", "AISprint", true);
+      g_aiSprintDistance          = cfg.get_float("AI", "AISprintDistance", 30.0f);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
@@ -434,6 +437,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    scene_tree_depth_guard_install(exe_base); // crash fix, always on
    prop_generator_fix_install(exe_base);     // rewrites a CALL rel32 - needs the RW window
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
+   ai_sprint_install(exe_base);        // Detours .text
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
