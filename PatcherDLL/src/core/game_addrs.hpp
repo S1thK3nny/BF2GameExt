@@ -1597,6 +1597,15 @@ namespace modtools {
    constexpr uintptr_t soldier_anim_banks              = 0x00ACECF8;
    constexpr uintptr_t soldier_anim_weapons            = 0x00ACF198;
    constexpr uintptr_t soldier_anim_maps               = 0x00ACF558;
+   // SoldierAnimationBank::AddBank, cdecl(name, parent): registers an
+   // AnimationName bank, -1 when the 16 names are full (cmp at 0x0057051B) or
+   // the parent is unregistered. s_iNumBanks is the count it tests.
+   constexpr uintptr_t soldier_anim_add_bank           = 0x005704B0;
+   constexpr uintptr_t soldier_anim_bank_count         = 0x00ACECE8;
+   // SoldierAnimationBank::AddMap, cdecl(bank, weapon): registers a bank and
+   // weapon type pair, -1 when the 30 maps are full (cmp at 0x005707BE).
+   constexpr uintptr_t soldier_anim_add_map            = 0x005707A0;
+   constexpr uintptr_t soldier_anim_map_count          = 0x00ACECF4;
    // GameLoop::sClientDeltaTime, the frame time SoldierAnimator::SetAction
    // (0x00575D50) reads first, at 0x00575D9B.
    constexpr uintptr_t game_client_delta_time          = 0x00C6A9AC;
@@ -2950,6 +2959,14 @@ namespace steam {
    constexpr uintptr_t soldier_anim_banks              = 0x007E9440;
    constexpr uintptr_t soldier_anim_weapons            = 0x007E9070;
    constexpr uintptr_t soldier_anim_maps               = 0x007E9700;
+   // SoldierAnimationBank::AddBank, fastcall(ECX name, EDX parent), RET 0;
+   // cap compare at 0x0063C4CB.
+   constexpr uintptr_t soldier_anim_add_bank           = 0x0063C460;
+   constexpr uintptr_t soldier_anim_bank_count         = 0x007E9430;
+   // SoldierAnimationBank::AddMap, fastcall(ECX bank, EDX weapon), RET 0; keeps
+   // EDX across its FindMap call. Cap compare at 0x0063C9B2.
+   constexpr uintptr_t soldier_anim_add_map            = 0x0063C9A0;
+   constexpr uintptr_t soldier_anim_map_count          = 0x007E906C;
    // GameLoop::sClientDeltaTime: SoldierAnimator::SetAction (0x0063ED60) loads
    // it into XMM3 first, at 0x0063ED66.
    constexpr uintptr_t game_client_delta_time          = 0x01E56058;
@@ -4017,6 +4034,14 @@ namespace gog {
    constexpr uintptr_t soldier_anim_banks              = 0x007EA070;
    constexpr uintptr_t soldier_anim_weapons            = 0x007EA330;
    constexpr uintptr_t soldier_anim_maps               = 0x007EA8E0;
+   // SoldierAnimationBank::AddBank, fastcall(ECX name, EDX parent), RET 0;
+   // cap compare at 0x0063D56B.
+   constexpr uintptr_t soldier_anim_add_bank           = 0x0063D500;
+   constexpr uintptr_t soldier_anim_bank_count         = 0x007EA04C;
+   // SoldierAnimationBank::AddMap, fastcall(ECX bank, EDX weapon), RET 0; cap
+   // compare at 0x0063DA52.
+   constexpr uintptr_t soldier_anim_add_map            = 0x0063DA40;
+   constexpr uintptr_t soldier_anim_map_count          = 0x007EA068;
    // GameLoop::sClientDeltaTime, loaded first by SetAction (0x0063FE00) at 0x0063FE06.
    constexpr uintptr_t game_client_delta_time          = 0x01E574F0;
 

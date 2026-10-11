@@ -24,10 +24,6 @@
 // This patch is always toggled; No need to disable it in the ini.
 // =============================================================================
 
-// Runtime-only logger (never called during install; see the install-window
-// no-game-code rule).  Resolved in anim_textures_install.
-static GameLog_t g_log = nullptr;
-
 // ---------------------------------------------------------------------------
 // Property hashes (FNV-1a of "AnimTexture1/2/3")
 // ---------------------------------------------------------------------------
@@ -155,9 +151,8 @@ static void register_anim_texture(void* weaponMeleeClass, int frameSlot, const c
    uint32_t baseTex = bladeEntry[10];
 
    if (!baseTex) {
-      if (g_log)
-         g_log("[AnimTex] WARNING: base texture hash is 0 for blade %d - AnimTexture%d ignored\n",
-               bladeIdx, frameSlot);
+      get_gamelog()("[AnimTex] WARNING: base texture hash is 0 for blade %d - AnimTexture%d ignored\n",
+                    bladeIdx, frameSlot);
       return;
    }
 
@@ -235,8 +230,6 @@ void anim_textures_install(uintptr_t exe_base)
       case GameBuild::GOG:      addrs = &GOG_ADDRS;      break;
       default:                  return; // unsupported build
    }
-
-   g_log = get_gamelog(); // runtime-only - must not be called during install
 
    s_bladeLookupFn    = (fn_BladeLookup)resolve(exe_base, addrs->blade_lookup);
    s_bladeModelPtr    = (uint32_t*)resolve(exe_base, addrs->blade_global_model);

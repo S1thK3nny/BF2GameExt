@@ -26,20 +26,8 @@ bool g_gcVisualLimitsEnabled = true;
 //     including the engine logger — is an EXEC access violation on builds
 //     with DEP (crashes Steam; modtools merely tolerates it).
 //
-//   log() — the engine's GameLog, for runtime-only diagnostics (hooks/stats).
+//   get_gamelog() — the engine's log, for runtime-only diagnostics (hooks/stats).
 // ---------------------------------------------------------------------------
-static GameLog_t g_log = nullptr;
-
-static void log(const char* fmt, ...)
-{
-    if (!g_log) return;
-    char buf[512];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    g_log("%s", buf);
-}
 
 // ---------------------------------------------------------------------------
 // GC draw-buffer layout constants
@@ -186,7 +174,7 @@ static bool __fastcall hooked_particle_add(
         if (!g_loggedOnce || (g_frameCount % 120 == 0)) {
             uint32_t spills = 0, spillFails = 0;
             particle_batch_spill_stats(spills, spillFails);
-            log("[GC_VIS] STATS: beams=%u/%u particles=%u/%u (vanilla limits: %u/%u) dropped: b=%u p=%u spills=%u spill_fails=%u",
+            get_gamelog()("[GC_VIS] STATS: beams=%u/%u particles=%u/%u (vanilla limits: %u/%u) dropped: b=%u p=%u spills=%u spill_fails=%u",
                 g_beamHighWater, g_beamLimit, g_particleHighWater, kNewParticleLimit,
                 kVanillaBeamLimit, kVanillaParticleLimit, g_beamDropped, g_particleDropped,
                 spills, spillFails);
@@ -242,8 +230,6 @@ void gc_visual_limits_install(uintptr_t exe_base)
 {
     if (!g_gcVisualLimitsEnabled) return;
     if (g_build == GameBuild::Unknown) return;
-
-    g_log = get_gamelog(); // runtime-only — must not be called during install
 
     // Append to the install log alongside the other patch sets
     install_log("Applying patch set: GC Visual Limit Extensions");

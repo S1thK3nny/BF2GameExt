@@ -35,12 +35,6 @@
 // lock break timer 0.1s, dot threshold 0.7.
 
 // ---------------------------------------------------------------------------
-// Logging
-// ---------------------------------------------------------------------------
-
-static GameLog_t s_log = nullptr;
-
-// ---------------------------------------------------------------------------
 // INI config
 // ---------------------------------------------------------------------------
 
@@ -891,8 +885,6 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
 
 void aim_assist_install(uintptr_t exe_base)
 {
-    s_log = get_gamelog();
-
     if (!s_aimAssistEnabled) return;
 
     // Select the address set for the detected build. Aim assist is fully ported

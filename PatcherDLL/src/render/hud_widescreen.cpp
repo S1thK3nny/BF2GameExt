@@ -28,10 +28,6 @@
 // [Fixes] ReticleCorrection: -1 auto, 0 disable, or manual strength.
 float g_reticleCorrection = -1.0f;
 
-// Runtime-only logger (never called during install; see the install-window
-// no-game-code rule).  Resolved in hud_widescreen_install.
-static GameLog_t g_log = nullptr;
-
 // ---------------------------------------------------------------------------
 // Correction parameters — refreshed each frame from HUD::Manager::Update hook.
 // ---------------------------------------------------------------------------
@@ -70,7 +66,7 @@ __declspec(naked) static void __cdecl reticle_y_correction()
 // ---------------------------------------------------------------------------
 // Recompute correction params from the live screen dimensions.
 // ---------------------------------------------------------------------------
-static void update_correction_params()
+static void update_correction_params(bool fromHook)
 {
    if (!s_screenWidth || !s_screenHeight) return;
    uint32_t w = *s_screenWidth;
@@ -103,11 +99,11 @@ static void update_correction_params()
       s_addConst    = 1.0f;
    }
 
-   if (s_logOnce < 3) {
+   // Install time must not reach the engine logger.
+   if (fromHook && s_logOnce < 3) {
       s_logOnce++;
-      if (g_log)
-         g_log("[HUD_WS] screen=%ux%u delta=%.1f str=%.2f yscale=%.4f yoff=%.4f",
-               w, h, delta, s_correctionStrength, s_yScale, s_yOffsetNorm);
+      get_gamelog()("[HUD_WS] screen=%ux%u delta=%.1f str=%.2f yscale=%.4f yoff=%.4f",
+                    w, h, delta, s_correctionStrength, s_yScale, s_yOffsetNorm);
    }
 }
 
@@ -123,7 +119,7 @@ static fn_ReticuleUpdate s_origReticuleUpdate = nullptr;
 
 static bool __fastcall hooked_ReticuleUpdate(void* self, void* edx, float p1)
 {
-   update_correction_params();
+   update_correction_params(true);
    return s_origReticuleUpdate(self, edx, p1);
 }
 
@@ -208,7 +204,6 @@ void hud_widescreen_install(uintptr_t exe_base)
       }
    }
 
-   g_log = get_gamelog(); // runtime-only — must not be called during install
    s_correctionStrength = g_reticleCorrection;
    s_screenWidth  = (const uint32_t*)resolve(exe_base, s_addrs->screen_width);
    s_screenHeight = (const uint32_t*)resolve(exe_base, s_addrs->screen_height);
@@ -253,7 +248,7 @@ void hud_widescreen_install(uintptr_t exe_base)
    DetourAttach(&(PVOID&)s_origReticuleUpdate, hooked_ReticuleUpdate);
    DetourTransactionCommit();
 
-   update_correction_params(); // initial params (screen dims usually available)
+   update_correction_params(false); // initial params (screen dims usually available)
 }
 
 // ---------------------------------------------------------------------------

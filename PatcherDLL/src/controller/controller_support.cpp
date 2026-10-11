@@ -11,12 +11,6 @@
 bool g_controllerEnabled = false;
 
 // ---------------------------------------------------------------------------
-// GameLog
-// ---------------------------------------------------------------------------
-
-static GameLog_t g_log = nullptr;
-
-// ---------------------------------------------------------------------------
 // Per-mode default binding definitions
 // ---------------------------------------------------------------------------
 
@@ -480,7 +474,7 @@ static bool sidecar_load()
 
       int raw, device;
       if (!parse_input(key, &raw, &device)) {
-         if (g_log) g_log("[Controller] .padbinds: unknown input '%s'\n", key);
+         get_gamelog()("[Controller] .padbinds: unknown input '%s'\n", key);
          continue;
       }
       char* context = nullptr;
@@ -491,7 +485,7 @@ static bool sidecar_load()
          if (!*tok) continue;
          int action = controller_action_from_name(tok);
          if (action >= 0 && action < kActionsPerMode) pad_add(mode, raw, device, action);
-         else if (action == -2 && g_log) g_log("[Controller] .padbinds: unknown action '%s'\n", tok);
+         else if (action == -2) get_gamelog()("[Controller] .padbinds: unknown action '%s'\n", tok);
       }
    }
    fclose(f);
@@ -857,7 +851,6 @@ void controller_bindings_uninstall()
 void controller_setup_bindings(uintptr_t exe_base)
 {
    if (!g_controllerEnabled) return;
-   g_log = get_gamelog();
    (void)exe_base;
    if (!s_profile || !pad_connected()) return;
 

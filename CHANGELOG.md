@@ -124,6 +124,13 @@ Scripts can check the running version through `GameExt.version`.
   gamepad. LB/RB and LT/RT switch the two tab rows, X and Y reset or confirm the
   options screens, left/right pick the command post on the spawn screen, and the stick picks
   planets in Galactic Conquest. See [Controller](docs/user/CONTROLLER.md#menus).
+- **Soldier animation limits are logged when hit** - A level can hold 16 different
+  soldier `AnimationName` banks and 30 animation maps, one per different pairing of a
+  unit's `AnimationName` with a weapon's `AnimationBank` (64 and 90 with
+  `ComboAnimIncrease`). Past either limit the game silently turned the next one away,
+  and soldiers using it crashed the game when they spawned; a bank whose parent bank
+  had not loaded yet did the same. The log now names what was turned away as an error
+  and says how to fix it.
 
 ### Changed
 
