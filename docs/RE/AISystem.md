@@ -658,3 +658,110 @@ The AI deliberately misses shots via `DumbDown` (1270 bytes) and `CalculateBubbl
 ## Key Insight: Space Assault AI Cheats
 
 `SpaceAssault_CheatLikeABastard` is a real function name from the PDB. It runs on a timer and calls `SpaceAssault_RandomFlyerKill` (picks a random enemy flyer and kills it) and `SpaceAssault_RandomCritSysDamage` (damages a random critical system). The AI doesn't actually outfly you in space - it just rolls dice and destroys things.
+
+---
+
+## Squad formations (researched 2026-10-11, not built)
+
+Read in Ghidra by a research pass; nothing here is patched yet, and each address is to be re-read
+before it is used. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
+shows them and move with the exe.
+
+### Two kinds of follower
+
+`UnitFollowAgent` runs in one of two modes, set by what recruited the follower:
+
+- **Formation.** The player's "follow me" squad command (`EntitySoldier::Update` pushes
+  `EVT_SC_FollowChr`) and Lua `Follow` goals (`AI::FollowGoal::Assign`, P `0x005C8650`).
+  `UnitFollowAgent::UpdateStatePostVision` (P `0x007928D0`, S `0x00668500`, G `0x006695A0`; on M the
+  code is there but Ghidra has no function, call site `0x005B0AB1`) reserves a slot with
+  `ReserveManager::ReserveOffset(leader, follower, type)`: P `0x0073AA80`, M `0x005C6840` (cdecl),
+  S `0x0062FA70` and G `0x00630B10` (ECX = out, EDX = leader, two stack arguments the caller pops).
+- **Loose.** Only `PlayerController::CheckForAutoFollow` (P `0x0071BE90`, M `0x0059AD80`, S `0x0061C150`),
+  which recruits friendlies the player runs past while the player has fewer than two formation
+  followers. `UnitFollowAgent::EnterState` (P `0x00791E40`) sends each one to a random point 10 m
+  behind the leader, give or take 4 m, and it stands still while within 20 m of the leader. There are no
+  slots in this mode: the loose clump is the design.
+
+### The slots
+
+A follower's slot is its place among the leader's formation reservations. There are seven layouts:
+random, single file (slot 0 lands on the leader), double file, jittered double file, circle, convoy
+and flying V (a wedge). A 27-byte helper picks one per follower (P `0x007926E0`, M `0x005AFEE0`,
+S `0x00667FC0`, G `0x00669060`): the wedge when the follower's `Controller::mOpenRadius` is above 10,
+otherwise double file. On M it takes the controller in EAX and returns in EAX; on S and G it takes it
+in ECX, and the caller keeps EDX live across the call.
+
+The offset is scaled by 2.0 m, by 2.2 m when the leader moves slower than 4 m/s, and by 1.7 m while
+the follower jet-hovers. On S the 2.2 and 1.7 constants are shared with other code, so a change must
+move the operands, not the constants. `NavigatorFollowTarget::UpdateTarget` (P `0x0067AFF0`,
+M `0x005A6920`) turns the slot by the leader's matrix, adds a sway of up to 0.3 m and drops a crumb
+every 2 m; the follower walks that trail of crumbs.
+
+Why a commanded squad still clumps (inferred):
+
+- each follower picks its own layout, so one can be in the wedge while another is in double file;
+- the slots turn with the leader's facing, which for a player is the camera's yaw;
+- the first two slots are only 1.5 m to either side of the leader and 0.5 m behind;
+- a reservation the pool refuses leaves the follower on slot 0 (stock pool 60;
+  `[AI] ReservationPoolSize` raises it).
+
+### What a change could do
+
+- Auto-recruits could follow in formation: the recruit pushes mode `0x11`, and `0x10` is formation
+  (M `0x0059AFAC`, S `0x0061C3CC`, G `0x0061D43C`). Auto-recruiting would then stop at two
+  followers, since formation followers are what it counts.
+- A replacement for the layout helper and the spacing operands could give the whole squad one layout
+  and one spacing, perhaps from the units' collision radii as convoys already do (the sum of the two
+  radii times 2.5).
+- `ReserveOffset` could gain a line-abreast layout and a column that starts one slot back.
+- `UpdateTarget` could turn the slots with the leader's direction of travel instead of the camera.
+
+## AI sprinting (researched 2026-10-11, not built)
+
+AI never touch `mControlSprint`, but they do sprint. `AILowLevel::mHeight` set to `HEIGHT_SPRINT` (3)
+makes `EntitySoldier::UpdateIndirect` (P `0x00588E10`, M `0x0053B920`, S and G `0x004F0110`) call the
+virtual `Sprint()`, standing back up if that fails; on S it is a thiscall taking a float, RET 4. Two
+places set it:
+
+- `NavigatorFollowTarget::UpdateFollowCrumbs` (P `0x0067AB50`, M `0x005A6C60`, S `0x005ACE90`,
+  G `0x005ADE40`), whenever a follower is more than 1 m from its crumb: formation squads, CTF escorts,
+  units running to board a vehicle, convoys;
+- the `CombatHelper` flee state (P `0x004C7860`), for hovers and walkers only, where it means boost.
+
+So AI sprint to catch up and never while simply crossing the map, which is what is seen in play.
+
+What a sprint does, read in P and M:
+
+- **Speed:** the ODF sprint factor times `MaxSpeed` (stock 1.5, so 10.5 m/s), reached over
+  `SprintAccelerateTime` (0.35 s). Strafing while sprinting is halved.
+- **Turning:** the sprint turn factor (0.35) applies to players only, so sprinting AI turn at full rate.
+- **Energy:** `EnergyDrainSprint` (stock 20 per second, from 120) drains any soldier in the sprint
+  state, but neither `Sprint()` nor the AI path checks energy first, so AI should keep sprinting on an
+  empty bar (inferred).
+- **Firing** ends a sprint unless the weapon allows firing while sprinting, so a fighting AI would
+  flicker in and out of it (inferred).
+- **Being shot at:** a sprinter's target bubble grows and its stance modifier doubles, so enemy AI hit
+  it less (inferred).
+
+A traversal sprint could set `mHeight` to sprint in a detour of `UpdateIndirect`, just before the
+original reads it, and put it back afterwards: only with no target and no recent threat, a far
+destination, a long current leg with a shallow next turn, and the energy to cover the leg
+(`EnergyMinSprint` and the class's drain). The height jump table itself must stay as it is:
+`soldier_prone` patches entries in it.
+
+## Path following (researched 2026-10-11)
+
+`PathFollower::Update` (P `0x00710220`, M `0x005DB240`, S `0x006132C0` with dt in XMM1, G `0x00614360`)
+moves to the next node once `CloseToDest` (P `0x0070F500`, M `0x005D9770`, S `0x00612E00`: within 1.0 m
+for soldiers, 0.25 m walking, 0.5 m at the last node) or `GonePastDest` (P `0x0070F920`, M `0x005D9290`,
+S `0x00612F80`: past the line through the node) is true.
+
+`UpdateControllableMoving` (P `0x00710800`, M `0x005D9970`, S `0x006137C0`, G `0x00614860`) steers at
+the point `AIUtil::CalculateSoldierSteerPoint` returns (P `0x00486160`, M `0x0058E460`, S `0x00440DB0`,
+G `0x00440DA0`; on S and G ECX = previous node, EDX = target node, XMM3 = look-ahead, two stack
+arguments the caller pops): (speed + 0.2) m ahead along the current leg, never past the node, so the
+heading flips at every node. A soldier that bumps into something has its steer point moved 5 m
+sideways (inferred to look jerky). Hovers and walkers share the function. `sCalculateTurnControls`
+(M `0x00590760`) then turns as fast as allowed, up to `MaxTurnSpeed` (stock 5 rad/s, doubled with fast
+turn).

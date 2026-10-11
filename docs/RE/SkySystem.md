@@ -45,3 +45,6 @@ BF1's reader is `SkyDome::Read(PblConfig&)` at `0x001D10A0`, with `SkyDome::Rend
 
 Ghidra has not applied BF1's symbols; resolve names through their Mach-O nlist entries, not by
 name lookup.
+
+The sky's other layers (rotating dome models, the hidden `CloudLayer`) and fog are in
+[Atmosphere.md](Atmosphere.md).

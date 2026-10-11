@@ -74,8 +74,9 @@ test for each walker's update.
 
 **Pilots that follow their walker** - A walker's pilot and riders hold the same animation
 whatever the walker does. Play variants of the pilot animation for turning left or right,
-starting and stopping, picked from the walker's own state and kept in step with its gait.
-Research first: where pilot animations are chosen and what walker state they can see.
+starting and stopping, picked from the walker's own state and blended in when the rider is
+drawn, in step with its stride. Needs new animations. Details in
+[docs/RE/PilotAnimations.md](docs/RE/PilotAnimations.md).
 
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
@@ -164,8 +165,8 @@ Details in [docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.
 **Additive animations** - An animation replaces the pose of the joints it covers, so a
 flinch, breathing or recoil cannot be laid over whatever the soldier is already doing without
 a full animation for each case. Add animations that add their change to the current pose,
-where directional jets already adjust it. Research first: whether Zephyr has any additive
-support, and how to sample an animation joint by joint.
+where directional jets already adjust it, and take it out again once drawn. Details in
+[docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md#additive-layers-researched-2026-10-11-not-built).
 
 ## Weapons
 
@@ -225,6 +226,11 @@ height, separate from the dome, for a sheet of cloud or haze. BF2 cut it complet
 `.sky` parsing and the rendering, so this means building it again, not switching it back on. The
 properties are known from a leftover block in Endor's `.sky` file. What is still missing is how
 BF1 actually drew it. Details in [docs/RE/SkySystem.md](docs/RE/SkySystem.md).
+
+**Atmosphere through the engine** - Maps barely use the fog, cloud and light effects BF2 already
+has, and no script can change them. Add Lua for height fog and the fog colour, and document moving
+cloud shadows (`WorldShadowMap`), rotating cloud domes and the hidden `CloudLayer`, which draw the
+same with or without Shader Patch. Details in [docs/RE/Atmosphere.md](docs/RE/Atmosphere.md).
 
 **Unlock framerate above 80 FPS** - The game caps out around 80 and anything above this will
 cause issues with vehicles, especially hovers, due to being tied to the framerate. The fix is to detach the physics and animation updates from the framerate, and instead run them on a fixed timestep. This will allow the game to run at higher framerates without affecting gameplay mechanics.
@@ -421,8 +427,8 @@ list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
 
-**New AI behaviours** - AI never sprint (nothing in the AI controllers or agents touches the
-sprint control), melee units trade blows with little blocking or spacing, and general behaviour
+**New AI behaviours** - AI sprint only to catch up with a squad leader, never to cross the
+map, melee units trade blows with little blocking or spacing, and general behaviour
 has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its 14
 behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
 be added there, starting with sprinting to distant goals out of combat and blocking and backing
@@ -434,16 +440,26 @@ engine already has a movement mode that needs no path, used for strafing runs. T
 fall back to it when the flyer cannot find a path, so flyers work on maps that never had flyer
 paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
-**Squad formations** - AI squad members trail their leader in a loose clump. Keep them in a
-formation around the leader (line, wedge or column) through the squad's follow logic.
-Research first: how a follower picks its spot today.
+**Squad formations** - Friendlies who tag along when the player runs past trail in a loose
+clump, and AI never form squads with each other. The engine already has formation slots for
+followers ordered with "follow me": use them for tag-alongs too, give a squad one layout and
+spacing, and let AI form squads behind an AI leader. Details in
+[docs/RE/AISystem.md](docs/RE/AISystem.md#squad-formations-researched-2026-10-11-not-built).
 
-**Smoother AI movement** - AI soldiers snap round path corners and change direction
-abruptly. Round off the corners and limit how fast they turn. Research first: the path
-follower and its turn rates.
+**Smoother AI turning** - AI soldiers swing their head and upper body onto a target at once,
+and turn sharply while moving. Ease both: a capped, eased turn rate for where they look and for
+their bodies. Details in [docs/RE/AISystem.md](docs/RE/AISystem.md).
 
-**Smoother AI flight** - AI flyers jitter as they fly their paths. The path between nodes is
-a spline, so the cause may be how it is sampled or how the flyer steers onto it. Research first.
+**Smoother AI flight** - AI flyers jitter as they fly their paths. They are placed on the
+curve each frame, not steered: the roll sees each turn only at its node and then kicks, and the
+drawn position lags a frame behind the speed. Replace the roll's turn input and place the flyer
+at the advanced point. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
+
+**Flyer wingmen** - A player's flyer has no wingmen: the squad key does nothing in the air, and
+every stock follow turns into boarding. Recruit friendly AI fighters with the squad key in flight,
+steer them to formation slots each frame, and give Rogue Leader's orders (form up, engage, attack
+my target, cover me). A prototype must show the AI can hold a slot at fighter speed. Details in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
 ## Controller
 
@@ -460,11 +476,11 @@ controls screen, or by editing the `.padbinds` file. A page listing every pad in
 single screen. It can be built from the same form widgets the options screens use, which the
 pad can already drive, and writes straight to `.padbinds`.
 
-**Xbox-style pad controls** - On PC a pad drives the PC control model with its buttons
-rebound. The Xbox version was made for a pad, with its own layout and aiming. Bring its pad
-handling across where the PC exe still carries it; `PlayerController::Update`, for one, still
-ramps up turning while a stick is held at full tilt. Research first: what the Xbox version does
-differently, and how much of that code PC kept.
+**Xbox-style pad controls** - A pad on PC gets a cross-shaped dead zone set in the wrong
+unit, no response curve, a slow turn ramp, and none of the console's aim help, whose options
+are still in the profile but hidden. Add a round dead zone and a look curve, a tunable turn ramp,
+and aim assist wired as the console wired it, through the hidden Auto Aim, Aim Assist and Sticky
+Reticule options. Details in [docs/RE/PadControls.md](docs/RE/PadControls.md).
 
 ## Lua API
 

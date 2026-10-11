@@ -376,3 +376,82 @@ from the leaning pose.
 Code: `entity/directional_jets.cpp`, the weights in
 `entity/directional_jets_core.hpp` (`tests/directional_jets_tests.cpp`); audit
 `tests/directional_jets_abi_tests.py`.
+
+## Additive layers (researched 2026-10-11, not built)
+
+The idea: lay a flinch, breathing, recoil or lean over whatever a soldier is already doing, as a change
+added to the pose, instead of a full animation for every case. Read in Ghidra by a research pass;
+nothing is built. P = Phantom, M = modtools, S = Steam, G = GOG.
+
+**Zephyr has no additive blending.** Its pose operations are `Set` and `Blend` (slerp or lerp toward
+a target), four forms each, plus `SetBasePose` and the `SetJointLocal` setters (the method list,
+P `0x0086CA70` to `0x00874450`). The only delta is root motion (`GetRootTransDelta`). The one layer laid
+over a pose is the procedural aim turn in `ApplyProceduralAnimationAndBuildWorldMatrices`
+(P `0x007518A0`). A blend's factor is its timer over its duration, applied each frame as an
+incremental `Blend` step (`CalculateBlendFactorDelta`, P `0x007527C0`) through the half's mask.
+
+**The stock flinch shows one frame.** `SetDamageDir` (P `0x00754C30`, M `0x005774E0`, S `0x00643470`,
+G `0x00644510`; thiscall(dir), RET 4), called from `EntitySoldier::ApplyDamage` (M `0x0054BE26`,
+S `0x004E1C64`), sets `mOverlayAnim` (+0x90) to the upper body's `HIT_*` animation, `mOverlayTime`
+(+0x94) to 1 and `mOverlayBlendFactor` (+0x98) to 0.5. `SetupPose` decays it at 8 a second (constant
+M `0x00A44FDC`), and `UpdateMovementAnimation` (M `0x0057B650`) lays it on with a fresh stack player,
+so only frame 0 ever shows: at most half strength, for an eighth of a second, in the `MOVE` action
+only, on the legs only while idle, never prone. The stock `stand_hit*` animations have 16 frames,
+15 of them never seen.
+
+**What is there to build on.**
+
+- `ZephyrPoseDyn<32>::GetJointTransform(out, joint, t)` samples one joint at a given time without
+  moving the player's own clock: P `0x00871300`, M `0x0082A5B0`, S `0x0072CDC0`, G `0x0072DE90`;
+  thiscall, RET 0xC, read on all three. S and G match byte for byte except the stack-cookie address
+  (S `0x007E3CB8`, G `0x007E4CB8`), which moves with the exe, so a prologue guard must mask it. The
+  two-argument form (M `0x0082A790`) uses the player's `m_fCurT`. The decoders run forward and start
+  again from frame 0 when asked for an earlier frame.
+- `ZephyrAnimInst<32>::SetAnim` (P `0x00874340`) maps a clip's joints to the skeleton's by CRC, with
+  no bounds check; skeleton joints the clip lacks are skipped, so a partial clip touches only its own
+  joints.
+- `BuildWorldMatricesRecurseDown` (P `0x0086D8E0`) uses a pose's translation only on the joints
+  `SetupJointTransformAnimationFlag` marks (`bone_root` and `hp_weapons` on human skeletons) and
+  normalizes each rotation, so for most joints only rotations count.
+- The directional jets' stand-in: the local pose is finished there and nothing is in world matrices yet.
+
+**A design.** One shared stand-in on that call runs the jets' lean, saves the joints the layers will
+touch, adds the layers, calls `ApplyProceduralAnimationAndBuildWorldMatrices`, and puts the saved
+joints back. The restore is essential: the pose persists between frames and blends from the last one
+drawn, so a delta left in it would build up through every blend (an estimated 3 to 5 times
+overshoot; inferred). The simplest place to restore is a second register-keeping stand-in on the next
+call, `RedPose::ConvertFromZephyrPose` (M `0x0057D400`, S `0x006406EB`, G `0x0064178B`), which only stores
+pointers to the world matrices (P `0x008B7CB0`). Jets refuse to install over an already retargeted
+call, so both features need the one shared hook.
+
+- Each layer: a stack player set up like the jets' (zeroed, `m_pSkel`, `m_bInterpolate`,
+  `SetAnimation(anim, 30)`); the clip's frame 0 as the reference, cached once per clip; the delta is
+  the reference's inverse times the current frame, slerped from no rotation by the layer's weight and
+  composed onto the pose. Skip joint 0, `DummyRoot` (`RotateLowerBody` sets it every frame) and joints
+  not yet set. A loop's time is wrapped by hand: `m_bLoop` would add root translation.
+- Triggers: a hit (detour `SetDamageDir`, play `add_hit<dir>`, and optionally zero `mOverlayTime` to
+  drop the stock one-frame flinch); a shot (`SetWeaponState` going to `FIRE`: P `0x00755360`,
+  M `0x00576A80`); breathing (a loop scaled by energy); a lean (from `mMovement`, as jets do).
+- Authoring: names like `<bank>_<weapon>_add_<name>`, found through `soldier_anim_tables` with the
+  weapon and bank parents, `_upper` or `_lower` to narrow it; the clip existing is the opt-in, as the
+  flyer's `boost` clip is. At least 2 frames, at most 32 joints, frame 0 neutral, rotations only,
+  munged with `/keepframe0` into a new numbered sub-bank so `AnimationBankAppend` picks it up.
+- A procedural version (a spring-damped kick, sine breathing, a roll lean spread over the spine as the
+  aim spreads its yaw) needs no art and could share the core.
+
+The hook never reaches the pilot and choke branch of `SetupPose` (it builds its own matrices),
+low-resolution pooled soldiers (`SoldierAnimatorLowRes_Pool::GetPose`, P `0x00764150`) or first-person
+arms. Flyers (and probably hovers) play 32-joint clips at render time where the flyer boost already
+builds a pose; walkers use 64-joint poses (`EntityWalker::BuildWorldMatrices`, P `0x005942B0`: `ApplyBlend`,
+M `0x0054FFD0`, then `CorrectJoints`), which would need more research.
+
+**Risks.** The quaternion multiplication order must be checked (D3DX reverses it). A fresh player
+decodes from frame 0 every frame, which is fine for short clips. Arm deltas move the animated
+`hp_fire`, so they move the host's barrel fire origin. Nothing is sent online, so each trigger must
+fire on every machine. The ODF listener's four property handlers are all taken, so a new ODF property
+needs a fifth slot or a shared handler.
+
+**Open:** whether `SetDamageDir` runs on a multiplayer client for remote and local soldiers; whether a
+remote shooter reaches `SetWeaponState` on clients (inferred yes); how zenasset handles partial-skeleton
+exports; the cost with many soldiers on screen. The stock `stand_hit*` frame 0 is 20-50° from the idle
+pose on the spine and head, so it is probably the hit pose itself and new clips are needed (inferred).
