@@ -1,6 +1,6 @@
 # HUD Properties
 
-Events, properties and transform parameters added by BF2GameExt to `.hud` files, on top of the stock ones. A game without the extension skips what it does not recognise and carries on, so one `.hud` works in both: a binding to one of these events logs "HUD Element unable to find event", and a `FillFrom` line logs "Error reading parameter" and leaves the bar filling from the left.
+Events, properties and transform parameters added by BF2GameExt to `.hud` files, on top of the stock ones. A game without the extension skips what it does not recognise and carries on, so one `.hud` works in both: a binding to one of these events logs "HUD Element unable to find event", and a `FillFrom` line logs "Error reading parameter" and leaves the bar filling from the left. The new transforms are the exception: a game without the extension cannot skip a block it does not know and reads the block's body as if it were one line, which can crash it, so keep `TransformNumberMath`, `TransformNumberLerp` and `TransformNumberCompare` in a `.hud` file that only a game with the extension loads.
 
 None of them needs an INI setting. Binding the event, writing the property or declaring the transform is the opt-in, and nothing changes until a `.hud` does one of those. For which builds each one works on, see the [compatibility table](../../README.md#compatibility). Worked examples and layouts are in [HUD System](HUD.md), and every edge case is in the [full reference](../RE/HUDAuthoring.md).
 
