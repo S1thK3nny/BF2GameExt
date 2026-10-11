@@ -72,6 +72,11 @@ come down at 2.6 to 2.8 m/s. Add an ODF property (for example `StompDetectionSpe
 inheriting through `ClassParent`) that sets the speed per class, read where the fix sets the
 test for each walker's update.
 
+**Pilots that follow their walker** - A walker's pilot and riders hold the same animation
+whatever the walker does. Play variants of the pilot animation for turning left or right,
+starting and stopping, picked from the walker's own state and kept in step with its gait.
+Research first: where pilot animations are chosen and what walker state they can see.
+
 **AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
 This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
 The fix is to add an additional check to the AI spawning code to check if the CommandFlyer is flying, and if so, 
@@ -155,6 +160,12 @@ directional rolls and others read them. Each new one has to know which of the ot
 the combinations multiply. Move them onto one layer that owns the tables and lookups, growing
 `entity/soldier_anim_tables`, which already reads both the stock layout and ComboAnimIncrease's.
 Details in [docs/RE/SoldierActionAnimations.md](docs/RE/SoldierActionAnimations.md).
+
+**Additive animations** - An animation replaces the pose of the joints it covers, so a
+flinch, breathing or recoil cannot be laid over whatever the soldier is already doing without
+a full animation for each case. Add animations that add their change to the current pose,
+where directional jets already adjust it. Research first: whether Zephyr has any additive
+support, and how to sample an animation joint by joint.
 
 ## Weapons
 
@@ -340,6 +351,12 @@ them through the engine's masked-bitmap mode with a gradient texture GameExt bui
 the colours, kept on a bar's full length as it fills. Details in
 [colour gradients](docs/RE/HUDSystem.md#colour-gradients-researched-2026-09-30).
 
+**Segmented bars: ammo pips and colour steps** - A `BarSegmented` always lays out all of its
+`NumSegments`, so it cannot show one pip per round across weapons. Add `EventNumSegments`,
+showing that many of them laid out again, and publish `player1.weaponN.roundsPerClip`; a
+transform between can cap the count. Also colour each segment along the bar from
+`SegmentColor` rows, as `NumberColor` does by value.
+
 **Repeated HUD blocks** - A `.hud` must write out a command post slot or marker, and its
 transforms, once per slot: `EventNameFilter` only renumbers by camera, once on PC. Add a
 `Repeat` block that re-reads its contents N times with the filter set to each index, as
@@ -417,6 +434,17 @@ engine already has a movement mode that needs no path, used for strafing runs. T
 fall back to it when the flyer cannot find a path, so flyers work on maps that never had flyer
 paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
+**Squad formations** - AI squad members trail their leader in a loose clump. Keep them in a
+formation around the leader (line, wedge or column) through the squad's follow logic.
+Research first: how a follower picks its spot today.
+
+**Smoother AI movement** - AI soldiers snap round path corners and change direction
+abruptly. Round off the corners and limit how fast they turn. Research first: the path
+follower and its turn rates.
+
+**Smoother AI flight** - AI flyers jitter as they fly their paths. The path between nodes is
+a spline, so the cause may be how it is sampled or how the flyer steers onto it. Research first.
+
 ## Controller
 
 **Button prompts** - Menu buttons only say what they do, never which pad button does it, so
@@ -431,6 +459,12 @@ controls screen, or by editing the `.padbinds` file. A page listing every pad in
 (Unit, Vehicle, Flyer, Hero, Turret), with left and right cycling the action, would make it a
 single screen. It can be built from the same form widgets the options screens use, which the
 pad can already drive, and writes straight to `.padbinds`.
+
+**Xbox-style pad controls** - On PC a pad drives the PC control model with its buttons
+rebound. The Xbox version was made for a pad, with its own layout and aiming. Bring its pad
+handling across where the PC exe still carries it; `PlayerController::Update`, for one, still
+ramps up turning while a stick is held at full tilt. Research first: what the Xbox version does
+differently, and how much of that code PC kept.
 
 ## Lua API
 
