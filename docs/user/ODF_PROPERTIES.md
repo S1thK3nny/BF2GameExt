@@ -551,6 +551,18 @@ CollisionShakeLimit     = "1"
 CollisionShakeThreshold = "2 ForwardSpeed"
 ```
 
+## Building Classes
+
+| Property | Value | Description | Since |
+|----------|-------|-------------|-------|
+| `AttachRemoveOnDeath` | `1` | Switches the light attached with the `AttachOdf` lines above it off when the building is destroyed, and back on when it respawns. Without it the light keeps shining over the wreck, as in the stock game. Put it after `AttachToHardPoint`; one line covers every hardpoint that light is attached to. Works in multiplayer. | 1.1.0 |
+
+```
+AttachOdf           = "com_light_red"
+AttachToHardPoint   = "hp_light"
+AttachRemoveOnDeath = 1
+```
+
 ## Animation Naming Conventions
 
 Not properties, but ODF-adjacent: these are picked up by name out of an animation bank, with nothing to declare anywhere.

@@ -248,6 +248,11 @@ Scripts can check the running version through `GameExt.version`.
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
+- **Menu navigation with a pad** - The menus, Instant Action, the profile screen,
+  the options screens, the spawn screen and Galactic Conquest can be driven with a
+  gamepad. LB/RB and LT/RT switch the two tab rows, X and Y reset or confirm the
+  options screens, left/right pick the command post on the spawn screen, and the stick picks
+  planets in Galactic Conquest. See [Controller](docs/user/CONTROLLER.md#menus).
 
 ### Changed
 
@@ -258,7 +263,12 @@ Scripts can check the running version through `GameExt.version`.
   sections are no longer read; copy any custom lines into the new file (same
   `Input=Action` format, sections named `[Unit]` to `[Turret]`). Older versions left
   pad buttons in the normal key slots, so press Restore Defaults once per mode to
-  get the stock keys back.
+  get the stock keys back. In the default layout Start only opens the pause menu and Back (View)
+  opens the map.
+- **`CreateEntity` only changes the new object when you pass a team.** 1.0.0 ran its
+  vehicle fix on everything `CreateEntity` made, setting team 0 when no team was
+  given. A three-argument call is now exactly stock; pass the team as the fourth
+  argument to get a vehicle with working weapons.
 
 - **`OnCharacterExitVehicle` now runs on the engine's own event manager.** The
   callback names, arguments and handles are unchanged, but registration, filtering,
@@ -294,10 +304,27 @@ Scripts can check the running version through `GameExt.version`.
 - With a pad connected, every map load reset part of your controls: second keys and
   pad buttons bound in Options -> Controls were replaced by the pad layout. Your
   keyboard bindings now stay as you set them.
+- With the unofficial v1.3 patch installed, mod maps past the first 499 were still
+  missing from the map list, because the patch's own addme kept its 500 mission
+  cap after the DLC Mission Limit raised the game's to 4096. Its cap now follows
+  the raised limit, and its "too many missions" warning only shows once you really
+  pass 4096. Nothing changes without the v1.3 patch.
 - **The `OnCharacterExitVehicle*` filter arguments were documented in the wrong
   order.** The 1.0.0 Lua API reference listed `OnCharacterExitVehicleName(name, fn)`;
   the functions have always taken `(fn, name)`, matching the stock `On*` events, and
   a script written from the old docs silently registered nothing.
+- **`HttpGet` and `HttpGetAsync` failed on every `http://` URL.** They always tried a
+  secure connection, which a plain HTTP server refuses, so `HttpGet` returned nil.
+  Both now work with `http://` and `https://`.
+- A server that never answered froze the game for about 30 seconds on every
+  `HttpGet`, `HttpPut` or `HttpPost`. Requests now give up after 5 seconds and
+  return nil.
+- **`GetCharacterWeapon`, `GetWeaponAmmo` and `SetWeaponAmmo` returned the wrong
+  weapon for channels above 1.** There are only two channels; any other channel now
+  returns nil, and `SetWeaponAmmo` no longer writes to an unrelated weapon.
+- `RemoveUnitClass` could crash the game when called before the teams were set up.
+  It now logs the problem and does nothing.
+- `SetFogEnable(true)` turned fog off. It now takes `true`/`false` as well as `1`/`0`.
 
 - A map could die at the very end of loading, after the loading screen, with a
   stack overflow. The engine's world splitter recursed forever on objects it
@@ -331,7 +358,8 @@ Scripts can check the running version through `GameExt.version`.
 - While looking through a scope, shots left the barrel instead of the centre of the
   scope, so they visibly angled in towards the target.
 - A light attached to a building with `AttachOdf` kept shining after the building
-  was destroyed. It now goes out with the building and comes back on when it respawns.
+  was destroyed. With `AttachRemoveOnDeath = 1` after its `AttachToHardPoint` line it
+  now goes out with the building and comes back on when it respawns.
 - Carriers (vehicle pads with `SetCarrierClass`):
   - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
   - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.

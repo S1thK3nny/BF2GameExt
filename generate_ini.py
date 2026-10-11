@@ -463,6 +463,54 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     )
     L.append("")
 
+    L.append("## Menus")
+    L.append("")
+    L.append(
+        "Menus have their own fixed layout, separate from the bindings, and follow "
+        "`[Controller] Enabled`. The mouse cursor hides while you use the pad, and moving "
+        "the mouse brings it back and hands control back to the mouse."
+    )
+    L.append("")
+    L.append("| Input | In menus |")
+    L.append("|-------|----------|")
+    L.append("| A / B | Accept / Back |")
+    L.append("| Start | Pause menu in game |")
+    L.append("| D-pad, left stick | Move the selection, shown the same way as mouse hover |")
+    L.append("| LB / RB | First row of tabs: Single Player, Multiplayer, Options, Profile (in game: the Options tabs) |")
+    L.append("| LT / RT | The row below it, for example Campaign, Galactic Conquest, Instant Action, Career |")
+    L.append("| X / Y | Instant Action: add the ticked maps / launch. Options screens: reset / OK |")
+    L.append("| B on an options screen | Cancel: your changes on that screen are undone, the same as the Cancel button |")
+    L.append("")
+    L.append(
+        "In **Instant Action**, left and right move between the columns (settings, "
+        "maps, mode and era, playlist, buttons) and up and down move inside one. In the "
+        "buttons under the lists, the d-pad moves to the nearest button in that direction. A clicks "
+        "the map, box or button, exactly like the mouse, and View adds another map the way "
+        "Ctrl+click does. On its **settings pages** and the **Options** screens, up and "
+        "down pick a setting, left and right change it, and moving down past the last "
+        "setting reaches the buttons under the list. On the settings pages, B steps back "
+        "to the page list on the left, and LT and RT step through the pages. On the "
+        "**Controls** screen the bindings list sits between the settings and the buttons; "
+        "A on a binding waits for the next key or pad button, like a click does."
+    )
+    L.append("")
+    L.append(
+        "On the **spawn screen**, up and down pick the class, left and right switch team, "
+        "LB and RB step through the command posts you can spawn at, A spawns and B goes to "
+        "team select."
+    )
+    L.append("")
+    L.append(
+        "In **Galactic Conquest**, A always does what the screen's Accept button does: "
+        "select or build a fleet and confirm a move on the map, buy the bonus or unit in the "
+        "middle on the purchase screens, start the new turn on the summary. On the map the "
+        "left stick or d-pad jumps to the nearest planet in that direction and B cancels a "
+        "fleet move. On the purchase screens left and right pick the bonus or unit. X ends "
+        "the turn from the map and both purchase screens, LB and RB zoom, and LT and RT "
+        "switch between Move, Bonus and Units."
+    )
+    L.append("")
+
     L.append("## Editing the file")
     L.append("")
     L.append(

@@ -13,3 +13,10 @@ extern bool g_dlcMissionInitFixEnabled;
 
 void dlc_mission_init_fix_install(uintptr_t exe_base);
 void dlc_mission_init_fix_uninstall();
+
+// DLC mission table size once the DLC Mission Limit Extension applies (stock 500).
+constexpr uint32_t kDlcMissionLimit = 0x1000;
+
+// Install callback of the DLC Mission Limit Extension patch set. Lifts the
+// unofficial v1.3 patch's Lua-side 500 mission cap to the raised table size.
+bool dlc_v13_mission_cap_install(uintptr_t exe_base);
