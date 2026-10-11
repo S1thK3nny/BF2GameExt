@@ -129,6 +129,11 @@ Scripts can check the running version through `GameExt.version`.
   at 60 fps most of an AT-TE's walking steps never landed. The test is now the foot's
   speed, 3 m/s, which is the stock test at 30 fps. `[Fixes] WalkerStompFix`, on by
   default.
+- A floating target bar no longer stays hidden on a unit you have the crosshair on
+  while part of it is behind cover. BF2 keeps a target only while one point on it is in
+  clear view; when it has none, the bar now takes the unit under the crosshair, out to
+  the weapon's range, if BF2 would target it at all. Only the HUD sees this: aim assist,
+  lock-on and firing are unchanged.
 
 ## 1.1.0
 

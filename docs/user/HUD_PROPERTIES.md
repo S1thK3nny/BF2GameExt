@@ -94,7 +94,7 @@ The unit states are for soldiers on foot: a droideka, a vehicle, a turret and a 
 | `player1.weapon1.target.distance` | Float | How far away weapon 1's target is, in metres, from what you control (the camera while you are dead). With no target it sends a value `InfiniteDashes(1)` prints as `--`. | 1.2.0 |
 | `player1.weapon2.target.distance` | Float | The same for weapon 2. | 1.2.0 |
 
-The last target stays for `[Features] TargetBarLatchSeconds` (default `0.5`) after the selection is lost, then the `.hud`'s own `FadeOutTime` plays. A vehicle and its exposed rider no longer make the bar flicker between them. Bind these with `EventPosition` only: an `EventEnable` on them keeps restarting the fade. The event replaces the group's own `Position`, so put offsets on child groups.
+The last target stays for `[Features] TargetBarLatchSeconds` (default `0.5`) after the selection is lost, then the `.hud`'s own `FadeOutTime` plays. A vehicle and its exposed rider no longer make the bar flicker between them, and a unit under the crosshair keeps its bar when part of it is behind cover. Bind these with `EventPosition` only: an `EventEnable` on them keeps restarting the fade. The event replaces the group's own `Position`, so put offsets on child groups.
 
 ### Reticule
 

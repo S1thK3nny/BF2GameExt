@@ -204,6 +204,8 @@ Group("player1targetbar")
 - A big vehicle up close keeps its bar on screen while you are aiming at it. Once you
   stop, the bar leaves the screen with its target.
 - A vehicle and its exposed rider no longer make the bar flicker between them.
+- A unit you have the crosshair on gets its bar even when part of it is behind cover.
+  The game alone keeps a target only while one point on it is in clear view.
 - Use `EventPosition` only. Binding the position event to `EventEnable` keeps
   restarting the fade.
 - Sizes, offsets and labels stay in the `.hud`: put offsets on child groups, since

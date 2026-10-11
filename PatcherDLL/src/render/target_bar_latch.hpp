@@ -15,6 +15,7 @@
 //
 // SELECTION RETENTION:
 //   * sample weapon->mTarget, else the native reticule handle, before lending;
+//   * with neither, the unit under the crosshair counts as the pick (below);
 //   * acquire/refresh only when the engine's filtered HUD target agrees;
 //   * hold the most recently selected target for 0.5s after selection loss;
 //   * a different natural target replaces it immediately, even a friendly,
@@ -30,7 +31,15 @@
 // engine continues publishing health/shield/name/colour with its native
 // filtering and change detection. Other target.* consumers share the hold.
 // The rider pair lends the same way, over the engine's pick; aim assist,
-// lock-on and firing never see either loan.
+// lock-on and firing never see any loan.
+//
+// THE UNIT UNDER THE CROSSHAIR: the engine takes or keeps a target only while one
+// ray, to one point on it, clears static geometry, so a unit half behind cover
+// loses its bar with the crosshair on it. When the engine picks nothing, a ray
+// along the crosshair line, out to the weapon's ExtremeRange, takes the first
+// unit it meets if the engine's own search would: targetable, visible to the
+// player, not IsNotTargetableByPlayer, not cloaked, not riding the player's
+// vehicle. It is lent into the empty reticule slot, like the hold.
 //
 // Hold expiry stops lending; native target.disable then starts the HUD fade.
 // Use FadeInTime(0) and FadeOutTime(0.25) on the existing bar/glow/label elements

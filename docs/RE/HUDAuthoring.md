@@ -324,7 +324,15 @@ selected target accepted by the native HUD refreshes the hold; after selection
 is lost, that target remains for 0.5 seconds by default. A different target
 replaces it immediately. The retained target cannot refresh its own timer, and
 retention performs no new line-of-sight/range/frustum check. The game's existing
-selection rules still decide acquisition; this does not port SWBFIII autoaim.
+selection rules decide acquisition; this does not port SWBFIII autoaim.
+
+The game keeps a target only while one ray, to one point on it, clears the walls
+and terrain, so a unit half behind cover loses its bar even with the crosshair on
+it. When the game has selected nothing, the unit under the crosshair counts as
+selected: the first thing on the crosshair line, out to the weapon's range, if the
+game's own search would take it (targetable, not hidden by `IsNotTargetableByPlayer`,
+not cloaked, not a trap hidden from your team, not riding your vehicle). A wall or
+the ground in front of it means nothing is selected.
 Weapon channels retain targets independently, only while their position event
 has a listener. Weapon/controlled-object changes reset retention.
 
@@ -1579,6 +1587,9 @@ screen with it rather than park at the edge. Then walk up to a large vehicle and
 aim at it: its bar should stay at the top of the screen while selected. For the
 rider pair, aim between a speeder bike and its exposed rider: the bar should stay
 on one of them, and move to the rider only when you hold your aim on the rider.
+For cover, put the crosshair on a unit standing half behind a wall or a crate: its
+bar should show while the crosshair is on the visible part, and hold for the usual
+0.5 seconds once it slips onto the wall. A cloaked enemy must get no bar.
 
 `tests/target_bar_selection_tests.cpp` is a standalone C++17 assertion test
 for replacement, expiry, generation reuse, channel isolation, prevention of
@@ -1586,7 +1597,8 @@ self-refresh and the rider pair. `tests/target_bar_geometry_tests.cpp` covers th
 safe-area pin and the pixel snap, and `tests/target_bar_fade_tests.cpp` the
 world-space anchor kept for the death fade. `tests/target_bar_selection_abi_tests.py
 "path\to\GameData"` checks native input instructions read-only on all three
-supported executables; it requires Python, `pefile` and `capstone`. These checks
+supported executables, the crosshair pick's included; it requires Python, `pefile`
+and `capstone`. These checks
 do not replace an in-game test.
 
 ### Horizon levelling checks

@@ -257,9 +257,11 @@
     <ClInclude Include="src\game\Battlefront2\Source\EntityCarrier.h" />
     <ClInclude Include="src\game\Battlefront2\Source\EntityDroideka.h" />
     <ClInclude Include="src\game\Battlefront2\Source\EntityFlyer.h" />
+    <ClInclude Include="src\game\Battlefront2\Source\EntitySoldier.h" />
     <ClInclude Include="src\game\Battlefront2\Source\EntityWalker.h" />
     <ClInclude Include="src\game\Battlefront2\Source\GameMusic.h" />
     <ClInclude Include="src\game\Battlefront2\Source\GameObject.h" />
+    <ClInclude Include="src\game\Battlefront2\Source\GameObjectClass.h" />
     <ClInclude Include="src\game\Battlefront2\Source\GameSound.h" />
     <ClInclude Include="src\game\Battlefront2\Source\GameSoundStream.h" />
     <ClInclude Include="src\game\Battlefront2\Source\RedCamera.h" />

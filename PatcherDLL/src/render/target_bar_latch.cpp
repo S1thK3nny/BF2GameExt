@@ -17,6 +17,11 @@
 #include "util/install_log.hpp"
 #include "core/pbl_hash.hpp"
 #include "game/Battlefront2/Source/Character.h"
+#include "game/Battlefront2/Source/CollisionObject.h"
+#include "game/Battlefront2/Source/EntitySoldier.h"
+#include "game/Battlefront2/Source/GameObjectClass.h"
+#include "game/Battlefront2/Source/Weapon.h"
+#include "weapon/barrel_fire_origin.hpp"
 
 #include <detours.h>
 
@@ -82,6 +87,35 @@
 // GetGameObject (+0x20), Steam 0x0061B863, GOG 0x0061C8D3. Modtools reads the
 // same chain at 0x004CE784 to swap a rider for its vehicle.
 //
+// THE UNIT UNDER THE CROSSHAIR
+//
+// PlayerController::Update (modtools 0x0059B460, Steam 0x0061A2B0, GOG 0x0061B320)
+// keeps or takes a target only if CollisionManager::RayTest, from mAimStart to one
+// point on it pulled back by its radius, clears statics and terrain (mask 0x90).
+// When neither handle holds a target, aimed_unit asks the crosshair instead: one
+// CollisionManager::RayHit (engine_ray_hit, weapon/barrel_fire_origin.cpp) along
+// the line barrel_fire_origin aims shots on, out to WeaponClass::mExtremeRange,
+// the distance the engine searches. The first thing hit decides, and its
+// GameObject must pass the engine's own candidate tests, read on every build:
+//
+//                                 modtools     Steam        GOG
+//   Weapon::mClass +0x64          0059C230     0061AF34     0061BFA4
+//   WeaponClass::mExtremeRange    0059C38F     0061B087     0061C0F7     +0xF0
+//   mAimStart +0x148              0059C32C     0061B03D     0061C0AD
+//   mEyeDir +0xE8                 0059C34A     0061B055     0061C0C5
+//   GameObject::mIsTargetable     0059C800     0061B63F     0061C6AF     +0x238 bit 0
+//   IsVisibleToMe(viewer)         0059C816     0061B654     0061C6C4     vptr +0x94
+//
+// IsNotTargetableByPlayer and the cloak are build-split: GameObjectClass.h and
+// EntitySoldier.h. IsVisibleToMe is thiscall with one argument, bool in AL, RET 4:
+// GameObject's own is MOV AL,1 / RET 4 (modtools 0x0055F830, Steam 0x00535A50, GOG
+// 0x005367C0) and only EntityTrap overrides it. The ray's exclude list holds
+// GameObject pointers: RayCallback compares each with what the hit's
+// CollisionObject vptr +0x38 (GetGameObject) returns (modtools 0x00429E00, Steam
+// and GOG 0x0045F070, byte-identical), the call that also names the hit. Terrain,
+// props, doors and other plain geometry answer null. A rider of the player's own
+// vehicle, which the engine skips, joins the exclude list and the ray goes again.
+//
 // EventClass::Create never checks for an existing name: a second Create with the
 // same name makes an orphan no element can ever bind to, because FindByHashID
 // returns the first match.  Always find first.
@@ -102,12 +136,18 @@ static constexpr int kVt_GetWeaponIndex = 0x3C;  // Controllable primary vptr
 static constexpr int kVt_GetWeapon      = 0x40;
 static constexpr int kVt_GetSmoothedMtx = 0x110;
 static constexpr int kVt_GetControllable = 0x6C;  // GameObject primary vptr
+static constexpr int kVt_IsVisibleToMe  = 0x94;   // GameObject primary vptr, (viewer)
 static constexpr int kCtrl_Character    = 0xCC;   // Controllable::mCharacter
+static constexpr int kCtrl_EyePoint     = 0xDC;   // Controllable::mEyePoint
+static constexpr int kCtrl_EyeDir       = 0xE8;   // Controllable::mEyeDir
+static constexpr int kCtrl_AimStart     = 0x148;  // Controllable::mTargetInfo.mAimStart
+static constexpr int kGO_Class          = 0x08;   // GameObjectClass*
 static constexpr int kGO_Active         = 0xDC;   // byte
 static constexpr int kGO_MatrixTrans    = 0x120;  // mMatrix (+0xF0) .trans
 static constexpr int kGO_Model          = 0x130;  // GameModel*
 static constexpr int kGO_Flags          = 0x1FC;  // bit 3 = alive
 static constexpr int kGO_HandleId       = 0x204;
+static constexpr int kGO_Targetable     = 0x238;  // bit 0 = mIsTargetable
 static constexpr int kGO_CollisionCentre = 0x18; // live TreeGrid centre mirror
 static constexpr int kGO_CollisionBounds = 0x60; // world AABB: min/max XYZ
 // GameModel primary RedModel +0x20. Its bounds offset differs by build.
@@ -115,6 +155,8 @@ static constexpr int kGO_CollisionBounds = 0x60; // world AABB: min/max XYZ
 static constexpr uint32_t kSoldierRtti = 0x5E8739F4;
 
 static constexpr int kGO_CurHealth      = 0x144;
+
+static constexpr int kWC_ExtremeRange   = 0xF0;   // WeaponClass::mExtremeRange
 
 static constexpr int kPD_WeaponStride   = 0x28;   // sizeof(WeaponData)
 static constexpr int kWD_TargetObject   = 0x14;
@@ -134,6 +176,10 @@ static constexpr int kChannels          = 2;
 // ---- Tuning ------------------------------------------------------------------
 static constexpr float kMaxTickSecs = 0.25f;  // a pause must not run the hold out
 static constexpr double kPairDwellSecs = 0.3; // rider/vehicle: picked this long to switch
+// The crosshair ray meets what the engine's search can pick (COLL_SOFT, COLL_RIGID,
+// COLL_STATIC, COLL_ATTACHED) and stops at COLL_TERRAIN. Items and water are left out.
+static constexpr int kAimRayMask = 0x02 | 0x08 | 0x10 | 0x20 | 0x80;
+static constexpr int kAimRayExcludes = 4;     // the player, its soldier, riders of its vehicle
 
 // ---- Engine entry points -----------------------------------------------------
 using fn_event_send_t    = void(__fastcall*)(void* ecx, void* edx);
@@ -147,6 +193,7 @@ using fn_get_weapon_t    = uint8_t*(__thiscall*)(void* self, int index);
 using fn_smoothed_t      = const float*(__thiscall*)(void* self);
 using fn_rtti_t          = bool(__thiscall*)(void* self, uint32_t hash);
 using fn_controllable_t  = uint8_t*(__thiscall*)(void* self);
+using fn_visible_t       = bool(__thiscall*)(void* self, void* viewer);
 
 using fn_open_t          = void(__cdecl*)();
 using fn_update_float_t  = void(__cdecl*)(float dt);
@@ -198,10 +245,12 @@ static uint8_t* s_controlled = nullptr;
 static Handle s_owner = {};
 static target_bar_selection::Retention s_retained[kChannels];
 static target_bar_selection::Pair s_pair[kChannels];
-// The engine's pick, sampled BEFORE any lending (weapon then reticle), after the
-// rider pair has chosen which member of a vehicle/rider pair to show.
+// The engine's pick, sampled BEFORE any lending (weapon then reticle), or the unit
+// under the crosshair when the engine picked nothing; after the rider pair has
+// chosen which member of a vehicle/rider pair to show.
 static Handle s_natural[kChannels];
-static bool   s_pairLent[kChannels];      // this tick shows a pair member over the pick
+static bool   s_pickLent[kChannels];      // this tick lends the pick shown: over the
+                                          // engine's, or into its empty slot
 static double s_now      = 0.0;           // seconds, advanced only by HUD ticks
 static bool   s_announced = false;
 
@@ -309,6 +358,68 @@ static bool retainable(const Handle& target)
    if (!handle_ok(target) || !is_alive(target.obj)) return false;
    const float health = *(const float*)(target.obj + kGO_CurHealth);
    return std::isfinite(health) && health > 0;
+}
+
+// Would PlayerController::Update's search take this object, its cone and its one
+// ray aside? Its tests in its order, with two differences: the bars' own rule
+// (alive, with health) stands in for its alive test, and a cloaked soldier is
+// refused whatever its team. The engine refuses only an enemy, but telling one
+// apart takes GameObject::GetAffiliationToMe, and its own pick still shows a
+// cloaked friend.
+static bool aim_candidate(uint8_t* obj, uint8_t* viewer)
+{
+   const Handle h = { obj, *(const uint32_t*)(obj + kGO_HandleId) };
+   if (!retainable(h) || (obj[kGO_Targetable] & 1) == 0) return false;
+   void** vt = *(void***)obj;
+   if (!((fn_visible_t)vt[kVt_IsVisibleToMe / 4])(obj, viewer)) return false;
+   const uint8_t* cls = *(const uint8_t* const*)(obj + kGO_Class);
+   if (!cls || (layout::GameObjectClass::mTargetFlags(cls) &
+                layout::GameObjectClass::kNotTargetableByPlayer) != 0) return false;
+   return !((fn_rtti_t)vt[0])(obj, kSoldierRtti) ||
+          layout::EntitySoldier::m_uiInvisibilityAlpha(obj) == 0;
+}
+
+// The unit under the crosshair, for a weapon the engine gave no target: the first
+// thing on the crosshair line out to the weapon's ExtremeRange, if the engine's
+// search would take it. See the notes at the top of this file.
+static Handle aimed_unit(uint8_t* chr, uint8_t* controlled, uint8_t* localObj, uint8_t* weapon)
+{
+   const uint8_t* cls = *(const uint8_t* const*)(weapon + layout::Weapon::kClass);
+   if (!cls) return {};
+   const float range = *(const float*)(cls + kWC_ExtremeRange);
+   if (!(range > 0.0f) || !std::isfinite(range)) return {};
+
+   // Which line the crosshair is on, as barrel_fire_origin measures it: unzoomed
+   // first person moves mAimStart off the eye line by the stance offset, 0.15 to
+   // 0.25 deep along it; everything else leaves mAimStart on the line.
+   const float* E   = (const float*)(controlled + kCtrl_EyeDir);
+   const float* eye = (const float*)(controlled + kCtrl_EyePoint);
+   const float* aim = (const float*)(controlled + kCtrl_AimStart);
+   const float along = (aim[0] - eye[0]) * E[0] + (aim[1] - eye[1]) * E[1] + (aim[2] - eye[2]) * E[2];
+   const float* from = along > 0.05f && along < 0.40f ? eye : aim;
+   const float len = std::sqrt(E[0] * E[0] + E[1] * E[1] + E[2] * E[2]);
+   if (!(len > 0.5f) || !std::isfinite(len) || !hud_world_markers::finite3(from)) return {};
+   const float start[3] = { from[0], from[1], from[2] };
+   const float dir[3] = { E[0] / len, E[1] / len, E[2] / len };
+
+   void* exclude[kAimRayExcludes] = { localObj };
+   int excluded = 1;
+   uint8_t* unit = *(uint8_t**)(chr + layout::Character::kUnit);
+   void* soldier = unit ? vcall_object(unit + kCtrl_Trackable) : nullptr;
+   if (soldier && soldier != localObj) exclude[excluded++] = soldier;
+   for (;;) {
+      void* hit = nullptr;
+      engine_ray_hit(start, dir, range, &hit, exclude, excluded, kAimRayMask);
+      if (!hit) return {};
+      void** vt = *(void***)hit;
+      uint8_t* obj = (uint8_t*)((fn_get_object_t)vt[layout::CollisionObject::kVt_GetGameObject / 4])(hit);
+      if (!obj) return {};   // terrain or plain geometry in the way
+      const Handle h = { obj, *(const uint32_t*)(obj + kGO_HandleId) };
+      // The engine never picks a rider of the player's own vehicle: look past it.
+      if (display_group(h) != localObj) return aim_candidate(obj, localObj) ? h : Handle{};
+      if (excluded == kAimRayExcludes) return {};
+      exclude[excluded++] = obj;
+   }
 }
 
 static const uint8_t* hud_camera()
@@ -499,7 +610,7 @@ static void clear_all_objects()
       s_retained[ch].reset();
       s_pair[ch].reset();
       s_natural[ch] = {};
-      s_pairLent[ch] = false;
+      s_pickLent[ch] = false;
       s_weapon[ch] = nullptr;
       s_lastFocus[ch] = {};
       s_position[ch].reset();
@@ -543,7 +654,7 @@ static void advance_clock()
 static void tick_before()
 {
    __try {
-      for (int ch = 0; ch < kChannels; ++ch) { s_natural[ch] = {}; s_pairLent[ch] = false; }
+      for (int ch = 0; ch < kChannels; ++ch) { s_natural[ch] = {}; s_pickLent[ch] = false; }
       if (!s_eventList) { clear_all_objects(); return; }
 
       if (*s_eventList == (uintptr_t)s_eventList) {
@@ -557,7 +668,8 @@ static void tick_before()
       }
       if (!s_announced) {
          s_announced = true;
-         install_log("[TargetBarLatch] selection retention active, hold %.2fs; fade is HUD-authored",
+         install_log("[TargetBarLatch] selection retention active, hold %.2fs; fade is HUD-authored; "
+                     "with no target picked, the unit under the crosshair counts",
                      (double)g_targetBarLatchSeconds);
       }
       advance_clock();
@@ -590,10 +702,19 @@ static void tick_before()
 
          uint8_t* weapon = nullptr;
          uint32_t* source = nullptr;
-         const Handle pick = natural_target(controlled, ch, weapon, source);
+         Handle pick = natural_target(controlled, ch, weapon, source);
          if (weapon != s_weapon[ch]) { s_retained[ch].reset(); s_pair[ch].reset(); }
          s_weapon[ch] = weapon;
          if (!weapon) { s_retained[ch].reset(); s_pair[ch].reset(); continue; }
+
+         // The engine picked nothing: the unit under the crosshair stands in for
+         // its pick, lent into the empty reticle slot.
+         uint32_t* reticule = (uint32_t*)(controlled + kCtrl_ReticuleTgt + ch * 8);
+         const bool enginePick = pick.obj != nullptr;
+         if (!enginePick) {
+            pick = aimed_unit(chr, controlled, localObj, weapon);
+            source = reticule;
+         }
 
          // A vehicle and its exposed rider trade the engine's pick back and
          // forth: keep showing the member picked first until the other holds.
@@ -605,10 +726,11 @@ static void tick_before()
 
          const Handle held = s_retained[ch].loan(
             s_natural[ch], retainable(s_retained[ch].target), s_now);
-         if (pick.obj && !same(s_natural[ch], pick)) {
-            // Over the engine's pick, in the handle it was read from.
+         if (pick.obj && (!enginePick || !same(s_natural[ch], pick))) {
+            // Over the engine's pick, in the handle it was read from; or the
+            // crosshair's unit, into the empty reticle slot.
             lend(ch, source, s_natural[ch]);
-            s_pairLent[ch] = true;
+            s_pickLent[ch] = true;
             continue;
          }
          if (!held.obj) {
@@ -617,7 +739,6 @@ static void tick_before()
          }
          // Retention does not re-run acquisition LOS/frustum/range gates.
          // Native selection wins; only temporarily fill an empty reticle slot.
-         uint32_t* reticule = (uint32_t*)(controlled + kCtrl_ReticuleTgt + ch * 8);
          Handle slot;
          std::memcpy(&slot, reticule, sizeof(slot));
          if (!handle_ok(slot)) lend(ch, reticule, held);
@@ -661,9 +782,9 @@ static void tick_after()
          // cannot refresh retention, and rejected/dead/stale targets clear it.
          const Handle accepted = retainable(shown) ? shown : Handle{};
          s_retained[ch].observe(s_natural[ch], accepted, s_now, g_targetBarLatchSeconds);
-         // The HUD refused the pair member shown over the pick: show the
-         // engine's own pick from the next tick instead of a blank bar.
-         if (s_pairLent[ch] && !same(accepted, s_natural[ch])) s_pair[ch].reset();
+         // The HUD refused the member lent: drop the pair, so the next tick
+         // shows the pick itself instead of a blank bar.
+         if (s_pickLent[ch] && !same(accepted, s_natural[ch])) s_pair[ch].reset();
 
          Handle focus = Handle{};
          bool sameTarget = true;
@@ -688,8 +809,8 @@ static void tick_after()
          // Never query dead-unit bounds: death changes the collision/model pose
          // and pulled the fading bar down into the corpse. Freeze the last live
          // world anchor, but reproject it with the current camera through the fade.
-         // Pinned on screen only while the engine picks this target; held or
-         // fading, the bar leaves the screen with it.
+         // Pinned on screen only while this target is picked, by the engine or
+         // under the crosshair; held or fading, the bar leaves the screen with it.
          const bool aimed = s_natural[ch].obj && same(s_natural[ch], focus);
          s_position[ch].update(sameTarget, alive, alive && boundsValid ? &world : nullptr,
                                aimed ? project_aimed : project_free);

@@ -1331,7 +1331,9 @@ event of ours.
 not work in the current build and requested reference-style selection retention.
 The healthbar module no longer hooks `Damageable::ApplyDamage`, depends on
 `IsMyEnemy`, or runs an extra LOS ray. Aim assist's independent damage hook is
-untouched. This does not copy the reference game's hybrid autoaim producer.
+untouched. (Since 2026-10-11 it casts one ray when the engine has picked nothing,
+to find the unit under the crosshair; see below. It adds a pick and never gates
+one.) This does not copy the reference game's hybrid autoaim producer.
 
 Per channel, before lending, call the same Controllable primary-vtable methods as
 native `UpdateWeaponEvents`: slot `+0x3C` with channel -> index; if nonnegative,
@@ -1441,6 +1443,60 @@ and the engine's pick shows from the next tick. The state machine is
 `target_bar_selection::Pair`, tested in `tests/target_bar_selection_tests.cpp`; the
 chain is audited on all three builds by `tests/target_bar_selection_abi_tests.py`.
 The user confirmed it in play on 2026-09-27, together with the unpinned positioning.
+
+**The unit under the crosshair (built 2026-10-11).** The user reported that a unit
+partly behind cover keeps its bar hidden even with the crosshair on it.
+`PlayerController::Update` (modtools `0x0059B460`, Steam `0x0061A2B0`, GOG
+`0x0061B320`) keeps or takes a target only if `CollisionManager::RayTest`, from
+`mAimStart` to the point `GetTargetPoint` gives for the body `GetTargetBodyID` chose,
+pulled back toward the eye by the target's radius, clears mask `0x90` (statics and
+terrain), ignoring the player and the target. One blocked ray to one point drops the
+target, however much of it is in view.
+
+When neither `Weapon::mTarget` nor `mReticuleTarget[channel]` holds a target, the
+latch now asks the crosshair: one `CollisionManager::RayHit` (`engine_ray_hit`, shared
+with the barrel fire origin) along the line `barrel_fire_origin` aims shots on
+(`mEyePoint` in unzoomed first person, else `mAimStart`, along `mEyeDir`), out to
+`WeaponClass::mExtremeRange`, the reach of the engine's own search. The mask is
+`0xBA`: what that search finds (`COLL_SOFT`, `COLL_RIGID`, `COLL_STATIC`,
+`COLL_ATTACHED`) and `COLL_TERRAIN` to stop at the ground; items and water are left
+out. The ray ignores the player's controlled object and its soldier. The first thing
+hit decides. `CollisionObject::GetGameObject` (vptr `+0x38`) is null for terrain,
+props, doors and other plain geometry, and then nothing is picked. A GameObject must
+pass the engine's own candidate tests:
+
+- alive with health (the bars' own rule, in place of the engine's alive test);
+- `GameObject::mIsTargetable`, `+0x238` bit 0;
+- `IsVisibleToMe(player)`, primary vptr `+0x94`: true except for a trap, to the side
+  that triggers it;
+- not `IsNotTargetableByPlayer` (`GameObjectClass` flags byte `+0x36C` on modtools,
+  `+0x328` on Steam and GOG, bit 4; ODF hash `0x1B2D820B`);
+- not a soldier with `m_uiInvisibilityAlpha` above 0 (`+0x753` on modtools, `+0x743`
+  on Steam and GOG). The engine refuses only a cloaked enemy; GameExt refuses any, so
+  it needs no `GetAffiliationToMe`, and the engine's own pick still shows a cloaked
+  friend.
+
+A rider of the player's own vehicle, which the engine also skips, joins the ray's
+exclude list and the ray goes again. The unit found stands in for the engine's pick:
+the rider pair resolves it, and it is lent into the empty reticule slot for
+`HUD::GameEvents::Update` only, like the hold, so aim assist, lock-on and firing never
+see it. The HUD's own target filter (`mbHideHealthBar`, bit 5 of the same flags byte)
+still applies, and an accepted pick refreshes the hold as an engine pick does.
+
+| | modtools | Steam | GOG |
+|---|---|---|---|
+| `Weapon::mClass` (`+0x64`) read | `0x0059C230` | `0x0061AF34` | `0x0061BFA4` |
+| `WeaponClass::mExtremeRange` (`+0xF0`), the search's range | `0x0059C38F` | `0x0061B087` | `0x0061C0F7` |
+| `mIsTargetable` test | `0x0059C800` | `0x0061B63F` | `0x0061C6AF` |
+| `IsVisibleToMe` call | `0x0059C816` | `0x0061B654` | `0x0061C6C4` |
+| `GameObject::IsVisibleToMe`: `MOV AL,1` / `RET 4` | `0x0055F830` | `0x00535A50` | `0x005367C0` |
+| `IsNotTargetableByPlayer` test | `0x0059C834` | `0x0061B677` | `0x0061C6E7` |
+| `IsNotTargetableByPlayer` set by `SetProperty` | `0x00561246` | `0x005368BF` | `0x0053762F` |
+| `m_uiInvisibilityAlpha` test | `0x0059C857` | `0x0061B69B` | `0x0061C70B` |
+| `RayCallback`: exclude list against GetGameObject | `0x00429E00` | `0x0045F070` | `0x0045F070` |
+
+`tests/target_bar_selection_abi_tests.py` checks each of these, and 19 mutants of the
+offsets and of its expectations all fail it. Not yet tried in play.
 
 **The user confirmed the revised positioning works better in play.** That is not
 confirmation across every build or an online session. The always-on revision passed
