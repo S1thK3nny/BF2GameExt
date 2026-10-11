@@ -238,14 +238,27 @@ the reticle blooms with recoil and tightens with stance.
 **Compass, pitch and zoom** - A HUD cannot show a compass, an artificial horizon or a zoom
 readout. Publish camera heading, pitch and zoom, pure camera maths like horizon levelling.
 
-**Speed and altitude** - Nothing tells the HUD a vehicle's speed or height. Publish both
-for speedometers and altimeters.
+**Vehicle readouts** - Nothing tells the HUD how a vehicle is moving or being flown. Publish
+its speed (in metres per second, as a share of its top speed, and as a needle rotation), its
+boost, a flyer's throttle, its height above the ground, its pitch and roll for an artificial
+horizon, a turret's direction against the hull, whether the player drives or mans a gun, and
+whether a flyer has landed.
+
+**Reload progress** - The stock `refire` event counts down both the pause between shots and a
+reload, as a share only. Publish a reload's time left in seconds and its progress from 0 to 1,
+sent only while reloading, beside GameExt's `state.reloading`.
+
+**Lead indicator for flyers** - Hitting a moving flyer means guessing how far ahead to aim.
+Publish the point to aim at, from the target's velocity and the weapon's ordnance speed.
+Aiming there must not drop the target, or its floating bar would vanish as the player follows
+the lead: the bars' target retention has to count aiming at the lead as aiming at the target.
+
+**More unit states** - Add `state.aiming` (aiming down the sights or zoomed), `state.cloaked`
+and `state.remote` (controlling a droid or turret) to the `player1.unit.state.*` events, for
+scope overlays and HUDs that change while cloaked or remote.
 
 **Damage direction** - Players cannot tell where damage came from. Publish a rotation that
 points at the last attacker and keeps tracking them, from the damage hook aim assist uses.
-
-**Kill confirm** - There is no kill cue beyond the feed. Check whether the stock kills
-statistic already fires on each kill; otherwise add a pulse from the kill feed.
 
 **Missile and grenade warnings** - The missile warning gives no direction and nothing warns
 about grenades. Publish a bearing and distance for the incoming missile and live grenades.
@@ -253,6 +266,10 @@ about grenades. Publish a bearing and distance for the incoming missile and live
 **Objective waypoints** - The stock `Target` element already draws script markers on
 objects in 3D with edge arrows, but every objective shares one icon and region markers
 get nothing. Publish each marker's screen position so a HUD can style them itself.
+
+**Kill feed with icons** - Kill messages reach the HUD only as text, so a `.hud` cannot show
+the weapon's icon or style the names. Publish each kill's killer, victim, their teams and the
+weapon's icon texture as separate events, and a list element that shows the last few.
 
 **Friendly name tags** - Teammates are hard to pick out online. Publish a fixed set of slots
 with name, health and position for teammates in view.
