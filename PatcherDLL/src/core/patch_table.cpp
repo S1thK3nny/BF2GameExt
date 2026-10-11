@@ -3,6 +3,7 @@
 #include "patch_table.hpp"
 #include "game_addrs.hpp"
 #include "entity/combo_anim_limit.hpp"
+#include "shell/dlc_mission_init_fix.hpp"
 #include "core/pbl_hash.hpp"
 
 // _RenderLightSabre: match Classic Collection's backward visual extension.
@@ -19,7 +20,7 @@ static char matrixPool_storage[matrixPool_size] = {};
 static const uint32_t matrixPool_address = (uint32_t)&matrixPool_storage[0];
 
 const static uint32_t DLC_mission_size = 0x110;
-const static uint32_t DLC_mission_patch_limit = 0x1000;
+const static uint32_t DLC_mission_patch_limit = kDlcMissionLimit;
 
 static char DLC_mission_table_storage[DLC_mission_size * DLC_mission_patch_limit] = {};
 static const uint32_t DLC_mission_table_address = (uint32_t)&DLC_mission_table_storage[0];
@@ -184,6 +185,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "DLC Mission Limit Extension",
+               .install = dlc_v13_mission_cap_install,
                .patches =
                   {
                      patch{0x4935c, 0xb08308, DLC_mission_table_address, {.file_offset = true, .expected_is_va = true}},                         // SetCurrentMap
@@ -1011,6 +1013,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "DLC Mission Limit Extension",
+               .install = dlc_v13_mission_cap_install,
                .patches =
                   {
                      patch{0x8de7d, 0x1f4, DLC_mission_patch_limit, {.file_offset = true}},                                                         // AddDownloadableContent
@@ -1700,6 +1703,7 @@ const exe_patch_list patch_lists[EXE_COUNT] = {
 
             patch_set{
                .name = "DLC Mission Limit Extension",
+               .install = dlc_v13_mission_cap_install,
                .patches =
                   {
                      patch{0x8de7d, 0x1f4, DLC_mission_patch_limit, {.file_offset = true}},                                                         // AddDownloadableContent

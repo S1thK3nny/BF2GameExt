@@ -47,6 +47,22 @@ static int lua_ReadTextFile(lua_State* L)
 }
 #endif
 
+// Opens the WinINet session every Http* call uses. The default timeouts let a
+// server that never answers hold the call far longer, and the synchronous
+// calls hold the game thread with it.
+static constexpr DWORD kHttpTimeoutMs = 5000;
+
+static HINTERNET http_open_session()
+{
+   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   if (!hNet) return nullptr;
+   DWORD ms = kHttpTimeoutMs;
+   InternetSetOptionA(hNet, INTERNET_OPTION_CONNECT_TIMEOUT, &ms, sizeof(ms));
+   InternetSetOptionA(hNet, INTERNET_OPTION_SEND_TIMEOUT,    &ms, sizeof(ms));
+   InternetSetOptionA(hNet, INTERNET_OPTION_RECEIVE_TIMEOUT, &ms, sizeof(ms));
+   return hNet;
+}
+
 // HttpGet(url) - performs a synchronous HTTP GET, returns response body as a string.
 // Returns nil on failure. Supports http and https.
 // Example: local body = HttpGet("http://example.com/data.txt")
@@ -55,11 +71,11 @@ static int lua_HttpGet(lua_State* L)
    const char* url = g_lua.tolstring(L, 1, nullptr);
    if (!url) { g_lua.pushnil(L); return 1; }
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hUrl = InternetOpenUrlA(hNet, url, nullptr, 0,
-                                     INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE |
+                                     INTERNET_FLAG_RELOAD |
                                      INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
                                      INTERNET_FLAG_IGNORE_CERT_DATE_INVALID, 0);
    if (!hUrl) { InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
@@ -125,7 +141,7 @@ static int lua_HttpPut(lua_State* L)
                             : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                        : INTERNET_DEFAULT_HTTP_PORT);
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
@@ -201,7 +217,7 @@ static int lua_HttpPost(lua_State* L)
                             : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                        : INTERNET_DEFAULT_HTTP_PORT);
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
@@ -252,7 +268,7 @@ static int lua_HttpPost(lua_State* L)
 // currently selected weapon in a given weapon channel.
 //
 // @param #int  charIndex   Integer character unit index (0-based)
-// @param #int  channel     Weapon channel (default 0).
+// @param #int  channel     Weapon channel (default 0), nil outside 0-1.
 //                          0 = primary weapon channel (key 1)
 //                          1 = secondary weapon channel (key 2)
 // @return #string          ODF name (e.g. "rep_weap_dc-15s_blaster_carbine"), or nil.
@@ -287,9 +303,10 @@ static int lua_GetCharacterWeapon(lua_State* L)
    const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
+   // mWeaponIndex has two entries; higher channels would read the bytes after it.
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
                        ? g_lua.tointeger(L, 2) : 0;
-   if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
+   if (channel < 0 || channel > 1) { g_lua.pushnil(L); return 1; }
 
    __try {
       char* charSlot = (char*)arrayBase + charIndex * layout::Character::kSize;
@@ -851,7 +868,7 @@ static uintptr_t resolve_active_weapon(int charIndex, int channel)
 
    const int maxChars = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
-   if (channel < 0 || channel > 7) return 0;
+   if (channel < 0 || channel > 1) return 0;   // mWeaponIndex has two entries
 
    const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) return 0;
@@ -1017,6 +1034,10 @@ static int lua_RemoveUnitClass(lua_State* L)
    // Get team pointer from g_ppTeams[teamIndex].
    // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
    const uintptr_t teamArrayBase = *(uintptr_t*)res(g_addr->team_array_base);
+   if (!teamArrayBase) {
+      fn_GameLog("RemoveUnitClass(): teams are not set up yet\n");
+      return 0;
+   }
    void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
    if (!teamPtr) {
       fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
@@ -1025,6 +1046,12 @@ static int lua_RemoveUnitClass(lua_State* L)
 
    const int classCount = *(int*)((char*)teamPtr + 0x48);
    void** classDefArr   = *(void***)((char*)teamPtr + 0x50);
+   int*   minArr        = *(int**)((char*)teamPtr + 0x54);
+   int*   maxArr        = *(int**)((char*)teamPtr + 0x58);
+   if (classCount <= 0 || !classDefArr || !minArr || !maxArr) {
+      fn_GameLog("RemoveUnitClass(): team %d has no classes\n", teamIndex);
+      return 0;
+   }
 
    int foundSlot = -1;
 
@@ -1052,7 +1079,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 
       uintptr_t node = *(uintptr_t*)res(g_addr->class_def_list);
       void* classDef = nullptr;
-      for (int guard = 0; guard < 1024; ++guard) {
+      for (int guard = 0; node && guard < 1024; ++guard) {
          void* element = *(void**)(node + 0x0c);
          if (!element) break;
          if (*(int*)((char*)element + 0x18) == targetHash) { classDef = element; break; }
@@ -1083,8 +1110,6 @@ static int lua_RemoveUnitClass(lua_State* L)
    // character is skipped for that spawn tick and respawns normally on the next
    // cycle. The warning is harmless and the alternative (tombstoning) prevents
    // slot reuse, breaking the add/remove cycle.
-   int* minArr = *(int**)((char*)teamPtr + 0x54);
-   int* maxArr = *(int**)((char*)teamPtr + 0x58);
    const int lastSlot = classCount - 1;
 
    for (int i = foundSlot; i < lastSlot; ++i) {
@@ -1137,10 +1162,10 @@ static DWORD WINAPI http_async_worker(LPVOID param)
 
    if (strcmp(w->method, "GET") == 0) {
       // High-level path: InternetOpenUrlA is fine for GET.
-      HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+      HINTERNET hNet = http_open_session();
       if (hNet) {
          HINTERNET hUrl = InternetOpenUrlA(hNet, w->url, nullptr, 0,
-                                           INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE |
+                                           INTERNET_FLAG_RELOAD |
                                            INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
                                            INTERNET_FLAG_IGNORE_CERT_DATE_INVALID, 0);
          if (hUrl) {
@@ -1168,7 +1193,7 @@ static DWORD WINAPI http_async_worker(LPVOID param)
                                   : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                              : INTERNET_DEFAULT_HTTP_PORT);
 
-         HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+         HINTERNET hNet = http_open_session();
          if (hNet) {
             HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
                                                nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
@@ -1370,7 +1395,9 @@ static int lua_SetFogRange(lua_State* L)
 // Example: SetFogEnable(1) -- enable fog, SetFogEnable(0) -- disable
 static int lua_SetFogEnable(lua_State* L)
 {
-   bool enable = g_lua.tonumber(L, 1) != 0;
+   // Lua 5.0's tonumber reads a boolean as 0, so true/false go through toboolean.
+   const bool enable = g_lua.isnumber(L, 1) ? g_lua.tonumber(L, 1) != 0
+                                            : g_lua.toboolean(L, 1) != 0;
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
@@ -1389,12 +1416,13 @@ static int lua_SetFogEnable(lua_State* L)
 // these, so vehicles spawned via it have no team / damage owner and weapons
 // silently no-op.
 //
-//   1. ctrl = entity->vtable[9]()        — get controllable
-//   2. ctrl->vtable[36](team)            — Controllable::SetTeam (+0x234 low 4 bits)
+//   1. ctrl = entity->vtable[9]()        — Entity::GetGameObject (null for a plain Entity)
+//   2. ctrl->vtable[36](team)            — GameObject::SetTeam (+0x234 low 4 bits)
 //   3. patch +0x234 bits 4-7  = team     — spawner-team
 //   4. patch +0x234 bits 8-11 = team     — group/owner bits
-//   5. ctrl->vtable[5]()                 — activate
+//   5. ctrl->vtable[5]()                 — GameObject::Init
 //
+// Slots confirmed against the Phantom PDB vtables of Entity and GameObject.
 // Returns true on success.
 static bool apply_vehicle_fixup(void* entity, int team)
 {
@@ -1436,23 +1464,21 @@ static bool apply_vehicle_fixup(void* entity, int team)
 // Extended signature:     CreateEntity(className, matrix, name [, team]) -> entity|nil
 //
 // After the original call returns (top of Lua stack = entity lightuserdata or
-// nil), runs the vehicle fixup so weapons work. Team defaults to 0 if omitted.
-// Non-vehicle entities are tolerated — apply_vehicle_fixup is SEH-guarded and
-// for entities without the expected vtable layout it'll either no-op or fail
-// cleanly without affecting the returned entity.
+// nil), runs the vehicle fixup so weapons work. Only when a team is passed: the
+// fixup re-inits any GameObject, not just vehicles, so a three-argument call
+// stays exactly stock.
 typedef int (__cdecl* fn_lua_create_entity_t)(void* L);
 static fn_lua_create_entity_t original_lua_create_entity = nullptr;
 
 static int __cdecl hooked_lua_create_entity(void* L)
 {
-   int team = 0;
    const bool haveTeam = g_lua.gettop && g_lua.isnumber &&
                          g_lua.gettop((lua_State*)L) >= 4 &&
                          g_lua.isnumber((lua_State*)L, 4);
-   if (haveTeam) team = g_lua.tointeger((lua_State*)L, 4);
+   const int team = haveTeam ? g_lua.tointeger((lua_State*)L, 4) : 0;
 
    const int ret = original_lua_create_entity(L);
-   if (ret <= 0) return ret;
+   if (ret <= 0 || !haveTeam) return ret;
 
    void* entity = g_lua.touserdata((lua_State*)L, -1);
    if (entity) apply_vehicle_fixup(entity, team);

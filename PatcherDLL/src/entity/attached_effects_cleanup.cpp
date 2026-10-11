@@ -3,7 +3,9 @@
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
+#include "entity/odf_gameext_props.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <detours.h>
 
@@ -238,8 +240,25 @@ void attached_effects_cleanup_install(uintptr_t exe_base)
 //
 // EntityBuilding::Kill swaps in the destroyed model and turns the hologram off,
 // but never touches m_pAttachedEffects, so an `AttachOdf` light keeps shining
-// over the wreck. Switch those lights off after Kill and back on after Respawn.
-// Both run on MP clients too, from EntityBuilding::ReadObject.
+// over the wreck. Opt in per attachment:
+//
+//     AttachOdf           = "com_light_red"
+//     AttachToHardPoint   = "hp_light"
+//     AttachRemoveOnDeath = 1
+//
+// and that light goes off after Kill and back on after Respawn. Both run on MP
+// clients too, from EntityBuilding::ReadObject.
+//
+// The mark lives in the attachment's own AttachClassData flags dword, bit 31.
+// AttachedEffectsClass::SetProperty rewrites the dword as
+// `(numParams - 1) << 1 | isOdf` when AttachToHardPoint commits the entry, and
+// every reader on all three builds masks it to bit 0 or bits 1-7 (BuildEffects
+// `AND 0xFE`, Update `SHR 1; AND 0x7F`), so bits 8-31 are zero and never read.
+// BuildAttachedEffectsClass copies the staging table wholesale, bit included.
+//
+// Since the commit clears it, the mark is applied to entries already committed:
+// every one since the last AttachOdf / AttachEffect line, so one light on
+// several hardpoints is covered by a single AttachRemoveOnDeath after them.
 // =============================================================================
 
 namespace {
@@ -253,10 +272,47 @@ constexpr uint32_t kOffAttachedEffects = 0x138;
 constexpr uint32_t kOffEntries      = 0x00;
 constexpr uint32_t kEntryStride     = 0x14;
 constexpr uint32_t kOffEntryFlags   = 0x08;
-constexpr uint32_t kEntryFlagOdf    = 0x01;  // AttachOdf, always an EntityLight
+constexpr uint32_t kEntryFlagOdf    = 0x01;        // AttachOdf, always an EntityLight
+constexpr uint32_t kEntryFlagOnDeath = 0x80000000;  // ours: AttachRemoveOnDeath
+constexpr uint32_t kMaxAttached     = 64;
 // FLEffectObject vftable
 constexpr uint32_t kActivateSlot   = 0x18;
 constexpr uint32_t kDeactivateSlot = 0x1C;
+
+// Property hashes. Each of the first three starts a new attachment.
+constexpr uint32_t kHashAttachOdf      = 0xA9D0D48B;
+constexpr uint32_t kHashAttachEffect   = 0x6A6C7E0D;
+constexpr uint32_t kHashAttachEffectHp = 0x576B09CD;  // "effect bone" on one line
+constexpr uint32_t kHashRemoveOnDeath  = 0x277176A5;  // AttachRemoveOnDeath
+
+// AttachedEffectsClass statics
+uint32_t* s_numAttached = nullptr;
+uint8_t*  s_attachData  = nullptr;
+// Where the current attachment's entries begin, and in which class
+const void* s_groupClass = nullptr;
+uint32_t    s_groupStart = 0;
+
+bool on_property(void* cls, uint32_t hash, const char* value)
+{
+   const uint32_t num = *s_numAttached;
+
+   if (hash == kHashAttachOdf || hash == kHashAttachEffect || hash == kHashAttachEffectHp) {
+      s_groupClass = cls;
+      s_groupStart = num;
+      return false;
+   }
+   if (hash != kHashRemoveOnDeath) return false;
+
+   const bool on      = value && std::atoi(value) != 0;
+   const uint32_t end = num < kMaxAttached ? num : kMaxAttached;
+   const uint32_t beg = (cls == s_groupClass && s_groupStart <= end) ? s_groupStart : 0;
+   for (uint32_t i = beg; i < end; ++i) {
+      uint32_t* flags = (uint32_t*)(s_attachData + i * kEntryStride + kOffEntryFlags);
+      if (!(*flags & kEntryFlagOdf)) continue;
+      *flags = on ? (*flags | kEntryFlagOnDeath) : (*flags & ~kEntryFlagOnDeath);
+   }
+   return true;
+}
 
 typedef void(__thiscall* BuildingFn_t)(void* self);
 BuildingFn_t s_origKill    = nullptr;
@@ -277,7 +333,8 @@ void set_attached_lights(uint8_t* self, bool on)
    if (!entries) return;
 
    for (uint32_t i = 0; i < count; ++i) {
-      if (!(*(uint32_t*)(entries + i * kEntryStride + kOffEntryFlags) & kEntryFlagOdf))
+      const uint32_t flags = *(uint32_t*)(entries + i * kEntryStride + kOffEntryFlags);
+      if ((flags & (kEntryFlagOdf | kEntryFlagOnDeath)) != (kEntryFlagOdf | kEntryFlagOnDeath))
          continue;
 
       uint8_t* rec = data + i * kAttachDataStride;
@@ -312,7 +369,13 @@ const uint8_t kRespawnRetail[]   = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C};  // PUS
 
 void building_lights_install(uintptr_t exe_base)
 {
-   if (g_addr->entity_building_kill == 0 || g_addr->entity_building_respawn == 0) return;
+   if (g_addr->entity_building_kill == 0 || g_addr->entity_building_respawn == 0 ||
+       g_addr->attach_class_num == 0 || g_addr->attach_class_data == 0) return;
+
+   // Positively identify the staging table through the code that uses it
+   if (*(uintptr_t*)resolve(exe_base, g_addr->attach_class_num_ref) != (uintptr_t)resolve(exe_base, g_addr->attach_class_num) ||
+       *(uintptr_t*)resolve(exe_base, g_addr->attach_class_data_ref) != (uintptr_t)resolve(exe_base, g_addr->attach_class_data))
+      return;
 
    const bool modtools = (g_build == GameBuild::Modtools);
    void* kill    = resolve(exe_base, g_addr->entity_building_kill);
@@ -323,6 +386,15 @@ void building_lights_install(uintptr_t exe_base)
 
    s_origKill    = (BuildingFn_t)kill;
    s_origRespawn = (BuildingFn_t)respawn;
+
+   // Without the listener nothing is ever marked, so the hooks would be inert
+   s_numAttached = (uint32_t*)resolve(exe_base, g_addr->attach_class_num);
+   s_attachData  = (uint8_t*)resolve(exe_base, g_addr->attach_class_data);
+   if (!odf_add_property_handler(on_property)) {
+      s_origKill    = nullptr;
+      s_origRespawn = nullptr;
+      return;
+   }
 
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());

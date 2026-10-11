@@ -460,6 +460,9 @@ namespace modtools {
    // DownloadableContent::GetContentDirectory() — __cdecl(void) -> char*, NULL
    // when no addon is active.  Returns the addon directory, e.g. "addon\\VTR".
    constexpr uintptr_t dlc_get_content_directory   = 0x00449400;
+   // Lua_Callbacks::AddDownloadableContent(L), a __cdecl lua_CFunction. Adds one
+   // DLC mission per call, refusing once the count reaches the table size.
+   constexpr uintptr_t add_downloadable_content    = 0x004494B0;
 
    // ---- Shell / In-game movies -------------------------------------------------
    // Lua_Callbacks::ScriptCB_PlayInGameMovie(L) — __cdecl lua_CFunction, registered
@@ -1558,6 +1561,15 @@ namespace modtools {
    constexpr uintptr_t entity_building_kill    = 0x004D2770;
    constexpr uintptr_t entity_building_respawn = 0x004D2C80;
 
+   // AttachedEffectsClass::s_uiNumAttached / s_aAttachClassData, the staging table
+   // AttachOdf lines fill while a class reads. AttachRemoveOnDeath marks entries
+   // in it. The _ref addresses are operands that must hold them (SetProperty's
+   // count load, BuildAttachedEffectsClass's copy source), checked at install.
+   constexpr uintptr_t attach_class_num      = 0x00B7A2D4;
+   constexpr uintptr_t attach_class_data     = 0x00B7A2D8;
+   constexpr uintptr_t attach_class_num_ref  = 0x004C27B4;
+   constexpr uintptr_t attach_class_data_ref = 0x004C1C21;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -2051,6 +2063,7 @@ namespace steam {
    constexpr uintptr_t red_warning_set_log_data    = 0x006F71A0; // 5-arg formatted overload
    constexpr uintptr_t log_formatted_flag          = 0x009C8490;
    constexpr uintptr_t dlc_get_content_directory   = 0x0048EBA0; // returns addmeDirectory
+   constexpr uintptr_t add_downloadable_content    = 0x0048EA30;
 
    // ---- Shell / In-game movies -------------------------------------------------
    // See the modtools namespace for what these are.  Reg table 0x007E7058;
@@ -2905,6 +2918,15 @@ namespace steam {
    constexpr uintptr_t entity_building_kill    = 0x00492B00;
    constexpr uintptr_t entity_building_respawn = 0x00492F30;
 
+   // AttachedEffectsClass::s_uiNumAttached / s_aAttachClassData, the staging table
+   // AttachOdf lines fill while a class reads. AttachRemoveOnDeath marks entries
+   // in it. The _ref addresses are operands that must hold them (SetProperty's
+   // count load, BuildAttachedEffectsClass's copy source), checked at install.
+   constexpr uintptr_t attach_class_num      = 0x01E2FDE0;
+   constexpr uintptr_t attach_class_data     = 0x01E2FDE8;
+   constexpr uintptr_t attach_class_num_ref  = 0x004476BB;
+   constexpr uintptr_t attach_class_data_ref = 0x0044796B;
+
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
    // CALL to the per-layer reset inside PropGenerator::Cleanup's 4-layer loop
@@ -3465,6 +3487,7 @@ namespace gog {
    constexpr uintptr_t red_warning_set_log_data       = 0x006F8270;
    constexpr uintptr_t log_formatted_flag             = 0x009C9930;
    constexpr uintptr_t dlc_get_content_directory      = 0x0048EBA0;
+   constexpr uintptr_t add_downloadable_content       = 0x0048EA30; // same address as Steam
 
    // ---- Shell / In-game movies --------------------------------------------------
    // See the modtools namespace.  Reg table 0x007E8058; StartInGameMoviePlay is
@@ -3963,6 +3986,15 @@ namespace gog {
    // are switched off and back on around them. See attached_effects_cleanup.cpp.
    constexpr uintptr_t entity_building_kill    = 0x00492B00;
    constexpr uintptr_t entity_building_respawn = 0x00492F30;
+
+   // AttachedEffectsClass::s_uiNumAttached / s_aAttachClassData, the staging table
+   // AttachOdf lines fill while a class reads. AttachRemoveOnDeath marks entries
+   // in it. The _ref addresses are operands that must hold them (SetProperty's
+   // count load, BuildAttachedEffectsClass's copy source), checked at install.
+   constexpr uintptr_t attach_class_num      = 0x01E31280;
+   constexpr uintptr_t attach_class_data     = 0x01E31288;
+   constexpr uintptr_t attach_class_num_ref  = 0x0044769B;
+   constexpr uintptr_t attach_class_data_ref = 0x0044794B;
 
    // ---- Prop layer LOD pointer across maps (render/prop_generator_fix.cpp) ----
 
