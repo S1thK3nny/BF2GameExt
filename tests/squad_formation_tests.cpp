@@ -272,6 +272,106 @@ void the_tag_along_stop()
    assert(capped_count(0, true, 1) == 0 && capped_count(1, true, 1) == 2);
 }
 
+// A follower walks the crumbs while it keeps up, and is given a route when it
+// falls behind or gets nowhere, kept until it has caught up. Updates come every
+// half second here, well inside kForgetAfter.
+void routes_for_those_left_behind()
+{
+   const Vec2 leader{0.0f, 0.0f}, slot{3.0f, -3.0f};
+   // Keeping up: crumbs.
+   FollowState s;
+   assert(follow_action(s, {3.5f, -3.5f}, slot, leader, false, 10.0) == FollowAction::Crumbs);
+   assert(s.mode == FollowMode::Crumbs);
+   // Far behind: a route, once, then kept while it lasts however far it still is.
+   assert(follow_action(s, {3.0f, -20.0f}, slot, leader, false, 10.5) == FollowAction::Plan);
+   assert(s.mode == FollowMode::Path);
+   for (double t = 11.0; t < 30.0; t += 0.5)
+      assert(follow_action(s, {3.0f, -19.0f}, slot, leader, true, t) == FollowAction::KeepPath);
+   // Caught up with its slot or its leader: crumbs again.
+   assert(follow_action(s, {3.0f, -5.0f}, slot, leader, true, 30.0) == FollowAction::Crumbs);
+   assert(s.mode == FollowMode::Crumbs);
+   s.mode = FollowMode::Path;
+   assert(follow_action(s, {1.0f, 2.0f}, {9.0f, -9.0f}, leader, true, 30.5) == FollowAction::Crumbs);
+
+   // Stuck: no headway for kStuckSeconds while past kStuckFrom, as its slot
+   // moves on at 1 m/s.
+   const auto moving = [](double w) { return Vec2{3.0f, -3.0f + (float)(w - 100.0)}; };
+   FollowState t;
+   double when = 100.0;
+   for (; when < 100.0 + kStuckSeconds; when += 0.5)
+      assert(follow_action(t, {3.0f, -8.0f + 0.1f * (float)(when - 100.0)}, moving(when), leader, false, when) ==
+             FollowAction::Crumbs);
+   assert(follow_action(t, {3.3f, -8.2f}, moving(when), leader, false, when) == FollowAction::Plan);
+   // Waiting on a squad that stands is not stuck, however long: its slot may be
+   // in a rock.
+   FollowState w;
+   for (double at = 150.0; at < 160.0; at += 0.5)
+      assert(follow_action(w, {3.0f, -9.0f}, slot, leader, false, at) == FollowAction::Crumbs);
+   // Making headway is not stuck, its slot moving on as fast.
+   FollowState u;
+   for (int i = 0; i <= 6; ++i)
+      assert(follow_action(u, {3.0f, -12.0f + 0.75f * i}, {3.0f, -3.0f + 0.75f * i}, leader, false,
+                           200.0 + 0.5 * i) == FollowAction::Crumbs);
+   // Standing in its slot is not stuck either.
+   FollowState v;
+   for (double w = 300.0; w < 310.0; w += 0.5)
+      assert(follow_action(v, {3.2f, -3.1f}, slot, leader, false, w) == FollowAction::Crumbs);
+   // Nor is staying close to a slot that shifts about it.
+   FollowState x;
+   for (int i = 0; i <= 8; ++i)
+      assert(follow_action(x, {3.0f, -3.0f}, {3.0f + 0.25f * i, -3.0f}, leader, false, 320.0 + 0.5 * i) ==
+             FollowAction::Crumbs);
+}
+
+// A route that ends, fails or is replaced is asked for again, never twice
+// within kReplanGap: the planner's queue puts a unit that asks again at the
+// back.
+void routes_are_not_asked_for_too_often()
+{
+   const Vec2 leader{0.0f, 0.0f}, slot{0.0f, -3.0f};
+   FollowState s;
+   assert(follow_action(s, {0.0f, -30.0f}, slot, leader, false, 50.0) == FollowAction::Plan);
+   assert(follow_action(s, {0.0f, -25.0f}, slot, leader, true, 50.5) == FollowAction::KeepPath);
+   // It ended short of the leader too soon to ask again: crumbs meanwhile.
+   for (double t = 51.0; t < 50.0 + kReplanGap; t += 0.5) {
+      assert(follow_action(s, {0.0f, -20.0f}, slot, leader, false, t) == FollowAction::Crumbs);
+      assert(s.mode == FollowMode::Path);
+   }
+   assert(follow_action(s, {0.0f, -20.0f}, slot, leader, false, 50.0 + kReplanGap) == FollowAction::Plan);
+   // Falling behind again just after a route: crumbs until the gap has passed.
+   FollowState t;
+   t.plannedAt = 70.0;
+   assert(follow_action(t, {0.0f, -30.0f}, slot, leader, false, 71.0) == FollowAction::Crumbs);
+   assert(follow_action(t, {0.0f, -30.0f}, slot, leader, false, 70.0 + kReplanGap) == FollowAction::Plan);
+   // A bad position on a route leaves it to the crumbs.
+   FollowState u;
+   assert(follow_action(u, {0.0f, -30.0f}, slot, leader, false, 89.5) == FollowAction::Plan);
+   assert(follow_action(u, {kNan, 0.0f}, slot, leader, true, 90.0) == FollowAction::Crumbs);
+   assert(u.mode == FollowMode::Crumbs);
+}
+
+// A follower back after kForgetAfter unseen (out of the follow state, or the
+// game paused) starts afresh, but still may not ask for a route too soon.
+void stale_followers_start_afresh()
+{
+   const Vec2 leader{0.0f, 0.0f}, slot{0.0f, -3.0f};
+   // A route alive when it comes back is someone else's.
+   FollowState f;
+   assert(follow_action(f, {0.0f, -30.0f}, slot, leader, false, 400.0) == FollowAction::Plan);
+   assert(follow_action(f, {0.0f, -9.0f}, slot, leader, true, 400.0 + kForgetAfter + 0.5) == FollowAction::Crumbs);
+   assert(f.mode == FollowMode::Crumbs);
+   // Not stuck on the strength of where it stood before it went.
+   FollowState g;
+   assert(follow_action(g, {0.0f, -9.0f}, slot, leader, false, 500.0) == FollowAction::Crumbs);
+   assert(follow_action(g, {0.0f, -9.0f}, {0.0f, -1.0f}, leader, false, 500.0 + kForgetAfter + 1.5) ==
+          FollowAction::Crumbs);
+   // The route it asked for just before it went still counts.
+   FollowState h;
+   assert(follow_action(h, {0.0f, -30.0f}, slot, leader, false, 600.0) == FollowAction::Plan);
+   assert(follow_action(h, {0.0f, -30.0f}, slot, leader, false, 600.0 + kForgetAfter + 0.5) == FollowAction::Crumbs);
+   assert(follow_action(h, {0.0f, -30.0f}, slot, leader, false, 600.0 + kReplanGap) == FollowAction::Plan);
+}
+
 } // namespace
 
 int main()
@@ -289,7 +389,11 @@ int main()
    odf_over_the_ini();
    heroes_keep_out_unless_told();
    the_tag_along_stop();
+   routes_for_those_left_behind();
+   routes_are_not_asked_for_too_often();
+   stale_followers_start_afresh();
    std::printf("Squad formation tests passed (names, spacing, slots, auto, headings, tags, slot points, "
-               "ODF keys over the INI, heroes, the tag-along stop).\n");
+               "ODF keys over the INI, heroes, the tag-along stop, routes for followers left behind, "
+               "route asking, stale followers).\n");
    return 0;
 }

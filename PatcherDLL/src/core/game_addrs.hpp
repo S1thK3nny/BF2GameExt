@@ -1316,6 +1316,13 @@ namespace modtools {
    // EventInfo::EventInfo(EventType, GameObject*): thiscall, RET 8, 0x58 bytes
    // (through the thunk 0x00407C61). AI squads build their "follow me" with it.
    constexpr uintptr_t event_info_ctor              = 0x0052ADE0;
+   // The follow agent's CALL to AILowLevel::SetNavigator_FollowTarget (through
+   // the thunk 0x0040650A), thiscall(leader, offset), RET 8, and
+   // AILowLevel::SetNavigator_Goto, thiscall(dest, obstacle, bool, bool),
+   // RET 0x10: squad formations give a follower left behind a planned route.
+   constexpr uintptr_t follow_set_navigator_call    = 0x005B0AE1;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x005A3180;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x005A2E00;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the
@@ -2803,6 +2810,11 @@ namespace steam {
    // its delta in XMM0 here, no stack argument; sAICtrls, as on modtools
    // (sPlayerCtrls is 0x01E30930).
    constexpr uintptr_t event_info_ctor              = 0x0043EDF0;
+   // The follow agent's CALL to SetNavigator_FollowTarget and SetNavigator_Goto,
+   // as on modtools.
+   constexpr uintptr_t follow_set_navigator_call    = 0x0066880C;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x0043C240;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x0043BF30;
    constexpr uintptr_t controller_manager_update    = 0x00486370;
    constexpr uintptr_t ai_controller_list           = 0x01E30934;
    // EntityHover::CollisionCallback, as on modtools: slot 6 of the
@@ -3510,6 +3522,9 @@ namespace gog {
    constexpr uintptr_t auto_follow_recruit_call     = 0x0061D451;
    constexpr uintptr_t unit_controller_send_event   = 0x00665170;
    constexpr uintptr_t event_info_ctor              = 0x0043EDE0;
+   constexpr uintptr_t follow_set_navigator_call    = 0x006698AC;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x0043C230;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x0043BF20;
    constexpr uintptr_t controller_manager_update    = 0x00486370;
    constexpr uintptr_t ai_controller_list           = 0x01E31DCC;
    // EntityHover::CollisionCallback, at Steam's address: slot 6 of the

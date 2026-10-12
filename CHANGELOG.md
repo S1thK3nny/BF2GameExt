@@ -122,6 +122,11 @@ Scripts can check the running version through `GameExt.version`.
   A `SquadLeader` rank in a soldier class's ODF decides who leads, over the INI; heroes stay out.
   Only a soldier on its way somewhere leads, and a squad whose leader stands still out of combat
   for 20 s is let go, so snipers at their spots keep nobody standing about.
+- **Squad pathfinding** - A squad follower more than 10 m behind its place, or caught on
+  something for 2 s as its squad moves on, finds its way to its leader round obstacles and
+  barriers, as soldiers going anywhere else do, then falls back into formation. Stock followers
+  walk straight along their place's trail and get caught on scenery. `[AI] SquadPathfinding=1`;
+  not yet tested in play.
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

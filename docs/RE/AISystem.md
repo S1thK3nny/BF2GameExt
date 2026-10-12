@@ -810,6 +810,47 @@ a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
   0x1B0]` (P `Character::GetPlayerStats`, `0x0049DE60`), more reads per build than a tie-break is
   worth. The tick notes when it first sees each soldier instead.
 
+### Follower routes (built 2026-10-12)
+
+Why tight followers get caught on scenery, read in P:
+
+- `NavigatorFollowTarget::UpdateTarget` drops a crumb every 2 m: the slot turned by the leader's
+  matrix, not the leader's own path, into a ring of 32 (64 m). So the trail of a slot 3 m beside a
+  leader who walks past a wall runs through the wall.
+- `LookForCrumbs` (P `0x0067A960`) takes the newest crumb within 2 m of the follower, or, every 2 s of
+  mission time, the newest within 30 m that `PathFinder::TestTrivialStraightLineHit` finds clear.
+  `UpdateFollowCrumbs` (P `0x0067AB50`) gives a straight `PathFollower` to the crumb after it, and
+  sets `HEIGHT_SPRINT` while the follower is more than 1 m from the newest crumb.
+- A `PathFollower` that stops with `PF_PATHBLOCKED` ends the navigator (state 100,
+  `UpdateState`, P `0x0067AE90`). `IsEqual` refuses a navigator in state 100, so the agent's next
+  call builds a new one, its crumbs restarting at the leader. Only a new navigator that finds no
+  crumb plans (`EnterState`, P `0x0067A2E0`): a straight `PathFollower` within 100 m when the line
+  is clear, otherwise `NavigatorGraphFollower`, the coarse hub graph.
+- A loose follower (`UnitFollowAgent::EnterState` state 5, P `0x00791E40`) goes by
+  `SetNavigator_Goto` to a valid point about 10 m behind the leader, which is why followers find
+  their way again once they stop following tightly.
+
+`AILowLevel::SetNavigator_Goto(dest, obstacle, bool, bool)` (P `0x00480D90`, M `0x005A2E00`,
+S `0x0043BF30`, G `0x0043BF20`; thiscall, RET 0x10) deletes the navigator and moves both ends to
+the closest valid points. Unless the first bool is set it asks `PathManager::GetPathPriority`
+(P `0x007118E0`: 50 m or more). A long trip, for a non-flyer whose AI type the world graph carries,
+gets a `NavigatorGraphFollower` (0x44 bytes, its last argument the second bool); anything else a
+`NavigatorPathFollower` (0x34) and `RequestPath`, the planner's A*, one request at a time. The
+loose follow and deathmatch agents call it (dest, null, false, false). On S and G it reads only
+ECX and its stack, and so does `SetNavigator_FollowTarget` (RET 8).
+
+**Built as `[AI] SquadPathfinding`** (`ai/squad_formation.cpp`). The follow agent's call to
+`SetNavigator_FollowTarget` (M `0x005B0AE1` through the thunk `0x0040650A`, S `0x0066880C`,
+G `0x006698AC`) goes to a stand-in. The game's crumbs stay while the follower keeps up. Once the
+follower is more than 10 m from its slot, or more than 3 m with no metre of headway for 2 s while
+its slot moved on at least a metre, it gets `SetNavigator_Goto` to the leader's position. It keeps
+that route until it is within 4 m of its slot or its leader, and then goes back to the crumbs.
+It sprints on the route while more than 4 m from its slot. A route is asked for at most every 3 s,
+since a unit that asks again goes to the back of the planner's queue. The route's navigator is
+known by its address and its vptr, as the pool can hand the address to another navigator. A
+follower unseen for over a second (out of the follow state, or the game paused) starts afresh,
+but keeps the time it last asked.
+
 ## AI sprinting (researched 2026-10-11, built 2026-10-12)
 
 AI never touch `mControlSprint`, but they do sprint. `AILowLevel::mHeight` set to `HEIGHT_SPRINT` (3)

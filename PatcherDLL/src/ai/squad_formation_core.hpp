@@ -192,6 +192,89 @@ inline Vec3 slot_point(Vec3 offset, Vec2 heading, const float* position)
    return {position[0] + w.x, position[1], position[2] + w.z};
 }
 
+// ---- How a follower gets there ----------------------------------------------
+// The game's follow navigator walks a straight line to each crumb, and the
+// crumbs of a slot to the side cut corners the leader went round, so a
+// follower runs into whatever is in the way. While a follower keeps up it
+// walks the crumbs, which cost nothing; once it falls well behind, or makes
+// no headway, it is given a route to its leader the way a unit going anywhere
+// gets one (the game's planner, round obstacles and barriers), and walks it
+// until it has caught up. The planner runs one search at a time for the whole
+// map and a unit that asks again loses its place in the queue, so a route is
+// never asked for again while it lasts: only once it has ended, failed or been
+// replaced, and then not within kReplanGap of the last.
+enum class FollowMode { Crumbs, Path };
+enum class FollowAction { Crumbs, KeepPath, Plan };
+
+constexpr float  kPathFar      = 10.0f;   // m from its slot: too far behind for crumbs
+constexpr float  kStuckFrom    = 3.0f;    // m from its slot past which ...
+constexpr double kStuckSeconds = 2.0;     // ... this long without headway, as its slot moves on, is stuck
+constexpr float  kHeadway      = 1.0f;    // m that counts as headway, or as its slot moving on
+constexpr float  kCaughtUp     = 4.0f;    // m from its slot or its leader: back to crumbs
+constexpr double kReplanGap    = 3.0;     // s between asking for routes
+constexpr float  kSprintBehind = 4.0f;    // m from its slot past which it sprints on a route
+constexpr double kForgetAfter  = 1.0;     // s unseen (out of the follow state, paused): start afresh
+
+struct FollowState {
+   FollowMode mode = FollowMode::Crumbs;
+   Vec2   headway;              // where it last made headway from ...
+   Vec2   slotThen;             // ... where its slot was then ...
+   double headwayAt = 0.0;      // ... and when
+   bool   headwayValid = false;
+   double plannedAt = -1e9;     // when it last asked for a route
+   double seenAt = -1e9;        // when it last came through
+};
+
+inline float distance(Vec2 a, Vec2 b)
+{
+   const float dx = a.x - b.x, dz = a.z - b.z;
+   return std::sqrt(dx * dx + dz * dz);
+}
+
+// What to do with a follower this update. `pathAlive`: the route it was last
+// given is still its navigator and has not finished.
+inline FollowAction follow_action(FollowState& s, Vec2 pos, Vec2 slot, Vec2 leader, bool pathAlive, double now)
+{
+   if (now - s.seenAt > kForgetAfter) {   // what it knew is stale, but not when it last asked
+      const double plannedAt = s.plannedAt;
+      s = FollowState{};
+      s.plannedAt = plannedAt;
+   }
+   s.seenAt = now;
+   if (!s.headwayValid || !(distance(pos, s.headway) < kHeadway)) {
+      s.headway = pos;
+      s.slotThen = slot;
+      s.headwayAt = now;
+      s.headwayValid = true;
+   }
+   const float toSlot = distance(pos, slot);
+   // Caught on something as the squad moves on; one waiting on a squad that
+   // stands (its slot in a rock, say) is left to wait.
+   const bool stuck = toSlot > kStuckFrom && now - s.headwayAt >= kStuckSeconds &&
+                      distance(slot, s.slotThen) >= kHeadway;
+   const bool mayPlan = now - s.plannedAt >= kReplanGap;
+   if (!std::isfinite(toSlot)) {
+      s.mode = FollowMode::Crumbs;
+      return FollowAction::Crumbs;
+   }
+   if (s.mode == FollowMode::Path) {
+      if (toSlot < kCaughtUp || distance(pos, leader) < kCaughtUp) {
+         s.mode = FollowMode::Crumbs;
+         return FollowAction::Crumbs;
+      }
+      if (pathAlive) return FollowAction::KeepPath;
+      if (!mayPlan) return FollowAction::Crumbs;   // until it may ask again
+   } else {
+      if (!(toSlot > kPathFar || stuck) || !mayPlan) return FollowAction::Crumbs;
+      s.mode = FollowMode::Path;
+   }
+   s.plannedAt = now;
+   s.headway = pos;
+   s.slotThen = slot;
+   s.headwayAt = now;
+   return FollowAction::Plan;
+}
+
 // ---- A class's ODF keys over the INI ----------------------------------------
 // Each key a class sets, itself or through ClassParent, decides that setting
 // for the class, whatever the INI says; a key it leaves out takes the INI's.

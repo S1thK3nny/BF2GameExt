@@ -20,6 +20,7 @@ int   g_squadFormation  = (int)squad_formation::Layout::Auto;
 float g_squadSpacing    = squad_formation::kDefaultSpacing;
 bool  g_squadAutoFormUp = true;
 int   g_squadSize       = 4;
+bool  g_squadPathfinding = true;
 
 namespace {
 
@@ -48,6 +49,18 @@ constexpr uint32_t kEv_Object           = 0x38;   // EventInfo::mGameObject
 constexpr int      kFollowChr           = 0x10;   // EVT_SC_FollowChr
 constexpr int      kFollowChrLoose      = 0x11;   // EVT_SC_FollowChrLoose
 constexpr int      kMaxSlot             = 64;
+// A follower's route (see "The route" below).
+constexpr uint32_t kGO_MatrixTrans      = 0x120;  // a GameObject's position
+constexpr uint32_t kGO_MatrixIface      = 0xC;    // the interface a GameObject's matrix comes from ...
+constexpr uint32_t kVt_GetMatrix        = 0x40;   // ... at its vptr +0x40
+constexpr uint32_t kOwner_Trackable     = 0x18;   // a Controllable's Trackable interface ...
+constexpr uint32_t kVt_GetTrackable     = 0x20;   // ... whose vptr +0x20 gives the GameObject
+constexpr uint32_t kLL_Owner            = 0x14;   // AILowLevel::mOwner, the UnitController
+constexpr uint32_t kLL_Navigator        = 0x18;   // AILowLevel::mNavigator
+constexpr uint32_t kLL_Height           = 0x6C;   // AILowLevel::mHeight
+constexpr uint32_t kVt_NavIsDone        = 0x14;
+constexpr int      kHeightStand         = 0;
+constexpr int      kHeightSprint        = 3;
 
 constexpr uint32_t kRttiSoldier   = pbl_hash("EntitySoldier");
 constexpr uint32_t kHashLeader    = pbl_hash("SquadLeader");
@@ -63,6 +76,10 @@ using fn_event_ctor_t     = void*(__thiscall*)(void* ev, int type, void* obj);
 using fn_transform_t      = float*(__stdcall*)(float* out, const float* v, const float* m);
 using fn_get_vec_t        = const float*(__thiscall*)(void* self);
 using fn_is_rtti_t        = bool(__thiscall*)(void* self, uint32_t hash);
+using fn_get_obj_t        = uint8_t*(__thiscall*)(void* self);
+using fn_is_done_t        = bool(__thiscall*)(void* self);
+using fn_nav_follow_t     = void(__thiscall*)(void* lowLevel, void* leader, const float* offset);
+using fn_nav_goto_t       = void(__thiscall*)(void* lowLevel, const float* dest, void* obstacle, bool a, bool b);
 
 // EventInfo is 0x58 bytes; its destructor does nothing on any build.
 constexpr size_t kEventInfoSize = 0x58;
@@ -75,6 +92,8 @@ uintptr_t s_count         = 0;   // ReserveManager::GetReservationCountForObject
 uintptr_t s_sendEvent     = 0;   // UnitController::SendEvent
 uintptr_t s_eventCtor     = 0;   // EventInfo::EventInfo(EventType, GameObject*)
 void* const* s_transformFn = nullptr;   // the pointer D3DXVec3TransformCoord is called through
+uintptr_t s_navFollow     = 0;   // AILowLevel::SetNavigator_FollowTarget
+uintptr_t s_navGoto       = 0;   // AILowLevel::SetNavigator_Goto
 
 // A redirected call: where, and the bytes it had.
 struct Site {
@@ -82,7 +101,7 @@ struct Site {
    uint8_t  orig[6] = {};
    uint8_t  len = 0;
 };
-Site s_offsetSite, s_turnSite, s_countSite, s_recruitSite;
+Site s_offsetSite, s_turnSite, s_countSite, s_recruitSite, s_routeSite;
 
 // ---- The game's functions, called from here ---------------------------------
 // The retail ones are whole-program optimised, so the callee-saved registers are
@@ -172,6 +191,62 @@ __declspec(naked) void* __cdecl call_event_ctor_rt(void*, int, void*)
       pop  ebp
       ret
    }
+}
+
+// AILowLevel::SetNavigator_FollowTarget: thiscall(leader, offset), RET 8.
+__declspec(naked) void __cdecl call_nav_follow_rt(void*, void*, const float*)
+{
+   __asm {
+      push ebp
+      mov  ebp, esp
+      push ebx
+      push esi
+      push edi
+      push dword ptr [ebp + 16]      // the offset
+      push dword ptr [ebp + 12]      // the leader
+      mov  ecx, dword ptr [ebp + 8]  // the AILowLevel
+      call dword ptr [s_navFollow]
+      pop  edi
+      pop  esi
+      pop  ebx
+      pop  ebp
+      ret
+   }
+}
+
+// AILowLevel::SetNavigator_Goto: thiscall(dest, obstacle, bool, bool), RET 0x10.
+__declspec(naked) void __cdecl call_nav_goto_rt(void*, const float*, void*, int, int)
+{
+   __asm {
+      push ebp
+      mov  ebp, esp
+      push ebx
+      push esi
+      push edi
+      push dword ptr [ebp + 24]
+      push dword ptr [ebp + 20]
+      push dword ptr [ebp + 16]      // the obstacle
+      push dword ptr [ebp + 12]      // where to
+      mov  ecx, dword ptr [ebp + 8]  // the AILowLevel
+      call dword ptr [s_navGoto]
+      pop  edi
+      pop  esi
+      pop  ebx
+      pop  ebp
+      ret
+   }
+}
+
+void call_nav_follow(void* lowLevel, void* leader, const float* offset)
+{
+   if (s_modtools) ((fn_nav_follow_t)s_navFollow)(lowLevel, leader, offset);
+   else            call_nav_follow_rt(lowLevel, leader, offset);
+}
+
+void call_nav_goto(void* lowLevel, const float* dest)
+{
+   if (s_modtools) ((fn_nav_goto_t)s_navGoto)(lowLevel, dest, nullptr, false, false);
+   else            call_nav_goto_rt(lowLevel, dest, nullptr, 0, 0);
 }
 
 float* call_reserve_offset(float* out, void* leader, void* follower, int type)
@@ -369,21 +444,29 @@ __declspec(naked) void formation_offset_rt()
 // ---- The turn: NavigatorFollowTarget::UpdateTarget's D3DXVec3TransformCoord --
 // A tagged offset, ours, turns to the squad's heading round the leader's
 // position, every update; anything else is the game's, turned by the matrix.
+// The way a leader's squad faces now, brought up to date; null while it has
+// none. `m` is the leader's matrix.
+const Heading* squad_heading(uint8_t* leader, const float* m)
+{
+   const float* velocity = call_vec(leader, kVt_GetVelocity);
+   if (!velocity) return nullptr;
+   const int64_t now = now_ticks();
+   LeaderHeading& entry = leader_entry(leader, now);
+   const float dt = (float)((double)(now - entry.stamp) / s_ticksPerSecond);
+   entry.stamp = now;
+   entry.heading = squad_formation::next_heading(entry.heading, {velocity[0], velocity[2]}, {m[8], m[10]}, dt);
+   return entry.heading.valid ? &entry.heading : nullptr;
+}
+
 bool turn_slot(float* out, const float* v, const float* m)
 {
    const uint8_t* nav = (const uint8_t*)v - kNav_FollowOffset;
    uint8_t* leader = *(uint8_t* const*)(nav + kNav_FollowTarget);
    if (!leader || *(const uint32_t*)(leader + kGO_HandleId) != *(const uint32_t*)(nav + kNav_FollowTargetId))
       return false;
-   const float* velocity = call_vec(leader, kVt_GetVelocity);
-   if (!velocity) return false;
-   const int64_t now = now_ticks();
-   LeaderHeading& entry = leader_entry(leader, now);
-   const float dt = (float)((double)(now - entry.stamp) / s_ticksPerSecond);
-   entry.stamp = now;
-   entry.heading = squad_formation::next_heading(entry.heading, {velocity[0], velocity[2]}, {m[8], m[10]}, dt);
-   if (!entry.heading.valid) return false;
-   const Vec3 p = squad_formation::slot_point({v[0], v[1], v[2]}, entry.heading.dir, m + 12);
+   const Heading* heading = squad_heading(leader, m);
+   if (!heading) return false;
+   const Vec3 p = squad_formation::slot_point({v[0], v[1], v[2]}, heading->dir, m + 12);
    out[0] = p.x;
    out[1] = p.y;
    out[2] = p.z;
@@ -399,6 +482,162 @@ float* __stdcall follow_transform(float* out, const float* v, const float* m)
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return ((fn_transform_t)*s_transformFn)(out, v, m);
+}
+
+// ---- The route: the follow agent's call to SetNavigator_FollowTarget --------
+// While a follower keeps up, the game's follow navigator walks it from crumb
+// to crumb in straight lines. Once it falls well behind, or makes no headway
+// as its squad moves on, it gets the route a unit going anywhere gets
+// (SetNavigator_Goto, the planner, round obstacles and barriers) to its
+// leader, whose position is always one a soldier can stand on, until it has
+// caught up (squad_formation_core.hpp).
+struct FollowerRoute {
+   const void* follower = nullptr;
+   uint32_t    handle = 0;
+   squad_formation::FollowState state;
+   const void* navigator = nullptr;   // the route it was last given, and its vptr: the
+   const void* vptr = nullptr;        // pool can hand its address to another navigator
+   int64_t     stamp = 0;
+};
+constexpr int kFollowers = 128;
+FollowerRoute s_routes[kFollowers];
+
+FollowerRoute& route_entry(const uint8_t* follower, int64_t now)
+{
+   const uint32_t handle = *(const uint32_t*)(follower + kGO_HandleId);
+   FollowerRoute* oldest = &s_routes[0];
+   for (auto& e : s_routes) {
+      if (e.follower == follower && e.handle == handle) {
+         e.stamp = now;
+         return e;
+      }
+      if (e.stamp < oldest->stamp) oldest = &e;
+   }
+   *oldest = FollowerRoute{};
+   oldest->follower = follower;
+   oldest->handle = handle;
+   oldest->stamp = now;
+   return *oldest;
+}
+
+// Where the agent wants the follower: its slot, as the navigator would put it.
+bool slot_in_world(uint8_t* leader, const float* offset, Vec2& slot)
+{
+   void* const iface = leader + kGO_MatrixIface;
+   const float* m = call_vec(iface, kVt_GetMatrix);
+   if (!m) return false;
+   if (squad_formation::is_tagged(offset[1])) {
+      const Heading* heading = squad_heading(leader, m);
+      if (!heading) return false;
+      const Vec3 p = squad_formation::slot_point({offset[0], offset[1], offset[2]}, heading->dir, m + 12);
+      slot = {p.x, p.z};
+   } else {   // a stock slot, turned by the matrix as D3DXVec3TransformCoord would
+      slot = {m[12] + offset[0] * m[0] + offset[1] * m[4] + offset[2] * m[8],
+              m[14] + offset[0] * m[2] + offset[1] * m[6] + offset[2] * m[10]};
+   }
+   return true;
+}
+
+// True when it saw to the follower's navigation itself; false to leave it to
+// the game's follow navigator.
+bool steer(uint8_t* lowLevel, uint8_t* leader, const float* offset)
+{
+   if (!lowLevel || !leader || !offset) return false;
+   uint8_t* const uc = *(uint8_t**)(lowLevel + kLL_Owner);
+   uint8_t* const owner = uc ? *(uint8_t**)(uc + kCtrl_Owner) : nullptr;
+   if (!owner) return false;
+   void* const trackable = owner + kOwner_Trackable;
+   uint8_t* const follower = ((fn_get_obj_t)(*(void***)trackable)[kVt_GetTrackable / 4])(trackable);
+   if (!follower) return false;
+   Vec2 slot;
+   if (!slot_in_world(leader, offset, slot)) return false;
+   const float* fp = (const float*)(follower + kGO_MatrixTrans);
+   const float* lp = (const float*)(leader + kGO_MatrixTrans);
+
+   const int64_t now = now_ticks();
+   FollowerRoute& route = route_entry(follower, now);
+   uint8_t* const navigator = *(uint8_t**)(lowLevel + kLL_Navigator);
+   const bool alive = navigator && navigator == route.navigator && *(void**)navigator == route.vptr &&
+                      !((fn_is_done_t)(*(void***)navigator)[kVt_NavIsDone / 4])(navigator);
+   const double seconds = (double)now / s_ticksPerSecond;
+   const auto action = squad_formation::follow_action(route.state, {fp[0], fp[2]}, slot, {lp[0], lp[2]}, alive,
+                                                      seconds);
+   if (action == squad_formation::FollowAction::Crumbs) return false;
+   if (action == squad_formation::FollowAction::Plan) {
+      const float dest[3] = {lp[0], lp[1], lp[2]};
+      call_nav_goto(lowLevel, dest);
+      route.navigator = *(uint8_t**)(lowLevel + kLL_Navigator);
+      route.vptr = route.navigator ? *(void* const*)route.navigator : nullptr;
+   }
+   // On a route the follow navigator is not there to set the pace: sprint while
+   // well behind, as it would.
+   const float dx = fp[0] - slot.x, dz = fp[2] - slot.z;
+   *(int*)(lowLevel + kLL_Height) =
+      dx * dx + dz * dz > squad_formation::kSprintBehind * squad_formation::kSprintBehind ? kHeightSprint
+                                                                                           : kHeightStand;
+   return true;
+}
+
+void follow_route(uint8_t* lowLevel, uint8_t* leader, const float* offset)
+{
+   __try {
+      if (steer(lowLevel, leader, offset)) return;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   call_nav_follow(lowLevel, leader, offset);   // the game's crumbs
+}
+
+// Modtools: thiscall(leader, offset), its two arguments popped, as __fastcall
+// with EDX unused.
+void __fastcall follow_route_mt(uint8_t* lowLevel, void*, uint8_t* leader, const float* offset)
+{
+   follow_route(lowLevel, leader, offset);
+}
+
+// Retail: ECX = the AILowLevel, the leader and the offset on the stack, popped
+// here. Every register but EAX comes back as it was, the XMM ones included.
+__declspec(naked) void follow_route_rt()
+{
+   __asm {
+      push   ebp
+      mov    ebp, esp
+      and    esp, 0xFFFFFFF0
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      push   ebx
+      push   esi
+      push   edi
+      push   ecx
+      push   edx
+      push   dword ptr [ebp + 12]   // the offset
+      push   dword ptr [ebp + 8]    // the leader
+      push   ecx                    // the AILowLevel
+      call   follow_route
+      add    esp, 12
+      pop    edx
+      pop    ecx
+      pop    edi
+      pop    esi
+      pop    ebx
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      mov    esp, ebp
+      pop    ebp
+      ret    8
+   }
 }
 
 // ---- Tag-alongs: PlayerController::CheckForAutoFollow -----------------------
@@ -633,6 +872,35 @@ void install_tag_alongs(uintptr_t base)
                s_defaults.autoFormUp ? "in formation" : "loose as stock", s_defaults.size);
 }
 
+// Followers' routes: the follow agent's call to SetNavigator_FollowTarget, and
+// SetNavigator_Goto by its prologue (no absolute addresses in it).
+void install_routes(uintptr_t base)
+{
+   if (!g_squadPathfinding) {
+      install_log("[SquadFormation] follower routes off (SquadPathfinding=0): followers walk the crumbs");
+      return;
+   }
+   const auto* a = g_addr;
+   if (!a->follow_set_navigator_call || !a->ai_set_navigator_follow_target || !a->ai_set_navigator_goto) {
+      install_log("[SquadFormation] follower routes NOT installed: no address set for this build");
+      return;
+   }
+   uint8_t* const at = (uint8_t*)resolve(base, a->follow_set_navigator_call);
+   const uintptr_t follow = (uintptr_t)resolve(base, a->ai_set_navigator_follow_target);
+   const uint8_t* go = (const uint8_t*)resolve(base, a->ai_set_navigator_goto);
+   const bool gotoOk = s_modtools ? std::memcmp(go, "\x83\xEC\x20\x53\x55\x56\x57\x8B\xF9", 9) == 0
+                                  : std::memcmp(go, "\x55\x8B\xEC\x83\xEC\x24\x53\x56\x57\x8B\xF9", 11) == 0;
+   if (!calls(at, follow) || !gotoOk) {
+      install_log("[SquadFormation] follower routes NOT installed: the follow agent's navigator calls differ");
+      return;
+   }
+   s_navFollow = follow;
+   s_navGoto = (uintptr_t)go;
+   redirect(s_routeSite, at, s_modtools ? (const void*)&follow_route_mt : (const void*)&follow_route_rt, 5);
+   install_log("[SquadFormation] follower routes installed: a follower left %.0f m behind, or stuck, plans a route "
+               "to its leader", (double)squad_formation::kPathFar);
+}
+
 // SendEvent and EventInfo's constructor, for the tag-alongs and AI squads, each
 // by its prologue (no absolute addresses in either).
 bool starts_with(const uint8_t* code, const char* bytes, size_t len)
@@ -706,6 +974,7 @@ void squad_formation_install(uintptr_t base)
    resolve_events(base);
    install_formation(base);
    install_tag_alongs(base);
+   install_routes(base);
 }
 
 void squad_formation_uninstall()
@@ -715,5 +984,6 @@ void squad_formation_uninstall()
    restore(s_turnSite);
    restore(s_countSite);
    restore(s_recruitSite);
+   restore(s_routeSite);
    s_classes.clear();
 }

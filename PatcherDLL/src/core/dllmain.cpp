@@ -321,6 +321,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_squadSpacing              = cfg.get_float("AI", "SquadSpacing", 3.0f);
       g_squadAutoFormUp           = cfg.get_bool("AI", "SquadAutoFormUp", true);
       g_squadSize                 = cfg.get_int("AI", "SquadSize", 4);
+      g_squadPathfinding          = cfg.get_bool("AI", "SquadPathfinding", true);
       g_aiSquads                  = cfg.get_bool("AI", "AISquads", true);
       g_aiSquadSize               = cfg.get_int("AI", "AISquadSize", 3);
       g_aiSquadRange              = cfg.get_float("AI", "AISquadRange", 20.0f);

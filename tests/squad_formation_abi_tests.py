@@ -19,6 +19,8 @@ source = (SRC / "ai/squad_formation.cpp").read_text()
 core = (SRC / "ai/squad_formation_core.hpp").read_text()
 addrs = (SRC / "core/game_addrs.hpp").read_text()
 goclass = (SRC / "game/Battlefront2/Source/GameObjectClass.h").read_text()
+sprint = (SRC / "ai/ai_sprint.cpp").read_text()
+sprint_core = (SRC / "ai/ai_sprint_core.hpp").read_text()
 
 
 def constant(text, name):
@@ -43,8 +45,22 @@ for name, value in {
     "kEv_Object": 0x38,
     "kFollowChr": 0x10,
     "kFollowChrLoose": 0x11,
+    "kGO_MatrixTrans": 0x120,
+    "kGO_MatrixIface": 0xC,
+    "kVt_GetMatrix": 0x40,
+    "kOwner_Trackable": 0x18,
+    "kVt_GetTrackable": 0x20,
+    "kLL_Owner": 0x14,
 }.items():
     assert constant(source, name) == value, name
+# The route reads as AI sprint reads them (tests/ai_sprint_abi_tests.py audits those).
+for name in ("kLL_Navigator", "kLL_Height", "kVt_NavIsDone"):
+    assert constant(source, name) == constant(sprint, name), name
+assert constant(source, "kHeightStand") == constant(sprint_core, "kHeightStand")
+assert constant(source, "kHeightSprint") == constant(sprint_core, "kHeightSprint")
+assert r'"\x83\xEC\x20\x53\x55\x56\x57\x8B\xF9", 9' in source            # Goto, modtools
+assert r'"\x55\x8B\xEC\x83\xEC\x24\x53\x56\x57\x8B\xF9", 11' in source    # Goto, retail
+assert "if (!calls(at, follow) || !gotoOk)" in source
 assert re.search(r"\bkAgentScale\s*=\s*2\.0f\s*;", core)
 assert 'pbl_hash("EntitySoldier")' in source
 for key in ("SquadLeader", "SquadSize", "SquadFormation", "SquadSpacing", "SquadFollower"):
@@ -58,7 +74,8 @@ assert "redirect(s_turnSite, turnAt, (const void*)&follow_transform, s_modtools 
 
 NAMES = ("follow_reserve_offset_call", "reserve_offset", "follow_target_transform_call",
          "follow_target_transform_ptr", "auto_follow_count_call", "reservation_count_for_object",
-         "auto_follow_recruit_call", "unit_controller_send_event")
+         "auto_follow_recruit_call", "unit_controller_send_event", "follow_set_navigator_call",
+         "ai_set_navigator_follow_target", "ai_set_navigator_goto")
 
 
 def namespace(text, name):
@@ -67,9 +84,12 @@ def namespace(text, name):
 
 
 expected_addrs = {
-    "modtools": (0x005B0AB1, 0x005C6840, 0x005A6A49, 0x00ADFC58, 0x0059ADE9, 0x005C6560, 0x0059AFC3, 0x0059F8A0),
-    "steam": (0x006687BC, 0x0062FA70, 0x005ACC31, 0x0076B54C, 0x0061C1B2, 0x0062F760, 0x0061C3E1, 0x006640D0),
-    "gog": (0x0066985C, 0x00630B10, 0x005ADBE1, 0x0076C548, 0x0061D222, 0x00630800, 0x0061D451, 0x00665170),
+    "modtools": (0x005B0AB1, 0x005C6840, 0x005A6A49, 0x00ADFC58, 0x0059ADE9, 0x005C6560, 0x0059AFC3, 0x0059F8A0,
+                 0x005B0AE1, 0x005A3180, 0x005A2E00),
+    "steam": (0x006687BC, 0x0062FA70, 0x005ACC31, 0x0076B54C, 0x0061C1B2, 0x0062F760, 0x0061C3E1, 0x006640D0,
+              0x0066880C, 0x0043C240, 0x0043BF30),
+    "gog": (0x0066985C, 0x00630B10, 0x005ADBE1, 0x0076C548, 0x0061D222, 0x00630800, 0x0061D451, 0x00665170,
+            0x006698AC, 0x0043C230, 0x0043BF20),
 }
 for build, values in expected_addrs.items():
     assert namespace(addrs, build) == dict(zip(NAMES, values)), build
@@ -90,6 +110,18 @@ mt_checks = {
     0x005B0AB6: [("mov", "edx, dword ptr [esp + 0x24]"), ("push", "eax"), ("push", "edx"),
                  ("lea", "eax, [esp + 0x30]"), ("push", "eax"), ("call", "0x40f461")],
     0x005B0AC9: [("add", "esp, 0x1c")],
+    # ... then AILowLevel (+0x2C4)::SetNavigator_FollowTarget(leader, &slot), thiscall, RET 8.
+    0x005B0AC6: [("mov", "ebp, dword ptr [esi + 0xc]"), ("add", "esp, 0x1c"), ("lea", "ecx, [esp + 0x18]"),
+                 ("push", "ecx"), ("mov", "ecx, edi"), ("add", "ebp, 0x2c4"), ("call", "0x40ddfa"), ("push", "eax"),
+                 ("mov", "ecx, ebp"), ("call", "0x40650a")],
+    0x0040650A: [("jmp", "0x5a3180")],
+    0x005A3213: [("ret", "8")],
+    # AILowLevel::SetNavigator_Goto(dest, obstacle, bool, bool): the unit through mOwner (+0x14), RET 0x10.
+    0x005A2E00: [("sub", "esp, 0x20"), ("push", "ebx"), ("push", "ebp"), ("push", "esi"), ("push", "edi"),
+                 ("mov", "edi, ecx"), ("call", "0x40d198"), ("mov", "eax, dword ptr [edi + 0x14]"),
+                 ("mov", "eax, dword ptr [eax + 4]"), ("mov", "edx, dword ptr [eax + 0x18]"),
+                 ("lea", "ecx, [eax + 0x18]"), ("call", "dword ptr [edx + 0x20]")],
+    0x005A2F1E: [("ret", "0x10")],
     # The layout helper: controller in EAX, 6 (wedge) above 10 m of open radius, else 2.
     0x005AFEE0: [("fld", "dword ptr [eax + 0x48]"), ("fcomp", "dword ptr [0xa33220]"), ("fnstsw", "ax"),
                  ("test", "ah, 0x41"), ("mov", "eax, 6"), ("je", "0x5afefa"), ("mov", "eax, 2"), ("ret", "")],
@@ -150,7 +182,7 @@ mt_rtti = {"EntitySoldier": 0x00B7E098}
 
 
 def retail(follow, helper, deref, reserve, table, single, xmm6, zero, turn, iat, check, count, recruit, ctor,
-           send, squad, helper_ten, scales, soldier, entry, special):
+           send, squad, helper_ten, scales, soldier, entry, special, nav_follow, nav_goto):
     """The checks Steam and GOG share, at each build's addresses."""
     return {
         # Tight follow: the scale from constants, the leader's velocity at GameObject vptr +0x44 ...
@@ -226,6 +258,17 @@ def retail(follow, helper, deref, reserve, table, single, xmm6, zero, turn, iat,
                 ("je", f"{squad + 0x17D:#x}")],
         squad + 0x17D: [("cmp", "eax, 0x10"), ("push", "dword ptr [esi + 0x3c]"),
                         ("sete", "byte ptr [ebp + 8]")],
+        # Then AILowLevel (+0x2C4)::SetNavigator_FollowTarget(leader, &slot), thiscall, RET 8.
+        follow + 0x35: [("lea", "eax, [esp + 0x18]"), ("mulss", "xmm0, xmm1"), ("push", "eax"),
+                        ("movss", "dword ptr [esp + 0x24], xmm0"), ("call", f"{deref:#x}"), ("push", "eax"),
+                        ("lea", "ecx, [esi + 0x2c4]"), ("call", f"{nav_follow:#x}")],
+        nav_follow: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr fs:[0]"), ("push", "-1")],
+        nav_follow + 0xB4: [("ret", "8")],
+        # SetNavigator_Goto(dest, obstacle, bool, bool): the unit through mOwner (+0x14), RET 0x10.
+        nav_goto: [("push", "ebp"), ("mov", "ebp, esp"), ("sub", "esp, 0x24"), ("push", "ebx"), ("push", "esi"),
+                   ("push", "edi"), ("mov", "edi, ecx"), ("call", f"{nav_goto - 0x90:#x}"),
+                   ("mov", "eax, dword ptr [edi + 0x14]"), ("mov", "ecx, dword ptr [eax + 4]")],
+        nav_goto + 0x102: [("ret", "0x10")],
         # Team::AddSpecialClass: the hero class bit.
         special + 0x15: [("or", "byte ptr [edx + 0x328], 2")],
     }
@@ -236,13 +279,13 @@ steam_checks = retail(follow=0x006687BC, helper=0x00667FC0, deref=0x0043A150, re
                       turn=0x005ACC31, iat=0x0076B54C, check=0x0061C1B0, count=0x0062F760, recruit=0x0061C3E1,
                       ctor=0x0043EDF0, send=0x006640D0, squad=0x0065E8A8, helper_ten=0x007B228C,
                       scales=(0x007B21D8, 0x007B21F0, 0x007B2188), soldier=0x01EBC054, entry=0x0061C150,
-                      special=0x00653F00)
+                      special=0x00653F00, nav_follow=0x0043C240, nav_goto=0x0043BF30)
 gog_checks = retail(follow=0x0066985C, helper=0x00669060, deref=0x0043A140, reserve=0x00630B10,
                     table=0x00630F4C, single=0x00630C91, xmm6=0x007B34B4, zero=0x007B2DD4,
                     turn=0x005ADBE1, iat=0x0076C548, check=0x0061D220, count=0x00630800, recruit=0x0061D451,
                     ctor=0x0043EDE0, send=0x00665170, squad=0x0065F948, helper_ten=0x007B3204,
                     scales=(0x007B3150, 0x007B3168, 0x007B3100), soldier=0x01EBD558, entry=0x0061D1C0,
-                    special=0x00654FA0)
+                    special=0x00654FA0, nav_follow=0x0043C230, nav_goto=0x0043BF20)
 steam_floats = {0x007B21D8: 2.0, 0x007B21F0: 2.2, 0x007B2188: 1.7, 0x007B22B8: 16.0, 0x007B228C: 10.0,
                 0x007B253C: -1.0, 0x007B1E5C: 0.0}
 gog_floats = {0x007B3150: 2.0, 0x007B3168: 2.2, 0x007B3100: 1.7, 0x007B3230: 16.0, 0x007B3204: 10.0,

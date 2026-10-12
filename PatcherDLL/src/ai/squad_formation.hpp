@@ -38,6 +38,24 @@
 //     camera never moves the squad. Any other offset (CTF escorts, convoys,
 //     a leader's class set to stock) goes to D3DX as before.
 //
+// Routes: the navigator walks the trail its slot leaves, a crumb every 2 m,
+// cutting across to a crumb up to 30 m off when a straight-line test finds the
+// way clear; it plans, on the coarse hub graph, only when a new navigator can
+// see no crumb at all. The trail runs wherever the slot went, through scenery
+// the leader walked beside, so a follower can stay caught on a wall or a
+// barrier. A unit going anywhere else, a loose follower included, gets
+// SetNavigator_Goto: the planner's route (A* under 50 m, the hub graph past
+// it). The follow agent's call to SetNavigator_FollowTarget goes to
+// follow_route, which leaves the crumbs to the game while the follower keeps
+// up, and gives it SetNavigator_Goto to the leader's position once it is more
+// than 10 m from its slot, or more than 3 m and has made no metre of headway
+// for 2 s while its slot moved on; it keeps the route until it is within 4 m
+// of its slot or its leader (squad_formation_core.hpp, follow_action). The
+// route's navigator is known by its address and vptr, and another is asked for
+// at most every 3 s, as the planner's queue sends a unit asking again to the
+// back. On a route it sprints while more than 4 m from its slot, as the follow
+// navigator would. Off with SquadPathfinding=0.
+//
 // Tag-alongs: PlayerController::CheckForAutoFollow recruits friendlies the
 // player runs past with EVT_SC_FollowChrLoose (0x11): no slot, a random spot
 // about 10 m behind, a loose group, until the player has two formation
@@ -119,6 +137,26 @@
 //   EventInfo                       mType +0x34, mGameObject +0x38 / +0x3C; its
 //                                   constructor only stores them (S 0x0043EDF0)
 //   Controller::mOwner              +0x4, the Controllable
+//   the follow agent's call to      0x005B0AE1 / 0x0066880C / 0x006698AC: ECX =
+//     SetNavigator_FollowTarget     the UnitController's AILowLevel (+0x2C4), the
+//                                   leader and &slot pushed (M through the thunk
+//                                   0x0040650A)
+//   AILowLevel::                    0x005A3180 / 0x0043C240 / 0x0043C230,
+//     SetNavigator_FollowTarget     thiscall(leader, offset), RET 8; it keeps the
+//                                   navigator only if it is a NavigatorFollowTarget
+//                                   (IsRtti, vptr +0x20) with the same leader and
+//                                   offset
+//   AILowLevel::SetNavigator_Goto   0x005A2E00 / 0x0043BF30 / 0x0043BF20,
+//                                   thiscall(dest, obstacle, bool, bool), RET 0x10;
+//                                   called (dest, null, false, false) as the game's
+//                                   own agents call it (UnitFollowAgent's loose
+//                                   move, P 0x00791E40). Retail reads only ECX and
+//                                   its stack.
+//   AILowLevel                      mOwner +0x14 (UnitController), mNavigator
+//                                   +0x18, mHeight +0x6C (0 stand, 3 sprint)
+//   Navigator                       vptr +0x14 IsDone
+//   a Controllable's GameObject     its Trackable at +0x18, vptr +0x20; position
+//                                   at GameObject +0x120
 //
 // Event types (Phantom's PDB, EventType): 0x0F EVQ_SC_IsFollowingChr, 0x10
 // EVT_SC_FollowChr, 0x11 EVT_SC_FollowChrLoose, 0x12 EVT_SC_StopFollowChr.
@@ -130,12 +168,14 @@
 //
 // INI: [AI] SquadFormation=auto|wedge|file|column|line|stock, SquadSpacing=3,
 // SquadAutoFormUp=1, SquadSize=4: the values for classes that set no key.
+// SquadPathfinding=1: follower routes (no ODF key).
 // =============================================================================
 
 extern int   g_squadFormation;     // squad_formation::Layout
 extern float g_squadSpacing;
 extern bool  g_squadAutoFormUp;
 extern int   g_squadSize;
+extern bool  g_squadPathfinding;
 
 void squad_formation_install(uintptr_t exe_base);
 void squad_formation_uninstall();
