@@ -6,6 +6,10 @@
 // AI squads: AI soldiers form squads with each other, a leader and followers
 // who keep formation behind it and fight round it.
 //
+// SWITCHED OFF (2026-10-12) until reworked: ai_squads_install logs and returns
+// (kAISquadsOn in ai_squads.cpp), and its INI keys are out of the registry and
+// unread. See the ROADMAP's "AI squads". The rest describes what was built.
+//
 // Stock BF2 has no AI-led squads: an AI follows a leader only when the player
 // commands it ("follow me"), tags along behind the player, or a Lua Follow goal
 // sends it. All three end in the same place: UnitController::SendEvent with an

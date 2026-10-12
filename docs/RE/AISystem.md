@@ -759,7 +759,21 @@ Why a commanded squad still clumps (inferred):
   +0x328 on S and G) set by `Team::AddSpecialClass`, Lua's `SetHeroClass` (M `0x00662EE0`,
   S `0x00653F00`, G `0x00654FA0`); `Character::IsHero` reads it (P `0x0049E1C0`).
 
+### Why `auto` is mostly a column (read 2026-10-12)
+
+`GetFormationType` (P `0x007926E0`) gives the wedge when `Controller::mOpenRadius` (+0x48) is above
+10. `Controller::UpdateFreeSpace` (P `0x004F1250`) sets it every 2 s of mission time
+(`mOpenRadiusTime`, +0x4C). It starts at 10 m with a step of 5 m, asks `PathFinder::IsPointValid`
+twice whether a circle of that radius, plus the unit's collision radius, is clear round the unit,
+and widens or narrows by the step, which halves. So the value is only ever 2.5, 7.5, 12.5 or 17.5,
+and above 10 only where a 10.5 m circle is clear. Anything within 10 m, such as a building, a rock or
+a barrier, gives double file in stock and a column under GameExt's `auto`. Each follower asks for
+itself, so one squad can mix shapes, and a follower's slot jumps when its answer changes.
+
 ### AI-led squads (built 2026-10-12)
+
+**Switched off (2026-10-12)** until reworked: `ai_squads_install` returns at once, whatever the INI
+or a class's keys say; see the ROADMAP's "AI squads". What follows is what was built.
 
 Stock BF2 has none: an AI follows a leader only when the player commands it, tags along behind the
 player, or a Lua `Follow` goal sends it. All three end in `UnitController::SendEvent` with an

@@ -427,6 +427,15 @@ list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
 
+**AI squads (built, switched off)** - AI soldiers can form squads with each other
+(`ai/ai_squads.*`), but it needs work, so nothing installs for now. `auto` drops to a column almost
+everywhere: the game's room test wants a clear 10 m circle, and each follower asks for itself, so a
+squad mixes shapes. A column also plays badly, and any class leads unless every ODF says otherwise.
+Your own squad's `auto` has the same column problem. Fixes: choose the shape once per squad, never a
+column, with a delay before switching; more layouts (staggered, echelon, diamond, arc, loose);
+spread out in combat; pick leaders without ODF edits (opt-in, INI class patterns, no snipers).
+Details in [docs/RE/AISystem.md](docs/RE/AISystem.md#ai-led-squads-built-2026-10-12).
+
 **New AI behaviours** - Melee units trade blows with little blocking or spacing, and general
 behaviour has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its
 14 behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can

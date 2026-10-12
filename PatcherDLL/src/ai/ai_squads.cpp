@@ -383,10 +383,18 @@ bool guard(const uint8_t* code, const char* bytes, const char* mask)
    return true;
 }
 
+// Off until reworked (ROADMAP, "AI squads"): nothing is installed, whatever
+// the INI or a class's ODF keys say. The code and its tests stay for then.
+constexpr bool kAISquadsOn = false;
+
 } // namespace
 
 void ai_squads_install(uintptr_t base)
 {
+   if (!kAISquadsOn) {
+      install_log("[AISquads] off: needs work, see the ROADMAP");
+      return;
+   }
    if (g_build != GameBuild::Modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
    const auto* a = g_addr;
    if (!a->controller_manager_update || !a->ai_controller_list) {

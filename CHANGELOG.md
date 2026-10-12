@@ -117,11 +117,6 @@ Scripts can check the running version through `GameExt.version`.
   formation, up to `SquadSize=4` (`SquadAutoFormUp=1`); heroes stay out. Soldier classes can set
   `SquadFormation`, `SquadSpacing`, `SquadSize` and `SquadFollower` in their ODFs, and those win
   over the INI. Not yet tested in play.
-- **AI squads** - AI soldiers form squads with each other: a leader and up to `AISquadSize=3`
-  followers within `AISquadRange=20` m, who keep formation and fight round it (`[AI] AISquads=1`).
-  A `SquadLeader` rank in a soldier class's ODF decides who leads, over the INI; heroes stay out.
-  Only a soldier on its way somewhere leads, and a squad whose leader stands still out of combat
-  for 20 s is let go, so snipers at their spots keep nobody standing about.
 - **Squad pathfinding** - A squad follower more than 10 m behind its place, or caught on
   something for 2 s as its squad moves on, finds its way to its leader round obstacles and
   barriers, as soldiers going anywhere else do, then falls back into formation. Stock followers
