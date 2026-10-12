@@ -13,8 +13,8 @@
 // UnitAgent::HandleSquadCommandEvent turns into a tight follow command. Nothing
 // in that path needs the leader to be a player.
 //
-// Once a second, before ControllerManager::Update, the tick walks every
-// controller and lists the AI soldiers: alive, on foot (an AI in a vehicle
+// Once a second, before ControllerManager::Update, the tick walks the AI
+// controllers and lists the AI soldiers: alive, on foot (an AI in a vehicle
 // controls the vehicle, not a soldier), with their team, position, whether
 // they already follow someone (their agent is a UnitFollowAgent) or are in
 // combat (UnitController state 2), and their class's squad keys. The squads it
@@ -41,11 +41,15 @@
 //     modtools cdecl(float dt); Steam and GOG take dt in XMM0, no stack
 //     argument, so their detour is a naked shim that keeps every register and
 //     jumps on to the trampoline.
-//   its list of every controller    the global 0x00B8EE6C / 0x01E30930 /
-//                                   0x01E31DDC: +4 the first node, a node's +4
-//                                   the next and +0xC the controller, a null
-//                                   controller the end; each one updated through
-//                                   vptr +0x14 (M 0x005997B3, S 0x00486392)
+//   sAICtrls, the AI controllers    the global 0x00B8EE70 / 0x01E30934 /
+//                                   0x01E31DCC: +4 the first node, a node's +4
+//                                   the next and +0xC the UnitController, a null
+//                                   controller the end. Update's decision budget
+//                                   walks it, and a loop that hands each one to a
+//                                   UnitController method (M 0x00599AFE, S and G
+//                                   0x004865D2, SendEvent). Its first loop walks
+//                                   sPlayerCtrls (0x00B8EE6C / 0x01E30930 /
+//                                   0x01E31DDC), player controllers only.
 //   Controller                      vptr +0x00 IsRtti; +0x4 mOwner, the
 //                                   Controllable; the Controllable's +0x18
 //                                   interface, vptr +0x20, gives its GameObject

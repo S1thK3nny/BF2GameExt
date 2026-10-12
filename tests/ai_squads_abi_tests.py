@@ -60,7 +60,7 @@ assert r'"\x55\x8B\xEC\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", 15' in 
 assert r'"\x55\x8B\xEC\x83\xEC\x10\x83\xEC\x08", 9' in formation
 assert constant(formation, "kEventInfoSize") == 0x58
 
-NAMES = ("controller_manager_update", "controller_list", "event_info_ctor", "unit_controller_send_event")
+NAMES = ("controller_manager_update", "ai_controller_list", "event_info_ctor", "unit_controller_send_event")
 
 
 def namespace(text, name):
@@ -68,20 +68,26 @@ def namespace(text, name):
     return {n: constant(body, n) for n in NAMES}
 
 
-assert namespace(addrs, "modtools") == dict(zip(NAMES, (0x005997A0, 0x00B8EE6C, 0x0052ADE0, 0x0059F8A0)))
-assert namespace(addrs, "steam") == dict(zip(NAMES, (0x00486370, 0x01E30930, 0x0043EDF0, 0x006640D0)))
-assert namespace(addrs, "gog") == dict(zip(NAMES, (0x00486370, 0x01E31DDC, 0x0043EDE0, 0x00665170)))
+assert namespace(addrs, "modtools") == dict(zip(NAMES, (0x005997A0, 0x00B8EE70, 0x0052ADE0, 0x0059F8A0)))
+assert namespace(addrs, "steam") == dict(zip(NAMES, (0x00486370, 0x01E30934, 0x0043EDF0, 0x006640D0)))
+assert namespace(addrs, "gog") == dict(zip(NAMES, (0x00486370, 0x01E31DCC, 0x0043EDE0, 0x00665170)))
 
 mt_checks = {
-    # ControllerManager::Update, cdecl(float): every controller in the list at [0xB8EE6C], the
-    # first node at +4, each node's controller at +0xC and the next at +4, updated through
-    # vptr +0x14 with dt.
+    # ControllerManager::Update, cdecl(float). Its first loop walks sPlayerCtrls at [0xB8EE6C], player
+    # controllers only (Phantom names it), updating each through vptr +0x14: not the list to read.
     0x005997A0: [("push", "ecx"), ("mov", "eax, dword ptr [0xb8ee6c]"), ("push", "ebx"), ("push", "ebp"),
                  ("push", "esi"), ("mov", "esi, dword ptr [eax + 4]"), ("mov", "ecx, dword ptr [esi + 0xc]"),
                  ("test", "ecx, ecx"), ("je", "0x5997c7"), ("mov", "eax, dword ptr [esp + 0x14]"),
                  ("mov", "edx, dword ptr [ecx]"), ("mov", "esi, dword ptr [esi + 4]"), ("push", "eax"),
                  ("call", "dword ptr [edx + 0x14]"), ("mov", "ecx, dword ptr [esi + 0xc]"),
                  ("test", "ecx, ecx"), ("jne", "0x5997b3")],
+    # sAICtrls at [0xB8EE70]: the first node at +4, each node's UnitController at +0xC (ECX for a
+    # UnitController method) and the next at +4, a null controller the end.
+    0x00599AFE: [("mov", "ecx, dword ptr [0xb8ee70]"), ("mov", "esi, dword ptr [ecx + 4]"),
+                 ("mov", "ecx, dword ptr [esi + 0xc]"), ("test", "ecx, ecx"), ("je", "0x599b24"),
+                 ("mov", "edi, edi"), ("mov", "edx, dword ptr [esp + 0x14]"), ("mov", "esi, dword ptr [esi + 4]"),
+                 ("push", "edx"), ("call", "0x416004"), ("mov", "ecx, dword ptr [esi + 0xc]"),
+                 ("test", "ecx, ecx")],
     # UnitController::UpdateHighLevel: the soldier through the owner's +0x18 interface, vptr
     # +0x20, and bit 3 of +0x1FC (the Damageable at +0x140, its word at +0xBC) for alive.
     0x005A03B1: [("mov", "edx, dword ptr [eax + 0x18]"), ("lea", "ecx, [eax + 0x18]"),
@@ -110,16 +116,22 @@ mt_slots = [(0x00A48810, 0x00, 0x005B00C0)]
 mt_rtti = {"UnitController": 0x00B8EFBC, "UnitFollowAgent": 0x00B8F20C, "EntitySoldier": 0x00B7E098}
 
 
-def retail(update, list_global, high_level, health, combat, send, ctor, follow_rtti, follow_global, team):
+def retail(update, player_list, ai_list, high_level, health, combat, send, ctor, follow_rtti, follow_global,
+           team):
     return {
-        # ControllerManager::Update: dt in XMM0, no stack argument; the same list walk.
+        # ControllerManager::Update: dt in XMM0, no stack argument; its first loop is sPlayerCtrls.
         update: [("push", "ebp"), ("mov", "ebp, esp"), ("and", "esp, 0xfffffff8"), ("sub", "esp, 0xc"),
-                 ("push", "ebx"), ("push", "esi"), ("mov", f"esi, dword ptr [{list_global:#x}]"), ("push", "edi"),
+                 ("push", "ebx"), ("push", "esi"), ("mov", f"esi, dword ptr [{player_list:#x}]"), ("push", "edi"),
                  ("movss", "dword ptr [esp + 0xc], xmm0"), ("mov", "esi, dword ptr [esi + 4]"),
                  ("mov", "ecx, dword ptr [esi + 0xc]"), ("test", "ecx, ecx"), ("je", f"{update + 0x3D:#x}"),
                  ("mov", "eax, dword ptr [ecx]"), ("mov", "esi, dword ptr [esi + 4]"), ("push", "ecx"),
                  ("movss", "dword ptr [esp], xmm0"), ("call", "dword ptr [eax + 0x14]"),
                  ("mov", "ecx, dword ptr [esi + 0xc]")],
+        # sAICtrls: each node's controller (+0xC) handed to SendEvent, a UnitController method.
+        update + 0x262: [("mov", f"esi, dword ptr [{ai_list:#x}]"), ("mov", "esi, dword ptr [esi + 4]"),
+                         ("mov", "eax, dword ptr [esi + 0xc]"), ("test", "eax, eax"), ("je", f"{update + 0x28E:#x}"),
+                         ("mov", "esi, dword ptr [esi + 4]"), ("mov", "ecx, eax"), ("push", "ebx"),
+                         ("call", f"{send:#x}"), ("cmp", "eax, 1")],
         high_level: [("mov", "ecx, dword ptr [esi + 4]"), ("add", "ecx, 0x18"), ("mov", "eax, dword ptr [ecx]"),
                      ("call", "dword ptr [eax + 0x20]"), ("mov", "eax, dword ptr [eax + 0x1fc]"), ("shr", "eax, 3"),
                      ("test", "al, 1")],
@@ -137,12 +149,12 @@ def retail(update, list_global, high_level, health, combat, send, ctor, follow_r
     }
 
 
-steam_checks = retail(update=0x00486370, list_global=0x01E30930, high_level=0x006639A7, health=0x0058E59D,
-                      combat=0x00663B92, send=0x006640D0, ctor=0x0043EDF0, follow_rtti=0x00667F00,
-                      follow_global=0x01F993E8, team=0x0061C1A2)
-gog_checks = retail(update=0x00486370, list_global=0x01E31DDC, high_level=0x00664A47, health=0x0058F53D,
-                    combat=0x00664C32, send=0x00665170, ctor=0x0043EDE0, follow_rtti=0x00668FA0,
-                    follow_global=0x01F9A89C, team=0x0061D212)
+steam_checks = retail(update=0x00486370, player_list=0x01E30930, ai_list=0x01E30934, high_level=0x006639A7,
+                      health=0x0058E59D, combat=0x00663B92, send=0x006640D0, ctor=0x0043EDF0,
+                      follow_rtti=0x00667F00, follow_global=0x01F993E8, team=0x0061C1A2)
+gog_checks = retail(update=0x00486370, player_list=0x01E31DDC, ai_list=0x01E31DCC, high_level=0x00664A47,
+                    health=0x0058F53D, combat=0x00664C32, send=0x00665170, ctor=0x0043EDE0,
+                    follow_rtti=0x00668FA0, follow_global=0x01F9A89C, team=0x0061D212)
 steam_slots = [(0x007AFB30, 0x00, 0x00667F00)]
 gog_slots = [(0x007B0AA8, 0x00, 0x00668FA0)]
 steam_rtti = {"UnitController": 0x01F99384, "UnitFollowAgent": 0x01F993E8, "EntitySoldier": 0x01EBC054}

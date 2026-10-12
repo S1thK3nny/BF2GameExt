@@ -768,9 +768,11 @@ a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
 
 - A tick runs once a second before `ControllerManager::Update` (M `0x005997A0`, cdecl(float); S and
   G `0x00486370`, the delta in XMM0 and no stack argument, behind a naked shim that keeps every
-  register). It walks the list of every controller that `Update` sends through vptr +0x14 (the global
-  M `0x00B8EE6C`, S `0x01E30930`, G `0x01E31DDC`; +4 the first node, a node's +4 the next and +0xC
-  the controller, a null controller the end).
+  register). It walks `sAICtrls`, the ordered list of every `UnitController` that `Update`'s decision
+  budget and its low-level loop walk (the global M `0x00B8EE70`, S `0x01E30934`, G `0x01E31DCC`; +4
+  the first node, a node's +4 the next and +0xC the controller, a null controller the end). The
+  list `Update` walks first, through vptr +0x14, is `sPlayerCtrls` (M `0x00B8EE6C`, S `0x01E30930`,
+  G `0x01E31DDC`): player controllers only. The first build walked that one and found no AI.
 - Each `UnitController` whose owner (+4, the GameObject through the owner's +0x18 interface, vptr
   +0x20) is a soldier, alive and with health, is a candidate. Alive is bit 3 of GameObject +0x1FC,
   the bit `UnitController::UpdateHighLevel` tests before a unit thinks at all (M `0x005A03BA`

@@ -55,12 +55,20 @@ using fn_is_rtti_t  = bool(__thiscall*)(void* self, uint32_t hash);
 using fn_get_obj_t  = uint8_t*(__thiscall*)(void* self);
 
 fn_update_t s_update = nullptr;   // ControllerManager::Update; the trampoline once detoured
-uint8_t**   s_list   = nullptr;   // the global holding the controller list
+uint8_t**   s_list   = nullptr;   // the global holding sAICtrls, the AI controllers
 bool        s_rt     = false;     // Steam / GOG: dt in XMM0
 bool        s_installed = false;
 float       s_range  = 20.0f;
 double      s_ticksPerSecond = 0.0;
 double      s_lastTick = 0.0;
+
+// A line in BF2GameExt.log now and then while squads change, so a run shows
+// whether they form: at most every 30 s, and 60 lines a session.
+constexpr double kReportSeconds = 30.0;
+constexpr int    kMaxReports    = 60;
+double s_lastReport = 0.0;
+int    s_reports    = 0;
+int    s_lastReported = -1;
 
 double seconds_now()
 {
@@ -137,7 +145,7 @@ Squad* squad_of(uint32_t leader)
    return &s;
 }
 
-// Every AI soldier, from the controller list.
+// Every AI soldier, from the AI controllers.
 void walk(double now)
 {
    s_count = 0;
@@ -201,6 +209,24 @@ void check_squads()
    s_squadCount = kept;
 }
 
+void report(double now, int refused)
+{
+   if (s_reports >= kMaxReports || now - s_lastReport < kReportSeconds) return;
+   int followers = 0, fighting = 0, following = 0;
+   for (int i = 0; i < s_squadCount; ++i) followers += s_squads[i].count;
+   for (int i = 0; i < s_count; ++i) {
+      fighting += s_units[i].combat;
+      following += !s_units[i].free;
+   }
+   const int state = s_squadCount * 1000 + followers;
+   if (state == s_lastReported && refused == 0) return;
+   s_lastReported = state;
+   s_lastReport = now;
+   ++s_reports;
+   install_log("[AISquads] %d squads with %d followers; %d AI soldiers seen, %d fighting, %d following anyone, "
+               "%d refused to join", s_squadCount, followers, s_count, fighting, following, refused);
+}
+
 void tick()
 {
    const double now = seconds_now();
@@ -209,17 +235,22 @@ void tick()
    walk(now);
    note_since(now);
    check_squads();
-   if (s_count < 2) return;
-
-   Recruit recruits[ai_squads::kMaxUnits];
-   const int n = ai_squads::plan(s_units, s_count, s_range, recruits, ai_squads::kMaxUnits);
-   for (int i = 0; i < n; ++i) {
-      const Seen& follower = s_seen[recruits[i].follower];
-      const Seen& leader = s_seen[recruits[i].leader];
-      if (squad_send_event(follower.uc, kFollowChr, leader.obj) != 1) continue;
-      Squad* s = squad_of(leader.handle);
-      if (s && s->count < squad_formation::kMaxSquadSize) s->members[s->count++] = follower.handle;
+   int refused = 0;
+   if (s_count >= 2) {
+      Recruit recruits[ai_squads::kMaxUnits];
+      const int n = ai_squads::plan(s_units, s_count, s_range, recruits, ai_squads::kMaxUnits);
+      for (int i = 0; i < n; ++i) {
+         const Seen& follower = s_seen[recruits[i].follower];
+         const Seen& leader = s_seen[recruits[i].leader];
+         if (squad_send_event(follower.uc, kFollowChr, leader.obj) != 1) {
+            ++refused;
+            continue;
+         }
+         Squad* s = squad_of(leader.handle);
+         if (s && s->count < squad_formation::kMaxSquadSize) s->members[s->count++] = follower.handle;
+      }
    }
+   report(now, refused);
 }
 
 void safe_tick()
@@ -286,7 +317,7 @@ void ai_squads_install(uintptr_t base)
 {
    if (g_build != GameBuild::Modtools && g_build != GameBuild::Steam && g_build != GameBuild::GOG) return;
    const auto* a = g_addr;
-   if (!a->controller_manager_update || !a->controller_list) {
+   if (!a->controller_manager_update || !a->ai_controller_list) {
       install_log("[AISquads] NOT installed: no address set for this build");
       return;
    }
@@ -312,7 +343,7 @@ void ai_squads_install(uintptr_t base)
                   (unsigned)a->controller_manager_update);
       return;
    }
-   s_list = (uint8_t**)resolve(base, a->controller_list);
+   s_list = (uint8_t**)resolve(base, a->ai_controller_list);
    s_update = (fn_update_t)code;
 
    // Installed whatever the INI says: a class's SquadLeader decides for it.
