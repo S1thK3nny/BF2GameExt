@@ -661,10 +661,11 @@ The AI deliberately misses shots via `DumbDown` (1270 bytes) and `CalculateBubbl
 
 ---
 
-## Squad formations (researched 2026-10-11, player squads built 2026-10-12)
+## Squad formations (researched 2026-10-11, built 2026-10-12)
 
 Read in Ghidra by a research pass, then re-read on every build for `[AI] SquadFormation` and
-`[AI] SquadAutoFormUp` (`ai/squad_formation.cpp`, built below). AI-led squads are not built. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
+`[AI] SquadAutoFormUp` (`ai/squad_formation.cpp`) and for AI-led squads (`ai/ai_squads.cpp`), both
+built below. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
 shows them and move with the exe.
 
 ### Two kinds of follower
@@ -757,6 +758,41 @@ Why a commanded squad still clumps (inferred):
   win over the INI key by key. A hero class is one with bit 1 of the class flags byte (+0x36C on M,
   +0x328 on S and G) set by `Team::AddSpecialClass`, Lua's `SetHeroClass` (M `0x00662EE0`,
   S `0x00653F00`, G `0x00654FA0`); `Character::IsHero` reads it (P `0x0049E1C0`).
+
+### AI-led squads (built 2026-10-12)
+
+Stock BF2 has none: an AI follows a leader only when the player commands it, tags along behind the
+player, or a Lua `Follow` goal sends it. All three end in `UnitController::SendEvent` with an
+`EventInfo` of `EVT_SC_FollowChr` about the leader, and nothing on that path needs the leader to be
+a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
+
+- A tick runs once a second before `ControllerManager::Update` (M `0x005997A0`, cdecl(float); S and
+  G `0x00486370`, the delta in XMM0 and no stack argument, behind a naked shim that keeps every
+  register). It walks the list of every controller that `Update` sends through vptr +0x14 (the global
+  M `0x00B8EE6C`, S `0x01E30930`, G `0x01E31DDC`; +4 the first node, a node's +4 the next and +0xC
+  the controller, a null controller the end).
+- Each `UnitController` whose owner (+4, the GameObject through the owner's +0x18 interface, vptr
+  +0x20) is a soldier, alive and with health, is a candidate. Alive is bit 3 of GameObject +0x1FC,
+  the bit `UnitController::UpdateHighLevel` tests before a unit thinks at all (M `0x005A03BA`
+  through the Damageable at +0x140, S `0x006639B2`, G `0x00664A52`). Health is +0x144, as Lua's
+  `GetObjectHealth` reads it (M `0x004720E1`, S `0x0058E59D`, G `0x0058F53D`), and the team the low
+  4 bits of +0x234, signed. It already follows someone when its agent (+0x2C0, as `SendEvent` reads
+  it) answers `IsRtti` (slot 0) for `UnitFollowAgent` (M `0x005B00C0`, S `0x00667F00`,
+  G `0x00668FA0`), and fights while its state (+0x7C) is 2.
+- Recruits are built with the game's `EventInfo` constructor (M `0x0052ADE0`, S `0x0043EDF0`,
+  G `0x0043EDE0`; thiscall, RET 8, 0x58 bytes, a destructor that does nothing). Squads the tick made
+  are checked each tick with `EVQ_SC_IsFollowingChr`, which `UnitFollowAgent::EventHandler` answers 1
+  only about the leader it follows (P `0x00792300`).
+- `UnitCombatAgent::EventHandler` hands a squad command on to `UnitAgent`'s (P `0x0078A300`), so a
+  fighting unit would leave its fight to follow: the tick takes nobody in combat, and starts no
+  squad round a leader in combat.
+- `HandleSquadCommandEvent` plays `VOT_SC_FollowResponse` for each recruit, through
+  `VOHelper::Play` with no listener, which plays it at the local player (P `0x0041BAA9`).
+- A squad ends with its leader: a follower whose leader's handle goes stale leaves its follow state,
+  and one whose leader boards a vehicle boards it too (`UnitBoardInfo`), as for the player.
+- Points as a tie-break were left out: `PlayerStats` is `sPlayerStats[(character - sCharacters) /
+  0x1B0]` (P `Character::GetPlayerStats`, `0x0049DE60`), more reads per build than a tie-break is
+  worth. The tick notes when it first sees each soldier instead.
 
 ## AI sprinting (researched 2026-10-11, built 2026-10-12)
 

@@ -72,6 +72,9 @@ Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 h
 | `SquadSpacing` | `3` | Metres between squad members in formation. Range 1.5 to 10. A class's SquadSpacing ODF key decides for its squads instead |
 | `SquadAutoFormUp` | `1` | Friendlies who start following you on their own join your squad in formation, as if you had ordered them to follow. Stock BF2 has them trail in a loose group instead. Set 0 for stock. A SquadSize ODF key on your class decides instead |
 | `SquadSize` | `4` | How many followers a squad takes, counting friendlies who join you on their own while SquadAutoFormUp is on. Stock BF2 stops those at 2 followers in formation. Range 1 to 8. A class's SquadSize ODF key decides for its squads instead |
+| `AISquads` | `1` | AI soldiers form squads with each other: a leader and followers who keep formation behind it and fight round it. Heroes stay out. A soldier class's SquadLeader and SquadFollower ODF keys decide who leads and who joins instead, even with this off. Set 0 for stock |
+| `AISquadSize` | `3` | Followers an AI squad leader takes. Range 1 to 8. A class's SquadSize ODF key decides for its squads instead |
+| `AISquadRange` | `20` | How far, in metres, an AI squad leader looks for soldiers to join it. Range 5 to 60 |
 | `PlayerAwarenessFairness` | `1` | AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock |
 
 ## Controller

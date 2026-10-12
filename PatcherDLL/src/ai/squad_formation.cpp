@@ -59,9 +59,13 @@ constexpr uint32_t kHashFollower  = pbl_hash("SquadFollower");
 using fn_reserve_offset_t = float*(__cdecl*)(float* out, void* leader, void* follower, int type);
 using fn_count_t          = int(__cdecl*)(void* obj, int team, int type);
 using fn_send_event_t     = int(__thiscall*)(void* uc, void* ev);
+using fn_event_ctor_t     = void*(__thiscall*)(void* ev, int type, void* obj);
 using fn_transform_t      = float*(__stdcall*)(float* out, const float* v, const float* m);
 using fn_get_vec_t        = const float*(__thiscall*)(void* self);
 using fn_is_rtti_t        = bool(__thiscall*)(void* self, uint32_t hash);
+
+// EventInfo is 0x58 bytes; its destructor does nothing on any build.
+constexpr size_t kEventInfoSize = 0x58;
 
 Defaults  s_defaults;
 bool      s_modtools      = false;
@@ -69,6 +73,7 @@ bool      s_odf           = false;
 uintptr_t s_reserveOffset = 0;   // the game's ReserveOffset
 uintptr_t s_count         = 0;   // ReserveManager::GetReservationCountForObject
 uintptr_t s_sendEvent     = 0;   // UnitController::SendEvent
+uintptr_t s_eventCtor     = 0;   // EventInfo::EventInfo(EventType, GameObject*)
 void* const* s_transformFn = nullptr;   // the pointer D3DXVec3TransformCoord is called through
 
 // A redirected call: where, and the bytes it had.
@@ -140,6 +145,27 @@ __declspec(naked) int __cdecl call_send_event_rt(void*, void*)
       push dword ptr [ebp + 12]      // the event
       mov  ecx, dword ptr [ebp + 8]  // the UnitController
       call dword ptr [s_sendEvent]
+      pop  edi
+      pop  esi
+      pop  ebx
+      pop  ebp
+      ret
+   }
+}
+
+// EventInfo's constructor: thiscall, its two arguments popped by itself.
+__declspec(naked) void* __cdecl call_event_ctor_rt(void*, int, void*)
+{
+   __asm {
+      push ebp
+      mov  ebp, esp
+      push ebx
+      push esi
+      push edi
+      push dword ptr [ebp + 16]      // the object
+      push dword ptr [ebp + 12]      // the type
+      mov  ecx, dword ptr [ebp + 8]  // the EventInfo
+      call dword ptr [s_eventCtor]
       pop  edi
       pop  esi
       pop  ebx
@@ -597,8 +623,7 @@ void install_tag_alongs(uintptr_t base)
    uint8_t* const countAt = (uint8_t*)resolve(base, a->auto_follow_count_call);
    uint8_t* const recruitAt = (uint8_t*)resolve(base, a->auto_follow_recruit_call);
    s_count = (uintptr_t)resolve(base, a->reservation_count_for_object);
-   s_sendEvent = (uintptr_t)resolve(base, a->unit_controller_send_event);
-   if (!calls(countAt, s_count) || !calls(recruitAt, s_sendEvent)) {
+   if (!s_sendEvent || !calls(countAt, s_count) || !calls(recruitAt, s_sendEvent)) {
       install_log("[SquadFormation] tag-alongs NOT installed: CheckForAutoFollow's calls differ");
       return;
    }
@@ -608,7 +633,57 @@ void install_tag_alongs(uintptr_t base)
                s_defaults.autoFormUp ? "in formation" : "loose as stock", s_defaults.size);
 }
 
+// SendEvent and EventInfo's constructor, for the tag-alongs and AI squads, each
+// by its prologue (no absolute addresses in either).
+bool starts_with(const uint8_t* code, const char* bytes, size_t len)
+{
+   return std::memcmp(code, bytes, len) == 0;
+}
+
+void resolve_events(uintptr_t base)
+{
+   const auto* a = g_addr;
+   if (!a->unit_controller_send_event || !a->event_info_ctor) return;
+   const uint8_t* send = (const uint8_t*)resolve(base, a->unit_controller_send_event);
+   const uint8_t* ctor = (const uint8_t*)resolve(base, a->event_info_ctor);
+   const bool ok = s_modtools
+      ? starts_with(send, "\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", 12) &&
+        starts_with(ctor, "\x83\xEC\x0C\x56\x57\x33\xFF\x83\xEC\x08", 10)
+      : starts_with(send, "\x55\x8B\xEC\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", 15) &&
+        starts_with(ctor, "\x55\x8B\xEC\x83\xEC\x10\x83\xEC\x08", 9);
+   if (!ok) {
+      install_log("[SquadFormation] SendEvent or EventInfo's constructor differs: no squad events");
+      return;
+   }
+   s_sendEvent = (uintptr_t)send;
+   s_eventCtor = (uintptr_t)ctor;
+}
+
 } // namespace
+
+const squad_formation::ClassKeys* squad_class_keys(uint8_t* soldier)
+{
+   return soldier_keys(soldier);
+}
+
+bool squad_is_hero(const uint8_t* obj)
+{
+   return obj && is_hero(obj);
+}
+
+squad_formation::Defaults& squad_defaults()
+{
+   return s_defaults;
+}
+
+int squad_send_event(void* unitController, int type, void* leader)
+{
+   if (!s_sendEvent || !s_eventCtor || !unitController || !leader) return -1;
+   alignas(16) uint8_t ev[kEventInfoSize + 8] = {};
+   if (s_modtools) ((fn_event_ctor_t)s_eventCtor)(ev, type, leader);
+   else            call_event_ctor_rt(ev, type, leader);
+   return call_send_event(unitController, ev);
+}
 
 void squad_formation_install(uintptr_t base)
 {
@@ -628,6 +703,7 @@ void squad_formation_install(uintptr_t base)
    // neither set every call goes on to the game unchanged.
    s_odf = odf_add_property_handler(on_property) && odf_add_derive_handler(on_derive);
    if (!s_odf) install_log("[SquadFormation] ODF keys unavailable: no listener slot left; the INI decides");
+   resolve_events(base);
    install_formation(base);
    install_tag_alongs(base);
 }

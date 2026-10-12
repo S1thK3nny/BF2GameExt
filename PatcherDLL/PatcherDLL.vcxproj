@@ -246,6 +246,8 @@
     <ClInclude Include="src\ai\ai_sprint_core.hpp" />
     <ClInclude Include="src\ai\squad_formation.hpp" />
     <ClInclude Include="src\ai\squad_formation_core.hpp" />
+    <ClInclude Include="src\ai\ai_squads.hpp" />
+    <ClInclude Include="src\ai\ai_squads_core.hpp" />
     <ClInclude Include="src\ai\reservation_pool.hpp" />
     <ClInclude Include="src\core\build_field.hpp" />
     <ClInclude Include="src\core\entity_layout.hpp" />
@@ -309,6 +311,7 @@
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\ai\ai_sprint.cpp" />
     <ClCompile Include="src\ai\squad_formation.cpp" />
+    <ClCompile Include="src\ai\ai_squads.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
     <ClCompile Include="src\entity\instance_props.cpp" />
     <ClCompile Include="src\entity\soldier_prone.cpp" />

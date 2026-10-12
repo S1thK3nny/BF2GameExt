@@ -1,5 +1,7 @@
 #pragma once
 
+#include "squad_formation_core.hpp"
+
 #include <stdint.h>
 
 // =============================================================================
@@ -54,7 +56,7 @@
 //                                  player's class, above 0, tag-alongs form up
 //   SquadFollower                  the follower's class: 0 never joins a squad.
 //                                  Unset, heroes (Team::AddSpecialClass) do not
-//   SquadLeader                    read and kept for AI-led squads, not built yet
+//   SquadLeader                    who leads an AI squad (ai_squads.hpp)
 //
 // READ ON ALL THREE BUILDS (modtools / Steam / GOG):
 //
@@ -137,3 +139,13 @@ extern int   g_squadSize;
 
 void squad_formation_install(uintptr_t exe_base);
 void squad_formation_uninstall();
+
+// For AI-led squads (ai_squads.cpp), from what this module keeps: the ODF keys
+// of a soldier's class (null for none, or for anything but a soldier), whether
+// an object's class is a team's hero class, the INI's values (AI squads set
+// theirs at install), and an EventInfo of `type` about `leader` sent to a
+// UnitController: SendEvent's answer, or -1 where the build has neither.
+const squad_formation::ClassKeys* squad_class_keys(uint8_t* soldier);
+bool squad_is_hero(const uint8_t* obj);
+squad_formation::Defaults& squad_defaults();
+int squad_send_event(void* unitController, int type, void* leader);

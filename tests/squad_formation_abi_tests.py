@@ -53,7 +53,7 @@ assert constant(goclass, "kHeroClass") == 0x02
 assert "mTargetFlags{0x36C, 0x328}" in goclass
 # The slot and the turn go in together, as do the count and the recruit.
 assert "if (!calls(offsetAt, s_reserveOffset) || !calls_through(turnAt, pointer))" in source
-assert "if (!calls(countAt, s_count) || !calls(recruitAt, s_sendEvent))" in source
+assert "if (!s_sendEvent || !calls(countAt, s_count) || !calls(recruitAt, s_sendEvent))" in source
 assert "redirect(s_turnSite, turnAt, (const void*)&follow_transform, s_modtools ? 5 : 6);" in source
 
 NAMES = ("follow_reserve_offset_call", "reserve_offset", "follow_target_transform_call",

@@ -235,6 +235,14 @@ void odf_over_the_ini()
    ClassKeys stock;
    stock.hasFormation = true; stock.formation = Layout::Stock;
    assert(formation_for(&stock, on) == Layout::Stock);
+
+   // An AI leader's squad: its class's SquadSize, as for the player, or the INI's for AI squads.
+   assert(ai_size_for(nullptr, on) == on.aiSize && on.aiSize != on.size);
+   ClassKeys sized;
+   sized.hasSize = true; sized.size = 5;
+   assert(ai_size_for(&sized, off) == 5 && size_for(&sized, off) == 5);
+   sized.size = 40;
+   assert(ai_size_for(&sized, on) == kMaxSquadSize);
 }
 
 void heroes_keep_out_unless_told()

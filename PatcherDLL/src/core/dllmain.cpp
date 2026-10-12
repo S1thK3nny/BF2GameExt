@@ -57,6 +57,7 @@
 #include "ai/ai_update_budget.hpp"
 #include "ai/ai_sprint.hpp"
 #include "ai/squad_formation.hpp"
+#include "ai/ai_squads.hpp"
 #include "ai/squad_formation_core.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -320,6 +321,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_squadSpacing              = cfg.get_float("AI", "SquadSpacing", 3.0f);
       g_squadAutoFormUp           = cfg.get_bool("AI", "SquadAutoFormUp", true);
       g_squadSize                 = cfg.get_int("AI", "SquadSize", 4);
+      g_aiSquads                  = cfg.get_bool("AI", "AISquads", true);
+      g_aiSquadSize               = cfg.get_int("AI", "AISquadSize", 3);
+      g_aiSquadRange              = cfg.get_float("AI", "AISquadRange", 20.0f);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
@@ -449,6 +453,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
    ai_sprint_install(exe_base);        // Detours .text
    squad_formation_install(exe_base);  // rewrites a CALL rel32, byte-patches .text - needs the RW window
+   ai_squads_install(exe_base);        // Detours .text; after squad_formation, whose keys and events it uses
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.

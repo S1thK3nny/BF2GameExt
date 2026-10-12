@@ -117,6 +117,10 @@ Scripts can check the running version through `GameExt.version`.
   formation, up to `SquadSize=4` (`SquadAutoFormUp=1`); heroes stay out. Soldier classes can set
   `SquadFormation`, `SquadSpacing`, `SquadSize` and `SquadFollower` in their ODFs, and those win
   over the INI. Not yet tested in play.
+- **AI squads** - AI soldiers form squads with each other: a leader and up to `AISquadSize=3`
+  followers within `AISquadRange=20` m, who keep formation and fight round it (`[AI] AISquads=1`).
+  A `SquadLeader` rank in a soldier class's ODF decides who leads, over the INI; heroes stay out.
+  Not yet tested in play.
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

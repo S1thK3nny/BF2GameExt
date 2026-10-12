@@ -48,6 +48,7 @@
 #include "ai/ai_update_budget.hpp"
 #include "ai/ai_sprint.hpp"
 #include "ai/squad_formation.hpp"
+#include "ai/ai_squads.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
@@ -390,6 +391,7 @@ void lua_hooks_uninstall()
    content_census_uninstall();
    ai_update_budget_uninstall();
    ai_sprint_uninstall();
+   ai_squads_uninstall();
    squad_formation_uninstall();
    memory_pool_heap_fix_uninstall();
 

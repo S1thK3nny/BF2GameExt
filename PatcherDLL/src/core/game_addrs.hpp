@@ -1313,6 +1313,15 @@ namespace modtools {
    constexpr uintptr_t reservation_count_for_object = 0x005C6560;
    constexpr uintptr_t auto_follow_recruit_call     = 0x0059AFC3;
    constexpr uintptr_t unit_controller_send_event   = 0x0059F8A0;
+   // EventInfo::EventInfo(EventType, GameObject*): thiscall, RET 8, 0x58 bytes
+   // (through the thunk 0x00407C61). AI squads build their "follow me" with it.
+   constexpr uintptr_t event_info_ctor              = 0x0052ADE0;
+   // ControllerManager::Update, cdecl(float dt), and the global holding its list
+   // of every controller (+4 the first node; a node's +4 the next, +0xC the
+   // controller; a null controller ends it), each updated through vptr +0x14.
+   // AI squads detour it for their tick (ai/ai_squads.cpp).
+   constexpr uintptr_t controller_manager_update    = 0x005997A0;
+   constexpr uintptr_t controller_list              = 0x00B8EE6C;
    // EntityHover::CollisionCallback: thiscall(CollisionResult*, CollisionObject*
    // other, Restrictor*), RET 0xC, bool in AL; `this` is the hover + 0xC, its
    // CollisionObject part. Slot 6 (+0x18) of the CollisionObject vtable of
@@ -2788,6 +2797,12 @@ namespace steam {
    constexpr uintptr_t reservation_count_for_object = 0x0062F760;
    constexpr uintptr_t auto_follow_recruit_call     = 0x0061C3E1;
    constexpr uintptr_t unit_controller_send_event   = 0x006640D0;
+   // EventInfo's constructor, as on modtools. ControllerManager::Update takes
+   // its delta in XMM0 here, no stack argument; its controller list, as on
+   // modtools.
+   constexpr uintptr_t event_info_ctor              = 0x0043EDF0;
+   constexpr uintptr_t controller_manager_update    = 0x00486370;
+   constexpr uintptr_t controller_list              = 0x01E30930;
    // EntityHover::CollisionCallback, as on modtools: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079BC98) and CommandHover
    // (0x0079834C).
@@ -3492,6 +3507,9 @@ namespace gog {
    constexpr uintptr_t reservation_count_for_object = 0x00630800;
    constexpr uintptr_t auto_follow_recruit_call     = 0x0061D451;
    constexpr uintptr_t unit_controller_send_event   = 0x00665170;
+   constexpr uintptr_t event_info_ctor              = 0x0043EDE0;
+   constexpr uintptr_t controller_manager_update    = 0x00486370;
+   constexpr uintptr_t controller_list              = 0x01E31DDC;
    // EntityHover::CollisionCallback, at Steam's address: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079CC38) and CommandHover
    // (0x007992EC).

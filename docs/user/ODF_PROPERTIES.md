@@ -64,6 +64,7 @@ Set on the concrete soldier class.
 | `SquadFormation` | `auto`, `wedge`, `file`, `column`, `line` or `stock` | How squads this class leads line up. `auto` is a wedge where there is room and a column where there is not; `file` is two abreast; `line` is abreast of the leader. See [Squads](#squads). | 1.2.0 |
 | `SquadSpacing` | metres | Space between members of squads this class leads, 1.5 to 10. | 1.2.0 |
 | `SquadSize` | number | How many followers squads this class leads take, 0 to 8. On the class you play, friendlies who start following you on their own join your squad in formation while this is above 0, and trail loosely as in stock BF2 at 0. | 1.2.0 |
+| `SquadLeader` | rank, `0` to `100` | Who leads AI squads. Among soldiers of a side near each other the highest rank leads, and a soldier joins only a leader ranked at least as high as itself; `0` never leads. Unset, any class but a hero leads at rank 1 while `[AI] AISquads` is on, and none while it is off. | 1.2.0 |
 | `SquadFollower` | `0` or `1` | `0` keeps the class out of squads: it never joins one in formation. Hero classes stay out unless they set `1`. | 1.2.0 |
 
 **Notes on the override texture slots.** The model needs a material named `override_texture3`, `override_texture4` or `override_texture5` for the matching slot to do anything, following the same naming the stock two slots use. `OverrideTexture` must also be set or none of the extra slots apply. They are read off the concrete class only and are not inherited through `ClassParent`.
@@ -567,6 +568,14 @@ SquadSize      = "3"
 ```
 
 Set them on a side's common base class and every unit that inherits from it drills the same way. The squad faces the way it travels: turning to look round does not swing it. CTF escorts round a flag carrier and vehicle convoys keep the game's own slots. Squads are run on the host and in single player; clients see the result.
+
+AI soldiers also form squads of their own (`[AI] AISquads`). Among soldiers of a side near each other (`[AI] AISquadRange`), the highest `SquadLeader` rank leads, the one alive longest when ranks tie, and the others join it up to its `SquadSize` (`[AI] AISquadSize` when unset). A soldier joins only a leader ranked at least as high as itself, never while it is fighting, and never with `SquadFollower = 0`. A squad lasts until its leader dies or boards a vehicle, which its followers then board too. As with the other properties, `SquadLeader` set on a class wins over the INI, so a mod can have its officers lead squads even where the player set `AISquads=0`:
+
+```
+[Properties]
+SquadLeader = "3"
+SquadSize   = "4"
+```
 
 ## Building Classes
 

@@ -460,6 +460,12 @@
     <ClInclude Include="src\ai\squad_formation_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\ai_squads.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_squads_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\reservation_pool.hpp">
       <Filter>ai</Filter>
     </ClInclude>
@@ -892,6 +898,9 @@
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\squad_formation.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\ai_squads.cpp">
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\instance_props.cpp">

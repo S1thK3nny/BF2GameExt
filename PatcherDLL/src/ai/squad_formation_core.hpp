@@ -254,9 +254,10 @@ inline bool set_key(ClassKeys& keys, Key key, const char* value)
 struct Defaults {
    Layout formation  = Layout::Auto;
    float  spacing    = kDefaultSpacing;
-   int    size       = 4;
+   int    size       = 4;      // the player's squad
    bool   autoFormUp = true;   // friendlies who tag along join the player's squad
    bool   aiSquads   = true;   // AI lead squads of their own
+   int    aiSize     = 3;      // an AI leader's squad
 };
 
 // The leader's class decides the squad's layout, spacing and size.
@@ -273,6 +274,14 @@ inline float spacing_for(const ClassKeys* leader, const Defaults& d)
 inline int size_for(const ClassKeys* leader, const Defaults& d)
 {
    const int size = leader && leader->hasSize ? leader->size : d.size;
+   return size < 0 ? 0 : size > kMaxSquadSize ? kMaxSquadSize : size;
+}
+
+// An AI leader's squad: its class's SquadSize, as for the player, or the INI's
+// size for AI squads.
+inline int ai_size_for(const ClassKeys* leader, const Defaults& d)
+{
+   const int size = leader && leader->hasSize ? leader->size : d.aiSize;
    return size < 0 ? 0 : size > kMaxSquadSize ? kMaxSquadSize : size;
 }
 
