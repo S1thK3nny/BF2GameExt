@@ -34,6 +34,13 @@
 // not join unless their class sets 1). A squad takes SquadSize from the
 // leader's class, or [AI] AISquadSize.
 //
+// Only a soldier on its way somewhere recruits, its navigator taking it 20 m or
+// more (read as AI sprint reads it): a sniper settled at its spot, or a unit
+// holding or defending a place, takes nobody along. A squad whose leader stands
+// within 3 m of one place out of combat for 20 s is let go: each follower's
+// UnitFollowAgent gets SetNextState(100), what its own stop-follow handling
+// does, without the voice line that comes with the event.
+//
 // Each recruit plays the game's own follow response, as for the player's
 // command: VOHelper::Play with no listener plays it at the local player.
 //
@@ -58,9 +65,12 @@
 //                                   (CheckForAutoFollow's own reads)
 //   UnitController                  +0x7C state (2 in combat, as AI sprint reads
 //                                   it); +0x2C0 mAgent (SendEvent: M 0x0059F8A6,
-//                                   S 0x006640D9)
-//   UnitAgent's vtable              +0x00 EnterState, +0x20 IsRtti, +0x50
-//                                   EventHandler (Phantom's UnitAgent_vftable;
+//                                   S 0x006640D9); +0x2C4 AILowLevel, its +0x18
+//                                   navigator and the navigator's destination as
+//                                   ai_sprint.hpp lists them
+//   UnitAgent's vtable              +0x00 EnterState, +0x1C SetNextState (stores
+//                                   +8, RET 4), +0x20 IsRtti, +0x50 EventHandler
+//                                   (Phantom's UnitAgent_vftable;
 //                                   UnitFollowAgent's at M 0x00A487F0, S 0x007AFB10,
 //                                   G 0x007B0A88, its IsRtti M 0x005B00C0,
 //                                   S 0x00667F00, G 0x00668FA0). Slot 0 is NOT

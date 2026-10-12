@@ -23,8 +23,43 @@ struct Unit {
    double since     = 0.0;    // alive since; the longer alive leads first at a rank
    bool   free      = true;   // following nobody
    bool   combat    = false;  // its controller is fighting
+   bool   travelling = false; // on its way somewhere at least kTravelStart off
    int    followers = 0;      // in its squad already
 };
+
+// Only a soldier on its way somewhere recruits: a sniper settled at its spot,
+// or a unit holding or defending a place, takes nobody along.
+constexpr float kTravelStart = 20.0f;   // metres from where it is going
+
+inline bool travelling(float distanceToDestination)
+{
+   return std::isfinite(distanceToDestination) && distanceToDestination >= kTravelStart;
+}
+
+// A squad whose leader stands still out of combat for kIdleSeconds is let go:
+// its followers go back to goals of their own. Standing is moving less than
+// kIdleRadius from where the leader last was; a fight starts the clock again.
+constexpr float  kIdleRadius  = 3.0f;
+constexpr double kIdleSeconds = 20.0;
+
+struct Anchor {
+   float  x = 0.0f, z = 0.0f;
+   double since = 0.0;
+   bool   valid = false;
+};
+
+inline Anchor next_anchor(Anchor a, float x, float z, bool combat, double now)
+{
+   const float dx = x - a.x, dz = z - a.z;
+   if (!a.valid || !(dx * dx + dz * dz < kIdleRadius * kIdleRadius)) return {x, z, now, true};
+   if (combat) a.since = now;
+   return a;
+}
+
+inline bool idle(const Anchor& a, double now)
+{
+   return a.valid && now - a.since >= kIdleSeconds;
+}
 
 struct Recruit {
    int follower;
@@ -55,12 +90,12 @@ inline bool serves_before(const Unit* units, int a, int b)
    return a < b;
 }
 
-// This tick's recruits, into `out` (up to `maxOut`); returns how many. A
-// leader keeps its squad and fills it up to its size; a free unit with a rank
-// starts one only out of combat, and only when someone will join it. A unit
-// joins only a leader of its own team, within `range` metres, ranked at least
-// as high as itself, nearest first; it is free, out of combat, and leads no
-// squad of its own.
+// This tick's recruits, into `out` (up to `maxOut`); returns how many. Only a
+// leader on its way somewhere recruits: it keeps its squad and fills it up to
+// its size, and a free unit with a rank starts one only out of combat, and
+// only when someone will join it. A unit joins only a leader of its own team,
+// within `range` metres, ranked at least as high as itself, nearest first; it
+// is free, out of combat, and leads no squad of its own.
 inline int plan(const Unit* units, int n, float range, Recruit* out, int maxOut)
 {
    if (n > kMaxUnits) n = kMaxUnits;
@@ -82,7 +117,7 @@ inline int plan(const Unit* units, int n, float range, Recruit* out, int maxOut)
       const Unit& leader = units[l];
       const bool leads = leader.followers > 0;
       if (!leads && claimed[l]) continue;            // following someone, or recruited this tick
-      if (!leader.free || leader.rank <= 0) continue;
+      if (!leader.free || leader.rank <= 0 || !leader.travelling) continue;
       if (!leads && leader.combat) continue;
       const int want = leader.size - leader.followers;
       if (want <= 0) continue;

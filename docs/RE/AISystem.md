@@ -796,6 +796,14 @@ a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
   squad round a leader in combat.
 - `HandleSquadCommandEvent` plays `VOT_SC_FollowResponse` for each recruit, through
   `VOHelper::Play` with no listener, which plays it at the local player (P `0x0041BAA9`).
+- Only a soldier on its way somewhere recruits: its navigator (`AILowLevel` +0x18, read as AI sprint
+  reads it, a follower's `NavigatorFollowTarget` ruled out) takes it 20 m or more. Snipers sit at
+  snipe hints inside the trooper and defend agents (`SnipeHelper`; the AI calls a soldier a sniper
+  by its weapon, `CombatUtil::IsSniperWpn`, P `0x004C9480`: a class flag and a zoom of 6 or more),
+  so travel is the general test. A squad whose leader stands within 3 m of one place out of combat
+  for 20 s is let go: each follower's agent gets `SetNextState(100)` (vptr +0x1C, which stores +8),
+  what `UnitFollowAgent::EventHandler` does for `EVT_SC_StopFollowChr` (M `0x005B10BC`,
+  S `0x00668C46`, G `0x00669CE6`) without its `VOT_SC_StopFollowResponse`.
 - A squad ends with its leader: a follower whose leader's handle goes stale leaves its follow state,
   and one whose leader boards a vehicle boards it too (`UnitBoardInfo`), as for the player.
 - Points as a tie-break were left out: `PlayerStats` is `sPlayerStats[(character - sCharacters) /

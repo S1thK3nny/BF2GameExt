@@ -34,6 +34,16 @@ constexpr uint32_t kOwner_Trackable = 0x18;    // the Controllable's Trackable i
 constexpr uint32_t kVt_GetTrackable = 0x20;    // ... whose vptr +0x20 gives the GameObject
 constexpr uint32_t kUC_State        = 0x7C;    // 2: in combat
 constexpr uint32_t kUC_Agent        = 0x2C0;   // UnitController::mAgent
+constexpr uint32_t kVt_AgentSetNext = 0x1C;    // a UnitAgent's SetNextState(int), RET 4
+constexpr int      kAgentExit       = 100;     // the state a follow agent leaves its follow by
+// Where the unit is going: as AI sprint reads it (ai_sprint.hpp, audited there).
+constexpr uint32_t kUC_LowLevel      = 0x2C4;  // UnitController::mLowLevel
+constexpr uint32_t kLL_Navigator     = 0x18;   // AILowLevel::mNavigator
+constexpr uint32_t kVt_NavIsDone     = 0x14;
+constexpr uint32_t kVt_NavIsRtti     = 0x20;
+constexpr uint32_t kGraph_GlobalDest = 0x24;   // NavigatorGraphFollower::mGlobalDest
+constexpr uint32_t kNav_PathFollower = 0x10;   // Navigator::mPathFollower ...
+constexpr uint32_t kPF_FinalPoint    = 0x30;   // ... and its mFinalPoint
 constexpr uint32_t kGO_MatrixTrans  = 0x120;
 constexpr uint32_t kGO_CurHealth    = 0x144;
 constexpr uint32_t kGO_Flags        = 0x1FC;   // bit 3: alive
@@ -50,10 +60,15 @@ constexpr float    kMaxRange        = 60.0f;
 constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
 constexpr uint32_t kRttiFollowAgent    = pbl_hash("UnitFollowAgent");
 constexpr uint32_t kRttiSoldier        = pbl_hash("EntitySoldier");
+constexpr uint32_t kRttiFollowTarget   = pbl_hash("NavigatorFollowTarget");
+constexpr uint32_t kRttiGraphFollower  = pbl_hash("NavigatorGraphFollower");
+constexpr uint32_t kRttiPathFollower   = pbl_hash("NavigatorPathFollower");
 
 using fn_update_t   = void(__cdecl*)(float dt);
 using fn_is_rtti_t  = bool(__thiscall*)(void* self, uint32_t hash);
 using fn_get_obj_t  = uint8_t*(__thiscall*)(void* self);
+using fn_is_done_t  = bool(__thiscall*)(void* self);
+using fn_set_next_t = void(__thiscall*)(void* self, int state);
 
 fn_update_t s_update = nullptr;   // ControllerManager::Update; the trampoline once detoured
 uint8_t**   s_list   = nullptr;   // the global holding sAICtrls, the AI controllers
@@ -82,6 +97,38 @@ bool is_rtti(void* obj, uint32_t hash, uint32_t slot = kVt_IsRtti)
 {
    void** vt = *(void***)obj;
    return ((fn_is_rtti_t)vt[slot / 4])(obj, hash);
+}
+
+// How far, on the ground, a unit is from where its navigator takes it; NaN when
+// it is going nowhere of its own (standing, sliding, following, done).
+float travel_distance(uint8_t* ctrl, const uint8_t* obj)
+{
+   uint8_t* const nav = *(uint8_t**)(ctrl + kUC_LowLevel + kLL_Navigator);
+   if (!nav) return NAN;
+   void** vt = *(void***)nav;
+   if (((fn_is_done_t)vt[kVt_NavIsDone / 4])(nav)) return NAN;
+   const float* dest = nullptr;
+   if (is_rtti(nav, kRttiFollowTarget, kVt_NavIsRtti)) return NAN;   // says yes to GraphFollower too
+   if (is_rtti(nav, kRttiGraphFollower, kVt_NavIsRtti)) {
+      dest = (const float*)(nav + kGraph_GlobalDest);
+   } else if (is_rtti(nav, kRttiPathFollower, kVt_NavIsRtti)) {
+      const uint8_t* follower = *(const uint8_t* const*)(nav + kNav_PathFollower);
+      if (follower) dest = (const float*)(follower + kPF_FinalPoint);
+   }
+   if (!dest) return NAN;
+   const float* pos = (const float*)(obj + kGO_MatrixTrans);
+   const float dx = dest[0] - pos[0], dz = dest[2] - pos[2];
+   return std::sqrt(dx * dx + dz * dz);
+}
+
+// Lets a follower go, as the game's own "stop following" does without its
+// voice line: the follow agent's next state becomes its exit.
+void release(uint8_t* ctrl)
+{
+   uint8_t* const agent = *(uint8_t**)(ctrl + kUC_Agent);
+   if (!agent || !is_rtti(agent, kRttiFollowAgent, kVt_AgentIsRtti)) return;
+   void** vt = *(void***)agent;
+   ((fn_set_next_t)vt[kVt_AgentSetNext / 4])(agent, kAgentExit);
 }
 
 // ---- What the tick sees -----------------------------------------------------
@@ -133,13 +180,15 @@ struct Member {
 };
 
 struct Squad {
-   uint32_t leader;
-   Member   members[squad_formation::kMaxSquadSize];
-   int      count;
+   uint32_t          leader;
+   Member            members[squad_formation::kMaxSquadSize];
+   int               count;
+   ai_squads::Anchor anchor;   // where and since when the leader has stood
 };
 constexpr int kMaxSquads = 128;
 Squad s_squads[kMaxSquads];
 int   s_squadCount = 0;
+int   s_released   = 0;   // squads let go for standing, since the last report
 
 Squad* squad_of(uint32_t leader)
 {
@@ -147,7 +196,7 @@ Squad* squad_of(uint32_t leader)
       if (s_squads[i].leader == leader) return &s_squads[i];
    if (s_squadCount == kMaxSquads) return nullptr;
    Squad& s = s_squads[s_squadCount++];
-   s = Squad{leader, {}, 0};
+   s = Squad{leader, {}, 0, {}};
    return &s;
 }
 
@@ -189,12 +238,14 @@ void walk(double now)
       u.since = alive_since(handle, now);
       u.free = !(agent && is_rtti(agent, kRttiFollowAgent, kVt_AgentIsRtti));
       u.combat = *(const int*)(ctrl + kUC_State) == kStateCombat;
+      u.travelling = u.free && ai_squads::travelling(travel_distance(ctrl, obj));
       s_seen[s_count++] = {ctrl, obj, handle};
    }
 }
 
 // Drops the squads and members that are gone, counts who is left, and marks
-// them taken, a recruit whose order still waits included.
+// them taken, a recruit whose order still waits included. A squad whose leader
+// has stood still out of combat too long is let go.
 void check_squads(double now)
 {
    int kept = 0;
@@ -202,6 +253,15 @@ void check_squads(double now)
       Squad s = s_squads[i];
       const int l = find_seen(s.leader);
       if (l < 0) continue;   // the leader died or took a vehicle: its followers let go themselves
+      s.anchor = ai_squads::next_anchor(s.anchor, s_units[l].x, s_units[l].z, s_units[l].combat, now);
+      if (ai_squads::idle(s.anchor, now)) {
+         for (int m = 0; m < s.count; ++m) {
+            const int f = find_seen(s.members[m].handle);
+            if (f >= 0) release(s_seen[f].uc);
+         }
+         ++s_released;
+         continue;
+      }
       int count = 0;
       for (int m = 0; m < s.count; ++m) {
          const int f = find_seen(s.members[m].handle);
@@ -229,12 +289,14 @@ void report(double now, int refused)
       following += !s_units[i].free;
    }
    const int state = s_squadCount * 1000 + followers;
-   if (state == s_lastReported && refused == 0) return;
+   if (state == s_lastReported && refused == 0 && s_released == 0) return;
    s_lastReported = state;
    s_lastReport = now;
    ++s_reports;
    install_log("[AISquads] %d squads with %d followers; %d AI soldiers seen, %d fighting, %d following someone "
-               "or joining, %d refused to join", s_squadCount, followers, s_count, fighting, following, refused);
+               "or joining, %d refused to join, %d squads let go for standing", s_squadCount, followers, s_count,
+               fighting, following, refused, s_released);
+   s_released = 0;
 }
 
 void tick()

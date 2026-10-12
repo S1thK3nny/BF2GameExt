@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "PatcherDLL/src"
 source = (SRC / "ai/ai_squads.cpp").read_text()
 formation = (SRC / "ai/squad_formation.cpp").read_text()
+sprint = (SRC / "ai/ai_sprint.cpp").read_text()
 addrs = (SRC / "core/game_addrs.hpp").read_text()
 
 
@@ -45,15 +46,25 @@ for name, value in {
     "kStateCombat": 2,
     "kFollowChr": 0x10,
     "kIsFollowingChr": 0x0F,
+    "kVt_AgentSetNext": 0x1C,
+    "kAgentExit": 100,
 }.items():
     assert constant(source, name) == value, name
+# Where a unit is going: the same reads AI sprint makes, which tests/ai_sprint_abi_tests.py audits.
+for name in ("kUC_LowLevel", "kLL_Navigator", "kVt_NavIsDone", "kVt_NavIsRtti", "kGraph_GlobalDest",
+             "kNav_PathFollower", "kPF_FinalPoint"):
+    assert constant(source, name) == constant(sprint, name), name
+for cls in ("NavigatorFollowTarget", "NavigatorGraphFollower", "NavigatorPathFollower"):
+    assert f'pbl_hash("{cls}")' in source, cls
+# The follower's navigator says yes to GraphFollower too: it is ruled out first.
+assert source.index("kRttiFollowTarget, kVt_NavIsRtti") < source.index("kRttiGraphFollower, kVt_NavIsRtti")
 for cls in ("UnitController", "UnitFollowAgent", "EntitySoldier"):
     assert f'pbl_hash("{cls}")' in source, cls
 assert "(*(const uint32_t*)(obj + kGO_Flags) >> 3) & 1u" in source           # alive: bit 3
 assert "(int32_t)(*(const uint32_t*)(obj + kGO_Team) << 28) >> 28" in source  # team: the low 4 bits, signed
-# An agent's IsRtti is at vptr +0x20; its slot 0 is EnterState.
-assert "is_rtti(agent, kRttiFollowAgent, kVt_AgentIsRtti)" in source
-assert source.count("kVt_AgentIsRtti") == 2
+# An agent's IsRtti is at vptr +0x20; its slot 0 is EnterState. Every agent test asks there.
+agent_tests = re.findall(r"is_rtti\(agent, [^)]*\)", source)
+assert len(agent_tests) >= 2 and all(t.endswith(", kVt_AgentIsRtti)") for t in agent_tests), agent_tests
 # The prologues the install guards, as the source spells them.
 assert r'"\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C"' in source
 assert '"xxxxxxxxxxxxx????xxxxxxx"' in source
@@ -110,6 +121,10 @@ mt_checks = {
     # EventInfo's constructor: thiscall, RET 8.
     0x0052ADE0: [("sub", "esp, 0xc"), ("push", "esi"), ("push", "edi"), ("xor", "edi, edi"), ("sub", "esp, 8")],
     0x0052AE45: [("pop", "edi"), ("mov", "eax, esi"), ("pop", "esi"), ("add", "esp, 0xc"), ("ret", "8")],
+    # UnitFollowAgent::EventHandler, stop following: SetNextState(100) at vptr +0x1C, then answers 1.
+    0x005B10BC: [("push", "0x64"), ("mov", "ecx, esi"), ("call", "dword ptr [eax + 0x1c]"), ("mov", "eax, 1")],
+    # SetNextState: stores the state at +8, RET 4.
+    0x00597880: [("mov", "eax, dword ptr [esp + 4]"), ("mov", "dword ptr [ecx + 8], eax"), ("ret", "4")],
     # UnitFollowAgent::IsRtti, at +0x20 of its vtable.
     0x005B00C0: [("mov", "eax, dword ptr [esp + 4]"), ("cmp", "dword ptr [0xb8f20c], eax")],
     0x0040D5B2: [("jmp", "0x5b00c0")],
@@ -118,13 +133,19 @@ mt_checks = {
 }
 # UnitFollowAgent's vtable, laid out as Phantom's UnitAgent_vftable: EnterState at +0x00, IsRtti at
 # +0x20, EventHandler at +0x50 (the slot SendEvent calls).
-mt_slots = [(0x00A487F0, 0x00, 0x005B0190), (0x00A487F0, 0x20, 0x005B00C0), (0x00A487F0, 0x50, 0x005B0EC0)]
+mt_slots = [(0x00A487F0, 0x00, 0x005B0190), (0x00A487F0, 0x1C, 0x00597880), (0x00A487F0, 0x20, 0x005B00C0),
+            (0x00A487F0, 0x50, 0x005B0EC0)]
 mt_rtti = {"UnitController": 0x00B8EFBC, "UnitFollowAgent": 0x00B8F20C, "EntitySoldier": 0x00B7E098}
 
 
 def retail(update, player_list, ai_list, high_level, health, combat, send, ctor, follow_rtti, follow_global,
-           team):
+           team, stop):
     return {
+        # UnitFollowAgent::EventHandler, stop following: SetNextState(100) at vptr +0x1C.
+        stop: [("push", "0x64"), ("call", "dword ptr [eax + 0x1c]"), ("mov", "eax, 1")],
+        # SetNextState: stores the state at +8, RET 4.
+        0x00478620: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
+                     ("mov", "dword ptr [ecx + 8], eax"), ("pop", "ebp"), ("ret", "4")],
         # ControllerManager::Update: dt in XMM0, no stack argument; its first loop is sPlayerCtrls.
         update: [("push", "ebp"), ("mov", "ebp, esp"), ("and", "esp, 0xfffffff8"), ("sub", "esp, 0xc"),
                  ("push", "ebx"), ("push", "esi"), ("mov", f"esi, dword ptr [{player_list:#x}]"), ("push", "edi"),
@@ -157,12 +178,14 @@ def retail(update, player_list, ai_list, high_level, health, combat, send, ctor,
 
 steam_checks = retail(update=0x00486370, player_list=0x01E30930, ai_list=0x01E30934, high_level=0x006639A7,
                       health=0x0058E59D, combat=0x00663B92, send=0x006640D0, ctor=0x0043EDF0,
-                      follow_rtti=0x00667F00, follow_global=0x01F993E8, team=0x0061C1A2)
+                      follow_rtti=0x00667F00, follow_global=0x01F993E8, team=0x0061C1A2, stop=0x00668C46)
 gog_checks = retail(update=0x00486370, player_list=0x01E31DDC, ai_list=0x01E31DCC, high_level=0x00664A47,
                     health=0x0058F53D, combat=0x00664C32, send=0x00665170, ctor=0x0043EDE0,
-                    follow_rtti=0x00668FA0, follow_global=0x01F9A89C, team=0x0061D212)
-steam_slots = [(0x007AFB10, 0x00, 0x006680D0), (0x007AFB10, 0x20, 0x00667F00), (0x007AFB10, 0x50, 0x00668A80)]
-gog_slots = [(0x007B0A88, 0x00, 0x00669170), (0x007B0A88, 0x20, 0x00668FA0), (0x007B0A88, 0x50, 0x00669B20)]
+                    follow_rtti=0x00668FA0, follow_global=0x01F9A89C, team=0x0061D212, stop=0x00669CE6)
+steam_slots = [(0x007AFB10, 0x00, 0x006680D0), (0x007AFB10, 0x1C, 0x00478620), (0x007AFB10, 0x20, 0x00667F00),
+               (0x007AFB10, 0x50, 0x00668A80)]
+gog_slots = [(0x007B0A88, 0x00, 0x00669170), (0x007B0A88, 0x1C, 0x00478620), (0x007B0A88, 0x20, 0x00668FA0),
+             (0x007B0A88, 0x50, 0x00669B20)]
 steam_rtti = {"UnitController": 0x01F99384, "UnitFollowAgent": 0x01F993E8, "EntitySoldier": 0x01EBC054}
 gog_rtti = {"UnitController": 0x01F9A838, "UnitFollowAgent": 0x01F9A89C, "EntitySoldier": 0x01EBD558}
 

@@ -21,6 +21,7 @@ Unit trooper(float x, float z, int team = 1)
    u.joins = true;
    u.size = 3;
    u.since = 10.0;
+   u.travelling = true;
    return u;
 }
 
@@ -188,6 +189,48 @@ void output_bounds_and_determinism()
    for (int i = 0; i < n; ++i) assert(role[a[i].leader] != 1);
 }
 
+// Only a soldier on its way somewhere recruits, new squads and old.
+void only_the_travelling_lead()
+{
+   Unit u[3] = {trooper(0, 0), trooper(3, 0), trooper(6, 0)};
+   u[0].since = 1.0;
+   u[0].travelling = false;   // a sniper at its spot: leads nobody...
+   Recruit r[8];
+   int n = plan_of(u, 3, r);
+   assert(n == 2 && has(r, n, 0, 1) && has(r, n, 2, 1));   // ...but may still join one
+   // Its squad from before keeps who it has, and takes nobody more.
+   u[0].followers = 1;
+   u[1].free = false;
+   assert(plan_of(u, 3, r) == 0);
+   // Nobody travelling: no squads.
+   for (Unit& x : u) {
+      x.travelling = false;
+      x.followers = 0;
+      x.free = true;
+   }
+   assert(plan_of(u, 3, r) == 0);
+   assert(travelling(kTravelStart) && !travelling(kTravelStart - 0.5f));
+   assert(!travelling(std::numeric_limits<float>::quiet_NaN()));
+   assert(!travelling(std::numeric_limits<float>::infinity()));   // a destination read as garbage
+}
+
+void idle_leaders_let_go()
+{
+   Anchor a;
+   a = next_anchor(a, 0.0f, 0.0f, false, 100.0);
+   assert(a.valid && !idle(a, 100.0));
+   // Shuffling about on the spot is standing.
+   a = next_anchor(a, 1.5f, -1.0f, false, 110.0);
+   assert(!idle(a, 110.0) && idle(a, 100.0 + kIdleSeconds));
+   // Moving off starts the clock again.
+   Anchor b = next_anchor(a, 5.0f, 0.0f, false, 118.0);
+   assert(!idle(b, 118.0 + kIdleSeconds - 0.5) && idle(b, 118.0 + kIdleSeconds));
+   // A fight holds the clock back while it lasts.
+   Anchor c = next_anchor(a, 0.5f, 0.0f, true, 119.0);
+   assert(!idle(c, 119.0 + kIdleSeconds - 0.5) && idle(c, 119.0 + kIdleSeconds));
+   assert(!idle(Anchor{}, 1e9));
+}
+
 // A recruit whose order still waits stays a member for a while, then has to
 // answer that it follows.
 void members_while_their_order_waits()
@@ -216,7 +259,10 @@ int main()
    a_leader_is_not_recruited();
    output_bounds_and_determinism();
    members_while_their_order_waits();
+   only_the_travelling_lead();
+   idle_leaders_let_go();
    std::printf("AI squad tests passed (pairs, loners, teams and range, size and nearest, rank, heroes, "
-               "followers, combat, filling first, leaders kept, bounds, joining members).\n");
+               "followers, combat, filling first, leaders kept, bounds, joining members, travelling "
+               "leaders, idle squads).\n");
    return 0;
 }
