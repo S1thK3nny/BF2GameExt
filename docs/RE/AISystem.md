@@ -753,7 +753,10 @@ of its own meanwhile, so the AI's own state never keeps it. The height jump tabl
 - its controller is not in combat (`UnitController` state 2, read at +0x7C) and `AILowLevel::mTarget`
   holds nothing;
 - it travels a path of its own: a `NavigatorGraphFollower` (to `mGlobalDest`, +0x24) or a
-  `NavigatorPathFollower` (to its path follower's `mFinalPoint`), not following a leader;
+  `NavigatorPathFollower` (to its path follower's `mFinalPoint`), not following a leader. A
+  follower's `NavigatorFollowTarget` derives from `NavigatorGraphFollower` and its `IsRtti` says yes
+  to both (P `0x0067A8F0`, M `0x005A63E0`, S `0x005AC510`, G `0x005AD4C0`), so it is ruled out
+  first;
 - that destination is at least `AISprintDistance` away on the ground (30 m), or half that once
   sprinting;
 - its energy bar is not overheated, and to start a sprint it is at least half full.

@@ -40,6 +40,10 @@
 //   Navigator::IsDone               vptr +0x14 same functions
 //   Navigator IsRtti                vptr +0x20 thiscall(hash), RET 4 (M 0x005A72B0,
 //                                              S 0x005AC4E0, G 0x005AD490)
+//   NavigatorFollowTarget::IsRtti   says yes to its own class and to
+//                                   NavigatorGraphFollower, its base (M 0x005A63E0,
+//                                   S 0x005AC510, G 0x005AD4C0), so a follower is
+//                                   ruled out before the graph follower test
 //   NavigatorGraphFollower::mGlobalDest +0x24  its GetGlobalDest, LEA EAX,[ECX+0x24]
 //                                              (M 0x005A7280, S 0x005ADAC0, G 0x005AEA70)
 //   Navigator::mPathFollower        +0x10      Navigator::GetGlobalDest (S 0x005AB6F0)
@@ -55,7 +59,7 @@
 //
 // The RTTI hashes are PblHash of the class names: each build makes them with
 // the PblHash constructor from the names (Steam 0x00406C50 for UnitController,
-// 0x004043D0 for NavigatorGraphFollower).
+// 0x004043C0 for NavigatorFollowTarget, 0x004043D0 for NavigatorGraphFollower).
 //
 // AI controllers exist only where AI is simulated (single player and the host),
 // so a client changes nothing; the sprint itself reaches clients as the

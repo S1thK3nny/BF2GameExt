@@ -39,6 +39,20 @@ struct Inputs {
    bool  overheated   = false;         // the energy bar's latch
 };
 
+// Which destination a navigator travels to, from what its IsRtti says yes to.
+// A follower's navigator derives from the graph follower and says yes to it
+// too, but it walks a leader's trail and the game sprints it itself, so it
+// travels nowhere of its own here.
+enum class Route { None, Graph, Path };
+
+inline Route route_of(bool followTarget, bool graphFollower, bool pathFollower)
+{
+   if (followTarget) return Route::None;
+   if (graphFollower) return Route::Graph;
+   if (pathFollower) return Route::Path;
+   return Route::None;
+}
+
 // Sprint on a long run out of combat: only where the AI would simply stand and
 // run, never instead of a crouch, prone, walk or a sprint of its own, and only
 // a soldier standing or already sprinting can (EntitySoldier::Sprint's own test).

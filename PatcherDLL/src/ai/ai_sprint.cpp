@@ -46,6 +46,7 @@ constexpr uint32_t kEnergyBarRelease    = 0x7D0;
 constexpr int kStateCombat = 2;
 
 constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
+constexpr uint32_t kRttiFollowTarget   = pbl_hash("NavigatorFollowTarget");
 constexpr uint32_t kRttiGraphFollower  = pbl_hash("NavigatorGraphFollower");
 constexpr uint32_t kRttiPathFollower   = pbl_hash("NavigatorPathFollower");
 
@@ -70,13 +71,18 @@ const float* travel_destination(uint8_t* nav)
 {
    void** vt = *(void***)nav;
    if (((fn_is_done_t)vt[kVt_NavIsDone / 4])(nav)) return nullptr;
-   if (is_rtti(nav, kVt_NavIsRtti, kRttiGraphFollower))
+   switch (ai_sprint::route_of(is_rtti(nav, kVt_NavIsRtti, kRttiFollowTarget),
+                               is_rtti(nav, kVt_NavIsRtti, kRttiGraphFollower),
+                               is_rtti(nav, kVt_NavIsRtti, kRttiPathFollower))) {
+   case ai_sprint::Route::Graph:
       return (const float*)(nav + kGraph_GlobalDest);
-   if (is_rtti(nav, kVt_NavIsRtti, kRttiPathFollower)) {
+   case ai_sprint::Route::Path: {
       const uint8_t* follower = *(const uint8_t* const*)(nav + kNav_PathFollower);
       return follower ? (const float*)(follower + kPF_FinalPoint) : nullptr;
    }
-   return nullptr;
+   default:
+      return nullptr;
+   }
 }
 
 // The AI's height, when this soldier should sprint this update; null otherwise.

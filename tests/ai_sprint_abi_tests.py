@@ -53,7 +53,7 @@ for name, value in {
     assert constant(source, name) == value, name
 for name, value in {"kHeightStand": 0, "kHeightSprint": 3, "kStateStand": 0, "kStateSprint": 3}.items():
     assert constant(core, name) == value, name
-for name in ("UnitController", "NavigatorGraphFollower", "NavigatorPathFollower"):
+for name in ("UnitController", "NavigatorFollowTarget", "NavigatorGraphFollower", "NavigatorPathFollower"):
     assert f'pbl_hash("{name}")' in source, name
 
 
@@ -99,6 +99,10 @@ mt_checks = {
     0x005A7280: [("lea", "eax, [ecx + 0x24]"), ("ret", "")],
     0x005A72B0: [("mov", "eax, dword ptr [esp + 4]"), ("cmp", "dword ptr [0xb8f0f8], eax"),
                  ("jne", "0x5a72c1"), ("mov", "al, 1"), ("ret", "4")],
+    # NavigatorFollowTarget::IsRtti: its own class, then NavigatorGraphFollower, its base.
+    0x005A63E0: [("mov", "eax, dword ptr [esp + 4]"), ("cmp", "dword ptr [0xb8f0e4], eax"),
+                 ("je", "0x5a63f4"), ("cmp", "dword ptr [0xb8f0f8], eax"), ("jne", "0x5a63f9"),
+                 ("mov", "al, 1"), ("ret", "4")],
     # Navigator::GetGlobalDest: mPathFollower +0x10, its mFinalPoint +0x30.
     0x005A4CF0: [("mov", "eax, dword ptr [ecx + 0x10]"), ("test", "eax, eax")],
     0x005A4D05: [("add", "eax, 0x30"), ("ret", "")],
@@ -136,6 +140,9 @@ steam_checks.update({
     0x005ADAC0: [("lea", "eax, [ecx + 0x24]"), ("ret", "")],
     0x005AC4E0: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
                  ("cmp", "dword ptr [0x1ecb250], eax")],
+    0x005AC510: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
+                 ("cmp", "dword ptr [0x1ecb1fc], eax"), ("jne", "0x5ac524"), ("mov", "al, 1"),
+                 ("pop", "ebp"), ("ret", "4"), ("cmp", "dword ptr [0x1ecb250], eax")],
     0x005AB6F0: [("mov", "eax, dword ptr [ecx + 0x10]"), ("test", "eax, eax")],
     0x005AB705: [("add", "eax, 0x30"), ("ret", "")],
     0x0043B628: [("lea", "ecx, [esi + 0xa0]")],
@@ -151,6 +158,9 @@ gog_checks.update({
     0x005AEA70: [("lea", "eax, [ecx + 0x24]"), ("ret", "")],
     0x005AD490: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
                  ("cmp", "dword ptr [0x1ecc704], eax")],
+    0x005AD4C0: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
+                 ("cmp", "dword ptr [0x1ecc700], eax"), ("jne", "0x5ad4d4"), ("mov", "al, 1"),
+                 ("pop", "ebp"), ("ret", "4"), ("cmp", "dword ptr [0x1ecc704], eax")],
     0x005AC6A0: [("mov", "eax, dword ptr [ecx + 0x10]"), ("test", "eax, eax")],
     0x005AC6B5: [("add", "eax, 0x30"), ("ret", "")],
     0x0043B618: [("lea", "ecx, [esi + 0xa0]")],
@@ -161,6 +171,7 @@ mt_slots = [
     (0x00A479B0, 0x30, 0x005A7280),   # NavigatorGraphFollower: GetGlobalDest
     (0x00A479B0, 0x20, 0x005A72B0),   #                         IsRtti
     (0x00A47A60, 0x30, 0x005A4CF0),   # NavigatorPathFollower:  Navigator::GetGlobalDest
+    (0x00A478F8, 0x20, 0x005A63E0),   # NavigatorFollowTarget:  IsRtti
 ]
 steam_slots = [
     (0x0079CF2C, 0xC4, 0x004F0110),   # the soldier's Controllable vtable: UpdateIndirect
@@ -168,12 +179,14 @@ steam_slots = [
     (0x007AA820, 0x30, 0x005ADAC0),
     (0x007AA820, 0x20, 0x005AC4E0),
     (0x007AA88C, 0x30, 0x005AB6F0),
+    (0x007AA7E4, 0x20, 0x005AC510),
 ]
 gog_slots = [
     (0x0079DECC, 0xC4, 0x004F0110),
     (0x0079DECC, 0xAC, 0x004EDBD0),
     (0x007AB6EC, 0x30, 0x005AEA70),
     (0x007AB6EC, 0x20, 0x005AD490),
+    (0x007AB698, 0x20, 0x005AD4C0),
 ]
 
 builds = [
@@ -222,12 +235,15 @@ for name, filename, checks, slots in builds:
         # the globals it compares from those very names.
         if name == "modtools":
             assert rtti_global(image, base, "UnitController") == 0x00B8EFBC
+            assert rtti_global(image, base, "NavigatorFollowTarget") == 0x00B8F0E4
             assert rtti_global(image, base, "NavigatorGraphFollower") == 0x00B8F0F8
         elif name == "steam":
             assert rtti_global(image, base, "UnitController") == 0x01F99384
+            assert rtti_global(image, base, "NavigatorFollowTarget") == 0x01ECB1FC
             assert rtti_global(image, base, "NavigatorGraphFollower") == 0x01ECB250
         else:
             assert rtti_global(image, base, "UnitController") == 0x01F9A838
+            assert rtti_global(image, base, "NavigatorFollowTarget") == 0x01ECC700
             assert rtti_global(image, base, "NavigatorGraphFollower") == 0x01ECC704
         print(f"{name}: {len(checks)} instruction checks, {len(slots)} vtable slots and the RTTI names passed")
     finally:

@@ -91,6 +91,15 @@ void energy_like_a_player()
    assert(should_sprint(in, kStart));
 }
 
+void followers_travel_nowhere_of_their_own()
+{
+   // A follower's navigator says yes to its own class and to the graph follower.
+   assert(route_of(true, true, false) == Route::None);
+   assert(route_of(false, true, false) == Route::Graph);
+   assert(route_of(false, false, true) == Route::Path);
+   assert(route_of(false, false, false) == Route::None);   // sliding or standing
+}
+
 void bad_input_never_sprints()
 {
    const float nan = std::numeric_limits<float>::quiet_NaN();
@@ -119,7 +128,8 @@ int main()
    never_in_combat();
    distance_with_a_margin();
    energy_like_a_player();
+   followers_travel_nowhere_of_their_own();
    bad_input_never_sprints();
-   std::printf("AI sprint tests passed (long runs, standing only, combat, distance margin, energy latch, bad input).\n");
+   std::printf("AI sprint tests passed (long runs, standing only, combat, distance margin, energy latch, followers, bad input).\n");
    return 0;
 }
