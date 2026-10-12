@@ -31,6 +31,7 @@ for name, value in {
     "kNodeNext": 0x04,
     "kNodePayload": 0x0C,
     "kVt_IsRtti": 0x00,
+    "kVt_AgentIsRtti": 0x20,
     "kCtrl_Owner": 0x04,
     "kOwner_Trackable": 0x18,
     "kVt_GetTrackable": 0x20,
@@ -50,6 +51,9 @@ for cls in ("UnitController", "UnitFollowAgent", "EntitySoldier"):
     assert f'pbl_hash("{cls}")' in source, cls
 assert "(*(const uint32_t*)(obj + kGO_Flags) >> 3) & 1u" in source           # alive: bit 3
 assert "(int32_t)(*(const uint32_t*)(obj + kGO_Team) << 28) >> 28" in source  # team: the low 4 bits, signed
+# An agent's IsRtti is at vptr +0x20; its slot 0 is EnterState.
+assert "is_rtti(agent, kRttiFollowAgent, kVt_AgentIsRtti)" in source
+assert source.count("kVt_AgentIsRtti") == 2
 # The prologues the install guards, as the source spells them.
 assert r'"\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C"' in source
 assert '"xxxxxxxxxxxxx????xxxxxxx"' in source
@@ -106,13 +110,15 @@ mt_checks = {
     # EventInfo's constructor: thiscall, RET 8.
     0x0052ADE0: [("sub", "esp, 0xc"), ("push", "esi"), ("push", "edi"), ("xor", "edi, edi"), ("sub", "esp, 8")],
     0x0052AE45: [("pop", "edi"), ("mov", "eax, esi"), ("pop", "esi"), ("add", "esp, 0xc"), ("ret", "8")],
-    # UnitFollowAgent::IsRtti, slot 0 of its vtable.
+    # UnitFollowAgent::IsRtti, at +0x20 of its vtable.
     0x005B00C0: [("mov", "eax, dword ptr [esp + 4]"), ("cmp", "dword ptr [0xb8f20c], eax")],
     0x0040D5B2: [("jmp", "0x5b00c0")],
     # CheckForAutoFollow: the team, the low 4 bits of +0x234, signed.
     0x0059ADD9: [("mov", "edx, dword ptr [esi + 0x234]"), ("shl", "edx, 0x1c"), ("push", "3"), ("sar", "edx, 0x1c")],
 }
-mt_slots = [(0x00A48810, 0x00, 0x005B00C0)]
+# UnitFollowAgent's vtable, laid out as Phantom's UnitAgent_vftable: EnterState at +0x00, IsRtti at
+# +0x20, EventHandler at +0x50 (the slot SendEvent calls).
+mt_slots = [(0x00A487F0, 0x00, 0x005B0190), (0x00A487F0, 0x20, 0x005B00C0), (0x00A487F0, 0x50, 0x005B0EC0)]
 mt_rtti = {"UnitController": 0x00B8EFBC, "UnitFollowAgent": 0x00B8F20C, "EntitySoldier": 0x00B7E098}
 
 
@@ -155,8 +161,8 @@ steam_checks = retail(update=0x00486370, player_list=0x01E30930, ai_list=0x01E30
 gog_checks = retail(update=0x00486370, player_list=0x01E31DDC, ai_list=0x01E31DCC, high_level=0x00664A47,
                     health=0x0058F53D, combat=0x00664C32, send=0x00665170, ctor=0x0043EDE0,
                     follow_rtti=0x00668FA0, follow_global=0x01F9A89C, team=0x0061D212)
-steam_slots = [(0x007AFB30, 0x00, 0x00667F00)]
-gog_slots = [(0x007B0AA8, 0x00, 0x00668FA0)]
+steam_slots = [(0x007AFB10, 0x00, 0x006680D0), (0x007AFB10, 0x20, 0x00667F00), (0x007AFB10, 0x50, 0x00668A80)]
+gog_slots = [(0x007B0A88, 0x00, 0x00669170), (0x007B0A88, 0x20, 0x00668FA0), (0x007B0A88, 0x50, 0x00669B20)]
 steam_rtti = {"UnitController": 0x01F99384, "UnitFollowAgent": 0x01F993E8, "EntitySoldier": 0x01EBC054}
 gog_rtti = {"UnitController": 0x01F9A838, "UnitFollowAgent": 0x01F9A89C, "EntitySoldier": 0x01EBD558}
 

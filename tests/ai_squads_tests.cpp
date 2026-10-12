@@ -188,6 +188,17 @@ void output_bounds_and_determinism()
    for (int i = 0; i < n; ++i) assert(role[a[i].leader] != 1);
 }
 
+// A recruit whose order still waits stays a member for a while, then has to
+// answer that it follows.
+void members_while_their_order_waits()
+{
+   assert(keep_member(false, 100.0, 100.0));                    // just sent
+   assert(keep_member(false, 100.0, 100.0 + kJoinGrace - 0.5));
+   assert(!keep_member(false, 100.0, 100.0 + kJoinGrace));      // never took it up
+   assert(keep_member(true, 100.0, 100.0 + 1000.0));            // following, however long ago
+   assert(kJoinGrace >= 2.0 && kJoinGrace <= 15.0);
+}
+
 } // namespace
 
 int main()
@@ -204,7 +215,8 @@ int main()
    squads_fill_before_new_ones_start();
    a_leader_is_not_recruited();
    output_bounds_and_determinism();
+   members_while_their_order_waits();
    std::printf("AI squad tests passed (pairs, loners, teams and range, size and nearest, rank, heroes, "
-               "followers, combat, filling first, leaders kept, bounds).\n");
+               "followers, combat, filling first, leaders kept, bounds, joining members).\n");
    return 0;
 }

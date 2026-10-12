@@ -31,6 +31,17 @@ struct Recruit {
    int leader;
 };
 
+// A recruit's follow order waits in its controller's queue until the
+// controller's next decision, so for a while after joining it still answers
+// that it follows nobody. It counts as a member, taken, for kJoinGrace seconds
+// from joining; after that only while it answers that it follows its leader.
+constexpr double kJoinGrace = 6.0;
+
+inline bool keep_member(bool follows, double joinedAt, double now)
+{
+   return follows || (now - joinedAt) < kJoinGrace;
+}
+
 // The order leaders are served in: squads that already have followers first,
 // then the highest rank, the longest alive, the lowest index.
 inline bool serves_before(const Unit* units, int a, int b)

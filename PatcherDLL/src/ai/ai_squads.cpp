@@ -27,7 +27,8 @@ using ai_squads::Unit;
 // ---- The same on modtools, Steam and GOG ------------------------------------
 constexpr uint32_t kNodeNext        = 0x04;
 constexpr uint32_t kNodePayload     = 0x0C;
-constexpr uint32_t kVt_IsRtti       = 0x00;
+constexpr uint32_t kVt_IsRtti       = 0x00;    // a Controller's or a GameObject's
+constexpr uint32_t kVt_AgentIsRtti  = 0x20;    // a UnitAgent's: its slot 0 is EnterState
 constexpr uint32_t kCtrl_Owner      = 0x04;    // Controller::mOwner, the Controllable
 constexpr uint32_t kOwner_Trackable = 0x18;    // the Controllable's Trackable interface ...
 constexpr uint32_t kVt_GetTrackable = 0x20;    // ... whose vptr +0x20 gives the GameObject
@@ -77,10 +78,10 @@ double seconds_now()
    return (double)t.QuadPart / s_ticksPerSecond;
 }
 
-bool is_rtti(void* obj, uint32_t hash)
+bool is_rtti(void* obj, uint32_t hash, uint32_t slot = kVt_IsRtti)
 {
    void** vt = *(void***)obj;
-   return ((fn_is_rtti_t)vt[kVt_IsRtti / 4])(obj, hash);
+   return ((fn_is_rtti_t)vt[slot / 4])(obj, hash);
 }
 
 // ---- What the tick sees -----------------------------------------------------
@@ -126,9 +127,14 @@ void note_since(double now)
 }
 
 // ---- The squads this module made --------------------------------------------
+struct Member {
+   uint32_t handle;
+   double   joined;   // when it was sent the follow order
+};
+
 struct Squad {
    uint32_t leader;
-   uint32_t members[squad_formation::kMaxSquadSize];
+   Member   members[squad_formation::kMaxSquadSize];
    int      count;
 };
 constexpr int kMaxSquads = 128;
@@ -181,14 +187,15 @@ void walk(double now)
       u.joins = squad_formation::joins_for(keys, hero);
       u.size = squad_formation::ai_size_for(keys, d);
       u.since = alive_since(handle, now);
-      u.free = !(agent && is_rtti(agent, kRttiFollowAgent));
+      u.free = !(agent && is_rtti(agent, kRttiFollowAgent, kVt_AgentIsRtti));
       u.combat = *(const int*)(ctrl + kUC_State) == kStateCombat;
       s_seen[s_count++] = {ctrl, obj, handle};
    }
 }
 
-// Drops the squads and members that are gone, and counts who is left.
-void check_squads()
+// Drops the squads and members that are gone, counts who is left, and marks
+// them taken, a recruit whose order still waits included.
+void check_squads(double now)
 {
    int kept = 0;
    for (int i = 0; i < s_squadCount; ++i) {
@@ -197,9 +204,12 @@ void check_squads()
       if (l < 0) continue;   // the leader died or took a vehicle: its followers let go themselves
       int count = 0;
       for (int m = 0; m < s.count; ++m) {
-         const int f = find_seen(s.members[m]);
-         if (f >= 0 && squad_send_event(s_seen[f].uc, kIsFollowingChr, s_seen[l].obj) == 1)
-            s.members[count++] = s.members[m];
+         const int f = find_seen(s.members[m].handle);
+         if (f < 0) continue;
+         const bool follows = squad_send_event(s_seen[f].uc, kIsFollowingChr, s_seen[l].obj) == 1;
+         if (!ai_squads::keep_member(follows, s.members[m].joined, now)) continue;
+         s_units[f].free = false;
+         s.members[count++] = s.members[m];
       }
       s.count = count;
       if (count == 0) continue;
@@ -223,8 +233,8 @@ void report(double now, int refused)
    s_lastReported = state;
    s_lastReport = now;
    ++s_reports;
-   install_log("[AISquads] %d squads with %d followers; %d AI soldiers seen, %d fighting, %d following anyone, "
-               "%d refused to join", s_squadCount, followers, s_count, fighting, following, refused);
+   install_log("[AISquads] %d squads with %d followers; %d AI soldiers seen, %d fighting, %d following someone "
+               "or joining, %d refused to join", s_squadCount, followers, s_count, fighting, following, refused);
 }
 
 void tick()
@@ -234,7 +244,7 @@ void tick()
    s_lastTick = now;
    walk(now);
    note_since(now);
-   check_squads();
+   check_squads(now);
    int refused = 0;
    if (s_count >= 2) {
       Recruit recruits[ai_squads::kMaxUnits];
@@ -247,7 +257,7 @@ void tick()
             continue;
          }
          Squad* s = squad_of(leader.handle);
-         if (s && s->count < squad_formation::kMaxSquadSize) s->members[s->count++] = follower.handle;
+         if (s && s->count < squad_formation::kMaxSquadSize) s->members[s->count++] = {follower.handle, now};
       }
    }
    report(now, refused);

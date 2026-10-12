@@ -779,12 +779,18 @@ a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
   through the Damageable at +0x140, S `0x006639B2`, G `0x00664A52`). Health is +0x144, as Lua's
   `GetObjectHealth` reads it (M `0x004720E1`, S `0x0058E59D`, G `0x0058F53D`), and the team the low
   4 bits of +0x234, signed. It already follows someone when its agent (+0x2C0, as `SendEvent` reads
-  it) answers `IsRtti` (slot 0) for `UnitFollowAgent` (M `0x005B00C0`, S `0x00667F00`,
-  G `0x00668FA0`), and fights while its state (+0x7C) is 2.
+  it) answers `IsRtti` for `UnitFollowAgent` (M `0x005B00C0`, S `0x00667F00`, G `0x00668FA0`), and
+  fights while its state (+0x7C) is 2. An agent's `IsRtti` is at vptr +0x20: Phantom's
+  `UnitAgent_vftable` starts `EnterState`, `ExitState`, `UpdateState`, and has `EventHandler` at
+  +0x50 (`UnitFollowAgent`'s vtable: M `0x00A487F0`, S `0x007AFB10`, G `0x007B0A88`). The first build
+  called slot 0, `EnterState`, on every AI agent once a second, and read its return as the answer.
 - Recruits are built with the game's `EventInfo` constructor (M `0x0052ADE0`, S `0x0043EDF0`,
   G `0x0043EDE0`; thiscall, RET 8, 0x58 bytes, a destructor that does nothing). Squads the tick made
   are checked each tick with `EVQ_SC_IsFollowingChr`, which `UnitFollowAgent::EventHandler` answers 1
-  only about the leader it follows (P `0x00792300`).
+  only about the leader it follows (P `0x00792300`). A recruit's follow order waits in its
+  controller's command queue until the controller's next decision (`UpdateHighLevel`), so for a few
+  seconds it still answers 0: it counts as a member, and taken, for 6 s from joining before it must
+  answer 1.
 - `UnitCombatAgent::EventHandler` hands a squad command on to `UnitAgent`'s (P `0x0078A300`), so a
   fighting unit would leave its fight to follow: the tick takes nobody in combat, and starts no
   squad round a leader in combat.

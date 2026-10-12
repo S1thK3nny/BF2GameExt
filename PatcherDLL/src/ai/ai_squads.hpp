@@ -19,8 +19,10 @@
 // they already follow someone (their agent is a UnitFollowAgent) or are in
 // combat (UnitController state 2), and their class's squad keys. The squads it
 // made are checked with the game's own query, EVQ_SC_IsFollowingChr (0x0F),
-// which a follower answers 1 only about the leader it follows; a dead leader or
-// one gone into a vehicle ends its squad on its own. ai_squads_core.hpp plans
+// which a follower answers 1 only about the leader it follows; a recruit's
+// order waits for its controller's next decision, so it counts as a member for
+// a few seconds before it has to (ai_squads_core.hpp). A dead leader or one
+// gone into a vehicle ends its squad on its own. ai_squads_core.hpp plans
 // the recruits, which go out as EVT_SC_FollowChr, as the player's command does.
 // squad_formation then lines the squad up.
 //
@@ -56,9 +58,15 @@
 //                                   (CheckForAutoFollow's own reads)
 //   UnitController                  +0x7C state (2 in combat, as AI sprint reads
 //                                   it); +0x2C0 mAgent (SendEvent: M 0x0059F8A6,
-//                                   S 0x006640D9), whose vptr +0x00 is IsRtti
-//                                   (UnitFollowAgent's: M 0x005B00C0, S 0x00667F00,
-//                                   G 0x00668FA0)
+//                                   S 0x006640D9)
+//   UnitAgent's vtable              +0x00 EnterState, +0x20 IsRtti, +0x50
+//                                   EventHandler (Phantom's UnitAgent_vftable;
+//                                   UnitFollowAgent's at M 0x00A487F0, S 0x007AFB10,
+//                                   G 0x007B0A88, its IsRtti M 0x005B00C0,
+//                                   S 0x00667F00, G 0x00668FA0). Slot 0 is NOT
+//                                   IsRtti here, unlike a Controller's or a
+//                                   GameObject's: the first build called
+//                                   EnterState on every AI agent each tick.
 //   GameObject                      +0x120 position; +0x144 health; +0x1FC flags,
 //                                   bit 3 alive (as the target bars read them);
 //                                   +0x204 handle id; +0x234 team, the low 4 bits
