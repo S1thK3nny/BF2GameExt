@@ -454,6 +454,12 @@
     <ClInclude Include="src\ai\ai_sprint_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\squad_formation.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\squad_formation_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\reservation_pool.hpp">
       <Filter>ai</Filter>
     </ClInclude>
@@ -883,6 +889,9 @@
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\ai_sprint.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\squad_formation.cpp">
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\instance_props.cpp">

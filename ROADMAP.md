@@ -439,11 +439,10 @@ engine already has a movement mode that needs no path, used for strafing runs. T
 fall back to it when the flyer cannot find a path, so flyers work on maps that never had flyer
 paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 
-**Squad formations** - Friendlies who tag along when the player runs past trail in a loose
-clump, and AI never form squads with each other. The engine already has formation slots for
-followers ordered with "follow me": use them for tag-alongs too, give a squad one layout and
-spacing, and let AI form squads behind an AI leader. Details in
-[docs/RE/AISystem.md](docs/RE/AISystem.md#squad-formations-researched-2026-10-11-not-built).
+**AI squads** - AI never form squads with each other. Let AI soldiers join an AI leader with the
+"follow me" event the player's squad command sends, so they move and fight in formation, the leader
+picked by a `SquadLeader` rank in its class ODF (unset: any class but a hero, at rank 1). Details in
+[docs/RE/AISystem.md](docs/RE/AISystem.md#squad-formations-researched-2026-10-11-player-squads-built-2026-10-12).
 
 **Smoother AI turning** - AI soldiers swing their head and upper body onto a target at once,
 and turn sharply while moving. Ease both: a capped, eased turn rate for where they look and for

@@ -61,6 +61,10 @@ Set on the concrete soldier class.
 | `RollShake` | scale | Eases your view back and down through a combat roll, then settles. Third person only. | 1.2.0 |
 | `SprintShake` | scale | A light judder in step with the stride while the unit sprints. Third person only. | 1.2.0 |
 | `BlastShake` | scale | How explosions shake your view while you play the unit. On without it; `0` turns it off. | 1.2.0 |
+| `SquadFormation` | `auto`, `wedge`, `file`, `column`, `line` or `stock` | How squads this class leads line up. `auto` is a wedge where there is room and a column where there is not; `file` is two abreast; `line` is abreast of the leader. See [Squads](#squads). | 1.2.0 |
+| `SquadSpacing` | metres | Space between members of squads this class leads, 1.5 to 10. | 1.2.0 |
+| `SquadSize` | number | How many followers squads this class leads take, 0 to 8. On the class you play, friendlies who start following you on their own join your squad in formation while this is above 0, and trail loosely as in stock BF2 at 0. | 1.2.0 |
+| `SquadFollower` | `0` or `1` | `0` keeps the class out of squads: it never joins one in formation. Hero classes stay out unless they set `1`. | 1.2.0 |
 
 **Notes on the override texture slots.** The model needs a material named `override_texture3`, `override_texture4` or `override_texture5` for the matching slot to do anything, following the same naming the stock two slots use. `OverrideTexture` must also be set or none of the extra slots apply. They are read off the concrete class only and are not inherited through `ClassParent`.
 
@@ -550,6 +554,19 @@ CollisionShakeRate      = "0"
 CollisionShakeLimit     = "1"
 CollisionShakeThreshold = "2 ForwardSpeed"
 ```
+
+## Squads
+
+Soldiers following a leader in formation (your squad, friendlies who join you on their own, units on a Lua `Follow` goal) line up by the squad properties on the **leader's** class, and `SquadFollower` on the follower's own. A property a class sets, itself or through `ClassParent`, decides that setting for the class whatever `BF2GameExt.ini` says, even where the INI turns squads off. A property it leaves out takes the INI's value (`[AI] SquadFormation`, `SquadSpacing`, `SquadSize`, `SquadAutoFormUp`). So a mod decides how its own units form up, and sides that set nothing behave as the player's INI asks.
+
+```
+[Properties]
+SquadFormation = "wedge"
+SquadSpacing   = "4"
+SquadSize      = "3"
+```
+
+Set them on a side's common base class and every unit that inherits from it drills the same way. The squad faces the way it travels: turning to look round does not swing it. CTF escorts round a flag carrier and vehicle convoys keep the game's own slots. Squads are run on the host and in single player; clients see the result.
 
 ## Building Classes
 

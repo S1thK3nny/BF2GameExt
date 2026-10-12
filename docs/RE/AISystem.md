@@ -661,10 +661,10 @@ The AI deliberately misses shots via `DumbDown` (1270 bytes) and `CalculateBubbl
 
 ---
 
-## Squad formations (researched 2026-10-11, not built)
+## Squad formations (researched 2026-10-11, player squads built 2026-10-12)
 
-Read in Ghidra by a research pass; nothing here is patched yet, and each address is to be re-read
-before it is used. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
+Read in Ghidra by a research pass, then re-read on every build for `[AI] SquadFormation` and
+`[AI] SquadAutoFormUp` (`ai/squad_formation.cpp`, built below). AI-led squads are not built. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
 shows them and move with the exe.
 
 ### Two kinds of follower
@@ -716,6 +716,47 @@ Why a commanded squad still clumps (inferred):
   radii times 2.5).
 - `ReserveOffset` could gain a line-abreast layout and a column that starts one slot back.
 - `UpdateTarget` could turn the slots with the leader's direction of travel instead of the camera.
+
+### Built (2026-10-12)
+
+- The follow agent's one call to `ReserveOffset` (M `0x005B0AB1`, S `0x006687BC`, G `0x0066985C`)
+  goes to a stand-in. It calls `ReserveOffset` for single file, which keeps the game's reservation
+  and gives the slot number as -z (M `0x005C69FB`, S `0x0062FBF1`, G `0x00630C91`), then lays the
+  slot out in formation space by the leader's layout and spacing. `auto` takes the layout helper's
+  answer: a wedge when it says there is room (6), a column otherwise. The slot goes back divided by
+  the agent's 2.0 with 1e-20 in y; every stock slot has 0 there.
+- The turn cannot go into that offset. `AILowLevel::SetNavigator_FollowTarget` (P `0x00480CC0`)
+  keeps the follower's `NavigatorFollowTarget` only while `IsEqual` (P `0x0067A860`) finds the same
+  leader and a bit-identical `mFollowOffset`; otherwise it deletes the navigator and builds a new one,
+  whose crumbs start again from the leader. An offset that changed as the leader turned would rebuild
+  it nearly every update. The formation-space slot stays the same while the slot number does.
+- `UpdateTarget`'s `D3DXVec3TransformCoord(out, &mFollowOffset, leader matrix)` goes to a stand-in
+  too (M `0x005A6A49`, a CALL to the thunk `0x007CB7B5`, `JMP [0x00ADFC58]`: D3DX is linked into
+  modtools and dispatches through that pointer; S `0x005ACC31` and G `0x005ADBE1`, `CALL [IAT]` to
+  d3dx9_43). A tagged offset turns to the squad's heading round the leader's position, every update;
+  any other goes on to D3DX. The navigator is `mFollowOffset` - 0x4C, its leader at +0x44 with the
+  handle id at +0x48. The two stand-ins go in together or not at all.
+- `ReserveOffset` has two other callers, which keep the stock slots: CTF escorts
+  (`UnitCTFOffenseAgent`, two abreast for the Empire and the Republic and jittered for the other
+  sides, P `0x0078D980`) and convoys (`UnitTrooperAgent`, `FT_CONVOY` scaled by the two collision
+  radii).
+- The heading is the leader's direction of travel (`GetVelocity`, GameObject vptr +0x44) once the
+  leader moves at 1.5 m/s, easing round over about a third of a second, and the last one while the
+  leader stands. The agent's 2.2 applies under 4 m/s, compared squared (16) on every build.
+- Tag-alongs: two calls in `CheckForAutoFollow` are redirected, together or not at all. Its count of
+  the player's formation reservations (M `0x0059ADE9`, S `0x0061C1B2`, G `0x0061D222`; on S and G
+  ECX = object, EDX = team and the type pushed) comes back as 2 once the squad is full and 0 before,
+  so its own `CMP EAX,2` stops at the squad size. Its recruit, `UnitController::SendEvent` (M
+  `0x0059AFC3`, S `0x0061C3E1`, G `0x0061D451`; thiscall, RET 4) on an `EventInfo` built with type
+  0x11, goes out as 0x10, or not at all for a class that never joins. The constructor only stores
+  the type (+0x34) and the object (+0x38, +0x3C), so changing the type afterwards is the same as
+  building it with 0x10. `UnitAgent::HandleSquadCommandEvent` builds the same follow command for
+  both types, tight when the type is 0x10 (M `0x005AA059`, S `0x0065EA25`, G `0x0065FAC5`).
+- ODF keys (`SquadFormation`, `SquadSpacing`, `SquadSize`, `SquadFollower`, and `SquadLeader` for
+  AI-led squads) are kept per soldier class, read through `Controllable + g_soldier->classPtr`, and
+  win over the INI key by key. A hero class is one with bit 1 of the class flags byte (+0x36C on M,
+  +0x328 on S and G) set by `Team::AddSpecialClass`, Lua's `SetHeroClass` (M `0x00662EE0`,
+  S `0x00653F00`, G `0x00654FA0`); `Character::IsHero` reads it (P `0x0049E1C0`).
 
 ## AI sprinting (researched 2026-10-11, built 2026-10-12)
 

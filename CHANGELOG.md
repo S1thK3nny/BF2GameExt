@@ -111,6 +111,12 @@ Scripts can check the running version through `GameExt.version`.
 - **AI sprint** - AI soldiers out of combat sprint on long runs, starting 30 m from where they
   are going and stopping at half that, until their energy runs out. Stock AI only sprint to catch
   up with a squad leader. `[AI] AISprint=1`, `[AI] AISprintDistance=30`; not yet tested in play.
+- **Squad formations** - A squad lines up on its leader in one layout (`[AI] SquadFormation`:
+  auto, wedge, file, column, line or stock) at one spacing (`SquadSpacing=3`), facing the way it
+  travels rather than the way the leader looks. Friendlies who join you on their own follow in
+  formation, up to `SquadSize=4` (`SquadAutoFormUp=1`); heroes stay out. Soldier classes can set
+  `SquadFormation`, `SquadSpacing`, `SquadSize` and `SquadFollower` in their ODFs, and those win
+  over the INI. Not yet tested in play.
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

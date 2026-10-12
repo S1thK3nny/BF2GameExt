@@ -1295,6 +1295,24 @@ namespace modtools {
    // `this` the soldier's Controllable. An AI soldier's per-update stance
    // switch on AILowLevel::mHeight. AI sprint detours it (ai/ai_sprint.cpp).
    constexpr uintptr_t entity_soldier_update_indirect = 0x0053B920;
+   // UnitFollowAgent's tight follow state: its CALL to ReserveManager::
+   // ReserveOffset (through the thunk 0x00406E29), cdecl(out, leader, follower,
+   // type). Squad formations redirect this one call (ai/squad_formation.cpp).
+   constexpr uintptr_t follow_reserve_offset_call   = 0x005B0AB1;
+   constexpr uintptr_t reserve_offset               = 0x005C6840;
+   // NavigatorFollowTarget::UpdateTarget's CALL that turns the follow offset by
+   // the leader's matrix: D3DXVec3TransformCoord, linked into this exe, reached
+   // through the thunk 0x007CB7B5 (JMP [0x00ADFC58], a pointer in .data).
+   constexpr uintptr_t follow_target_transform_call = 0x005A6A49;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x00ADFC58;
+   // PlayerController::CheckForAutoFollow: its CALL to ReserveManager::
+   // GetReservationCountForObject (cdecl(obj, team, type), through the thunk
+   // 0x0040200E), and the CALL to UnitController::SendEvent (thiscall(EventInfo*),
+   // through 0x0040C216) that recruits a friendly with EVT_SC_FollowChrLoose.
+   constexpr uintptr_t auto_follow_count_call       = 0x0059ADE9;
+   constexpr uintptr_t reservation_count_for_object = 0x005C6560;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0059AFC3;
+   constexpr uintptr_t unit_controller_send_event   = 0x0059F8A0;
    // EntityHover::CollisionCallback: thiscall(CollisionResult*, CollisionObject*
    // other, Restrictor*), RET 0xC, bool in AL; `this` is the hover + 0xC, its
    // CollisionObject part. Slot 6 (+0x18) of the CollisionObject vtable of
@@ -2756,6 +2774,20 @@ namespace steam {
    // EntitySoldier::UpdateIndirect, as on modtools; reached only through the
    // soldier's Controllable vtable (slot +0xC4 at 0x0079CF2C).
    constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
+   // The follow agent's CALL to ReserveManager::ReserveOffset, as on modtools;
+   // here ECX = out, EDX = leader, follower and type on the stack, caller pops.
+   constexpr uintptr_t follow_reserve_offset_call   = 0x006687BC;
+   constexpr uintptr_t reserve_offset               = 0x0062FA70;
+   // UpdateTarget's CALL [IAT] to d3dx9_43!D3DXVec3TransformCoord, as on
+   // modtools.
+   constexpr uintptr_t follow_target_transform_call = 0x005ACC31;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x0076B54C;
+   // CheckForAutoFollow's two calls, as on modtools; here the count takes
+   // ECX = obj, EDX = team and the type pushed, the caller popping.
+   constexpr uintptr_t auto_follow_count_call       = 0x0061C1B2;
+   constexpr uintptr_t reservation_count_for_object = 0x0062F760;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0061C3E1;
+   constexpr uintptr_t unit_controller_send_event   = 0x006640D0;
    // EntityHover::CollisionCallback, as on modtools: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079BC98) and CommandHover
    // (0x0079834C).
@@ -3450,6 +3482,16 @@ namespace gog {
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
    // EntitySoldier::UpdateIndirect, at Steam's address.
    constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
+   // The follow agent's CALL to ReserveOffset, UpdateTarget's turn and
+   // CheckForAutoFollow's two calls, as on Steam.
+   constexpr uintptr_t follow_reserve_offset_call   = 0x0066985C;
+   constexpr uintptr_t reserve_offset               = 0x00630B10;
+   constexpr uintptr_t follow_target_transform_call = 0x005ADBE1;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x0076C548;
+   constexpr uintptr_t auto_follow_count_call       = 0x0061D222;
+   constexpr uintptr_t reservation_count_for_object = 0x00630800;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0061D451;
+   constexpr uintptr_t unit_controller_send_event   = 0x00665170;
    // EntityHover::CollisionCallback, at Steam's address: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079CC38) and CommandHover
    // (0x007992EC).

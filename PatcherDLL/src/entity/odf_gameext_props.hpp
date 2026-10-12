@@ -36,7 +36,7 @@ uint32_t odf_gameext_props_applied();
 // starts as a copy of its parent, before its own properties are read, so this
 // is where a property kept outside the class object has to be inherited.
 //
-// Register from an installer, before any level loads; up to four of each.
+// Register from an installer, before any level loads; up to eight of each.
 using OdfPropertyHandler = bool (*)(void* cls, uint32_t hash, const char* value);
 using OdfDeriveHandler   = void (*)(const void* parent, void* child);
 bool odf_add_property_handler(OdfPropertyHandler handler);

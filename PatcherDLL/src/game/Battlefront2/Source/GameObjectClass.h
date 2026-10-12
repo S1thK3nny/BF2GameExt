@@ -22,12 +22,19 @@
 //
 // Bit 5 of the same byte is mbHideHealthBar (Phantom PDB), which the HUD's own
 // target events refuse; GameExt leaves that test to the HUD.
+//
+// Bit 1 marks a team's hero class: Team::AddSpecialClass, which Lua's
+// SetHeroClass reaches, sets it (modtools OR byte [EAX+0x36C],2 @00662EEC in
+// 0x00662EE0, Steam OR byte [EDX+0x328],2 @00653F15 in 0x00653F00, GOG @00654FB5
+// in 0x00654FA0), and Character::IsHero tests it through GameObject +0x8 (Phantom
+// 0x0049E1C0).
 // =============================================================================
 
 namespace layout::GameObjectClass {
 
 inline constexpr Field<uint8_t> mTargetFlags{0x36C, 0x328};
 
+constexpr uint8_t kHeroClass             = 0x02;   // mTargetFlags bit 1
 constexpr uint8_t kNotTargetableByPlayer = 0x10;   // mTargetFlags bit 4
 
 } // namespace layout::GameObjectClass

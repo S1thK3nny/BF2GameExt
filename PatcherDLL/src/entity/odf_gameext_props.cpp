@@ -213,7 +213,7 @@ int    s_recentUsed      = 0;   // slots filled, saturates at kWindow
 uint32_t s_applied = 0;
 
 // Listeners registered by other modules (odf_add_*_handler).
-constexpr int kMaxHandlers = 4;
+constexpr int kMaxHandlers = 8;
 OdfPropertyHandler s_propertyHandlers[kMaxHandlers] = {};
 OdfDeriveHandler   s_deriveHandlers[kMaxHandlers]   = {};
 int s_propertyHandlerCount = 0;
