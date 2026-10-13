@@ -77,6 +77,7 @@ constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
 constexpr uint32_t kHashClass = pbl_hash("WingmanClass");
 constexpr uint32_t kHashCount = pbl_hash("WingmanCount");
 constexpr uint32_t kHashAuto  = pbl_hash("WingmanAuto");
+constexpr uint32_t kHashSlot  = pbl_hash("WingmanSlot");
 
 constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
@@ -135,6 +136,10 @@ bool on_property(void* cls, uint32_t hash, const char* value)
    }
    if (hash == kHashAuto) {
       if (cls) flyer_wingmen::set_auto(s_classes[cls], value);
+      return true;
+   }
+   if (hash == kHashSlot) {
+      if (cls) flyer_wingmen::add_slot(s_classes[cls], value);
       return true;
    }
    return false;
@@ -622,7 +627,8 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    s_leaderTarget = std::isfinite(aim) && aim > 0.0f ? aim : st.leaderSpeed;
 
    const V3 me = row(wm, 3), leaderPos = row(lm, 3);
-   st.slot = flyer_wingmen::to_world(st.frame, leaderPos, flyer_wingmen::slot_offset(w->slot, g_flyerWingmenSpacing));
+   st.slot = flyer_wingmen::to_world(st.frame, leaderPos,
+                                     flyer_wingmen::slot_for(keys_of(s_leader), w->slot, g_flyerWingmenSpacing));
    const V3 slot = flyer_wingmen::in_frame(st.frame, me, st.slot);   // the slot, from the wingman
    flyer_wingmen::update_trim(w->trim, slot, dt);
    const V3 steer = flyer_wingmen::keep_clear(

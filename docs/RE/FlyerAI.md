@@ -433,3 +433,15 @@ navigator), then, while flying and not placed on a path (`GetFollowingPath`, M `
   how fast the player flies, so a wingman brakes or boosts with the player rather than after.
 - **Speed limits:** a wingman's speeds stretch round both.
 - **Turning:** in formation it flies that speed exactly until its point is 60° off its nose.
+
+**Round three in play:** the user: "Much better, they slow down with me now."
+
+**`WingmanSlot` (the user's idea).** A leader class can lay out its own formation, one slot per line,
+written as a command vehicle's `SpawnPointLocation` lines are:
+- **Format:** `WingmanSlot = "x y z"`, in the leader's frame with its roll left out (x right, y up,
+  z ahead). A fourth number, the spawn points' angle, is ignored.
+- **Order and count:** wingmen take the slots in order. The lines set how many wingmen the class takes,
+  unless `WingmanCount` asks for fewer.
+- **Inheritance:** a child class's own lines replace the slots it inherits.
+- **Without any:** the vee.
+- **Limit:** up to 8 wingmen (was 4).

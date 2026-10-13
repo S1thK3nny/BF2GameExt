@@ -68,7 +68,7 @@ assert r'"\x83\xEC\x28\x53\x55\x56\x8B\xE9\x8B\x85\x08\x03\x00\x00", 14' in sour
 assert source.count(r'"\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12') == 3             # the getters
 assert r'"\xD9\x05\x6C\xA0\xA2\x00\x56\x8B\xF1\x8B\x8E\x6C\x06\x00\x00", 15' in source       # DoTrick
 assert 'pbl_hash("WingmanClass")' in source and 'pbl_hash("WingmanCount")' in source
-assert 'pbl_hash("WingmanAuto")' in source
+assert 'pbl_hash("WingmanAuto")' in source and 'pbl_hash("WingmanSlot")' in source
 
 mt = re.search(r"namespace modtools\s*\{(.*?)\n\s*\}\s*//\s*namespace modtools", addrs, re.S).group(1)
 NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "flyer_max_speed", "flyer_min_speed",

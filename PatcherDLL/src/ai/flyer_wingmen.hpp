@@ -89,11 +89,14 @@
 //
 // ODF keys on a flyer class, over the INI key by key, and a class that sets
 // any has wingmen whatever FlyerWingmen says (flyer_wingmen_core.hpp):
-// WingmanClass, WingmanCount, WingmanAuto.
+// WingmanClass, WingmanCount, WingmanAuto, and WingmanSlot "x y z" lines,
+// written as a command vehicle's SpawnPointLocation lines are, for its own
+// formation in place of the vee.
 //
 // INI (unregistered while a prototype): [AI] FlyerWingmen=1 gives every flyer
-// wingmen, FlyerWingmenCount=3 (0 to 4), FlyerWingmenSpacing=25 (metres, 8 to
-// 60), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key only).
+// wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
+// 60, the vee's), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key
+// only).
 // =============================================================================
 
 extern bool  g_flyerWingmen;

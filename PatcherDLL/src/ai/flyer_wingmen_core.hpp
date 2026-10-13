@@ -37,7 +37,7 @@ inline bool normalise(V3& v)
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 // ---- The formation ------------------------------------------------------------
-constexpr int   kMaxWingmen     = 4;
+constexpr int   kMaxWingmen     = 8;
 constexpr int   kDefaultWingmen = 3;
 constexpr float kDefaultSpacing = 25.0f;   // m between neighbours
 constexpr float kMinSpacing     = 8.0f;
@@ -249,6 +249,14 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //   WingmanCount   wingmen it takes, 0 to kMaxWingmen; 0 leads none
 //   WingmanAuto    1: friendlies join it at takeoff; 0: only the squad key
 //                  recruits them
+//   WingmanSlot    "x y z": a slot in the leader's frame, roll left out (x
+//                  right, y up, z ahead, metres), one line per slot in the
+//                  order wingmen take them, as a command vehicle's
+//                  SpawnPointLocation lines are written (a fourth number, the
+//                  spawn points' angle, is ignored). Its lines set how many
+//                  wingmen it takes, unless WingmanCount asks for fewer; a
+//                  child's own lines replace the slots it inherits. Without
+//                  any, the vee (slot_offset).
 constexpr int kMaxClasses = 16;
 
 struct ClassKeys {
@@ -260,6 +268,10 @@ struct ClassKeys {
    int      count = 0;
    bool     hasAuto = false;
    bool     autoForm = true;
+   V3       slots[kMaxWingmen];
+   int      slotCount = 0;
+   bool     hasSlots = false;
+   bool     ownSlots = false;     // its own lines have begun replacing the inherited slots
 };
 
 // A value as an ODF writes it: spaces and quotes round it ignored.
@@ -324,6 +336,38 @@ inline bool set_count(ClassKeys& k, const char* value)
    return true;
 }
 
+// One WingmanSlot line, "x y z": false, leaving the slots as they were, for a
+// value without three numbers. The first of a class's own lines clears what it
+// inherited.
+inline bool add_slot(ClassKeys& k, const char* value)
+{
+   if (!value) return false;
+   const char* b = value;
+   const char* e = value;
+   while (*e) ++e;
+   trim(b, e);
+   char buf[96];
+   const size_t n = (size_t)(e - b) < sizeof buf - 1 ? (size_t)(e - b) : sizeof buf - 1;
+   for (size_t i = 0; i < n; ++i) buf[i] = b[i] == ',' ? ' ' : b[i];
+   buf[n] = 0;
+   float xyz[3];
+   char* p = buf;
+   for (float& c : xyz) {
+      char* end = nullptr;
+      const double v = std::strtod(p, &end);
+      if (end == p || !std::isfinite(v)) return false;
+      c = (float)v;
+      p = end;
+   }
+   if (!k.ownSlots) {
+      k.slotCount = 0;
+      k.ownSlots = true;
+   }
+   k.hasSlots = true;
+   if (k.slotCount < kMaxWingmen) k.slots[k.slotCount++] = {xyz[0], xyz[1], xyz[2]};
+   return true;
+}
+
 inline bool set_auto(ClassKeys& k, const char* value)
 {
    double v;
@@ -333,15 +377,25 @@ inline bool set_auto(ClassKeys& k, const char* value)
    return true;
 }
 
-// A child class starts as its parent; its own WingmanClass lines replace the list.
+// A child class starts as its parent; its own WingmanClass and WingmanSlot
+// lines replace the lists.
 inline ClassKeys inherited(const ClassKeys& parent)
 {
    ClassKeys k = parent;
    k.ownClasses = false;
+   k.ownSlots = false;
    return k;
 }
 
-inline bool sets_any(const ClassKeys* k) { return k && (k->hasClasses || k->hasCount || k->hasAuto); }
+inline bool sets_any(const ClassKeys* k) { return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots); }
+
+// Slot `slot` of this leader's formation: its class's WingmanSlot where it has
+// one, else the vee at `spacing`.
+inline V3 slot_for(const ClassKeys* leader, int slot, float spacing)
+{
+   if (leader && leader->hasSlots && slot >= 0 && slot < leader->slotCount) return leader->slots[slot];
+   return slot_offset(slot, spacing);
+}
 
 // Whether a flyer of class `followerId` may fly as this leader's wingman: the
 // leader's list where it has one, else the INI's rule, keeping up.
@@ -355,9 +409,12 @@ inline bool accepts(const ClassKeys* leader, uint32_t followerId, bool keepsUp)
    return keepsUp;
 }
 
+// Wingmen it takes: WingmanCount, else its slots, else the INI; never more than
+// it has slots for.
 inline int count_for(const ClassKeys* leader, int ini)
 {
-   const int n = leader && leader->hasCount ? leader->count : ini;
+   int n = leader && leader->hasCount ? leader->count : leader && leader->hasSlots ? leader->slotCount : ini;
+   if (leader && leader->hasSlots && n > leader->slotCount) n = leader->slotCount;
    return n < 0 ? 0 : n > kMaxWingmen ? kMaxWingmen : n;
 }
 

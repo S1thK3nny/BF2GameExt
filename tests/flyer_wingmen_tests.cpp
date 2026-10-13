@@ -267,7 +267,7 @@ void class_keys()
    assert(set_count(k, "9") && k.count == kMaxWingmen);
    assert(set_count(k, "-1") && k.count == 0);
    assert(!set_count(k, "two") && !set_count(k, "") && k.count == 0);
-   assert(count_for(&k, 3) == 0 && count_for(&none, 3) == 3 && count_for(nullptr, 7) == kMaxWingmen);
+   assert(count_for(&k, 3) == 0 && count_for(&none, 3) == 3 && count_for(nullptr, 20) == kMaxWingmen);
    assert(set_auto(k, "0") && !k.autoForm && !auto_for(&k, true));
    assert(set_auto(k, "1") && k.autoForm && auto_for(&k, false));
    assert(!set_auto(k, "yes"));
@@ -277,6 +277,39 @@ void class_keys()
    assert(set_auto(onlyAuto, "1") && sets_any(&onlyAuto));
    add_class(onlyList, 0);   // WingmanClass = "": no class follows, but it is set
    assert(sets_any(&onlyList) && onlyList.classCount == 0 && !accepts(&onlyList, 7, true));
+}
+
+// A leader class's own formation: WingmanSlot lines, written as a command
+// vehicle's SpawnPointLocation lines are.
+void slot_keys()
+{
+   ClassKeys k;
+   assert(add_slot(k, "\"-12.0 2.0 -8.0\"") && add_slot(k, "12 2 -8 355") && add_slot(k, "0,4,-16"));
+   assert(k.hasSlots && k.slotCount == 3 && sets_any(&k));
+   assert(near(k.slots[0], {-12, 2, -8}) && near(k.slots[1], {12, 2, -8}) && near(k.slots[2], {0, 4, -16}));
+   // Not three numbers: ignored.
+   assert(!add_slot(k, "1 2") && !add_slot(k, "") && !add_slot(k, nullptr) && !add_slot(k, "a b c"));
+   assert(k.slotCount == 3);
+   // Its slots, then the vee past them; no keys, the vee.
+   assert(near(slot_for(&k, 1, 25.0f), {12, 2, -8}) && near(slot_for(&k, 3, 25.0f), slot_offset(3, 25.0f)));
+   assert(near(slot_for(nullptr, 0, 25.0f), slot_offset(0, 25.0f)) && near(slot_for(&k, -1, 25.0f), slot_offset(0, 25.0f)));
+   // How many: its slots, unless WingmanCount asks for fewer.
+   assert(count_for(&k, 1) == 3);
+   ClassKeys fewer = k;
+   set_count(fewer, "2");
+   assert(count_for(&fewer, 5) == 2);
+   ClassKeys more = k;
+   set_count(more, "6");
+   assert(count_for(&more, 5) == 3);
+   // A child inherits them until its own lines replace them.
+   ClassKeys child = inherited(k);
+   assert(child.slotCount == 3 && near(slot_for(&child, 2, 25.0f), {0, 4, -16}));
+   assert(add_slot(child, "5 0 -5"));
+   assert(child.slotCount == 1 && near(child.slots[0], {5, 0, -5}) && count_for(&child, 3) == 1);
+   // At most kMaxWingmen.
+   ClassKeys many;
+   for (int i = 0; i < kMaxWingmen + 3; ++i) add_slot(many, "1 1 1");
+   assert(many.slotCount == kMaxWingmen && count_for(&many, 1) == kMaxWingmen);
 }
 
 // The log's numbers.
@@ -305,8 +338,10 @@ int main()
    turning();
    who_flies();
    class_keys();
+   slot_keys();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
-               "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, stats).\n");
+               "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
+               "stats).\n");
    return 0;
 }
