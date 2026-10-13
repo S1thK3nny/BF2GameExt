@@ -461,13 +461,16 @@ at the advanced point. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 every stock follow turns into boarding. Recruit friendly AI fighters with the squad key in flight,
 steer them to formation slots each frame, and give Rogue Leader's orders (form up, engage, attack
 my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m in level flight in the
-first test; a second round adds speed matching, no tricks, the squad key and ODF keys. Details in
+first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
+`WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
+formation. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
 **Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
 rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or
 `PathFollowerRealFlight = 1` on a flyer class) steps the path follower on a point about a second
-ahead and flies the ship after it by physics; not yet played. Details in
+ahead and flies the ship after it by physics; it works on Cato Neimoidia since danger regions and
+hangar shields stopped trapping it. Next: real pursuit, AI-led formations, Steam/GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#real-flight-on-paths-prototype-2026-10-13-modtools-only).
 
 ## Controller

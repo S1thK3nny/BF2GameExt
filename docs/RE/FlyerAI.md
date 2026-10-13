@@ -558,14 +558,15 @@ sets it to -1 or 1 first, the AI's own roll to a world direction).
 - **First look (the user):** after a side roll wingmen flew off for a moment. A side roll is a dodge:
   while `mSideRoll.x` is set, `EntityFlyer::Update` (M `0x004FEE51`) eases the flyer's sideways speed
   (Controllable +0x35C) toward `mSideRoll.x` times a class speed (class +0xDA4) at a class rate (+0x884),
-  and once it is cleared lets it ebb at a thirtieth of that rate. A rippled wingman turned for the slot the leader's dodge had moved, then dodged as well, and its
-  steering acted in a rolling frame.
+  and once it is cleared lets it ebb at a thirtieth of that rate. A rippled wingman turned for the slot the
+  leader's dodge had moved, then dodged as well, and its steering acted in a rolling frame.
 - **Fix:** from the leader's trick until its own copy has ended plus 0.3 s, a wingman is steered at a point
   100 m straight off its nose at the leader's speed (its trims left alone), then back to its slot.
 - **Flips (the user's idea):** a flip is a half loop, so the leader comes out heading back the way it came
   with its wingmen across from where they were. Each leader flip mirrors the formation, left for right, so
   a wingman falls back into a slot on its own side instead of crossing the leader; a new formation starts
-  unmirrored. Not yet played.
+  unmirrored.
+- **In play (a3a1971, the user, 2026-10-13):** "Great stuff, works!"
 
 ---
 
@@ -600,7 +601,7 @@ A danger region is a no-fly zone for AI flyers that steer by physics. Read in P;
 
 The user's ask after the spline write-up: let spline flyers fly for real. Built on the wingmen's hooks
 (`ai/flyer_real_flight.*`; `[AI] FlyerRealFlight=1`, or `PathFollowerRealFlight = 1` on a flyer class,
-over the INI; unregistered). Not yet played.
+over the INI). Played on Cato Neimoidia: below, "First play" and "Second play".
 
 **The carrot.** `EntityPathFollower::Update` (M `0x005EC8F0`, thiscall, 7 arguments, `RET 0x1C`) moves the
 matrix its `BranchParams` points at (+4), and `GetBranchParams` (the follower's vptr +0x1C, M `0x004F52D0`,
@@ -675,3 +676,20 @@ and those launching from the capital ships stayed in the hangars.
   which for a flyer on real flight or a wingman in formation sends the ray out with ordnance only set,
   and `CollisionModel::RayHit` is detoured to read the model's rigid mask (+0x114, `GetCollisionMask`'s
   case for 8) as its ordnance mask (+0x12C) during that ray only.
+
+**Second play (9e6221f, the user, 2026-10-13):** "That seems to have fixed the circling."
+
+**Still to watch in play:**
+- **Climbs:** `RaiseHeight` still lifts the point over what vehicles hit within 1.5 s of the nose, and 25 m
+  over the terrain ahead, so paths hugging a capital ship, running under bridges or strafing low are flown
+  higher than drawn.
+- **Corners:** cut inside, tight hairpins swung wide; watch for scraping near buildings and hangar mouths.
+- **Collisions between flyers:** nothing keeps two apart (`CalculateDest` avoids barriers only), so flyers
+  sharing a path can now collide.
+- **Landing on arrival** a lead early; **no stock squadrons or flybys** for these flyers; **danger regions**
+  ignored, as placed flyers always ignored them.
+
+**Next, as offered to the user:** real pursuit on top (on turn-and-attack, steer at where the attacker will
+be, on a leash, then rejoin through `Branch`); AI-led formations through the wingmen code (several leaders
+at once, a rule for which classes lead, what wingmen do when their leader turns to fight, stock squadrons
+off for those classes, the map's `EntityFormation` shapes as slot sets); Steam and GOG; online (host only).
