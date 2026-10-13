@@ -58,6 +58,7 @@
 #include "ai/ai_sprint.hpp"
 #include "ai/squad_formation.hpp"
 #include "ai/ai_squads.hpp"
+#include "ai/flyer_wingmen.hpp"
 #include "ai/squad_formation_core.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -322,6 +323,10 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_squadAutoFormUp           = cfg.get_bool("AI", "SquadAutoFormUp", true);
       g_squadSize                 = cfg.get_int("AI", "SquadSize", 4);
       g_squadPathfinding          = cfg.get_bool("AI", "SquadPathfinding", true);
+      // A prototype, so not in the registry: off unless the player adds it.
+      g_flyerWingmen              = cfg.get_bool("AI", "FlyerWingmen", false);
+      g_flyerWingmenCount         = cfg.get_int("AI", "FlyerWingmenCount", 3);
+      g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
@@ -452,6 +457,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    ai_sprint_install(exe_base);        // Detours .text
    squad_formation_install(exe_base);  // rewrites a CALL rel32, byte-patches .text - needs the RW window
    ai_squads_install(exe_base);        // off for now (logs it); after squad_formation, whose keys and events it uses
+   flyer_wingmen_install(exe_base);    // Detours .text, rewrites a CALL rel32 - needs the RW window
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.

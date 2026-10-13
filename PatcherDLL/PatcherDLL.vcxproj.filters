@@ -454,6 +454,12 @@
     <ClInclude Include="src\ai\ai_sprint_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\flyer_wingmen.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\flyer_wingmen_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\squad_formation.hpp">
       <Filter>ai</Filter>
     </ClInclude>
@@ -895,6 +901,9 @@
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\ai_sprint.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\flyer_wingmen.cpp">
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\squad_formation.cpp">

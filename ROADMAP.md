@@ -460,7 +460,8 @@ at the advanced point. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 **Flyer wingmen** - A player's flyer has no wingmen: the squad key does nothing in the air, and
 every stock follow turns into boarding. Recruit friendly AI fighters with the squad key in flight,
 steer them to formation slots each frame, and give Rogue Leader's orders (form up, engage, attack
-my target, cover me). A prototype must show the AI can hold a slot at fighter speed. Details in
+my target, cover me). A prototype must show the AI can hold a slot at fighter speed: a modtools one is
+in (`[AI] FlyerWingmen=1`), not yet played. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
 ## Controller

@@ -1323,6 +1323,17 @@ namespace modtools {
    constexpr uintptr_t follow_set_navigator_call    = 0x005B0AE1;
    constexpr uintptr_t ai_set_navigator_follow_target = 0x005A3180;
    constexpr uintptr_t ai_set_navigator_goto        = 0x005A2E00;
+   // Flyer wingmen (a prototype, modtools only). EntityFlyer::UpdateIndirect,
+   // thiscall(float dt) on the flyer's Controllable (entity +0x240), RET 4; its
+   // one CALL to EntityFlyer::CalculateDest (through the thunk 0x00401726),
+   // thiscall(dt, ControllableDestination*, point*, speed*, myPos*) on the
+   // entity, RET 0x14; GetFlyerMaxSpeed and GetFlyerMinSpeed, thiscall() on
+   // the entity, the speed in ST0.
+   constexpr uintptr_t flyer_update_indirect        = 0x004F4C10;
+   constexpr uintptr_t flyer_calc_dest_call         = 0x004F4D4D;
+   constexpr uintptr_t flyer_calc_dest              = 0x004F4630;
+   constexpr uintptr_t flyer_max_speed              = 0x004F0950;
+   constexpr uintptr_t flyer_min_speed              = 0x004F0A10;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

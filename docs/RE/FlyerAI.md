@@ -340,3 +340,43 @@ with smoother AI flight.
 within a few metres at 70-95 m/s (a prototype answers that); whether the host sees a remote client's
 squad key; how a wingman boosts to keep up with a boosting leader (no AI boost path was found outside
 the spline mode); how often `AIGoalManager` reassigns a wingman's pilot.
+
+### The prototype (2026-10-13, modtools only)
+
+**Why the squadron code cannot follow a player.** `EntityPathFollower::UpdateSquadron` (P `0x0055E2D0`,
+called from `EntityPathFollower::Update`, P `0x0055D380`) adds a member's formation offset
+(`EntitySquadron::UpdatePosition`, P `0x0058DE00`, `EntityFormation::CalculatePoint` in the frame it is
+handed) to the member's **own** point on the path, then matches its speed along that path to the
+leader's. `CreateSquadronFromClosestEntities` (M `0x005E8F70`) returns at once unless the leader has a
+path (+0xA8), puts every member on the leader's path, and is off when networked. So a squadron is AI
+fighters sharing one path. The formation shapes would carry over; the movement would not.
+
+**How a free-flying AI flyer is steered** (read in P, then M). `EntityFlyer::UpdateIndirect` (M
+`0x004F4C10`, `this` the Controllable at entity +0x240) runs `AILowLevel::UpdateIndirect` (the
+navigator), then, while flying and not placed on a path (`GetFollowingPath`, M `0x004D7960`: flags
++0x5F4 bit 8, state +0x5A4 = 2, alive, `mFreeFlyTime` +0x1CDC not above 0, no trick), calls
+`CalculateDest` (M `0x004F4630` via the thunk `0x00401726`, call at `0x004F4D4D`; thiscall on the entity,
+`RET 0x14`). That copies `AILowLevel::mDest` (UnitController +0x2C4 +0x1C, a 0x34-byte
+`ControllableDestination`: `mHasDest` +0, `mPos` +4, `mOriginalPos` +0x10, `mDirection` +0x1C,
+`mSafeHeightEnforce` +0x28 (SH_FULL 0), `mTaperFactor` +0x2C, `mMaxSpeed` +0x30), avoids barriers every
+0.1 s (sliding: flags bit 0x10), raises the point over terrain, and shapes the speed:
+- **Off its nose:** a point more than about 26° off the nose (`cos` 0.9) drops the speed factor to 0.
+- **Near and misaligned:** a point within one top speed's distance scales it toward 0.3 unless the flyer
+  already faces `mDirection`.
+- **Floor:** never below 20 m/s.
+
+`UpdateIndirect` then turns it into thrust. The speed is a share of the top speed:
+`AIUtil::GetTargetSpeedForRealSpeed` (P `0x00488330`) is speed / max, kept within 0 to 1.
+`GetFlyerMaxSpeed` / `GetFlyerMinSpeed` (M `0x004F0950` / `0x004F0A10`) read the class at +0x66C.
+
+**Built (`ai/flyer_wingmen.*`, `[AI] FlyerWingmen=1`, unregistered).**
+- **Picking wingmen:** a detour of `UpdateIndirect` does this once a second (the nearest friendly AI
+  flyers within 300 m with a top speed at least 90% of the player's), and holds a path flyer's
+  `mFreeFlyTime` at 0.5 s so it flies free.
+- **Steering:** the call to `CalculateDest` swaps a wingman's `mDest` for its vee slot carried on 0.5 s by
+  the leader's velocity, facing the leader's way, at the leader's speed plus 0.5 m/s per metre the slot is
+  ahead. It puts the AI's own destination back afterwards, and keeps 85% of that speed until the point is
+  60° off the nose.
+- **Logging:** BF2GameExt.log reports each slot's error every 5 s.
+- **Checks:** `tests/flyer_wingmen_abi_tests.py` audits the reads.
+- **Not yet:** played, ported to Steam/GOG, orders, ODF keys.
