@@ -1348,6 +1348,15 @@ namespace modtools {
    constexpr uintptr_t flyer_update_path_follower   = 0x004F30C0;
    constexpr uintptr_t flyer_update_path_call       = 0x004FDD93;
    constexpr uintptr_t flyer_free_reset_call        = 0x004FDDED;
+   // EntityFlyer::RaiseHeight's CALL to CollisionManager::RayHit (through the
+   // thunk 0x00407581), cdecl(start, dir, length, hit*, normal*, ignore list,
+   // ignore count, type mask, bool ordnanceOnly), the fraction in ST0; and
+   // CollisionModel::RayHit, thiscall(matrix, pose, start, dir, length, normal*,
+   // body*, bool ordnanceOnly, ...), RET 0x24, which with ordnanceOnly tests only
+   // the bodies in its ordnance mask (+0x12C; the vehicle mask is +0x114).
+   constexpr uintptr_t flyer_raise_ray_call         = 0x004F429E;
+   constexpr uintptr_t collision_ray_hit            = 0x0042E230;
+   constexpr uintptr_t collision_model_ray_hit      = 0x004359C0;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

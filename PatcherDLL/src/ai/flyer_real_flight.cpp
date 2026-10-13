@@ -7,6 +7,9 @@
 #include "core/resolve.hpp"
 #include "util/install_log.hpp"
 
+#include <detours.h>
+
+#include <cfloat>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -31,10 +34,13 @@ constexpr uint32_t kFly_Flags        = 0x5F4;
 constexpr uint32_t kFly_EnergyClass  = 0x618;    // the energy bar's class, its max at +0 ...
 constexpr uint32_t kFly_Energy       = 0x61C;    // ... the energy ...
 constexpr uint32_t kFly_EnergyFlags  = 0x620;    // ... bit 0: not counted
+constexpr uint32_t kFly_NextBarrierCheck = 0x650;   // CalculateDest's next barrier and danger region check
 constexpr uint32_t kFly_Class        = 0x66C;    // its EntityFlyerClass ...
 constexpr uint32_t kClass_PathClass  = 0x6AC;    // ... whose EntityPathFollowerClass this is ...
 constexpr uint32_t kClass_BoostSpeed = 0x898;    // ... and mBoostFlyerSpeed
 constexpr uint32_t kFly_FreeFlyTime  = 0x1CDC;
+constexpr uint32_t kModel_RigidMask    = 0x114;  // CollisionModel: the bodies vehicles hit (VehicleCollision) ...
+constexpr uint32_t kModel_OrdnanceMask = 0x12C;  // ... and those ordnance hits, which its RayHit can be held to
 constexpr uint32_t kFol_LandNow      = 0xD5;     // EntityPathFollower::mbLandNow
 constexpr uint32_t kVt_BranchParams  = 0x1C;     // the follower's GetBranchParams
 constexpr int      kStateFlying      = 2;
@@ -97,20 +103,29 @@ using fn_step_t          = bool(__thiscall*)(void* follower, BranchParams* param
 using fn_reset_t         = void(__thiscall*)(void* follower, void* pathClass);
 using fn_land_t          = void(__thiscall*)(void* flyer);
 using fn_upf_t           = void(__thiscall*)(void* flyer, float dt, float* matrix);
+using fn_ray_hit_t       = float(__cdecl*)(const float* start, const float* dir, float length, void** hit, float* normal,
+                                           uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly);
+using fn_model_ray_t     = float(__thiscall*)(uint8_t* model, void* matrix, void* pose, const float* start,
+                                              const float* dir, float length, float* normal, int* body,
+                                              int ordnanceOnly, uint32_t extra);
 
-fn_step_t  s_step = nullptr;
-fn_reset_t s_reset = nullptr;
-fn_land_t  s_land = nullptr;
-fn_upf_t   s_updatePathFollower = nullptr;
-Borrowed   s_borrowed;
-bool       s_installed = false;
-double     s_ticksPerSecond = 0.0;
+fn_step_t      s_step = nullptr;
+fn_reset_t     s_reset = nullptr;
+fn_land_t      s_land = nullptr;
+fn_upf_t       s_updatePathFollower = nullptr;
+fn_ray_hit_t   s_rayHit = nullptr;     // CollisionManager::RayHit
+fn_model_ray_t s_modelRay = nullptr;   // CollisionModel::RayHit; after the install, the original's trampoline
+bool           s_modelDetoured = false;
+bool           s_vehicleRay = false;   // RaiseHeight's ray for one of ours: only what vehicles hit
+Borrowed       s_borrowed;
+bool           s_installed = false;
+double         s_ticksPerSecond = 0.0;
 
 struct Site {
    uint8_t* at = nullptr;
    uint8_t  orig[5] = {};
 };
-Site s_upfSite, s_resetSite;
+Site s_upfSite, s_resetSite, s_raySite;
 
 // ---- The ODF key, per class ---------------------------------------------------------
 std::unordered_map<const void*, bool> s_classes;
@@ -167,6 +182,24 @@ void hold(uint8_t* flyer)
 {
    float& t = *(float*)(flyer + kFly_FreeFlyTime);
    if (!(t >= kHoldFreeFly)) t = kHoldFreeFly;
+}
+
+// CalculateDest checks for barriers and danger regions once its next check is
+// due, and a hit sends the flyer sliding off to one side for as long as the line
+// ahead stays blocked. A path crossing a danger region (a capital ship's hangar
+// sits inside one on Cato Neimoidia) then has the flyer circling its carrot for
+// ever. Placed flyers never met them; a flyer on real flight is kept from them
+// the same way: its next check never comes, and any slide is called off.
+void park_barriers(uint8_t* flyer)
+{
+   *(float*)(flyer + kFly_NextBarrierCheck) = FLT_MAX;
+   flyer[kFly_Flags] &= (uint8_t)~kFlagSliding;
+}
+
+void free_barriers(uint8_t* flyer)
+{
+   float& next = *(float*)(flyer + kFly_NextBarrierCheck);
+   if (next == FLT_MAX) next = 0.0f;   // checked again from the next update
 }
 
 void* path_class(const uint8_t* flyer)
@@ -299,12 +332,14 @@ void step(int i, uint8_t* flyer, float dt, double now)
       c.pathless = true;
       c.retryAt = now + flyer_real_flight::kRetrySeconds;
       s_reset(follower, bp.pathClass);
+      free_barriers(flyer);
       ++s_stats.pathless;
       return;
    }
    if (follower[kFol_LandNow]) {
       // A node's LandOnArrival, as UpdatePathFollower takes it.
       *(float*)(flyer + kFly_FreeFlyTime) = kHoldFreeFly;
+      free_barriers(flyer);
       s_land(flyer);
       forget(i);
       return;
@@ -342,6 +377,59 @@ void __fastcall free_reset_mt(uint8_t* follower, void*, void* pathClass)
       keep = false;
    }
    if (!keep) s_reset(follower, pathClass);
+}
+
+// ---- RaiseHeight's ray, and the collision model under it ---------------------------------
+// EntityFlyer::RaiseHeight casts a ray 1.5 s along the nose against rigid and
+// static objects (types 0x18) and, on a hit, lifts the point over the object's
+// bounding sphere and asks 20 m/s. The ray tests every collision body, so a
+// hangar shield that lets vehicles through stops a flyer leaving the hangar. For
+// a flyer on real flight (or a wingman in formation) only the bodies vehicles
+// hit count: the ray goes out held to "ordnance" bodies, and for that ray each
+// collision model's ordnance mask is its vehicle mask (VehicleCollision).
+//
+// RaiseHeight's CALL to CollisionManager::RayHit: cdecl(start, dir, length,
+// hit*, normal*, ignore list, ignore count, type mask, ordnance only), the
+// fraction of the length in ST0. Its ignore list is the flyer itself.
+float __cdecl raise_ray_mt(const float* start, const float* dir, float length, void** hit, float* normal,
+                           uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly)
+{
+   bool vehicles = false;
+   __try {
+      uint8_t* const flyer = ignore && ignoreCount > 0 ? ignore[0] : nullptr;
+      vehicles = flyer && (live(flyer) >= 0 || (s_borrowed.wingman && s_borrowed.wingman(flyer)));
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      vehicles = false;
+   }
+   if (!vehicles) return s_rayHit(start, dir, length, hit, normal, ignore, ignoreCount, typeMask, ordnanceOnly);
+   float fraction = 1.0f;
+   s_vehicleRay = true;
+   __try {
+      fraction = s_rayHit(start, dir, length, hit, normal, ignore, ignoreCount, typeMask, 1);
+   } __finally {
+      s_vehicleRay = false;
+   }
+   return fraction;
+}
+
+// CollisionModel::RayHit, detoured: thiscall(matrix, pose, start, dir, length,
+// normal*, body*, ordnance only, ...), RET 0x24, the fraction in ST0. Only
+// during the ray above does it trade its ordnance mask for its vehicle mask.
+float __fastcall model_ray_mt(uint8_t* model, void*, void* matrix, void* pose, const float* start, const float* dir,
+                              float length, float* normal, int* body, int ordnanceOnly, uint32_t extra)
+{
+   if (!s_vehicleRay || !(ordnanceOnly & 0xFF))
+      return s_modelRay(model, matrix, pose, start, dir, length, normal, body, ordnanceOnly, extra);
+   uint8_t saved[8];
+   std::memcpy(saved, model + kModel_OrdnanceMask, 8);
+   std::memcpy(model + kModel_OrdnanceMask, model + kModel_RigidMask, 8);
+   float fraction = 1.0f;
+   __try {
+      fraction = s_modelRay(model, matrix, pose, start, dir, length, normal, body, ordnanceOnly, extra);
+   } __finally {
+      std::memcpy(model + kModel_OrdnanceMask, saved, 8);
+   }
+   return fraction;
 }
 
 // ---- Install --------------------------------------------------------------------------
@@ -392,7 +480,10 @@ void on_update(uint8_t* flyer, float dt)
    if (!flies_for_real(flyer)) {
       // The stock code has it again: its follower resets while it flies free,
       // and it branches onto a path from where it is.
-      if (i >= 0) forget(i);
+      if (i >= 0) {
+         free_barriers(flyer);
+         forget(i);
+      }
       return;
    }
    if (i < 0) {
@@ -418,10 +509,12 @@ void on_update(uint8_t* flyer, float dt)
    report(now);
 }
 
-void release(const uint8_t* flyer)
+void release(uint8_t* flyer)
 {
    const int i = find(flyer);
-   if (i >= 0) forget(i);
+   if (i < 0) return;
+   if (s_carrots[i].handle == handle_of(flyer)) free_barriers(flyer);
+   forget(i);
 }
 
 bool steer_before(uint8_t* flyer, Steer& st)
@@ -452,6 +545,7 @@ bool steer_before(uint8_t* flyer, Steer& st)
    *(float*)(st.dest + kDest_Speed) = st.target;
    std::memcpy(st.point, &point, 12);
    st.carrot = i;
+   park_barriers(flyer);   // no slides off its path (above)
    return true;
 }
 
@@ -480,6 +574,7 @@ bool install(uintptr_t base, const Borrowed& borrowed)
    const auto* a = g_addr;
    if (g_build != GameBuild::Modtools || !a->flyer_path_step || !a->flyer_update_path_follower ||
        !a->flyer_update_path_call || !a->flyer_free_reset_call || !a->path_follower_reset || !a->entity_flyer_land ||
+       !a->flyer_calc_dest || !a->flyer_raise_ray_call || !a->collision_ray_hit || !a->collision_model_ray_hit ||
        !borrowed.maxSpeed || !borrowed.minSpeed || !borrowed.midSpeed) {
       install_log("[RealFlight] NOT installed: no address set for this build");
       return false;
@@ -488,8 +583,12 @@ bool install(uintptr_t base, const Borrowed& borrowed)
    const uint8_t* const stepFn = (const uint8_t*)resolve(base, a->flyer_path_step);
    const uint8_t* const resetFn = (const uint8_t*)resolve(base, a->path_follower_reset);
    const uint8_t* const landFn = (const uint8_t*)resolve(base, a->entity_flyer_land);
+   const uint8_t* const calcDest = (const uint8_t*)resolve(base, a->flyer_calc_dest);
+   const uint8_t* const rayFn = (const uint8_t*)resolve(base, a->collision_ray_hit);
+   const uint8_t* const modelRay = (const uint8_t*)resolve(base, a->collision_model_ray_hit);
    uint8_t* const upfCall = (uint8_t*)resolve(base, a->flyer_update_path_call);
    uint8_t* const resetCall = (uint8_t*)resolve(base, a->flyer_free_reset_call);
+   uint8_t* const rayCall = (uint8_t*)resolve(base, a->flyer_raise_ray_call);
    const bool ok =
       // UpdatePathFollower: the follower at +0x3CC, GetBranchParams at its vptr +0x1C into
       // params at [esp+0x38] ...
@@ -516,7 +615,16 @@ bool install(uintptr_t base, const Borrowed& borrowed)
       matches(upfCall + 0x24, "\xD9\x83\x9C\x1A\x00\x00", 6) &&
       // ... and, off the path, the follower into ECX and the CALL to Reset.
       matches(resetCall - 6, "\x8D\x8B\x8C\x01\x00\x00", 6) && resetCall[0] == 0xE8 &&
-      call_destination(resetCall) == (uintptr_t)resetFn;
+      call_destination(resetCall) == (uintptr_t)resetFn &&
+      // CalculateDest: the next barrier check at +0x650, compared with the mission time.
+      matches(calcDest + 0x57, "\xD9\x85\x50\x06\x00\x00", 6) && matches(calcDest + 0x1AE, "\xD8\x9D\x50\x06\x00\x00", 6) &&
+      // RaiseHeight: rigid and static objects, the flyer its one ignored object,
+      // ordnance only off; then its CALL to CollisionManager::RayHit.
+      matches(rayCall - 0x25, "\x6A\x00\x6A\x18\x6A\x01", 6) && rayCall[0] == 0xE8 &&
+      call_destination(rayCall) == (uintptr_t)rayFn && matches(rayCall - 0x63, "\x89\x7C\x24\x2C", 4) &&
+      // CollisionModel::RayHit: its prologue, its ordnance mask at +0x12C, RET 0x24.
+      matches(modelRay, "\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x74", 9) &&
+      matches(modelRay + 0xB9, "\x85\x87\x2C\x01\x00\x00", 6) && matches(modelRay + 0x184, "\xC2\x24\x00", 3);
    if (!ok) {
       install_log("[RealFlight] NOT installed: the path follower or EntityFlyer's update differ");
       return false;
@@ -529,10 +637,24 @@ bool install(uintptr_t base, const Borrowed& borrowed)
    s_reset = (fn_reset_t)resetFn;
    s_land = (fn_land_t)landFn;
    s_updatePathFollower = (fn_upf_t)upf;
+   s_rayHit = (fn_ray_hit_t)rayFn;
+
+   s_modelRay = (fn_model_ray_t)modelRay;
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   const LONG r = DetourAttach(&(PVOID&)s_modelRay, model_ray_mt);
+   if (r != NO_ERROR || DetourTransactionCommit() != NO_ERROR) {
+      if (r != NO_ERROR) DetourTransactionAbort();
+      s_modelRay = nullptr;
+      install_log("[RealFlight] NOT installed: detouring CollisionModel::RayHit failed (%ld)", (long)r);
+      return false;
+   }
+   s_modelDetoured = true;
 
    // The calls, during the installers' writable window.
    redirect(s_upfSite, upfCall, (const void*)&update_path_follower_mt);
    redirect(s_resetSite, resetCall, (const void*)&free_reset_mt);
+   redirect(s_raySite, rayCall, (const void*)&raise_ray_mt);
    s_installed = true;
    install_log("[RealFlight] installed (prototype): %s",
                g_flyerRealFlight ? "every AI flyer that flies paths chases them by physics"
@@ -542,9 +664,16 @@ bool install(uintptr_t base, const Borrowed& borrowed)
 
 void uninstall()
 {
-   for (Site* s : {&s_upfSite, &s_resetSite}) {
+   for (Site* s : {&s_upfSite, &s_resetSite, &s_raySite}) {
       if (s->at) protected_write(s->at, s->orig, 5);
       *s = Site{};
+   }
+   if (s_modelDetoured) {
+      DetourTransactionBegin();
+      DetourUpdateThread(GetCurrentThread());
+      DetourDetach(&(PVOID&)s_modelRay, model_ray_mt);
+      DetourTransactionCommit();
+      s_modelDetoured = false;
    }
    s_installed = false;
    for (int i = 0; i < kMaxCarrots; ++i) forget(i);

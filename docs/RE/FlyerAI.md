@@ -564,7 +564,8 @@ A danger region is a no-fly zone for AI flyers that steer by physics. Read in P;
   (P `0x00783F70`, `0x007847B0`) ignore the event for a flyer inside a danger box
   (`FlyRegionManager::IsInside`, P `0x005C65E0`). `UnitFlyAgent` swallows both events before them (see
   "Why being shot at does not help"), so for an ordinary AI pilot this likely never runs (inferred).
-- **Not affected:** spline flyers while placed (`CalculateDest` does not run), human pilots, ground units.
+- **Not affected:** spline flyers while placed (`CalculateDest` does not run) or on real flight (the check is
+  held off, "Real flight on paths" below), human pilots, ground units.
 - **Stock use:** none; no stock region file names one.
 - **Wingmen:** they fly through `CalculateDest`, so they slide away from danger regions too.
 
@@ -605,10 +606,11 @@ detours). `TargetReact`'s trigger does not test the free-flight time, so turn-an
 the carrot.
 
 **What else changes for these flyers:**
-- **Danger regions and barriers** apply, through `CalculateDest`.
-- **`EntityFlyer::RaiseHeight`** (P `0x00528910`) lifts the point 25 m over terrain and, when a collision ray
-  from the flyer along its nose, 1.5 s long, hits something, over that object's bounding sphere, asking
-  20 m/s. The path's speed is not held then.
+- **Danger regions and barriers** do not apply: their check is held off (below, "First play").
+- **`EntityFlyer::RaiseHeight`** (P `0x00528910`, M `0x004F40A0`) lifts the point 25 m over terrain and,
+  when a collision ray from the flyer along its nose, 1.5 s long, hits something, over that object's
+  bounding sphere, asking 20 m/s. The path's speed is not held then, and the ray counts only the bodies
+  vehicles hit (below).
 - **Corners:** in the tests' kinematic model (90°/s, 30 m/s²) the flyer cuts about 15 m inside a 150 m
   turn, and a 10 m hairpin swings it wide and back onto the far leg.
 - **No stock squadrons or flybys:** both form only in `UpdatePathFollower`, and `CanJoinSquadron`
@@ -616,6 +618,35 @@ the carrot.
 - **Landing on arrival** comes about a lead early, when the carrot reaches the node.
 
 **Checks.** `tests/flyer_real_flight_tests.cpp` (the core, and a chase in the kinematic model) and
-`tests/flyer_real_flight_abi_tests.py` (34 modtools instruction checks, the vtables, the guards).
+`tests/flyer_real_flight_abi_tests.py` (53 modtools instruction checks, the vtables, the guards).
 BF2GameExt.log reports every 5 s: flyers on real flight, the carrot's distance against the lead, the speeds,
 restarts and paths not found.
+
+**First play (2026-10-13, the user, Cato Neimoidia in the BF3 mod).** Flyers fell into endless circling,
+and those launching from the capital ships stayed in the hangars.
+- **The log:** no path ever missing and few restarts, but carrots 1.6 leads ahead on average (up to 570 m)
+  and flyers at 60 to 70 m/s against the path's 80 to 94: flyers going round rather than after their
+  carrots.
+- **Danger regions:** Cato has seven (`cato.rgn` five, among them a 700 x 100 box; one round each capital
+  ship, 304 x 514 and 211 x 411). Of its 46 fighter paths, 2 to 17 cross each box (Size read as full or half
+  extent), with up to 71 nodes inside one, the capital ships' hangar and takeoff paths among them.
+  `AvoidBarriers` then slides the flyer off to one side every 0.1 s while the line ahead stays in the box:
+  round and round its carrot, and never out of a hangar inside one.
+- **Fix:** CalculateDest checks once the flyer's +0x650 is due (M `0x004F47D9`; only `CalculateDest` and the
+  constructor touch it, P `+0x64C`) and calls a slide off only a second after a check (`0x004F4682`). For a
+  flyer on real flight it is set to FLT_MAX and any slide flag (0x10) cleared before each `CalculateDest`,
+  and set back to 0 when the flyer leaves real flight or loses its path. Placed flyers never met either.
+- **Hangar shields (the user's find):** a shield that lets vehicles through still stopped them, and the
+  user suggested the vehicle collision mask. `RaiseHeight`'s ray, `CollisionManager::RayHit` (M
+  `0x0042E230`, types 0x18 rigid and static, ordnance only false), tests every body of each model:
+  `CollisionModel::RayHit` (P `0x004B93B0`, M `0x004359C0`) skips bodies only with ordnance only set, and
+  then by the ordnance mask. A collision model keeps a body mask per collider (P `CollisionModel_data`:
+  soft +0x108, rigid +0x110, static +0x118, terrain +0x120, ordnance +0x128, tow cable +0x130, targetable
+  +0x138, flying ordnance +0x140; M +4 for the vtable), filled from the ODF's `SoldierCollision`,
+  `VehicleCollision`, `BuildingCollision`, `TerrainCollision`, `OrdnanceCollision` and
+  `TargetableCollision`; `CollisionObject::CheckForCollision` (P `0x004B9C80`) picks which mask of each
+  side two objects collide with, a flyer by `mIsFlyerFlag` and `mUseVehicleCollisionAgainstFlyers`.
+- **Fix:** `RaiseHeight`'s CALL (M `0x004F429E`, the flyer its one ignored object) goes to `raise_ray_mt`,
+  which for a flyer on real flight or a wingman in formation sends the ray out with ordnance only set,
+  and `CollisionModel::RayHit` is detoured to read the model's rigid mask (+0x114, `GetCollisionMask`'s
+  case for 8) as its ordnance mask (+0x12C) during that ray only.

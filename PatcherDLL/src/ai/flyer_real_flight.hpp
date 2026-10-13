@@ -34,6 +34,18 @@
 //     stock code does; a node's LandOnArrival lands it, as the stock code does;
 //     a flyer that falls far behind its carrot starts the carrot over from
 //     where it is.
+//   - No barrier or danger region slides: CalculateDest checks for them once
+//     the flyer's next check (+0x650) is due and slides the flyer off to one
+//     side while the line ahead is blocked; a path through a danger region (a
+//     capital ship's hangar sits in one on Cato Neimoidia) had flyers circling
+//     their carrots for ever. Placed flyers never met them; this check is held
+//     off for a flyer on real flight (FLT_MAX, given back when it stops).
+//   - RaiseHeight's obstacle ray counts only what vehicles hit: it tested every
+//     collision body, so a hangar shield that lets vehicles through kept flyers
+//     in the hangar. Its CALL to CollisionManager::RayHit goes to raise_ray_mt,
+//     which, for a flyer on real flight or a wingman in formation, sends the
+//     ray out held to "ordnance" bodies while CollisionModel::RayHit (detoured)
+//     reads each model's vehicle mask (VehicleCollision) as its ordnance mask.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -62,6 +74,14 @@
 //   EntityPathFollower::Reset       0x005E7290, thiscall(pathClass), RET 4
 //   EntityFlyer::Land               0x004F1380, thiscall(), RET (the
 //                                   LandOnArrival fix detours it)
+//   CalculateDest's barrier check   the flyer's +0x650 (read only there), against
+//                                   the mission time (0x004F4687, 0x004F47DE)
+//   RaiseHeight's CALL to RayHit    0x004F429E (thunk 0x00407581 to
+//                                   CollisionManager::RayHit 0x0042E230,
+//                                   cdecl, 9 arguments, ST0), types 0x18, the
+//                                   flyer its one ignored object
+//   CollisionModel::RayHit          0x004359C0, thiscall, 9 arguments, RET 0x24,
+//                                   ST0; ordnance mask +0x12C, vehicle +0x114
 //   EntityFlyer (from the entity)   the path follower +0x3CC (mPath +0xA8,
 //                                   mbLandNow +0xD5 within it), network proxy
 //                                   +0x78 bit 0, class +0x66C (its
@@ -107,7 +127,7 @@ void on_derive(const void* parent, void* child);
 void on_update(uint8_t* flyer, float dt);
 
 // A flyer that has become a wingman in formation: its carrot goes.
-void release(const uint8_t* flyer);
+void release(uint8_t* flyer);
 
 // From the CalculateDest stand-in, when the wingmen do not steer the flyer.
 // steer_before swaps the AI's destination for the carrot and keeps what it

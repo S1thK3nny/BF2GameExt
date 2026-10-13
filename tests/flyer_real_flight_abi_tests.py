@@ -36,6 +36,9 @@ for name, value in {
     "kClass_BoostSpeed": 0x898,
     "kFol_LandNow": 0xD5,
     "kVt_BranchParams": 0x1C,
+    "kFly_NextBarrierCheck": 0x650,
+    "kModel_RigidMask": 0x114,
+    "kModel_OrdnanceMask": 0x12C,
 }.items():
     assert constant(source, name) == value, name
 # The reads it shares with the wingmen (tests/flyer_wingmen_abi_tests.py audits those).
@@ -59,6 +62,10 @@ for name, value in {
     "flyer_free_reset_call": 0x004FDDED,
     "path_follower_reset": 0x005E7290,
     "entity_flyer_land": 0x004F1380,
+    "flyer_calc_dest": 0x004F4630,
+    "flyer_raise_ray_call": 0x004F429E,
+    "collision_ray_hit": 0x0042E230,
+    "collision_model_ray_hit": 0x004359C0,
 }.items():
     assert constant(mt, name) == value, name
 
@@ -143,6 +150,47 @@ checks = {
                  ("test", "cl, 3"), ("je", "0x4fe040"), ("mov", "eax, dword ptr [ebx + 0x42c]"), ("test", "eax, eax"),
                  ("je", "0x4fdde4"), ("add", "eax, 0x6ac"), ("jmp", "0x4fdde6"), ("xor", "eax, eax"), ("push", "eax"),
                  ("lea", "ecx, [ebx + 0x18c]"), ("call", "0x404133")],
+    # CalculateDest (EBP the entity): a slide is called off only once the next barrier check
+    # (+0x650) is a second overdue (the mission time from 0x0040DCD3) ...
+    0x004F4682: [("call", "0x40dcd3"), ("fld", "dword ptr [ebp + 0x650]"), ("fadd", "dword ptr [0xa2a290]"),
+                 ("fcompp", ""), ("fnstsw", "ax"), ("test", "ah, 5"), ("jnp", "0x4f46a2"),
+                 ("test", "byte ptr [esi + 0x74], 1"), ("je", "0x4f46a9"), ("and", "byte ptr [ebp + 0x5f4], 0xef")],
+    # ... and the check runs only once it is due: 0.1 s on, AvoidBarriers(flyer, myPos, point),
+    # whose true slides the flyer (flags 0x10).
+    0x004F47D9: [("call", "0x40dcd3"), ("fcomp", "dword ptr [ebp + 0x650]"), ("fnstsw", "ax"), ("test", "ah, 0x41"),
+                 ("jne", "0x4f4842"), ("call", "0x40dcd3"), ("fadd", "dword ptr [0xa2c074]"), ("push", "esi"),
+                 ("push", "ebx"), ("push", "ebp"), ("fstp", "dword ptr [ebp + 0x650]"), ("call", "0x40beb0"),
+                 ("add", "esp, 0xc"), ("test", "al, al"), ("je", "0x4f4842"), ("or", "byte ptr [ebp + 0x5f4], 0x10")],
+    0x0040DCD3: [("jmp", "0x732e60")],
+    0x0040BEB0: [("jmp", "0x591130")],
+    # Then RaiseHeight(myPos, taper, point, speed*, taperFactor), the flyer in ECX.
+    0x004F48A1: [("push", "ebx"), ("mov", "ecx, ebp"), ("call", "0x409827")],
+    0x00409827: [("jmp", "0x4f40a0")],
+    # RaiseHeight: the flyer in EDI, stored as the ray's one ignored object ...
+    0x004F40A0: [("sub", "esp, 0x54"), ("push", "ebx"), ("push", "esi"), ("push", "edi"), ("mov", "edi, ecx")],
+    0x004F423B: [("mov", "dword ptr [esp + 0x2c], edi")],
+    # ... then CollisionManager::RayHit(start, dir, length, &hit, 0, &ignore, 1, 0x18, false), cdecl, ST0.
+    0x004F4279: [("push", "0"), ("push", "0x18"), ("push", "1"), ("lea", "edx, [esp + 0x38]"), ("push", "edx"),
+                 ("push", "0"), ("lea", "eax, [esp + 0x34]"), ("push", "eax"), ("push", "ecx"),
+                 ("fsubr", "dword ptr [esp + 0x74]"), ("lea", "edx, [esp + 0x58]"), ("push", "edx"),
+                 ("lea", "eax, [esp + 0x74]"), ("fstp", "dword ptr [esp + 0x78]"), ("push", "eax"), ("call", "0x407581"),
+                 ("fst", "dword ptr [esp + 0x38]"), ("fcomp", "dword ptr [0xa2a290]"), ("add", "esp, 0x24")],
+    0x00407581: [("jmp", "0x42e230")],
+    0x0042E230: [("fld", "dword ptr [0xa2a290]"), ("mov", "edx, dword ptr [esp + 0x10]"),
+                 ("fld", "dword ptr [0xa2a06c]"), ("mov", "dword ptr [edx], 0")],
+    0x0042E25B: [("ret", "")],
+    # CollisionModel::RayHit: with ordnance only ([ebp+0x24]) a body counts if its bit is set
+    # in the ordnance mask (+0x12C, +0x130 past the 32nd); RET 0x24, ST0.
+    0x004359C0: [("push", "ebp"), ("mov", "ebp, esp"), ("and", "esp, 0xfffffff0"), ("sub", "esp, 0x74"),
+                 ("push", "ebx"), ("push", "esi"), ("push", "edi")],
+    0x00435A50: [("mov", "al, byte ptr [ebp + 0x24]"), ("test", "al, al"), ("je", "0x435a86"), ("cmp", "esi, 0x1f"),
+                 ("jle", "0x435a70"), ("mov", "eax, dword ptr [edi + 0x130]")],
+    0x00435A79: [("test", "dword ptr [edi + 0x12c], eax")],
+    0x00435B44: [("ret", "0x24")],
+    # CollisionModel::GetCollisionMask: ordnance (0x400) +0x12C, rigid (8, the vehicles') +0x114.
+    0x00435649: [("cmp", "eax, 0x400"), ("je", "0x435679")],
+    0x00435679: [("lea", "eax, [ecx + 0x12c]"), ("ret", "4")],
+    0x0043562E: [("lea", "eax, [ecx + 0x114]"), ("ret", "4")],
 }
 
 decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
@@ -163,6 +211,9 @@ def dword(va):
 # Every flyer type's follower vtable has GetBranchParams (through its thunk) at +0x1C.
 for vtable in (0x00A3CB44, 0x00A3A3F0, 0x00A56B28):
     assert dword(vtable + 0x1C) == 0x004049AD, hex(vtable)
+# GetCollisionMask's jump table sends rigid (8) to the +0x114 case.
+table = [dword(0x00435684 + 4 * k) for k in range(4)]
+assert table[image[0x00435694 - base + (8 - 4)]] == 0x0043562E
 # The guards' bytes are the code's.
 for va, text in ((0x004F30C0, "83EC5053568BF1"),
                  (0x004F3119, "8B86CC030000578D4C24388DBECC030000518BCFFF501C"),
@@ -176,7 +227,14 @@ for va, text in ((0x004F30C0, "83EC5053568BF1"),
                  (0x004FDD8D, "8D8BC0FDFFFFE8"),
                  (0x004FDD98, "8A8BB4030000F6C108"),
                  (0x004FDDB7, "D9839C1A0000"),
-                 (0x004FDDE7, "8D8B8C010000E8")):
+                 (0x004FDDE7, "8D8B8C010000E8"),
+                 (0x004F4687, "D98550060000"),
+                 (0x004F47DE, "D89D50060000"),
+                 (0x004F4279, "6A006A186A01"),
+                 (0x004F423B, "897C242C"),
+                 (0x004359C0, "558BEC83E4F083EC74"),
+                 (0x00435A79, "85872C010000"),
+                 (0x00435B44, "C22400")):
     want = bytes.fromhex(text.replace(" ", ""))
     assert image[va - base:va - base + len(want)] == want, hex(va)
 # The same guards are the module's (as C escapes), at the offsets it checks them.
@@ -185,10 +243,17 @@ for text in (r"\x83\xEC\x50\x53\x56\x8B\xF1", r"\x8B\x86\xCC\x03\x00\x00\x57\x8D
              r"\x84\x9E\x20\x06\x00\x00\x75\x23\x8B\x8E\x18\x06\x00\x00", r"\xD9\x86\x1C\x06\x00\x00",
              r"\x8A\x86\xA1\x04\x00\x00", r"\x55\x8B\xEC\x83\xE4\xF0\x81\xEC\xF4\x00\x00\x00",
              r"\x8B\x44\x24\x04\x56\x50\x8B\xF1", r"\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00", r"\x8D\x8B\xC0\xFD\xFF\xFF",
-             r"\x8A\x8B\xB4\x03\x00\x00\xF6\xC1\x08", r"\xD9\x83\x9C\x1A\x00\x00", r"\x8D\x8B\x8C\x01\x00\x00"):
+             r"\x8A\x8B\xB4\x03\x00\x00\xF6\xC1\x08", r"\xD9\x83\x9C\x1A\x00\x00", r"\x8D\x8B\x8C\x01\x00\x00",
+             r"\xD9\x85\x50\x06\x00\x00", r"\xD8\x9D\x50\x06\x00\x00", r"\x6A\x00\x6A\x18\x6A\x01", r"\x89\x7C\x24\x2C",
+             r"\x55\x8B\xEC\x83\xE4\xF0\x83\xEC\x74", r"\x85\x87\x2C\x01\x00\x00", r"\xC2\x24\x00"):
     assert text in source, text
 for offset, va in ((0x59, 0x004F3119), (0x70, 0x004F3130), (0xB1, 0x004F3171), (0xCE, 0x004F318E), (0x108, 0x004F31C8),
                    (0x26F, 0x004F332F)):
     assert va - 0x004F30C0 == offset and f"upf + 0x{offset:X}" in source, hex(offset)
 assert "upfCall + 0x24" in source and 0x004FDDB7 - 0x004FDD93 == 0x24
+for name, offset, va, at in (("calcDest", 0x57, 0x004F4687, 0x004F4630), ("calcDest", 0x1AE, 0x004F47DE, 0x004F4630),
+                             ("modelRay", 0xB9, 0x00435A79, 0x004359C0), ("modelRay", 0x184, 0x00435B44, 0x004359C0)):
+    assert va - at == offset and f"{name} + 0x{offset:X}" in source, (name, hex(offset))
+for offset, va in ((0x25, 0x004F4279), (0x63, 0x004F423B)):
+    assert 0x004F429E - va == offset and f"rayCall - 0x{offset:X}" in source, hex(offset)
 print(f"modtools: {len(checks)} instruction checks, the vtables and the guards passed")
