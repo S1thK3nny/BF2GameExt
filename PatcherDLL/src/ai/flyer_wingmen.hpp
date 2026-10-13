@@ -38,8 +38,21 @@
 //   - GetFlyerMaxSpeed and GetFlyerMinSpeed are detoured: a wingman may fly up
 //     to 30 m/s faster than its leader and down to 20 m/s slower, whatever its
 //     class allows, so it can match a faster, slower or boosting leader.
-//   - DoTrick is detoured: no rolls or flips, which threw wingmen out of
-//     formation and into the player.
+//   - DoTrick is detoured: no rolls or flips of their own, which threw wingmen
+//     out of formation and into the player. They copy the leader's instead:
+//     once the leader is in a trick (flags +0x5F4 & 3 by the next update, else
+//     it was refused), each wingman in formation does the trick it did
+//     (mLastTrickPerformed +0x5E4) in slot order, kTrickRipple apart, a side
+//     roll the same way (mSideRoll.x +0x5D8, which the game sets from the
+//     strafe key before DoTrick). A copy calls past the stand-in and is free:
+//     the energy (+0x61C) and the spent-out bit (+0x620 bit 0, which makes
+//     SpendEnergy refuse) are put back round it. A class with no trick costs
+//     still does none, and one with no double-tap cost rolls for a flip.
+//     From the leader's trick until its own copy has ended and settled, a
+//     wingman flies straight off its nose (a side roll is a sideways dodge: it
+//     would otherwise turn for the slot the leader's dodge moved, then dodge
+//     too). A flip turns the leader round, so the formation is then mirrored,
+//     left for right, and each wingman falls back on the side it came out on.
 //
 // Real flight on paths (flyer_real_flight.hpp) rides on the same hooks and ODF
 // listener: a flyer not in formation goes to it from the UpdateIndirect detour

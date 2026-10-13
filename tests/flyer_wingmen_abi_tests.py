@@ -55,6 +55,13 @@ for name, value in {
     "kGO_Class": 0x8,
     "kClass_Id": 0x18,
     "kFly_TargetSpeed": 0x598,
+    "kFlagTrick": 0x03,
+    "kFly_SideRoll": 0x5D8,
+    "kFly_LastTrick": 0x5E4,
+    "kFly_EnergyValue": 0x61C,
+    "kFly_EnergyFlags": 0x620,
+    "kTrickSideRoll": 6,
+    "kTrickCount": 7,
 }.items():
     assert constant(source, name) == value, name
 # The reads it shares with AI squads (tests/ai_squads_abi_tests.py audits those).
@@ -146,6 +153,31 @@ checks = {
                  ("mov", "ecx, edx"), ("call", "0x415479"), ("fld", "dword ptr [ebx + 0x358]")],
     # EBX there is the Controllable: the same function reads mState at its +0x364.
     0x004FE4A7: [("xor", "edi, edi")],
+    # DoTrick: no tricks for a class with no single-tap cost (+0xD8C); a side roll whatever was
+    # asked with no double-tap cost (+0xD90) ...
+    0x004F3D19: [("mov", "ecx, dword ptr [esi + 0x66c]"), ("fld", "dword ptr [ecx + 0xd8c]"), ("fucompp", ""),
+                 ("fnstsw", "ax"), ("test", "ah, 0x44"), ("jnp", "0x4f3fbe"), ("fld", "dword ptr [0xa2a06c]"),
+                 ("push", "ebp"), ("fld", "dword ptr [ecx + 0xd90]"), ("mov", "ebp, 6"), ("fucompp", ""),
+                 ("fnstsw", "ax"), ("test", "ah, 0x44"), ("jnp", "0x4f3d51"), ("mov", "ebp, dword ptr [esp + 0xc]")],
+    # ... refused while in a trick (flags 3) or when SpendEnergy on the bar at +0x618 refuses ...
+    0x004F3DBF: [("test", "byte ptr [esi + 0x5f4], 3"), ("mov", "dword ptr [esi + 0x614], edi"), ("jne", "0x4f3f88"),
+                 ("mov", "ecx, dword ptr [esp + 0x10]"), ("push", "ecx"), ("lea", "ecx, [esi + 0x618]"),
+                 ("call", "0x40d143"), ("test", "al, al"), ("je", "0x4f3f88")],
+    # ... and, once it went ahead, records the trick it did at +0x5E4.
+    0x004F3F01: [("mov", "dword ptr [esi + 0x5e4], ebp")],
+    # EnergyBar::SpendEnergy: refuses while spent out (bit 0 of +8), else takes from the energy (+4).
+    0x0040D143: [("jmp", "0x4d0050")],
+    0x004D006A: [("mov", "edx, dword ptr [ecx + 8]"), ("test", "dl, 1"), ("je", "0x4d0077"), ("xor", "al, al"),
+                 ("ret", "4"), ("fld", "dword ptr [ecx + 4]"), ("fsub", "dword ptr [esp + 4]")],
+    # The side roll (case 6): SideRoll goes by the sign of mSideRoll.x (+0x5D8) ...
+    0x004F3E07: [("mov", "ecx, esi"), ("call", "0x413cb4")],
+    0x00413CB4: [("jmp", "0x4f3410")],
+    0x004F3410: [("fld", "dword ptr [ecx + 0x5d8]")],
+    # ... which UpdateIndirect writes at the Controllable's +0x398 before its own side roll.
+    0x004F500C: [("lea", "ecx, [esi + 0x398]")],
+    # RollAdd and FlipAdd: in a trick, flags bit 0 rolling, bit 1 flipping.
+    0x004F0A74: [("mov", "al, byte ptr [ecx + 0x5f4]"), ("fadd", "dword ptr [ecx + 0x5c0]"), ("or", "al, 1")],
+    0x004F0B54: [("mov", "al, byte ptr [ecx + 0x5f4]"), ("fadd", "dword ptr [ecx + 0x5c8]"), ("or", "al, 2")],
 }
 # The stand-ins are naked and keep EDX and the XMM registers.
 for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
@@ -156,6 +188,10 @@ for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
     assert ("push   edx" in asm and "pop    edx" in asm) or ("pushad" in asm and "popad" in asm), name
 for name, stand_in in (("s_maxSpeed", "max_speed_mt"), ("s_minSpeed", "min_speed_mt"), ("s_doTrick", "do_trick_mt")):
     assert f"DetourAttach(&(PVOID&){name}, {stand_in})" in source, name
+# DoTrick's stand-in hands trick_allowed the trick, its one argument above the return address.
+trick_body = re.search(r"__declspec\(naked\) void do_trick_mt\(\)\s*\{(.*?)\n\}", source, re.S).group(1)
+assert "push   dword ptr [ebp + 8]" in trick_body and "add    esp, 8" in trick_body
+assert "bool __cdecl trick_allowed(uint8_t* flyer, int trick)" in source
 
 decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 pe = pefile.PE(str(Path(sys.argv[1]) / "BF2_modtools_NoDVD_NoConsole.exe"))
@@ -166,6 +202,8 @@ for address, expected in checks.items():
     data = image[address - base:address - base + 96]
     actual = [(i.mnemonic, i.op_str) for i in decoder.disasm(data, address, count=len(expected))]
     assert actual == expected, (hex(address), actual, expected)
+# DoTrick's switch on the trick (ebp*4 + 0x004F3FC4) sends SIDE_ROLL (6) to the SideRoll case.
+assert int.from_bytes(image[0x004F3FC4 + 6 * 4 - base:0x004F3FC4 + 7 * 4 - base], "little") == 0x004F3E07
 # The guards' bytes are the code's.
 for va, text in ((0x004F4C10, "81EC84000000535556 8BF1"), (0x004F4630, "83EC2853555 68BE98B8508030000"),
                  (0x004F0950, "D9056CA0A200D981FC050000"), (0x004F0A10, "D9056CA0A200D981FC050000"),

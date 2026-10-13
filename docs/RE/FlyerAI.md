@@ -542,6 +542,31 @@ written as a command vehicle's `SpawnPointLocation` lines are:
     `WingmanClass` list is ignored, and a slot left with none is open to any class that may follow.
   - The free slots fill in order, each with the nearest flyer that may take it.
 
+**Copying the leader's tricks (the user's ask, 2026-10-13: rippled, free of energy).** `DoTrick` (M
+`0x004F3D10`) does nothing for a class with no single-tap cost (+0xD8C), makes any trick a side roll for one
+with no double-tap cost (+0xD90), refuses while a trick runs (flags +0x5F4 & 3: `RollAdd` sets bit 0,
+`FlipAdd` bit 1) or when `EnergyBar::SpendEnergy` (M `0x004D0050`) on the bar at +0x618 refuses (only while
+its +8 bit 0, spent out, is set; else it takes the cost from +4, the entity's +0x61C), and records the trick
+it did at +0x5E4. The tricks (`EntityFlyer::Trick`): FLIP_UP 0, FLIP_DOWN 1, FLIP_UP_RIGHT 2,
+FLIP_DOWN_RIGHT 3, FLIP_UP_LEFT 4, FLIP_DOWN_LEFT 5 (half loops, the diagonal ones with a roll added),
+SIDE_ROLL 6 (a full roll, its side the sign of `mSideRoll.x`, +0x5D8; the player's double-tapped strafe
+sets it to -1 or 1 first, the AI's own roll to a world direction).
+- **Built:** the `DoTrick` stand-in notes the leader's call (the trick asked, the side); when the leader is in
+  a trick by the next update, each wingman in formation copies the trick it did, in slot order, 0.15 s
+  apart, the first 0.15 s after the leader. A copy calls the original past the stand-in (camera shake's
+  `DoTrick` detour acts only for the viewed flyer), with the energy and the spent-out bit put back round it.
+- **First look (the user):** after a side roll wingmen flew off for a moment. A side roll is a dodge:
+  while `mSideRoll.x` is set, `EntityFlyer::Update` (M `0x004FEE51`) eases the flyer's sideways speed
+  (Controllable +0x35C) toward `mSideRoll.x` times a class speed (class +0xDA4) at a class rate (+0x884),
+  and once it is cleared lets it ebb at a thirtieth of that rate. A rippled wingman turned for the slot the leader's dodge had moved, then dodged as well, and its
+  steering acted in a rolling frame.
+- **Fix:** from the leader's trick until its own copy has ended plus 0.3 s, a wingman is steered at a point
+  100 m straight off its nose at the leader's speed (its trims left alone), then back to its slot.
+- **Flips (the user's idea):** a flip is a half loop, so the leader comes out heading back the way it came
+  with its wingmen across from where they were. Each leader flip mirrors the formation, left for right, so
+  a wingman falls back into a slot on its own side instead of crossing the leader; a new formation starts
+  unmirrored. Not yet played.
+
 ---
 
 ## Danger regions (researched 2026-10-13)

@@ -365,6 +365,26 @@ void slot_classes()
    assert(child.slotCount == 1 && child.slotClassCount[0] == 0 && slot_accepts(&child, 0, B));
 }
 
+// The leader's trick copied down the formation in slot order, kTrickRipple apart,
+// the first one kTrickRipple after the leader.
+void ripples()
+{
+   const int vee[] = {0, 1, 2, 3};
+   for (int i = 0; i < 4; ++i) assert(ripple_rank(vee[i], vee, 4) == i);
+   const int gaps[] = {5, 0, 3};   // slots held, in no order
+   assert(ripple_rank(0, gaps, 3) == 0 && ripple_rank(3, gaps, 3) == 1 && ripple_rank(5, gaps, 3) == 2);
+   assert(ripple_rank(2, gaps, 0) == 0);
+   assert(std::fabs(ripple_delay(0) - kTrickRipple) < 1e-9 && std::fabs(ripple_delay(3) - 4.0 * kTrickRipple) < 1e-9);
+   assert(std::fabs(ripple_delay(-2) - kTrickRipple) < 1e-9);
+   assert(kTrickRipple > 0.0 && kTrickWait > kTrickRipple && kTrickSettle > 0.0 && kHoldAhead > 0.0f);
+   // The flips (0 to 5) turn the leader round; the side roll (6) does not.
+   for (int t = 0; t <= 5; ++t) assert(is_flip(t));
+   assert(!is_flip(6) && !is_flip(-1) && !is_flip(7));
+   // Mirrored, left for right: a right-hand slot behind becomes the left-hand one.
+   assert(near(mirrored({15, 2, -10}, true), {-15, 2, -10}) && near(mirrored({15, 2, -10}, false), {15, 2, -10}));
+   assert(near(mirrored(slot_offset(0, 20.0f), true), slot_offset(1, 20.0f)));
+}
+
 // The log's numbers.
 void stats()
 {
@@ -393,9 +413,10 @@ int main()
    class_keys();
    slot_keys();
    slot_classes();
+   ripples();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
-               "slot classes, stats).\n");
+               "slot classes, ripples, stats).\n");
    return 0;
 }

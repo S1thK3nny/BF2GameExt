@@ -43,7 +43,14 @@ constexpr uint32_t kSquadPressed     = 3;       // down, and changed this update
 constexpr int      kStateFlying      = 2;
 constexpr uint8_t  kFlagPaths        = 0x08;    // flies its paths when it may
 constexpr uint8_t  kFlagSliding      = 0x10;    // sliding round a barrier
+constexpr uint8_t  kFlagTrick        = 0x03;    // in a trick: rolling (1, RollAdd) or flipping (2, FlipAdd)
 constexpr float    kHoldFreeFly      = 0.5f;    // s of free flight a path flyer is held to
+constexpr uint32_t kFly_SideRoll     = 0x5D8;   // mSideRoll: a side roll goes left with x below 0
+constexpr uint32_t kFly_LastTrick    = 0x5E4;   // mLastTrickPerformed, set when DoTrick goes ahead
+constexpr uint32_t kFly_EnergyValue  = 0x61C;   // the energy bar (+0x618): its energy ...
+constexpr uint32_t kFly_EnergyFlags  = 0x620;   // ... and flags, bit 0 spent out (SpendEnergy refuses)
+constexpr int      kTrickSideRoll    = 6;       // EntityFlyer::Trick: 0-5 the flips, 6 SIDE_ROLL
+constexpr int      kTrickCount       = 7;
 
 constexpr uint32_t kUC_LowLevel   = 0x2C4;
 constexpr uint32_t kLL_Dest       = 0x1C;
@@ -165,7 +172,24 @@ struct Wingman {
    int      slot = 0;
    Trim     trim;
    Stats    stats;
+   int      trick = -1;        // the leader's trick it copies at trickAt, or -1
+   float    trickSide = 0.0f;  // which way the leader's side roll went (mSideRoll.x)
+   double   trickAt = 0.0;
+   bool     holding = false;   // flying straight through the leader's trick and its own
+   double   holdUntil = 0.0;   // once its copy is done (or passed over)
 };
+
+// The leader's DoTrick, seen before it runs; it went ahead if the leader is in a
+// trick by the next update.
+struct LeaderTrick {
+   int    requested = -1;
+   float  side = 0.0f;
+   double at = 0.0;
+};
+LeaderTrick s_leaderTrick;
+int         s_trickLogs = 0;
+constexpr int kMaxTrickLogs = 50;
+bool        s_mirror = false;   // the formation left for right, after an odd number of the leader's flips
 
 Wingman  s_wing[flyer_wingmen::kMaxWingmen];
 int      s_count = 0;
@@ -269,6 +293,7 @@ void release_all(const char* why)
    if (s_count) install_log("[Wingmen] %d let go: %s", s_count, why);
    s_count = 0;
    for (auto& w : s_wing) w = Wingman{};
+   s_mirror = false;   // a new formation starts the right way round
 }
 
 // Still a wingman? Why not, or null.
@@ -418,6 +443,100 @@ void squad_key(double now)
    }
 }
 
+// ---- The leader's tricks, copied down the formation ----------------------------------
+const char* trick_name(int trick, float side)
+{
+   static const char* const kNames[kTrickCount] = {"flip up", "flip down", "flip up right", "flip down right",
+                                                    "flip up left", "flip down left", "side roll"};
+   if (trick == kTrickSideRoll) return side < 0.0f ? "side roll left" : "side roll right";
+   return trick >= 0 && trick < kTrickCount ? kNames[trick] : "trick";
+}
+
+// From DoTrick's stand-in, before the leader's trick runs: what was asked, and
+// which way a side roll goes (the game sets mSideRoll.x from the strafe key
+// first). A leader already in a trick is refused, so that call is passed over.
+void note_leader_trick(const uint8_t* flyer, int trick)
+{
+   if (flyer != s_leader || !s_formUp || !s_count || (flyer[kFly_Flags] & kFlagTrick)) return;
+   if (trick < 0 || trick >= kTrickCount) return;
+   s_leaderTrick.requested = trick;
+   s_leaderTrick.side = *(const float*)(flyer + kFly_SideRoll);
+   s_leaderTrick.at = seconds();
+}
+
+// Once the leader is in its trick, each wingman in formation gets its turn.
+void ripple_leader_trick(double now)
+{
+   if (s_leaderTrick.requested < 0) return;
+   if (!s_leader || handle_of(s_leader) != s_leaderHandle || !s_formUp) {
+      s_leaderTrick = LeaderTrick{};
+      return;
+   }
+   if (!(s_leader[kFly_Flags] & kFlagTrick)) {
+      if (now - s_leaderTrick.at > flyer_wingmen::kTrickWait) s_leaderTrick = LeaderTrick{};   // refused
+      return;
+   }
+   // The trick it did: its class may have turned a flip into a side roll.
+   const int done = *(const int*)(s_leader + kFly_LastTrick);
+   const int trick = done >= 0 && done < kTrickCount ? done : s_leaderTrick.requested;
+   int slots[flyer_wingmen::kMaxWingmen];
+   for (int i = 0; i < s_count; ++i) slots[i] = s_wing[i].slot;
+   for (int i = 0; i < s_count; ++i) {
+      Wingman& w = s_wing[i];
+      w.trick = trick;
+      w.trickSide = s_leaderTrick.side;
+      w.trickAt = now + flyer_wingmen::ripple_delay(flyer_wingmen::ripple_rank(w.slot, slots, s_count));
+      w.holding = true;   // straight on until its copy is done
+   }
+   // A flip turns the leader round: its wingmen take the slots on the side they
+   // come out on.
+   if (flyer_wingmen::is_flip(trick)) s_mirror = !s_mirror;
+   if (s_trickLogs < kMaxTrickLogs) {
+      ++s_trickLogs;
+      install_log("[Wingmen] the leader's %s: %d wingmen copy it, %.2f s apart%s", trick_name(trick, s_leaderTrick.side),
+                  s_count, flyer_wingmen::kTrickRipple,
+                  flyer_wingmen::is_flip(trick) ? (s_mirror ? "; the formation now mirrored" : "; the formation back the right way round") : "");
+   }
+   s_leaderTrick = LeaderTrick{};
+}
+
+// A wingman holding course goes back to its slot once its copy has ended and
+// settled, or straight away when its turn came and it did not trick.
+void update_hold(Wingman& w, double now)
+{
+   if (!w.holding || w.trick >= 0) return;   // still waiting for its turn
+   if (w.obj[kFly_Flags] & kFlagTrick) {
+      w.holdUntil = now + flyer_wingmen::kTrickSettle;   // in its copy
+      return;
+   }
+   if (now >= w.holdUntil) w.holding = false;
+}
+
+// A wingman's turn: the same trick the same way, free of energy.
+void copy_trick(Wingman& w, double now)
+{
+   const int trick = w.trick;
+   w.trick = -1;
+   w.holdUntil = now + flyer_wingmen::kTrickSettle;   // if it does not trick, it settles from here
+   uint8_t* const f = w.obj;
+   if (handle_of(f) != w.handle || !alive(f) || !flying(f) || !in_formation(f) || (f[kFly_Flags] & kFlagTrick)) return;
+   if (trick == kTrickSideRoll) {
+      float* const side = (float*)(f + kFly_SideRoll);
+      side[0] = w.trickSide < 0.0f ? -1.0f : 1.0f;
+      side[1] = 0.0f;
+      side[2] = 0.0f;
+   }
+   // Whatever DoTrick spends goes back, and a spent-out bar does not refuse it.
+   float& energy = *(float*)(f + kFly_EnergyValue);
+   uint32_t& energyFlags = *(uint32_t*)(f + kFly_EnergyFlags);
+   const float keptEnergy = energy;
+   const uint32_t keptFlags = energyFlags;
+   energyFlags = keptFlags & ~1u;
+   s_doTrick(f, nullptr, trick);   // the trampoline, past the stand-in that keeps wingmen from tricks
+   energy = keptEnergy;
+   energyFlags = keptFlags;
+}
+
 // ---- EntityFlyer::UpdateIndirect ----------------------------------------------------
 bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
 {
@@ -429,6 +548,11 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
       }
       squad_key(now);
       uint8_t* const obj = (uint8_t*)ctrl - kFly_Controllable;
+      ripple_leader_trick(now);
+      if (Wingman* w = find(obj)) {
+         if (w->trick >= 0 && now >= w->trickAt) copy_trick(*w, now);
+         update_hold(*w, now);
+      }
       if (in_formation(obj)) {
          // A wingman that flies paths is held off them, so it flies by physics.
          flyer_real_flight::release(obj);
@@ -559,11 +683,13 @@ __declspec(naked) void min_speed_mt()
    }
 }
 
-// Rolls and flips throw a wingman out of formation and into its leader. True
-// to let the trick through.
-bool __cdecl trick_allowed(uint8_t* flyer)
+// Rolls and flips of their own throw a wingman out of formation and into its
+// leader; it copies its leader's instead (copy_trick, which calls past this). True
+// to let the trick through. The leader's own is noted for its wingmen to copy.
+bool __cdecl trick_allowed(uint8_t* flyer, int trick)
 {
    __try {
+      note_leader_trick(flyer, trick);
       return !in_formation(flyer);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return true;
@@ -588,9 +714,10 @@ __declspec(naked) void do_trick_mt()
       movups [esp + 0x60], xmm6
       movups [esp + 0x70], xmm7
       pushad
+      push   dword ptr [ebp + 8]    // the trick, above the return address
       push   ecx                    // the flyer
       call   trick_allowed
-      add    esp, 4
+      add    esp, 8
       test   al, al
       popad                         // leaves the flags as TEST set them
       movups xmm0, [esp + 0x00]
@@ -641,20 +768,31 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    s_leaderTarget = std::isfinite(aim) && aim > 0.0f ? aim : st.leaderSpeed;
 
    const V3 me = row(wm, 3), leaderPos = row(lm, 3);
-   st.slot = flyer_wingmen::to_world(st.frame, leaderPos,
-                                     flyer_wingmen::slot_for(keys_of(s_leader), w->slot, g_flyerWingmenSpacing));
+   st.slot = flyer_wingmen::to_world(
+      st.frame, leaderPos,
+      flyer_wingmen::mirrored(flyer_wingmen::slot_for(keys_of(s_leader), w->slot, g_flyerWingmenSpacing), s_mirror));
    const V3 slot = flyer_wingmen::in_frame(st.frame, me, st.slot);   // the slot, from the wingman
-   flyer_wingmen::update_trim(w->trim, slot, dt);
+   if (!w->holding) flyer_wingmen::update_trim(w->trim, slot, dt);
    const V3 steer = flyer_wingmen::keep_clear(
       flyer_wingmen::steer_offset(slot, flyer_wingmen::lead_distance(st.leaderSpeed), w->trim.climb),
       flyer_wingmen::in_frame(st.frame, me, leaderPos));
    st.point = flyer_wingmen::to_world(st.frame, me, steer);
+   V3 heading = st.frame.fwd;
 
    // Its speeds are the stretched ones, as its getters answer for it (above),
    // and the target the one the game's throttle turns into that speed.
    const float hi = flyer_wingmen::stretched_max(s_maxSpeed(flyer, nullptr), high_speed());
    const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), low_speed());
-   const float speed = flyer_wingmen::formation_speed(s_leaderTarget + w->trim.speed, slot.z, lo, hi);
+   float speed = flyer_wingmen::formation_speed(s_leaderTarget + w->trim.speed, slot.z, lo, hi);
+
+   // Through the leader's trick and its own copy: straight off its nose, at the
+   // leader's speed.
+   V3 nose = row(wm, 2);
+   if (w->holding && flyer_wingmen::normalise(nose)) {
+      st.point = me + nose * flyer_wingmen::kHoldAhead;
+      heading = nose;
+      speed = flyer_wingmen::formation_speed(s_leaderTarget, 0.0f, lo, hi);
+   }
    st.target = flyer_wingmen::target_for_speed(speed, lo, s_midSpeed(flyer, nullptr), hi);
 
    uint8_t* const dest = *(uint8_t**)(flyer + kFly_Ctrl) + kUC_LowLevel + kLL_Dest;
@@ -663,7 +801,7 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    st.dest[kDest_Has] = 1;
    std::memcpy(st.dest + kDest_Pos, &st.point, 12);
    std::memcpy(st.dest + kDest_Original, &st.point, 12);
-   std::memcpy(st.dest + kDest_Dir, &st.frame.fwd, 12);
+   std::memcpy(st.dest + kDest_Dir, &heading, 12);
    *(int*)(st.dest + kDest_Safe) = kSafeHeightFull;
    *(float*)(st.dest + kDest_Taper) = 0.0f;
    *(float*)(st.dest + kDest_Speed) = st.target;

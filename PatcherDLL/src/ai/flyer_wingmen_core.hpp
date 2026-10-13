@@ -228,6 +228,41 @@ inline float keep_speed(float stockTarget, float formationTarget, float offNoseC
    return formationTarget;
 }
 
+// ---- Copying the leader's tricks --------------------------------------------------
+// A trick the leader pulls (a flip or a side roll) is copied by its wingmen in
+// formation, one after another down the formation in slot order: the first
+// kTrickRipple after the leader, each next kTrickRipple after the one before.
+constexpr double kTrickRipple = 0.15;   // s
+constexpr double kTrickWait   = 0.25;   // s: by then the leader's trick shows, or it was refused
+
+// A wingman's place in the ripple: how many of the `count` wingmen in `slots`
+// hold an earlier slot than `slot`.
+inline int ripple_rank(int slot, const int* slots, int count)
+{
+   int rank = 0;
+   for (int i = 0; i < count; ++i)
+      if (slots[i] < slot) ++rank;
+   return rank;
+}
+
+inline double ripple_delay(int rank) { return kTrickRipple * (double)((rank > 0 ? rank : 0) + 1); }
+
+// A wingman flies straight through the leader's trick and its own copy: from the
+// leader's trick until its copy has ended and kTrickSettle has passed it is
+// steered at a point straight off its nose, kHoldAhead out. Otherwise it turns
+// for the slot the leader's side roll (a sideways dodge) has moved before
+// dodging the same way itself, and its controls act in a spinning frame.
+constexpr double kTrickSettle = 0.3;     // s
+constexpr float  kHoldAhead   = 100.0f;  // m
+
+// The flips (EntityFlyer::Trick 0 to 5) are half loops: the leader comes out
+// heading back the way it came, with its wingmen across from where they were.
+// The formation is then mirrored, left for right, so each falls back into a slot
+// on the side it is on rather than crossing the leader's path.
+inline bool is_flip(int trick) { return trick >= 0 && trick <= 5; }
+
+inline V3 mirrored(V3 slot, bool mirror) { return mirror ? V3{-slot.x, slot.y, slot.z} : slot; }
+
 // ---- Who flies as one -------------------------------------------------------------
 // Only a flyer that can keep up: its top speed at least kKeepUp of the leader's.
 constexpr float kKeepUp       = 0.9f;
