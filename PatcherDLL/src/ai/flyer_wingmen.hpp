@@ -89,9 +89,11 @@
 //
 // ODF keys on a flyer class, over the INI key by key, and a class that sets
 // any has wingmen whatever FlyerWingmen says (flyer_wingmen_core.hpp):
-// WingmanClass, WingmanCount, WingmanAuto, and WingmanSlot "x y z" lines,
-// written as a command vehicle's SpawnPointLocation lines are, for its own
-// formation in place of the vee.
+// WingmanClass, WingmanCount, WingmanAuto, and WingmanSlot "x y z [class ...]"
+// lines, written as a command vehicle's SpawnPointLocation lines are, for its
+// own formation in place of the vee; a slot naming classes is kept for those
+// of them that may follow. The free slots fill in order, each with the nearest
+// flyer that may take it.
 //
 // INI (unregistered while a prototype): [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to

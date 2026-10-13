@@ -139,7 +139,8 @@ bool on_property(void* cls, uint32_t hash, const char* value)
       return true;
    }
    if (hash == kHashSlot) {
-      if (cls) flyer_wingmen::add_slot(s_classes[cls], value);
+      if (cls)
+         flyer_wingmen::add_slot(s_classes[cls], value, [](const char* b, unsigned n) { return pbl_hash(b, n); });
       return true;
    }
    return false;
@@ -283,31 +284,33 @@ const char* lost(const Wingman& w, uint8_t* leader)
    return nullptr;
 }
 
-int free_slot()
+bool slot_taken(int slot)
 {
-   for (int s = 0; s < flyer_wingmen::kMaxWingmen; ++s) {
-      bool taken = false;
-      for (int i = 0; i < s_count; ++i) taken |= s_wing[i].slot == s;
-      if (!taken) return s;
-   }
-   return -1;
+   for (int i = 0; i < s_count; ++i)
+      if (s_wing[i].slot == slot) return true;
+   return false;
 }
 
-// The nearest friendly AI flyers its class lets follow it, into the free slots.
-void fill(uint8_t* leader, int want)
+// The leader's free slots, in order, each to the nearest friendly AI flyer
+// its class lets follow and the slot lets in (a WingmanSlot line may keep it
+// for some classes).
+void fill(uint8_t* leader)
 {
    uint8_t* const list = s_list ? *s_list : nullptr;
-   if (!list || want <= 0) return;
-   if (want > flyer_wingmen::kMaxWingmen) want = flyer_wingmen::kMaxWingmen;
+   if (!list) return;
+   const ClassKeys* keys = keys_of(leader);
+   const int total = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   if (s_count >= total) return;
    const float* lm = matrix_of(leader);
    if (!lm) return;
    const V3 lp = row(lm, 3);
    const float leaderMax = s_maxSpeed(leader, nullptr);
    const int team = team_of(leader);
-   const ClassKeys* keys = keys_of(leader);
 
-   struct Candidate { uint8_t* obj; uint8_t* uc; float d; };
-   Candidate best[flyer_wingmen::kMaxWingmen];
+   // Every friendly AI flyer pool enough that may follow, the nearest first.
+   constexpr int kMaxCandidates = 32;
+   struct Candidate { uint8_t* obj; uint8_t* uc; uint32_t cls; float d; };
+   Candidate pool[kMaxCandidates];
    int found = 0;
    uint8_t* node = *(uint8_t**)(list + kNodeNext);
    for (int i = 0; i < kMaxNodes && node; ++i) {
@@ -324,30 +327,34 @@ void fill(uint8_t* leader, int want)
       if (!m) continue;
       const float d = flyer_wingmen::length(row(m, 3) - lp);
       if (!(d <= flyer_wingmen::kRecruitRange)) continue;
-      if (!flyer_wingmen::accepts(keys, class_id(obj),
-                                  flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax)))
+      const uint32_t cls = class_id(obj);
+      if (!flyer_wingmen::accepts(keys, cls, flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax)))
          continue;
-      // Keep the `want` nearest, nearest first.
-      if (found < want) best[found++] = {obj, uc, d};
-      else if (d < best[want - 1].d) best[want - 1] = {obj, uc, d};
+      if (found < kMaxCandidates) pool[found++] = {obj, uc, cls, d};
+      else if (d < pool[kMaxCandidates - 1].d) pool[kMaxCandidates - 1] = {obj, uc, cls, d};
       else continue;
-      for (int k = found - 1; k > 0 && best[k].d < best[k - 1].d; --k) {
-         const Candidate t = best[k];
-         best[k] = best[k - 1];
-         best[k - 1] = t;
+      for (int k = found - 1; k > 0 && pool[k].d < pool[k - 1].d; --k) {
+         const Candidate t = pool[k];
+         pool[k] = pool[k - 1];
+         pool[k - 1] = t;
       }
    }
-   for (int i = 0; i < found && s_count < flyer_wingmen::kMaxWingmen; ++i) {
-      const int slot = free_slot();
-      if (slot < 0) break;
-      Wingman& w = s_wing[s_count++];
-      w = Wingman{};
-      w.obj = best[i].obj;
-      w.handle = handle_of(best[i].obj);
-      w.uc = best[i].uc;
-      w.slot = slot;
-      install_log("[Wingmen] slot %d: #%u joined, %.0f m off, top speed %.0f m/s against the leader's %.0f",
-                  slot + 1, w.handle, (double)best[i].d, (double)s_maxSpeed(w.obj, nullptr), (double)leaderMax);
+   bool used[kMaxCandidates] = {};
+   for (int slot = 0; slot < total && s_count < flyer_wingmen::kMaxWingmen; ++slot) {
+      if (slot_taken(slot)) continue;
+      for (int c = 0; c < found; ++c) {
+         if (used[c] || !flyer_wingmen::slot_accepts(keys, slot, pool[c].cls)) continue;
+         used[c] = true;
+         Wingman& w = s_wing[s_count++];
+         w = Wingman{};
+         w.obj = pool[c].obj;
+         w.handle = handle_of(pool[c].obj);
+         w.uc = pool[c].uc;
+         w.slot = slot;
+         install_log("[Wingmen] slot %d: #%u joined, %.0f m off, top speed %.0f m/s against the leader's %.0f",
+                     slot + 1, w.handle, (double)pool[c].d, (double)s_maxSpeed(w.obj, nullptr), (double)leaderMax);
+         break;
+      }
    }
 }
 
@@ -387,7 +394,7 @@ void tick(double now)
       if (const char* why = lost(s_wing[i], leader)) drop(i, why);
    const ClassKeys* keys = keys_of(leader);
    const int want = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
-   if (s_formUp && flyer_wingmen::auto_for(keys, g_flyerWingmenAuto) && s_count < want) fill(leader, want - s_count);
+   if (s_formUp && flyer_wingmen::auto_for(keys, g_flyerWingmenAuto) && s_count < want) fill(leader);
    report(now);
 }
 
@@ -401,7 +408,7 @@ void squad_key(double now)
    s_lastPress = now;
    if (!s_count) {
       s_formUp = true;
-      fill(s_leader, flyer_wingmen::count_for(keys_of(s_leader), g_flyerWingmenCount));
+      fill(s_leader);
       install_log("[Wingmen] squad key: %s", s_count ? "form up" : "no one near enough to join");
    } else {
       s_formUp = !s_formUp;

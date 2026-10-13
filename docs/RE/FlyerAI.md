@@ -445,3 +445,7 @@ written as a command vehicle's `SpawnPointLocation` lines are:
 - **Inheritance:** a child class's own lines replace the slots it inherits.
 - **Without any:** the vee.
 - **Limit:** up to 8 wingmen (was 4).
+- **Slot classes (the user's follow-up):** `WingmanSlot = "x y z [class ...]"`.
+  - Classes named after the offsets keep the slot for themselves. A name not on the leader's
+    `WingmanClass` list is ignored, and a slot left with none is open to any class that may follow.
+  - The free slots fill in order, each with the nearest flyer that may take it.

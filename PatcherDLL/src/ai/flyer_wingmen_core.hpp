@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 // =============================================================================
@@ -249,15 +250,19 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //   WingmanCount   wingmen it takes, 0 to kMaxWingmen; 0 leads none
 //   WingmanAuto    1: friendlies join it at takeoff; 0: only the squad key
 //                  recruits them
-//   WingmanSlot    "x y z": a slot in the leader's frame, roll left out (x
-//                  right, y up, z ahead, metres), one line per slot in the
-//                  order wingmen take them, as a command vehicle's
-//                  SpawnPointLocation lines are written (a fourth number, the
-//                  spawn points' angle, is ignored). Its lines set how many
+//   WingmanSlot    "x y z [class ...]": a slot in the leader's frame, roll
+//                  left out (x right, y up, z ahead, metres), one line per
+//                  slot in the order wingmen take them, as a command vehicle's
+//                  SpawnPointLocation lines are written (a further number,
+//                  the spawn points' angle, is ignored). Classes named after
+//                  it keep the slot for themselves; one not on the leader's
+//                  WingmanClass list is ignored, and a slot left with none is
+//                  open to any class that may follow. Its lines set how many
 //                  wingmen it takes, unless WingmanCount asks for fewer; a
 //                  child's own lines replace the slots it inherits. Without
 //                  any, the vee (slot_offset).
-constexpr int kMaxClasses = 16;
+constexpr int kMaxClasses     = 16;
+constexpr int kMaxSlotClasses = 4;
 
 struct ClassKeys {
    uint32_t classes[kMaxClasses] = {};   // PblHash of each ODF name, as EntityClass::mId holds it
@@ -269,6 +274,8 @@ struct ClassKeys {
    bool     hasAuto = false;
    bool     autoForm = true;
    V3       slots[kMaxWingmen];
+   uint32_t slotClasses[kMaxWingmen][kMaxSlotClasses] = {};   // the classes each slot is kept for
+   int      slotClassCount[kMaxWingmen] = {};
    int      slotCount = 0;
    bool     hasSlots = false;
    bool     ownSlots = false;     // its own lines have begun replacing the inherited slots
@@ -336,17 +343,19 @@ inline bool set_count(ClassKeys& k, const char* value)
    return true;
 }
 
-// One WingmanSlot line, "x y z": false, leaving the slots as they were, for a
-// value without three numbers. The first of a class's own lines clears what it
-// inherited.
-inline bool add_slot(ClassKeys& k, const char* value)
+// One WingmanSlot line, "x y z [class ...]": false, leaving the slots as they
+// were, for a value without three numbers first. `hash` gives a class name's
+// id as EntityClass::mId holds it (PblHash). The first of a class's own lines
+// clears what it inherited.
+template <class Hash>
+inline bool add_slot(ClassKeys& k, const char* value, Hash hash)
 {
    if (!value) return false;
    const char* b = value;
    const char* e = value;
    while (*e) ++e;
    trim(b, e);
-   char buf[96];
+   char buf[256];
    const size_t n = (size_t)(e - b) < sizeof buf - 1 ? (size_t)(e - b) : sizeof buf - 1;
    for (size_t i = 0; i < n; ++i) buf[i] = b[i] == ',' ? ' ' : b[i];
    buf[n] = 0;
@@ -364,7 +373,26 @@ inline bool add_slot(ClassKeys& k, const char* value)
       k.ownSlots = true;
    }
    k.hasSlots = true;
-   if (k.slotCount < kMaxWingmen) k.slots[k.slotCount++] = {xyz[0], xyz[1], xyz[2]};
+   if (k.slotCount >= kMaxWingmen) return true;
+   const int slot = k.slotCount++;
+   k.slots[slot] = {xyz[0], xyz[1], xyz[2]};
+   k.slotClassCount[slot] = 0;
+   // The rest: names of the classes it is kept for; a number (the spawn
+   // points' angle) is passed over.
+   for_each_name(p, [&](const char* b, unsigned len) {
+      char word[64];
+      const unsigned n = len < sizeof word - 1 ? len : (unsigned)(sizeof word - 1);
+      for (unsigned i = 0; i < n; ++i) word[i] = b[i];
+      word[n] = 0;
+      char* end = nullptr;
+      std::strtod(word, &end);
+      if (end && end != word && *end == 0) return;   // a number
+      const uint32_t id = hash(b, len);
+      if (!id) return;
+      for (int i = 0; i < k.slotClassCount[slot]; ++i)
+         if (k.slotClasses[slot][i] == id) return;
+      if (k.slotClassCount[slot] < kMaxSlotClasses) k.slotClasses[slot][k.slotClassCount[slot]++] = id;
+   });
    return true;
 }
 
@@ -388,6 +416,26 @@ inline ClassKeys inherited(const ClassKeys& parent)
 }
 
 inline bool sets_any(const ClassKeys* k) { return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots); }
+
+// Whether a flyer of class `followerId`, one that may follow this leader, may
+// take slot `slot`: the classes its WingmanSlot line names, those of them on
+// the leader's WingmanClass list where it has one; with none, any.
+inline bool slot_accepts(const ClassKeys* leader, int slot, uint32_t followerId)
+{
+   if (!leader || !leader->hasSlots || slot < 0 || slot >= leader->slotCount) return true;
+   int named = 0;
+   for (int i = 0; i < leader->slotClassCount[slot]; ++i) {
+      const uint32_t id = leader->slotClasses[slot][i];
+      if (leader->hasClasses) {
+         bool follows = false;
+         for (int j = 0; j < leader->classCount; ++j) follows |= leader->classes[j] == id;
+         if (!follows) continue;   // not a class that may follow: ignored
+      }
+      ++named;
+      if (id == followerId) return true;
+   }
+   return named == 0;
+}
 
 // Slot `slot` of this leader's formation: its class's WingmanSlot where it has
 // one, else the vee at `spacing`.

@@ -16,6 +16,15 @@ namespace {
 const float kNan = std::numeric_limits<float>::quiet_NaN();
 
 bool near(float a, float b, float eps = 1e-4f) { return std::fabs(a - b) <= eps; }
+
+// A class name's id, as the game's PblHash makes it (FNV-1a, each byte OR 0x20).
+uint32_t test_hash(const char* s, unsigned n)
+{
+   uint32_t h = 0x811C9DC5u;
+   unsigned i = 0;
+   for (; i < n && s[i]; ++i) h = (h ^ ((uint32_t)(int32_t)(signed char)s[i] | 0x20u)) * 0x01000193u;
+   return i ? h : 0;
+}
 bool near(V3 a, V3 b, float eps = 1e-4f) { return near(a.x, b.x, eps) && near(a.y, b.y, eps) && near(a.z, b.z, eps); }
 
 // A vee: right then left, a row further back each pair, every slot a full
@@ -284,11 +293,13 @@ void class_keys()
 void slot_keys()
 {
    ClassKeys k;
-   assert(add_slot(k, "\"-12.0 2.0 -8.0\"") && add_slot(k, "12 2 -8 355") && add_slot(k, "0,4,-16"));
+   assert(add_slot(k, "\"-12.0 2.0 -8.0\"", test_hash) && add_slot(k, "12 2 -8 355", test_hash) &&
+          add_slot(k, "0,4,-16", test_hash));
    assert(k.hasSlots && k.slotCount == 3 && sets_any(&k));
    assert(near(k.slots[0], {-12, 2, -8}) && near(k.slots[1], {12, 2, -8}) && near(k.slots[2], {0, 4, -16}));
    // Not three numbers: ignored.
-   assert(!add_slot(k, "1 2") && !add_slot(k, "") && !add_slot(k, nullptr) && !add_slot(k, "a b c"));
+   assert(!add_slot(k, "1 2", test_hash) && !add_slot(k, "", test_hash) && !add_slot(k, nullptr, test_hash) &&
+          !add_slot(k, "a b c", test_hash));
    assert(k.slotCount == 3);
    // Its slots, then the vee past them; no keys, the vee.
    assert(near(slot_for(&k, 1, 25.0f), {12, 2, -8}) && near(slot_for(&k, 3, 25.0f), slot_offset(3, 25.0f)));
@@ -304,12 +315,54 @@ void slot_keys()
    // A child inherits them until its own lines replace them.
    ClassKeys child = inherited(k);
    assert(child.slotCount == 3 && near(slot_for(&child, 2, 25.0f), {0, 4, -16}));
-   assert(add_slot(child, "5 0 -5"));
+   assert(add_slot(child, "5 0 -5", test_hash));
    assert(child.slotCount == 1 && near(child.slots[0], {5, 0, -5}) && count_for(&child, 3) == 1);
    // At most kMaxWingmen.
    ClassKeys many;
-   for (int i = 0; i < kMaxWingmen + 3; ++i) add_slot(many, "1 1 1");
+   for (int i = 0; i < kMaxWingmen + 3; ++i) add_slot(many, "1 1 1", test_hash);
    assert(many.slotCount == kMaxWingmen && count_for(&many, 1) == kMaxWingmen);
+}
+
+// A WingmanSlot line may keep its slot for some classes: those of them on the
+// leader's WingmanClass list; a slot left with none is open to any follower.
+void slot_classes()
+{
+   const uint32_t A = test_hash("rep_fly_vwing", 13), B = test_hash("rep_fly_arc170", 14),
+                  C = test_hash("cis_fly_droid", 13);
+   ClassKeys k;
+   add_class(k, A);
+   add_class(k, B);                                                               // A and B may follow
+   assert(add_slot(k, "-15 0 -10 rep_fly_vwing", test_hash));                     // kept for A
+   assert(add_slot(k, "15 0 -10 355 cis_fly_droid", test_hash));                  // C cannot follow: open
+   assert(add_slot(k, "0 5 -25 cis_fly_droid, rep_fly_arc170", test_hash));       // C ignored: B only
+   assert(add_slot(k, "0 0 -40", test_hash));                                     // open
+   assert(k.slotClassCount[0] == 1 && k.slotClassCount[1] == 1 && k.slotClassCount[2] == 2 &&
+          k.slotClassCount[3] == 0);
+   assert(near(k.slots[1], {15, 0, -10}));                                        // the angle passed over
+   assert(slot_accepts(&k, 0, A) && !slot_accepts(&k, 0, B));
+   assert(slot_accepts(&k, 1, A) && slot_accepts(&k, 1, B));
+   assert(slot_accepts(&k, 2, B) && !slot_accepts(&k, 2, A) && !slot_accepts(&k, 2, C));
+   assert(slot_accepts(&k, 3, A) && slot_accepts(&k, 3, B));
+   // Past its slots (the vee), or no keys: open.
+   assert(slot_accepts(&k, 6, A) && slot_accepts(&k, -1, A) && slot_accepts(nullptr, 0, A));
+   // No follow list: a slot's classes keep it for them.
+   ClassKeys open;
+   assert(add_slot(open, "1 2 3 cis_fly_droid", test_hash));
+   assert(slot_accepts(&open, 0, C) && !slot_accepts(&open, 0, A));
+   ClassKeys angle;                                                               // the angle is no class
+   assert(add_slot(angle, "1 2 3 90 cis_fly_droid", test_hash) && angle.slotClassCount[0] == 1);
+   // At most kMaxSlotClasses names, each once; a name starting with a digit is a name.
+   ClassKeys many, twice, digit;
+   add_slot(many, "0 0 -10 a b c d e a", test_hash);
+   add_slot(twice, "0 0 -10 a a", test_hash);
+   add_slot(digit, "0 0 -10 1st_fly", test_hash);
+   assert(many.slotClassCount[0] == kMaxSlotClasses && twice.slotClassCount[0] == 1);
+   assert(digit.slotClassCount[0] == 1 && digit.slotClasses[0][0] == test_hash("1st_fly", 7));
+   // Inherited slots keep their classes; a child's own lines replace both.
+   ClassKeys child = inherited(k);
+   assert(slot_accepts(&child, 0, A) && !slot_accepts(&child, 0, B));
+   assert(add_slot(child, "5 0 -5", test_hash));
+   assert(child.slotCount == 1 && child.slotClassCount[0] == 0 && slot_accepts(&child, 0, B));
 }
 
 // The log's numbers.
@@ -339,9 +392,10 @@ int main()
    who_flies();
    class_keys();
    slot_keys();
+   slot_classes();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
-               "stats).\n");
+               "slot classes, stats).\n");
    return 0;
 }
