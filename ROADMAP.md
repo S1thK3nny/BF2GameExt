@@ -463,15 +463,25 @@ steer them to formation slots each frame, and give Rogue Leader's orders (form u
 my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m in level flight in the
 first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
 `WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
-formation. Details in
+formation. Next: the orders (who is called up, what each mode does), researched in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-what-the-game-offers-researched-2026-10-14-not-built)
+and waiting on the user's answers. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
 **Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
 rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or
 `PathFollowerRealFlight = 1` on a flyer class) steps the path follower on a point about a second
 ahead and flies the ship after it by physics; it works on Cato Neimoidia since danger regions and
-hangar shields stopped trapping it. Next: real pursuit, AI-led formations, Steam/GOG. Details in
+hangar shields stopped trapping it. It now chases its attacker for real when the game turns it on one,
+and gathers squadrons by the game's rule in the map's formation shapes (both unplayed). Next: play them,
+Steam/GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#real-flight-on-paths-prototype-2026-10-13-modtools-only).
+
+**Flyers keep clear of each other** - Nothing keeps two AI flyers apart, and a flyer ahead makes an AI
+climb and brake as if it were a building. A modtools prototype (`[AI] FlyerAvoidance=1`) bends every
+AI-steered flyer away from any it would pass within a few metres of in the next 2 s, and lets
+`RaiseHeight` pass over flyers. Unplayed. Details in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#flyer-to-flyer-avoidance-prototype-2026-10-14-modtools-only).
 
 ## Controller
 

@@ -685,11 +685,183 @@ and those launching from the capital ships stayed in the hangars.
   higher than drawn.
 - **Corners:** cut inside, tight hairpins swung wide; watch for scraping near buildings and hangar mouths.
 - **Collisions between flyers:** nothing keeps two apart (`CalculateDest` avoids barriers only), so flyers
-  sharing a path can now collide.
-- **Landing on arrival** a lead early; **no stock squadrons or flybys** for these flyers; **danger regions**
-  ignored, as placed flyers always ignored them.
+  sharing a path can now collide. Avoidance (below) is the answer, as a prototype of its own.
+- **Landing on arrival** a lead early; **no stock flybys** for these flyers (their squadrons are ours now,
+  below); **danger regions** ignored, as placed flyers always ignored them.
 
-**Next, as offered to the user:** real pursuit on top (on turn-and-attack, steer at where the attacker will
-be, on a leash, then rejoin through `Branch`); AI-led formations through the wingmen code (several leaders
-at once, a rule for which classes lead, what wingmen do when their leader turns to fight, stock squadrons
-off for those classes, the map's `EntityFormation` shapes as slot sets); Steam and GOG; online (host only).
+**Built next (2026-10-14, the user's ask):** real pursuit, AI squadrons and flyer-to-flyer avoidance, in
+the three sections below; Steam, GOG and online (host only) still to come.
+
+---
+
+## Real pursuit (prototype, 2026-10-14, modtools only)
+
+The user's ask: let a flyer on real flight turn on its attacker for real. On with real flight
+(`[AI] FlyerRealFlightPursuit=1`, the default). Not played yet.
+
+**How the game turns a flyer on its attacker** (read in P, then M).
+- **The trigger:** in the attacker's own `EntityFlyer::Update` (M `0x004FDC69`), when its target is a flyer
+  whose class's path class is FlyerVsFlyer (class +0x6AC + 0x78) that flies paths, flying, alive, in no trick
+  and not already turning (`mbQueuePoint` +0x49D, `mbGoMinSpeed` +0x49E), at most every 2 s (+0x1AAC) and after
+  a reaction delay (+0x1AB0): the target's `TargetReact(attacker)` (M `0x004F0C30` through `0x0040550B`,
+  thiscall, `RET 4`). Human and AI attackers alike. The target need not be placed on its path, so flyers on
+  real flight are turned too.
+- **`TargetReact`:** within 700 m, turn and attack (300 to 700 m, by `GetFlyerTurnAndAttackFrequency`) zeroes
+  the free-flight time and sets the follower's `mAttacker` (follower +0xB4, the entity's +0x480) to the
+  attacker's `Character` (its Controllable's +0xCC), and adds the attacker as a threat. Evading (inside 300 m,
+  or by `GetFlyerEvasiveFrequency`) winds the weave (`mStrafeTimer`, follower +0x70).
+- **The follower acts on it in its next step:** `EntityPathFollower::Update` calls `ShotAtByEnemy`
+  (M `0x005EBDA0` through `0x004112A7`), which, for a FlyerVsFlyer class with `mAttacker` set and not already
+  turning, resets the follower and builds a curve toward the attacker's flyer
+  (`Character::GetControllable`: its remote +0x150, else its vehicle +0x14C, else its unit +0x148). At the
+  curve's end `GetNextTowardsAttackerPoint` points it at the attacker for a 3.5 s staredown
+  (`mStaredownTimer` +0xC4) and clears `mAttacker`; when that runs out it branches back.
+  `EntityPathFollower::Reset` leaves `mAttacker` alone.
+
+**Built (`ai/flyer_real_flight.*`).**
+- **Taking the attacker first:** the carrot's step is where `ShotAtByEnemy` would act, so before each step the
+  `UpdateIndirect` detour reads `mAttacker`. When it is a flyer on another side, it is cleared (so the
+  follower never bends toward it) and the flyer chases it. Another attacker while chasing switches the
+  chase to it; one that is not a flyer is left to the game.
+- **The chase:** the carrot waits. The `CalculateDest` stand-in steers at the target led by its velocity for
+  the time the chaser needs to cover the distance (at most 1.5 s), flat out to close or to turn onto it, and,
+  with the target within ~45° of the nose, at the target's speed plus 0.5 m/s per metre past a 120 m gap
+  (`pursuit_point`, `pursuit_speed`). The speed is held until the point is ~45° off the nose; past that the
+  game slows it to turn. Shooting stays the game's (`ProcessFire`, the FlyerVsFlyer bursts; the attacker is
+  already its threat).
+- **The leash:** 15 s from the last provocation (`TargetReact` re-arms it every 2 s while the attacker keeps
+  it targeted), 40 s at most; over sooner when the target dies, lands, changes sides or gets more than
+  1000 m away. Then the carrot starts over from the flyer, so its follower branches back onto the paths, and
+  for 4 s it turns on no one.
+- **RaiseHeight's ray passes over flyers** for a chasing flyer (and for every flyer with avoidance on): a
+  flyer ahead is a rigid object to it, to climb over at 20 m/s, which would stop any chase at gun range. The
+  ray's CALL is already redirected (`raise_ray_mt`): a hit whose `CollisionObject` belongs to a flyer (its
+  vptr +0x38, as the ray callback M `0x00429E00` asks it) is added to the ignore list and the ray cast again,
+  at most four times.
+- **Squadrons:** a squadron's wingman that is turned on hands its attacker to its leader, and the whole
+  squadron goes with it (below); the player's wingmen in formation leave the fight to the player.
+- **Checks:** `tests/flyer_real_flight_tests.cpp` adds the lead, the speed, the leash's clock and a chase of a
+  target circling at 20°/s (the chaser settles 83 to 89 m behind it, never more than 28° off its nose);
+  `tests/flyer_real_flight_abi_tests.py` the trigger, `TargetReact`, `ShotAtByEnemy` and the ray callback
+  (67 modtools checks). The log names each chase and why it ended.
+
+---
+
+## AI squadrons on real flight (prototype, 2026-10-14, modtools only)
+
+The game's squadrons ride splines, so flyers on real flight never form one. The user's ask: AI-led
+formations through the wingmen code. On with real flight (`[AI] FlyerRealFlightSquadrons=1`, the
+default). Not played yet.
+
+**The game's rule** (P `EntityFlyer::UpdatePathFollower` `0x00535E00`, M `0x004F30C0`).
+- **When:** each update a placed flyer not in a squadron counts `mSquadronFormationTime` (+0x1CE8) down by dt;
+  `ResetSquadronTime` (M `0x004F08C0`), once it is not above 0, sets it to 7 ± 1.5 s and says to try.
+- **Reach and angle:** the class's `mSquadronSquaredDist` (+0x1108), else its model's bounding radius (the
+  class's `GetModel`, vptr +0x20, then +0x20, +0x94) times 30, squared; `mSquadronMaxAngle` (+0x1104), a cosine.
+  Both default to 0 (M `0x004FA01E`), and no stock or BF3 ODF sets them: so within 30 bounding radii and
+  heading within 90°.
+- **Who:** `CreateSquadronForFlyby` first (offline, beside the player), else
+  `CreateSquadronFromClosestEntities` (M `0x005E8F70`, off when networked): only a FlyerVsFlyer path class,
+  only with `SquadronFormation` names, only on a path; candidates from the list every follower joins (below),
+  same side, `CanJoinSquadron` (placed on a path, not in a squadron or a trick), within the reach and angle,
+  scored 2 + cos − d²/r²; as many as the path's `MaxSquadSize` (path +0x84; unset, no limit) lets.
+- **How many:** `CreateSquadron(n + 1)` picks one of the class's `SquadronFormation` shapes with exactly that
+  many slots at random (`EntitySquadronClass::SelectFormation`, M `0x005EDC20`: names at the class's +0x6AC,
+  their count at +0x6D4); with none it tries one fewer, down to three flyers (a pair only when one candidate
+  was all there was).
+- **Shapes:** `EntityFormation` paths (`type_EntityFormation <name>` in the `.pth`): their points, a `Root`
+  node (index +0x28, else the first) and `rootisslot` (+0x2C bit 0, default 1). `EntityFormation::Read`
+  makes each point relative to the root; it means to turn them by the root's inverse rotation too, but
+  `PblQuaternion::RotateVector` returns by value and the result is dropped (P `0x00536510`, M `0x005E2CD4`),
+  so the offsets stay in the path's axes, which the game reads as x right, y up, z ahead. The leader takes
+  the root when it is a slot, else the first other point; members take the rest in order.
+  `EntityFormation::Find(name)` (M `0x005E2EB0`, cdecl) walks the map's formations.
+- **Stock use:** the space maps author Tri-form, Line-Form, Box-Form, five-form, eschleft-form,
+  eschrgt-form and wall-form, every path `maxsquadsize(3)`; the BF3 mod's Cato Neimoidia adds escort-form
+  and bomber-Form and sets no `maxsquadsize`. Formations of 3 or 4.
+
+**Built (`ai/flyer_wingmen.*`).** The wingmen code now runs up to 33 formations: the player's and up to 32
+AI squadrons, each with its leader, slots, trims, trick copying and flip mirroring.
+- **Forming:** a free AI flyer on real flight, on a path and not chasing counts its `mSquadronFormationTime`
+  down as the game would (the game's `UpdatePathFollower` no longer runs for it), and tries by the game's rule
+  above, with flyers on real flight as the candidates. The leader class's `WingmanClass` list, where set,
+  limits who may join; else a flyer must keep up (top speed at least 90% of the leader's).
+- **Shape:** one of the class's `SquadronFormation` shapes the map has, chosen as the game chooses;
+  scaled up until no two flyers are nearer than 22 m (five-form puts its first member 12.6 m off the
+  leader: fine for placed flyers, not for flown ones). A class with no `SquadronFormation` but its own
+  `WingmanSlot` lines flies those; with neither, no squadron, as the game.
+- **Flying:** each wingman is steered to its slot as the player's wingmen are (the leader's speeds
+  stretched round its own, its tricks copied, flips mirrored).
+- **Fighting:** a leader turned on its attacker chases it (above) with its squadron in formation behind it. A
+  wingman turned on hands its attacker to its leader, unless the leader already chases, so the squadron
+  turns as one.
+- **Breaking up:** a wingman is let go as the player's are (dead, landed, flown by someone else, changed
+  sides, more than 800 m off); the squadron breaks up when its leader dies, lands, leaves real flight or
+  joins another formation, or when its last wingman goes. Its wingmen go back to real flight at once.
+- **The player:** may call an AI squadron's wingmen away into their own formation, never its leaders.
+- **Checks:** `tests/flyer_wingmen_tests.cpp` adds the rule (timer, reach, candidates and their order, how
+  many) and the shapes (Tri-form, five-form, Box-Form from the stock maps, the scaling);
+  `tests/flyer_wingmen_abi_tests.py` the rule's reads, `SelectFormation`, `Find`, `GetNumSlots`, `Read` and the
+  class defaults (74 modtools checks). The log reports each squadron formed (leader, shape, members and
+  their distances), each break-up and why, and every 5 s how far off their slots the wingmen fly.
+
+---
+
+## Flyer-to-flyer avoidance (prototype, 2026-10-14, modtools only)
+
+The user's ask: avoidance between flyers, wholesale. `[AI] FlyerAvoidance=1` (off by default). Not played yet.
+
+**What the game has.** Nothing: `CalculateDest` keeps an AI flyer off barriers, danger regions, terrain and
+water, and `RaiseHeight`'s obstacle ray (rigid and static objects 1.5 s along the nose) takes a flyer ahead as
+an obstacle: it lifts the point over its bounding sphere and slows to 20 m/s. Placed flyers are never
+steered at all.
+
+**Every flyer, one list.** The `EntityPathFollower` constructor (M `0x005E89F0`) links every follower into one
+list: head node M `0x00AD3524` (+4 the first node; a node's +4 the next, +0xC its follower; the head's +0xC
+null; the count at +0x10), linked in at `0x005E8AE3`. Only `EntityFlyer`'s constructor builds a follower
+(through `0x0040E42B`, once, at the entity's +0x3CC), so the list is every flyer, human or AI;
+`CreateSquadronFromClosestEntities` walks it the same way. A flyer's collision sphere is read as `RaiseHeight`
+reads its own (M `0x004F4259`): the TreeGridObject's sphere stack (+0x10, its index +0x14, the radius at stack +
+index × 16 + 0x4C), else its own radius (+0x24). States (`EntityFlyer::Land`): 1 taking off, 2 flying, 3 landing.
+
+**Built (`ai/flyer_avoidance.*`).**
+- **Who:** every AI flyer `CalculateDest` steers (free-flying AI on any map, flyers on real flight, chasers,
+  wingmen of either kind), against every other flyer taking off, flying or landing, the player's included.
+  Placed flyers keep the stock behaviour.
+- **When:** after `CalculateDest` (and the wingmen's or real flight's own steering), the stand-in calls
+  `flyer_avoidance::adjust`. Once a frame the flyers are read from the list. For each other flyer within
+  400 m, the closest approach within 2 s, both holding their velocities, is a threat when it falls inside the
+  two radii plus 8 m.
+- **How:** the point it steers at is bent away from where the threat will be, square to its own heading, the
+  harder the nearer and the sooner (at most ~66° off), and a slower one ahead going its way eases its speed
+  target by up to 40%. On its line of flight it breaks right with the other ahead (two meeting head on both go
+  right) and left with it behind (one being overtaken makes way). A point the game lifted over terrain or an
+  obstacle is bent to the side only, never lower.
+- **The climb over flyers goes:** `RaiseHeight`'s ray passes over flyers (see "Real pursuit").
+- **Checks:** `tests/flyer_avoidance_tests.cpp` meets two kinematic flyers (90°/s, 30 m/s²): head on they
+  pass 19.2 m apart (1.0 m blind), 5 m offset 19.2 m (5.1), crossing at right angles 16.3 m (0), overtaking
+  19.0 m (0.2). `tests/flyer_avoidance_abi_tests.py` audits the list, its one builder, the sphere reads
+  and the states (11 modtools checks). The log reports every 5 s how often it steered and the nearest pass
+  it foresaw.
+
+---
+
+## Wingmen orders: what the game offers (researched 2026-10-14, not built)
+
+The user's ask: settle who is called up and what each mode does. Read in P; nothing is patched. The
+questions put to the user are in the session; the answers decide the build.
+
+- **The squad key in flight:** the flyer's Controllable trigger (+0x60), whose low two bits are both set on
+  the update it is pressed (`EntityFlyer::Update` tests for 3). Which bit says held is not traced; once it
+  is, a hold and a double tap can be told apart from a tap.
+- **The player's target:** `Controllable::GetTargetLockedObj` (P `0x004EE4F0`) answers the flyer's locked
+  target, refreshed from the player's `LockOnManager` (`sLockOnManagers[joystick]`, `mLockedObj` P +0x928). The
+  same manager tracks who attacks the player (`mNewAttacker` P +0x910, the attacker targets the HUD shows).
+  Modtools offsets not read yet.
+- **Making an AI attack something:** `UnitController::ForceSetAttackHelperTarget` (P `0x0078B170`) sets its
+  `AttackHelper` target, as `UnitFlyAgent::IsNearATAT` does with `AddThreat`; steering it there is the chase
+  above.
+- **Feedback:** the stock squad command HUD (`StatusDisplay`, `SquadCommandGroup::Create` P `0x007724E0`)
+  shows `game.squadcommand.<context>.<order>` strings, contexts field, driver, passenger and gunner, orders
+  up, down, right and left (the consoles' d-pad), with "Follow me", "Move out", "Hold position", "At ease",
+  "All clear", "Get in" and "Get out" among the stock English texts.
