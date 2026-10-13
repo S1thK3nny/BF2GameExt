@@ -99,7 +99,7 @@
 // of them that may follow. The free slots fill in order, each with the nearest
 // flyer that may take it.
 //
-// INI (unregistered while a prototype): [AI] FlyerWingmen=1 gives every flyer
+// INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
 // 60, the vee's), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key
 // only).

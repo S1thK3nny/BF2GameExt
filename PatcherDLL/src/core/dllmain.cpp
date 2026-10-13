@@ -324,7 +324,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_squadAutoFormUp           = cfg.get_bool("AI", "SquadAutoFormUp", true);
       g_squadSize                 = cfg.get_int("AI", "SquadSize", 4);
       g_squadPathfinding          = cfg.get_bool("AI", "SquadPathfinding", true);
-      // A prototype, so not in the registry: off unless the player adds it.
+      // Prototypes, off by default.
       g_flyerWingmen              = cfg.get_bool("AI", "FlyerWingmen", false);
       g_flyerWingmenCount         = cfg.get_int("AI", "FlyerWingmenCount", 3);
       g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);

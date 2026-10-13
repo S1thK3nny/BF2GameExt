@@ -78,6 +78,11 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("AI", "SquadSize", "4", "How many followers a squad takes, counting friendlies who join you on their own while SquadAutoFormUp is on. Stock BF2 stops those at 2 followers in formation. Range 1 to 8. A class's SquadSize ODF key decides for its squads instead"),
    INI_ENTRY("AI", "SquadPathfinding", "1", "A squad follower that falls more than 10 m behind its place, or gets caught on something for 2 seconds as its squad moves on, finds its way to its leader round obstacles and barriers, as a soldier going anywhere else does, then falls back in. Stock BF2 followers walk straight along the trail their place leaves and get caught on scenery. Set 0 for stock"),
    INI_ENTRY("AI", "PlayerAwarenessFairness","1", "AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock"),
+   INI_ENTRY("AI", "FlyerWingmen", "0", "PROTOTYPE, modtools only. Friendly AI flyers fly a formation on your flyer as wingmen. In the air the squad key recruits them, then switches them between forming up and breaking off to fight. A flyer class with Wingman ODF keys has wingmen whatever this says. Set 1 to enable"),
+   INI_ENTRY("AI", "FlyerWingmenCount", "3", "How many wingmen your flyer takes. Range 0 to 8. A class's WingmanCount or WingmanSlot ODF keys decide for it instead"),
+   INI_ENTRY("AI", "FlyerWingmenSpacing", "25", "Metres between neighbours in the wingmen's vee. Range 8 to 60. A class's WingmanSlot ODF keys lay out its own formation instead"),
+   INI_ENTRY("AI", "FlyerWingmenAuto", "1", "Wingmen join you at takeoff. Set 0 to have them join only on the squad key. A class's WingmanAuto ODF key decides for it instead"),
+   INI_ENTRY("AI", "FlyerRealFlight", "0", "PROTOTYPE, modtools only. AI flyers on the map's flyer paths fly them instead of being placed on the curve: each chases a point about a second ahead along its path. A flyer class's PathFollowerRealFlight ODF key decides for it instead. Set 1 to enable"),
 
    // [Controller] — gamepad support
    INI_ENTRY("Controller", "Enabled", "1", "Enable gamepad / controller support"),

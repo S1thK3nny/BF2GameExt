@@ -93,8 +93,8 @@
 // ODF key on a flyer class, over the INI: PathFollowerRealFlight = 1 flies its
 // paths for real, 0 places it as the stock game does.
 //
-// INI (unregistered while a prototype): [AI] FlyerRealFlight=1 for every AI
-// flyer that flies paths.
+// INI: [AI] FlyerRealFlight=1 for every AI flyer that flies paths (off by
+// default).
 // =============================================================================
 
 extern bool g_flyerRealFlight;

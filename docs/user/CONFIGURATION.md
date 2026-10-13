@@ -57,7 +57,7 @@ Rendering and lighting for lightsaber blades. On by default. Radius and intensit
 
 ## AI
 
-Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone.
+Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone. The `Flyer` keys at the end are prototypes, modtools only and off by default: wingmen for your flyer, and AI flyers that fly their paths for real.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -74,6 +74,11 @@ Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 h
 | `SquadSize` | `4` | How many followers a squad takes, counting friendlies who join you on their own while SquadAutoFormUp is on. Stock BF2 stops those at 2 followers in formation. Range 1 to 8. A class's SquadSize ODF key decides for its squads instead |
 | `SquadPathfinding` | `1` | A squad follower that falls more than 10 m behind its place, or gets caught on something for 2 seconds as its squad moves on, finds its way to its leader round obstacles and barriers, as a soldier going anywhere else does, then falls back in. Stock BF2 followers walk straight along the trail their place leaves and get caught on scenery. Set 0 for stock |
 | `PlayerAwarenessFairness` | `1` | AI keep looking for other enemies while fighting you. In stock BF2 an AI tracking you cannot notice anyone else at all. Set 0 for stock |
+| `FlyerWingmen` | `0` | PROTOTYPE, modtools only. Friendly AI flyers fly a formation on your flyer as wingmen. In the air the squad key recruits them, then switches them between forming up and breaking off to fight. A flyer class with Wingman ODF keys has wingmen whatever this says. Set 1 to enable |
+| `FlyerWingmenCount` | `3` | How many wingmen your flyer takes. Range 0 to 8. A class's WingmanCount or WingmanSlot ODF keys decide for it instead |
+| `FlyerWingmenSpacing` | `25` | Metres between neighbours in the wingmen's vee. Range 8 to 60. A class's WingmanSlot ODF keys lay out its own formation instead |
+| `FlyerWingmenAuto` | `1` | Wingmen join you at takeoff. Set 0 to have them join only on the squad key. A class's WingmanAuto ODF key decides for it instead |
+| `FlyerRealFlight` | `0` | PROTOTYPE, modtools only. AI flyers on the map's flyer paths fly them instead of being placed on the curve: each chases a point about a second ahead along its path. A flyer class's PathFollowerRealFlight ODF key decides for it instead. Set 1 to enable |
 
 ## Controller
 
