@@ -411,3 +411,25 @@ navigator), then, while flying and not placed on a path (`GetFollowingPath`, M `
   - A class that sets any of them has wingmen even with the INI off; with none, any class that can keep
     up follows.
 - **Not yet:** played, ported to Steam/GOG, an on-screen word for the orders.
+
+**Round two in play (2026-10-13).**
+- **A crash at once:** EIP `0x004F09ED` in `GetFlyerMidSpeed`, reading a null class. `EntityFlyer::Update`
+  keeps the flyer in EDX across `GetFlyerMaxSpeed`, which touches only EAX, ECX and the FPU stack, and
+  loads ECX from it for the next getter (M `0x004FED55`). The C++ stand-in lost EDX. The getters' and
+  `DoTrick`'s stand-ins are now naked and keep every register.
+- **Then:** wingmen broke their limits, but drifted ahead when the player braked. They flew ~71 m/s
+  where ~45 was asked.
+
+**How a throttle becomes a speed** (M `0x004FED19`, read in `EntityFlyer::Update`).
+- **The flight code:** the move control below 0 runs from the mid speed (at 0) down to the min (at -1),
+  and above 0 from mid up to max (at +1), all three from the getters. The result is kept within min and
+  max, stored as the speed the flyer heads for (Controllable +0x358, the entity's +0x598), and flown
+  toward.
+- **The AI's throttle:** `AIUtil::GetThrustForTargetSpeed` gives 2 x target - 1 for a flyer whose min is
+  above 0. So a target taken as speed / max, `GetTargetSpeedForRealSpeed`'s unit, is right only at the
+  top: 45 m/s on a 60/75/105 flyer came out at ~73.
+- **Round three:** the target is the exact inverse (`target_for_speed`).
+- **Feed-forward:** it takes the player's +0x598, the speed the player's throttle asks for, rather than
+  how fast the player flies, so a wingman brakes or boosts with the player rather than after.
+- **Speed limits:** a wingman's speeds stretch round both.
+- **Turning:** in formation it flies that speed exactly until its point is 60° off its nose.

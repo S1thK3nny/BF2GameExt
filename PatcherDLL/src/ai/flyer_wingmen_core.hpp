@@ -186,26 +186,45 @@ inline float stretched_min(float classMin, float leaderSpeed)
    return classMin < need ? classMin : need;
 }
 
-// The game's own unit for it: a share of the flyer's top speed
-// (AIUtil::GetTargetSpeedForRealSpeed: speed / max, within 0 to 1).
-inline float target_for(float speed, float maxSpeed)
+// What the AI asks for is a target (0 to 1) that becomes a throttle, and the
+// throttle a speed, each the game's own way:
+//   - throttle = AIUtil::GetThrustForTargetSpeed(target, min, mid, max): the
+//     target 0 gives zero_thrust (-1 for a flyer whose slowest speed is above
+//     0), and the target 1 full throttle, in a straight line between;
+//   - speed = EntityFlyer::Update (modtools 0x004FED19): from the slowest speed
+//     at -1 to the mid speed at 0, and from mid to the top speed at +1,
+//     then kept within the slowest and the top.
+// The min, mid and max are the flyer's getters', a wingman's stretched.
+inline float zero_thrust(float minSpeed, float midSpeed, float maxSpeed)
 {
-   if (!(maxSpeed > 0.0f) || !std::isfinite(speed)) return 1.0f;
-   return clampf(speed / maxSpeed, 0.0f, 1.0f);
+   if (minSpeed > 0.0f) return -1.0f;
+   if (midSpeed > 0.0f) return minSpeed / (midSpeed - minSpeed);
+   return maxSpeed > 0.0f ? (0.0f - midSpeed) / (maxSpeed - midSpeed) : 1.0f;
+}
+
+// The target that flies `speed`. Outside what it can fly: the nearest end.
+inline float target_for_speed(float speed, float minSpeed, float midSpeed, float maxSpeed)
+{
+   if (!std::isfinite(speed) || !std::isfinite(minSpeed) || !std::isfinite(midSpeed) || !std::isfinite(maxSpeed))
+      return 1.0f;
+   float thrust;
+   if (speed < midSpeed) thrust = midSpeed > minSpeed ? (speed - midSpeed) / (midSpeed - minSpeed) : -1.0f;
+   else thrust = maxSpeed > midSpeed ? (speed - midSpeed) / (maxSpeed - midSpeed) : 1.0f;
+   const float zero = zero_thrust(minSpeed, midSpeed, maxSpeed);   // past either end, the clamp below holds it
+   if (!(zero < 1.0f) || !std::isfinite(zero)) return 1.0f;
+   return clampf((thrust - zero) / (1.0f - zero), 0.0f, 1.0f);
 }
 
 // The flight code all but stops a flyer whose point is more than ~26 degrees
-// off its nose. A wingman following the formation round a turn keeps most of
-// its speed until the point is kKeepSpeedCos off the nose; past that it slows
-// to turn, as the stock code would have it.
+// off its nose. A wingman in formation flies its formation speed until the
+// point is kKeepSpeedCos off its nose; past that it slows to turn, as the
+// stock code would have it.
 constexpr float kKeepSpeedCos = 0.5f;    // 60 degrees
-constexpr float kKeepShare    = 0.85f;
 
 inline float keep_speed(float stockTarget, float formationTarget, float offNoseCos)
 {
-   if (!std::isfinite(offNoseCos) || offNoseCos < kKeepSpeedCos) return stockTarget;
-   const float floor = formationTarget * kKeepShare;
-   return stockTarget > floor ? stockTarget : floor;
+   if (!std::isfinite(offNoseCos) || offNoseCos < kKeepSpeedCos || !std::isfinite(formationTarget)) return stockTarget;
+   return formationTarget;
 }
 
 // ---- Who flies as one -------------------------------------------------------------

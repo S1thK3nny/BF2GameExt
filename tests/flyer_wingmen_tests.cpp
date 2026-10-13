@@ -147,21 +147,71 @@ void speeds()
    assert(near(formation_speed(kNan, 0.0f, lo, hi), hi));
    assert(near(formation_speed(lead, kNan, lo, hi), hi));
    assert(near(formation_speed(lead, 0.0f, lo, 0.0f), 0.0f));
-   // The game's unit: a share of the top speed.
-   assert(near(target_for(50.0f, 100.0f), 0.5f) && near(target_for(150.0f, 100.0f), 1.0f));
-   assert(near(target_for(-5.0f, 100.0f), 0.0f) && near(target_for(50.0f, 0.0f), 1.0f));
-   assert(near(target_for(kNan, 100.0f), 1.0f));
 }
 
-// Round a turn it keeps most of its formation speed; past 60 degrees off its
-// nose it slows as the game would have it.
+// The game's own chain, as read: AIUtil::GetThrustForTargetSpeed, then
+// EntityFlyer::Update's throttle (modtools 0x004FED19), kept within min and max.
+float game_thrust(float target, float mn, float md, float mx)
+{
+   float zero = -1.0f;
+   if (mn <= 0.0f) {
+      if (md <= 0.0f) {
+         zero = 1.0f;
+         if (0.0f < mx) zero = (0.0f - md) / (mx - md);
+      } else {
+         zero = mn / (md - mn);
+      }
+   }
+   if (0.0f <= target) return (1.0f - zero) * target + zero;
+   return (zero + 1.0f) * target - 1.0f;
+}
+
+float game_speed(float thrust, float mn, float md, float mx)
+{
+   const float s = thrust < 0.0f ? md - (mn - md) * thrust : md + (mx - md) * thrust;
+   return s < mn ? mn : s > mx ? mx : s;
+}
+
+// The target asked for flies the speed wanted, through the game's own chain.
+void targets()
+{
+   struct Flyer { float mn, md, mx; } flyers[] = {
+      {60, 80, 100},    // a stock fighter
+      {20, 75, 125},    // stretched to match a slow leader and a boosting one
+      {10, 70, 70},     // no headroom above mid
+      {70, 70, 110},    // none below
+   };
+   for (const Flyer& f : flyers) {
+      for (float s = f.mn; s <= f.mx; s += 0.5f) {
+         const float target = target_for_speed(s, f.mn, f.md, f.mx);
+         assert(target >= 0.0f && target <= 1.0f);
+         assert(near(game_speed(game_thrust(target, f.mn, f.md, f.mx), f.mn, f.md, f.mx), s, 1e-3f));
+      }
+      // Beyond what it can fly: the nearest end.
+      const auto flown = [&](float s) {
+         return game_speed(game_thrust(target_for_speed(s, f.mn, f.md, f.mx), f.mn, f.md, f.mx), f.mn, f.md, f.mx);
+      };
+      assert(near(flown(f.mn - 30.0f), f.mn, 1e-3f) && near(flown(f.mx + 30.0f), f.mx, 1e-3f));
+      assert(near(target_for_speed(f.mx + 30.0f, f.mn, f.md, f.mx), 1.0f));
+   }
+   // The first test's wingman: the old share-of-top-speed target asked a 60/75/105
+   // flyer for 45 m/s and got ~73 (the log showed ~71); this one gets 45.
+   assert(near(game_speed(game_thrust(45.0f / 105.0f, 60, 75, 105), 60, 75, 105), 72.86f, 0.05f));
+   assert(near(game_speed(game_thrust(target_for_speed(45, 30, 75, 105), 30, 75, 105), 30, 75, 105), 45.0f, 1e-3f));
+   // A flyer whose slowest speed is 0 or below cannot be asked under its mid speed.
+   assert(near(game_speed(game_thrust(target_for_speed(20, 0, 40, 90), 0, 40, 90), 0, 40, 90), 40.0f, 1e-3f));
+   assert(near(game_speed(game_thrust(target_for_speed(60, 0, 40, 90), 0, 40, 90), 0, 40, 90), 60.0f, 1e-3f));
+   assert(near(target_for_speed(kNan, 60, 80, 100), 1.0f) && near(target_for_speed(70, 60, kNan, 100), 1.0f));
+}
+
+// In formation it flies its formation speed until its point is 60 degrees
+// off its nose; past that it slows as the game would have it.
 void turning()
 {
-   assert(near(keep_speed(0.1f, 0.8f, 1.0f), 0.8f * kKeepShare));
-   assert(near(keep_speed(0.1f, 0.8f, 0.6f), 0.8f * kKeepShare));
-   assert(near(keep_speed(0.9f, 0.8f, 0.9f), 0.9f));                  // faster than asked: left alone
+   assert(near(keep_speed(0.1f, 0.8f, 1.0f), 0.8f));
+   assert(near(keep_speed(0.9f, 0.3f, 0.6f), 0.3f));                   // slower too
    assert(near(keep_speed(0.1f, 0.8f, kKeepSpeedCos - 0.01f), 0.1f));
-   assert(near(keep_speed(0.1f, 0.8f, kNan), 0.1f));
+   assert(near(keep_speed(0.1f, 0.8f, kNan), 0.1f) && near(keep_speed(0.1f, kNan, 1.0f), 0.1f));
 }
 
 // Only a flyer that can keep up joins.
@@ -251,11 +301,12 @@ int main()
    trimming();
    stretching();
    speeds();
+   targets();
    turning();
    who_flies();
    class_keys();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
-               "stretching, speeds, turning, who flies, class keys, stats).\n");
+               "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, stats).\n");
    return 0;
 }

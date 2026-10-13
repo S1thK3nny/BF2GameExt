@@ -36,6 +36,7 @@ constexpr uint32_t kFly_Ctrl         = 0x308;   // Controllable::mCtrl
 constexpr uint32_t kFly_State        = 0x5A4;
 constexpr uint32_t kFly_Flags        = 0x5F4;
 constexpr uint32_t kFly_FreeFlyTime  = 0x1CDC;
+constexpr uint32_t kFly_TargetSpeed  = 0x598;   // the speed its throttle asks for (Controllable +0x358)
 constexpr uint32_t kCtl_Squad        = 0x60;    // the Controllable's squad-key trigger
 constexpr uint32_t kSquadPressed     = 3;       // down, and changed this update
 constexpr int      kStateFlying      = 2;
@@ -96,6 +97,7 @@ using fn_calc_dest_t = bool(__thiscall*)(void* flyer, float dt, void* dest, floa
 fn_update_t s_update   = nullptr;
 fn_speed_t  s_maxSpeed = nullptr;
 fn_speed_t  s_minSpeed = nullptr;
+fn_speed_t  s_midSpeed = nullptr;   // called, not detoured
 fn_trick_t  s_doTrick  = nullptr;
 uintptr_t   s_calcDest = 0;
 fn_local_t  s_local    = nullptr;
@@ -161,7 +163,8 @@ Wingman  s_wing[flyer_wingmen::kMaxWingmen];
 int      s_count = 0;
 uint8_t* s_leader = nullptr;
 uint32_t s_leaderHandle = 0;
-float    s_leaderSpeed = 0.0f;     // as last seen by a wingman's steering
+float    s_leaderSpeed = 0.0f;     // as last seen by a wingman's steering: how fast it flies ...
+float    s_leaderTarget = 0.0f;    // ... and the speed its throttle asks for
 bool     s_formUp = true;          // the order: form up, or break off
 double   s_nextTick = 0.0;
 double   s_nextReport = 0.0;
@@ -423,6 +426,11 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
 }
 
 // ---- Speeds and tricks --------------------------------------------------------------
+// A wingman's speeds stretch round both how fast its leader flies and the
+// speed it is heading for: braking or boosting, the wingman may go there too.
+float high_speed() { return s_leaderTarget > s_leaderSpeed ? s_leaderTarget : s_leaderSpeed; }
+float low_speed() { return s_leaderTarget < s_leaderSpeed ? s_leaderTarget : s_leaderSpeed; }
+
 // The getters touch only EAX, ECX and the FPU stack, and their callers know it:
 // EntityFlyer::Update keeps the flyer in EDX across GetFlyerMaxSpeed and loads
 // ECX from it for the next getter (modtools 0x004FED55). The stand-ins keep
@@ -432,7 +440,7 @@ float __cdecl max_speed_for(uint8_t* flyer)
 {
    const float v = s_maxSpeed(flyer, nullptr);
    __try {
-      if (in_formation(flyer)) return flyer_wingmen::stretched_max(v, s_leaderSpeed);
+      if (in_formation(flyer)) return flyer_wingmen::stretched_max(v, high_speed());
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return v;
@@ -442,7 +450,7 @@ float __cdecl min_speed_for(uint8_t* flyer)
 {
    const float v = s_minSpeed(flyer, nullptr);
    __try {
-      if (in_formation(flyer)) return flyer_wingmen::stretched_min(v, s_leaderSpeed);
+      if (in_formation(flyer)) return flyer_wingmen::stretched_min(v, low_speed());
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return v;
@@ -609,6 +617,9 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    if (!st.frame.valid || !flyer_wingmen::finite(leaderVel)) return false;
    st.leaderSpeed = flyer_wingmen::length(leaderVel);
    s_leaderSpeed = st.leaderSpeed;
+   // Braking or boosting, the leader's throttle says so before its speed does.
+   const float aim = *(const float*)(s_leader + kFly_TargetSpeed);
+   s_leaderTarget = std::isfinite(aim) && aim > 0.0f ? aim : st.leaderSpeed;
 
    const V3 me = row(wm, 3), leaderPos = row(lm, 3);
    st.slot = flyer_wingmen::to_world(st.frame, leaderPos, flyer_wingmen::slot_offset(w->slot, g_flyerWingmenSpacing));
@@ -619,12 +630,12 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
       flyer_wingmen::in_frame(st.frame, me, leaderPos));
    st.point = flyer_wingmen::to_world(st.frame, me, steer);
 
-   // Its speeds are the stretched ones: max and min speed answer for it so (above).
-   const float maxSpeed = s_maxSpeed(flyer, nullptr);
-   const float hi = flyer_wingmen::stretched_max(maxSpeed, st.leaderSpeed);
-   const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), st.leaderSpeed);
-   const float speed = flyer_wingmen::formation_speed(st.leaderSpeed + w->trim.speed, slot.z, lo, hi);
-   st.target = flyer_wingmen::target_for(speed, hi);
+   // Its speeds are the stretched ones, as its getters answer for it (above),
+   // and the target the one the game's throttle turns into that speed.
+   const float hi = flyer_wingmen::stretched_max(s_maxSpeed(flyer, nullptr), high_speed());
+   const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), low_speed());
+   const float speed = flyer_wingmen::formation_speed(s_leaderTarget + w->trim.speed, slot.z, lo, hi);
+   st.target = flyer_wingmen::target_for_speed(speed, lo, s_midSpeed(flyer, nullptr), hi);
 
    uint8_t* const dest = *(uint8_t**)(flyer + kFly_Ctrl) + kUC_LowLevel + kLL_Dest;
    std::memcpy(st.saved, dest, kDestSize);
@@ -700,7 +711,7 @@ void flyer_wingmen_install(uintptr_t base)
    }
    const auto* a = g_addr;
    if (!a->flyer_update_indirect || !a->flyer_calc_dest_call || !a->flyer_calc_dest || !a->flyer_max_speed ||
-       !a->flyer_min_speed || !a->flyer_do_trick || !a->ai_controller_list || !a->net_game_get_local_player) {
+       !a->flyer_min_speed || !a->flyer_mid_speed || !a->flyer_do_trick || !a->ai_controller_list || !a->net_game_get_local_player) {
       install_log("[Wingmen] NOT installed: no address set for this build");
       return;
    }
@@ -711,6 +722,7 @@ void flyer_wingmen_install(uintptr_t base)
       starts_with(base, a->flyer_calc_dest, "\x83\xEC\x28\x53\x55\x56\x8B\xE9\x8B\x85\x08\x03\x00\x00", 14) &&
       starts_with(base, a->flyer_max_speed, "\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12) &&
       starts_with(base, a->flyer_min_speed, "\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12) &&
+      starts_with(base, a->flyer_mid_speed, "\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12) &&
       // Camera shake may have detoured DoTrick already (it checks the same
       // prologue first); the detours chain.
       (starts_with(base, a->flyer_do_trick, "\xD9\x05\x6C\xA0\xA2\x00\x56\x8B\xF1\x8B\x8E\x6C\x06\x00\x00", 15) ||
@@ -737,6 +749,7 @@ void flyer_wingmen_install(uintptr_t base)
    s_update = (fn_update_t)resolve(base, a->flyer_update_indirect);
    s_maxSpeed = (fn_speed_t)resolve(base, a->flyer_max_speed);
    s_minSpeed = (fn_speed_t)resolve(base, a->flyer_min_speed);
+   s_midSpeed = (fn_speed_t)resolve(base, a->flyer_mid_speed);
    s_doTrick = (fn_trick_t)resolve(base, a->flyer_do_trick);
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
