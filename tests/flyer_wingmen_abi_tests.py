@@ -120,7 +120,22 @@ checks = {
                  ("cmp", "al, 3")],
     # EntityClass::Read finds a ClassParent by mId at +0x18, the PblHash of its name.
     0x004D08F0: [("cmp", "dword ptr [ecx + 0x18], edx")],
+    # Why the getters' stand-ins keep every register: EntityFlyer::Update keeps the flyer in EDX
+    # across GetFlyerMaxSpeed and loads ECX from it for GetFlyerMidSpeed (a C++ stand-in that lost
+    # EDX crashed here, 2026-10-13).
+    0x004FED55: [("call", "0x415aff"), ("fstp", "dword ptr [esp + 0x10]"), ("mov", "ecx, edx"),
+                 ("call", "0x402e64")],
+    0x00415AFF: [("jmp", "0x4f0950")],
 }
+# The stand-ins are naked and keep EDX and the XMM registers.
+for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
+    body = re.search(r"__declspec\(naked\) void " + name + r"\(\)\s*\{(.*?)\n\}", source, re.S)
+    assert body, name
+    asm = body.group(1)
+    assert "movups [esp + 0x70], xmm7" in asm and "movups xmm7, [esp + 0x70]" in asm, name
+    assert ("push   edx" in asm and "pop    edx" in asm) or ("pushad" in asm and "popad" in asm), name
+for name, stand_in in (("s_maxSpeed", "max_speed_mt"), ("s_minSpeed", "min_speed_mt"), ("s_doTrick", "do_trick_mt")):
+    assert f"DetourAttach(&(PVOID&){name}, {stand_in})" in source, name
 
 decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 pe = pefile.PE(str(Path(sys.argv[1]) / "BF2_modtools_NoDVD_NoConsole.exe"))

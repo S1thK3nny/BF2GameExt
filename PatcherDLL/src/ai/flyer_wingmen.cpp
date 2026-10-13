@@ -423,9 +423,14 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
 }
 
 // ---- Speeds and tricks --------------------------------------------------------------
-float __fastcall hooked_max_speed(uint8_t* flyer, void* edx)
+// The getters touch only EAX, ECX and the FPU stack, and their callers know it:
+// EntityFlyer::Update keeps the flyer in EDX across GetFlyerMaxSpeed and loads
+// ECX from it for the next getter (modtools 0x004FED55). The stand-ins keep
+// every register, the XMM ones too, and hand the speed back in ST0 as the
+// getters do.
+float __cdecl max_speed_for(uint8_t* flyer)
 {
-   const float v = s_maxSpeed(flyer, edx);
+   const float v = s_maxSpeed(flyer, nullptr);
    __try {
       if (in_formation(flyer)) return flyer_wingmen::stretched_max(v, s_leaderSpeed);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -433,9 +438,9 @@ float __fastcall hooked_max_speed(uint8_t* flyer, void* edx)
    return v;
 }
 
-float __fastcall hooked_min_speed(uint8_t* flyer, void* edx)
+float __cdecl min_speed_for(uint8_t* flyer)
 {
-   const float v = s_minSpeed(flyer, edx);
+   const float v = s_minSpeed(flyer, nullptr);
    __try {
       if (in_formation(flyer)) return flyer_wingmen::stretched_min(v, s_leaderSpeed);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -443,16 +448,139 @@ float __fastcall hooked_min_speed(uint8_t* flyer, void* edx)
    return v;
 }
 
-// Rolls and flips throw a wingman out of formation and into its leader.
-void __fastcall hooked_do_trick(uint8_t* flyer, void* edx, int trick)
+__declspec(naked) void max_speed_mt()
 {
-   bool skip = false;
-   __try {
-      skip = in_formation(flyer);
-   } __except (EXCEPTION_EXECUTE_HANDLER) {
-      skip = false;
+   __asm {
+      push   ebp
+      mov    ebp, esp
+      and    esp, 0xFFFFFFF0
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      push   ebx
+      push   esi
+      push   edi
+      push   ecx
+      push   edx
+      push   ecx                    // the flyer
+      call   max_speed_for          // the speed in ST0
+      add    esp, 4
+      pop    edx
+      pop    ecx
+      pop    edi
+      pop    esi
+      pop    ebx
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      mov    esp, ebp
+      pop    ebp
+      ret
    }
-   if (!skip) s_doTrick(flyer, edx, trick);
+}
+
+__declspec(naked) void min_speed_mt()
+{
+   __asm {
+      push   ebp
+      mov    ebp, esp
+      and    esp, 0xFFFFFFF0
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      push   ebx
+      push   esi
+      push   edi
+      push   ecx
+      push   edx
+      push   ecx                    // the flyer
+      call   min_speed_for          // the speed in ST0
+      add    esp, 4
+      pop    edx
+      pop    ecx
+      pop    edi
+      pop    esi
+      pop    ebx
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      mov    esp, ebp
+      pop    ebp
+      ret
+   }
+}
+
+// Rolls and flips throw a wingman out of formation and into its leader. True
+// to let the trick through.
+bool __cdecl trick_allowed(uint8_t* flyer)
+{
+   __try {
+      return !in_formation(flyer);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return true;
+   }
+}
+
+// thiscall(Trick), RET 4. Every register comes back as it was, whether the
+// trick is skipped or the original (or camera shake's detour before it) runs.
+__declspec(naked) void do_trick_mt()
+{
+   __asm {
+      push   ebp
+      mov    ebp, esp
+      and    esp, 0xFFFFFFF0
+      sub    esp, 0x80
+      movups [esp + 0x00], xmm0
+      movups [esp + 0x10], xmm1
+      movups [esp + 0x20], xmm2
+      movups [esp + 0x30], xmm3
+      movups [esp + 0x40], xmm4
+      movups [esp + 0x50], xmm5
+      movups [esp + 0x60], xmm6
+      movups [esp + 0x70], xmm7
+      pushad
+      push   ecx                    // the flyer
+      call   trick_allowed
+      add    esp, 4
+      test   al, al
+      popad                         // leaves the flags as TEST set them
+      movups xmm0, [esp + 0x00]
+      movups xmm1, [esp + 0x10]
+      movups xmm2, [esp + 0x20]
+      movups xmm3, [esp + 0x30]
+      movups xmm4, [esp + 0x40]
+      movups xmm5, [esp + 0x50]
+      movups xmm6, [esp + 0x60]
+      movups xmm7, [esp + 0x70]
+      mov    esp, ebp
+      pop    ebp
+      jz     skip
+      jmp    dword ptr [s_doTrick]  // the trick, with the caller's stack as it was
+   skip:
+      ret    4
+   }
 }
 
 // ---- EntityFlyer::CalculateDest, at UpdateIndirect's call ---------------------------
@@ -613,9 +741,9 @@ void flyer_wingmen_install(uintptr_t base)
    DetourTransactionBegin();
    DetourUpdateThread(GetCurrentThread());
    LONG r = DetourAttach(&(PVOID&)s_update, hooked_update);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_maxSpeed, hooked_max_speed);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_minSpeed, hooked_min_speed);
-   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_doTrick, hooked_do_trick);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_maxSpeed, max_speed_mt);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_minSpeed, min_speed_mt);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_doTrick, do_trick_mt);
    if (r != NO_ERROR || DetourTransactionCommit() != NO_ERROR) {
       if (r != NO_ERROR) DetourTransactionAbort();
       install_log("[Wingmen] NOT installed: detouring EntityFlyer failed (%ld)", (long)r);
@@ -642,9 +770,9 @@ void flyer_wingmen_uninstall()
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
       DetourDetach(&(PVOID&)s_update, hooked_update);
-      DetourDetach(&(PVOID&)s_maxSpeed, hooked_max_speed);
-      DetourDetach(&(PVOID&)s_minSpeed, hooked_min_speed);
-      DetourDetach(&(PVOID&)s_doTrick, hooked_do_trick);
+      DetourDetach(&(PVOID&)s_maxSpeed, max_speed_mt);
+      DetourDetach(&(PVOID&)s_minSpeed, min_speed_mt);
+      DetourDetach(&(PVOID&)s_doTrick, do_trick_mt);
       DetourTransactionCommit();
       s_detoured = false;
    }
