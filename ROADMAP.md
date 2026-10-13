@@ -464,6 +464,12 @@ my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m 
 first test; a second round adds speed matching, no tricks, the squad key and ODF keys. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
+**Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
+rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or
+`PathFollowerRealFlight = 1` on a flyer class) steps the path follower on a point about a second
+ahead and flies the ship after it by physics; not yet played. Details in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#real-flight-on-paths-prototype-2026-10-13-modtools-only).
+
 ## Controller
 
 **Button prompts** - Menu buttons only say what they do, never which pad button does it, so

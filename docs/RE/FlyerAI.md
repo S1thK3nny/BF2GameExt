@@ -184,6 +184,98 @@ exemption are verified from bytes; the causal step is inferred.
 
 ---
 
+## Fighter splines: how the AI uses them (researched 2026-10-13)
+
+Read in Phantom for the user's question on the pros and cons of fighter splines, and checked against the
+stock map and side sources under `C:\BF2_ModTools\assets`. P = Phantom, M = modtools, given where already
+known. Nothing is patched.
+
+**Opting in.**
+- **The ship:** its ODF's `PathFollowerClass` names the paths it may fly (stock: `rep`, `cis`, `imp`,
+  `all`, `Fighter`, `transport`), and `PathFollowerClass_CTF` gives it other routes while it carries a
+  flag. `PathFollowerFlyerVsFlyer` switches the fighting reactions below. It is on unless the ODF says 0
+  (`EntityPathFollowerClass` constructor, P `0x005571F0`); stock says 0 only for `all_fly_snowspeeder`
+  and `rep_fly_gunship`. `PathFollowerBranchPaths`, `PathFollowerBranchRange`,
+  `PathFollowerBranchMaxAngle` and `PathFollowerMinBranchDist` (default 300) shape the branching
+  (`EntityPathFollowerClass::SetProperty`, P `0x0055C200`).
+- **The path:** a `.pth` path named `type_EntityPath <name>`, read by `EntityPath::ReadPropertyScope`
+  (P `0x00556860`): `Class` and `Class1` to `Class5` (a path class, optionally followed by a number, not
+  traced), `Direction` (-1, 0, 1), `VarianceX/Y/Z`, `Frequency`, `Speed`, `EnableObject` and
+  `SingleDirection`. Stock also writes `MaxSquadSize` and `PathFollowerSpeed`. Four ids are unresolved:
+  `0x95EA8376`, `0xF22B0522`, `0x3CBCEB39`, `0x60940EA9`. Nodes can carry `BranchProbability`,
+  `SpeedFactor` and `LandOnArrival`, and override the branching (count, angle, and `Range` or
+  `BranchRegion`; see EntityPathBranchRegions.md).
+- **Live paths:** a path is used while it is enabled (Lua `EnableFlyerPath`) and, if it names an
+  `EnableObject`, while that object exists and is alive (`EntityPath::IsEnabled`, P `0x00556400`).
+- **Stock use:** 22 path files on the space maps and one on Hoth. On every other map AI flyers fly by
+  physics.
+
+**Riding.** While `GetFollowingPath` holds, `EntityFlyer::UpdatePathFollower` (P `0x00535E00`,
+M `0x004F30C0`) places the flyer on the curve, as "Flying a path" below describes.
+`EntityFlyer::GetBranchParams` (P `0x005261C0`) hands the follower the flyer's own matrix and a speed
+from `AIDifficulty::GetFlyerSpeedRange` with a slow wobble; a flag carrier flies in the faster half. The
+follower flies 0.8x while turning on an attacker and 1.5x while its boost timer runs.
+
+**Choosing the next path.** `EntityPathFollower::EndOfSegment` (P `0x00559B20`, M `0x005EA9C0`) branches
+at a path's end, when a node's `BranchProbability` comes up, or when the flyer has no path. `Branch`
+(P `0x00557520`) asks `FindPath` (P `0x00559E20`):
+- **Candidates:** only the first and last node of each live path open to the class, in a direction the
+  path allows.
+- **Score:** `EntityPath::CalculateSuitability` (P `0x00555A60`) multiplies range² / distance², how far
+  ahead of the nose the node lies and how well the path's direction there matches the flyer's heading.
+  `FindPath` multiplies that by `Frequency`, and an end nearer than `MinBranchDist` counts 0.4x.
+- **Pick:** at random among the best `BranchPaths`, each tried with `RayTestSpline` (the joining curve
+  against collision), at most four tries, else the closest. `MoveTo` joins with a generated curve.
+- **No path:** `Update` fails and `UpdatePathFollower` gives 2 s of physics flight (`mFreeFlyTime`, with
+  a trick if one is due), then it tries again.
+- **Online:** `Branch` returns at once on a client; the host decides.
+
+**Fighting.** The AI still picks targets, but nothing steers a placed flyer at one.
+- **Shooting:** `UpdateIndirect` (P `0x00535530`, M `0x004F4C10`) runs `AILowLevel::ProcessFire`, so it
+  hits what crosses its nose. A FlyerVsFlyer class also fires a 0.6 s burst every 1.5 to 6 s
+  (`mFireTimer`, 10 s at first). This runs for every AI flyer, on a path or not.
+- **Being targeted:** in `EntityFlyer::Update` (P `0x0052EB00`), a flyer whose target is a FlyerVsFlyer AI
+  flyer on a path calls the target's `TargetReact` (P `0x0052E1E0`), after a reaction delay from the
+  difficulty and at most every 2 s (the timers are not fully traced). Within 700 m the target rolls:
+  - **300 to 700 m:** turn and attack (`GetFlyerTurnAndAttackFrequency`), else evade
+    (`GetFlyerEvasiveFrequency`), else nothing.
+  - **Under 300 m:** evade or nothing.
+  - **Turn and attack:** sets `mAttacker` and adds the attacker as a threat. `ShotAtByEnemy`
+    (P `0x0055C5D0`) drops the path and builds a curve round toward the attacker, flown at 0.8x. At its
+    end `GetNextTowardsAttackerPoint` (P `0x0055A970`) adds a point toward the attacker and starts a 3.5 s
+    staredown, the head-on pass. When that runs out it branches back into the network.
+  - **Evade:** `mStrafeTimer` = 4π, a sideways weave of up to about 8 m for about 3 s.
+- **Damage:** `EntityFlyer::ApplyDamage` (P `0x00523760`) gives an AI FlyerVsFlyer flyer a
+  `GetFlyerFreeFlyOnDamage` chance of 2 s off the path in physics flight, with a trick timed by
+  `GetFlyerTrickOnDamage` (at most one per 10 s).
+- **Side roll:** on maps without `SetGroundFlyerMap(1)`, `UpdateIndirect` side-rolls any AI flyer whose
+  target is within 200 m and either within 40 m or more than about 15° off the nose.
+
+**Single-player extras** (skipped when networked):
+- **Player-centric:** at a branch, `EndOfSegment` sends about half the FlyerVsFlyer AI toward the local
+  player's vehicle (`HeadTowards`, P `0x0055AD20`) when it is far enough away. Each AI's random seed
+  fixes which half (`IsFlyerPlayerCentric`, P `0x0055AFC0`; never in 1- or 2-flag CTF).
+- **Squadrons and flybys:** see "Wingmen for a player's flyer" below.
+
+**Other uses.** Two-seat flyers circle an AT-AT (`UnitFlyAgent::IsNearATAT` calls `CirclePoint`,
+P `0x00557AD0`), path flyers can pick up a CTF flag (`PickupCTFFlag`, P `0x0055B2E0`), and nodes can land
+a flyer (`LandOnArrival`, mended by `land_on_arrival_fix`).
+
+**The AI brain barely reaches it.** Of the follower's steering calls (`HeadTowards`, `MoveTo`,
+`SetPoint`, `Branch`, `FindPath`, `DelayPath`, `SmoothPath`, `CirclePoint`), only `CirclePoint` is called
+from outside it, for the AT-AT. Goals and command posts do not move a spline flyer; the network,
+`EnableObject` and Lua do.
+
+**Pros and cons**, as given to the user:
+- **For:** cheap and safe (no steering or avoidance, so never into terrain or a capital ship); the map's
+  author decides where the fight happens; it looks cinematic; single player stays busy round the player.
+- **Against:** a network per map and class, without which flyers circle; short or sharp legs give
+  hairpins and jitter; no real dogfighting (nothing chases, and turn-and-attack aims where the attacker
+  was); rejoining only at path ends, often far from the fight; the ship's own handling is skipped and
+  nothing keeps two ships apart; online loses the extras; a player cannot lead a spline squadron.
+
+---
+
 ## Flying a path: where the jitter comes from (researched 2026-10-11)
 
 Read in Ghidra by a research pass and checked against a Python model of the code run on the user's
@@ -449,3 +541,81 @@ written as a command vehicle's `SpawnPointLocation` lines are:
   - Classes named after the offsets keep the slot for themselves. A name not on the leader's
     `WingmanClass` list is ignored, and a slot left with none is open to any class that may follow.
   - The free slots fill in order, each with the nearest flyer that may take it.
+
+---
+
+## Danger regions (researched 2026-10-13)
+
+A danger region is a no-fly zone for AI flyers that steer by physics. Read in P; nothing is patched.
+
+- **Authoring:** a box region whose class string starts with `danger` (`Region("danger", 0)` in the
+  `.rgn`). The `danger` factory belongs to `FlyRegionManager`, built in `GameState::PreStateInit`
+  (modtools factory vtable `0x00A47014`, see EntityPathBranchRegions.md). `FlyRegionManager::CreateRegion`
+  (P `0x005C64C0`) rejects any other shape ("Danger region %s must be a box") and adds 1000 to the box's
+  height (`PblRegion::mSize.y`, descriptor +0x44), so in practice it is a column taller than any map.
+- **Steering:** `CalculateDest` (P `0x00523CB0`, M `0x004F4630`) calls `AIUtil::AvoidBarriers`
+  (P `0x00484500`) every 0.1 s, unless the navigator's path sets a flag (not traced). It looks one second
+  ahead along the flat heading at the class's top speed. If planning barriers block that point, or
+  `FlyRegionManager::RayTest` (P `0x005C66A0`) finds the line crossing a danger box widened by the
+  flyer's collision radius (at least 15 m), the flyer slides: it heads for a point square to its heading,
+  always on the same side, two seconds of top speed away (at least 30 m), and re-checks every 0.1 s. It
+  turns sideways only, never over or under.
+- **Reactions:** `UnitAgent::HandleDamagedEvent` and `UnitAgent::Handle_Audible_CanHearEnemy`
+  (P `0x00783F70`, `0x007847B0`) ignore the event for a flyer inside a danger box
+  (`FlyRegionManager::IsInside`, P `0x005C65E0`). `UnitFlyAgent` swallows both events before them (see
+  "Why being shot at does not help"), so for an ordinary AI pilot this likely never runs (inferred).
+- **Not affected:** spline flyers while placed (`CalculateDest` does not run), human pilots, ground units.
+- **Stock use:** none; no stock region file names one.
+- **Wingmen:** they fly through `CalculateDest`, so they slide away from danger regions too.
+
+---
+
+## Real flight on paths (prototype, 2026-10-13, modtools only)
+
+The user's ask after the spline write-up: let spline flyers fly for real. Built on the wingmen's hooks
+(`ai/flyer_real_flight.*`; `[AI] FlyerRealFlight=1`, or `PathFollowerRealFlight = 1` on a flyer class,
+over the INI; unregistered). Not yet played.
+
+**The carrot.** `EntityPathFollower::Update` (M `0x005EC8F0`, thiscall, 7 arguments, `RET 0x1C`) moves the
+matrix its `BranchParams` points at (+4), and `GetBranchParams` (the follower's vptr +0x1C, M `0x004F52D0`,
+`RET 4`, the same slot in all three flyer types' follower vtables) hands it the flyer's own. A flyer on real
+flight has a matrix of ours, the carrot, and the `UpdateIndirect` detour steps the follower on that
+instead. The flyer is held in free flight, and the `CalculateDest` call steers it at the carrot, along the
+carrot's heading, at the carrot's speed, as the wingmen are steered at their slots.
+- **Pace:** the carrot runs a lead ahead (a second of the flyer's speed, 40 to 150 m). It is stepped by `dt`
+  times 2 - distance / lead (0 to 2), so it waits with the flyer two leads behind and runs on as the flyer
+  catches it.
+- **Speed:** the flyer is asked for the carrot's speed, the path's, plus 0.5 m/s per metre past the lead.
+- **Starting over:** four leads behind (at least 300 m), the follower is reset and the carrot starts again
+  from the flyer, so the next step branches onto a path from there.
+
+**Free flight resets the follower every update.** `EntityFlyer::Update` (M, EBX the Controllable) calls
+`UpdatePathFollower` while the flyer is on its path (`0x004FDD93`, through the thunk `0x00411CA2`), makes
+the same test again with the free-flight time read afresh, and off the path calls
+`EntityPathFollower::Reset` (`0x004FDDED`, through `0x00404133`), every update. So a flyer back from free
+flight always branches onto a path from where it is. Both CALLs are redirected:
+- **`free_reset_mt`** keeps the follower of a flyer on real flight.
+- **`update_path_follower_mt`** holds a flyer on real flight, or a wingman in formation, whose free flight
+  something cut short (`TargetReact`, P `0x0052E1E0`, zeroes it), instead of letting the follower place it
+  for an update; the second test then flies it.
+
+**As the stock code takes it.** A follower that finds no path leaves the flyer to the AI for 2 s, the free
+flight `UpdatePathFollower` gives. `mbLandNow` lands it (`Land`, M `0x004F1380`, which the LandOnArrival fix
+detours). `TargetReact`'s trigger does not test the free-flight time, so turn-and-attack and the weave move
+the carrot.
+
+**What else changes for these flyers:**
+- **Danger regions and barriers** apply, through `CalculateDest`.
+- **`EntityFlyer::RaiseHeight`** (P `0x00528910`) lifts the point 25 m over terrain and, when a collision ray
+  from the flyer along its nose, 1.5 s long, hits something, over that object's bounding sphere, asking
+  20 m/s. The path's speed is not held then.
+- **Corners:** in the tests' kinematic model (90°/s, 30 m/s²) the flyer cuts about 15 m inside a 150 m
+  turn, and a 10 m hairpin swings it wide and back onto the far leg.
+- **No stock squadrons or flybys:** both form only in `UpdatePathFollower`, and `CanJoinSquadron`
+  (P `0x004DC0C0`) takes only flyers whose free-flight time is not above 0.
+- **Landing on arrival** comes about a lead early, when the carrot reaches the node.
+
+**Checks.** `tests/flyer_real_flight_tests.cpp` (the core, and a chase in the kinematic model) and
+`tests/flyer_real_flight_abi_tests.py` (34 modtools instruction checks, the vtables, the guards).
+BF2GameExt.log reports every 5 s: flyers on real flight, the carrot's distance against the lead, the speeds,
+restarts and paths not found.

@@ -1336,6 +1336,18 @@ namespace modtools {
    constexpr uintptr_t flyer_min_speed              = 0x004F0A10;
    constexpr uintptr_t flyer_mid_speed              = 0x004F09B0;   // GetFlyerMidSpeed, as the two above
    // (EntityFlyer::DoTrick is flyer_do_trick, above.)
+   // Real flight on paths (a prototype, modtools only). EntityPathFollower::Update,
+   // thiscall(BranchParams*, float dt, float* velocityOut, PblMatrix* matrixOut,
+   // bool forceBranch, float boostRatio, float energyRatio) on the follower
+   // (entity +0x3CC), RET 0x1C, false when it has no path; EntityFlyer::
+   // UpdatePathFollower, thiscall(float dt, PblMatrix*) on the entity, RET 8;
+   // EntityFlyer::Update's CALL to it (through the thunk 0x00411CA2) and, when
+   // the flyer is not on its path, its CALL to EntityPathFollower::Reset (through
+   // the thunk 0x00404133; path_follower_reset, above).
+   constexpr uintptr_t flyer_path_step              = 0x005EC8F0;
+   constexpr uintptr_t flyer_update_path_follower   = 0x004F30C0;
+   constexpr uintptr_t flyer_update_path_call       = 0x004FDD93;
+   constexpr uintptr_t flyer_free_reset_call        = 0x004FDDED;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

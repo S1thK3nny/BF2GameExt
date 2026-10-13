@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "flyer_wingmen.hpp"
+#include "flyer_real_flight.hpp"
 #include "flyer_wingmen_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -143,7 +144,7 @@ bool on_property(void* cls, uint32_t hash, const char* value)
          flyer_wingmen::add_slot(s_classes[cls], value, [](const char* b, unsigned n) { return pbl_hash(b, n); });
       return true;
    }
-   return false;
+   return flyer_real_flight::on_property(cls, hash, value);   // shares this listener slot
 }
 
 // Every class is made from a base: it starts with the base's keys or none, so a
@@ -153,6 +154,7 @@ void on_derive(const void* parent, void* child)
    const auto it = s_classes.find(parent);
    if (it != s_classes.end()) s_classes[child] = flyer_wingmen::inherited(it->second);
    else s_classes.erase(child);
+   flyer_real_flight::on_derive(parent, child);
 }
 
 // ---- The squadron -----------------------------------------------------------------
@@ -426,11 +428,16 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
          tick(now);
       }
       squad_key(now);
-      // A wingman that flies paths is held off them, so it flies by physics.
       uint8_t* const obj = (uint8_t*)ctrl - kFly_Controllable;
-      if (in_formation(obj) && (obj[kFly_Flags] & kFlagPaths)) {
-         float& t = *(float*)(obj + kFly_FreeFlyTime);
-         if (!(t >= kHoldFreeFly)) t = kHoldFreeFly;
+      if (in_formation(obj)) {
+         // A wingman that flies paths is held off them, so it flies by physics.
+         flyer_real_flight::release(obj);
+         if (obj[kFly_Flags] & kFlagPaths) {
+            float& t = *(float*)(obj + kFly_FreeFlyTime);
+            if (!(t >= kHoldFreeFly)) t = kHoldFreeFly;
+         }
+      } else {
+         flyer_real_flight::on_update(obj, dt);   // its paths flown for real, where it may
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
@@ -684,18 +691,27 @@ void steer_after(uint8_t* flyer, Steer& st, bool steered, float* speed)
 bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float* point, float* speed, float* myPos)
 {
    Steer st;
-   bool steering = false;
+   flyer_real_flight::Steer onPath;   // a flyer on real flight, at its carrot
+   bool steering = false, chasing = false;
    __try {
       steering = steer_before(flyer, dt, st);
+      if (!steering) chasing = flyer_real_flight::steer_before(flyer, onPath);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      steering = false;
+      steering = chasing = false;
       if (st.dest) std::memcpy(st.dest, st.saved, kDestSize);
+      flyer_real_flight::restore(onPath);
    }
    const bool r = ((fn_calc_dest_t)s_calcDest)(flyer, dt, dest, point, speed, myPos);
    if (steering) {
       __try {
          steer_after(flyer, st, r, speed);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+   } else if (chasing) {
+      __try {
+         flyer_real_flight::steer_after(flyer, onPath, r, point, speed);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         flyer_real_flight::restore(onPath);
       }
    }
    return r;
@@ -720,6 +736,7 @@ void flyer_wingmen_install(uintptr_t base)
 {
    if (g_build != GameBuild::Modtools) {
       if (g_flyerWingmen) install_log("[Wingmen] NOT installed: the prototype runs on modtools only");
+      if (g_flyerRealFlight) install_log("[RealFlight] NOT installed: the prototype runs on modtools only");
       return;
    }
    const auto* a = g_addr;
@@ -786,10 +803,19 @@ void flyer_wingmen_install(uintptr_t base)
                "%s", g_flyerWingmen ? "on for every flyer" : "off but for flyer classes with Wingman keys",
                g_flyerWingmenCount, (double)g_flyerWingmenSpacing,
                g_flyerWingmenAuto ? "joining at takeoff" : "joining on the squad key");
+
+   // Real flight on paths rides on these hooks (flyer_real_flight.hpp).
+   flyer_real_flight::Borrowed borrowed;
+   borrowed.maxSpeed = s_maxSpeed;
+   borrowed.minSpeed = s_minSpeed;
+   borrowed.midSpeed = s_midSpeed;
+   borrowed.wingman = &in_formation;
+   flyer_real_flight::install(base, borrowed);
 }
 
 void flyer_wingmen_uninstall()
 {
+   flyer_real_flight::uninstall();
    if (s_callSite.at) protected_write(s_callSite.at, s_callSite.orig, 5);
    s_callSite = Site{};
    if (s_detoured) {

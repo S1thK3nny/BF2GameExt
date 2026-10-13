@@ -41,6 +41,10 @@
 //   - DoTrick is detoured: no rolls or flips, which threw wingmen out of
 //     formation and into the player.
 //
+// Real flight on paths (flyer_real_flight.hpp) rides on the same hooks and ODF
+// listener: a flyer not in formation goes to it from the UpdateIndirect detour
+// and the CalculateDest stand-in.
+//
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
 //   EntityFlyer::UpdateIndirect     0x004F4C10, thiscall(float dt) on the
