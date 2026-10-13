@@ -370,13 +370,44 @@ navigator), then, while flying and not placed on a path (`GetFollowingPath`, M `
 `GetFlyerMaxSpeed` / `GetFlyerMinSpeed` (M `0x004F0950` / `0x004F0A10`) read the class at +0x66C.
 
 **Built (`ai/flyer_wingmen.*`, `[AI] FlyerWingmen=1`, unregistered).**
-- **Picking wingmen:** a detour of `UpdateIndirect` does this once a second (the nearest friendly AI
-  flyers within 300 m with a top speed at least 90% of the player's), and holds a path flyer's
-  `mFreeFlyTime` at 0.5 s so it flies free.
-- **Steering:** the call to `CalculateDest` swaps a wingman's `mDest` for its vee slot carried on 0.5 s by
-  the leader's velocity, facing the leader's way, at the leader's speed plus 0.5 m/s per metre the slot is
-  ahead. It puts the AI's own destination back afterwards, and keeps 85% of that speed until the point is
-  60° off the nose.
+- **Picking wingmen:** a detour of `UpdateIndirect` does this once a second: the nearest friendly AI
+  flyers within 300 m that the leader's class lets follow. It also holds a path flyer's `mFreeFlyTime`
+  at 0.5 s so it flies free.
+- **Steering:** the call to `CalculateDest` swaps a wingman's `mDest` for a point near its vee slot,
+  facing the leader's way, at the leader's speed plus 0.5 m/s per metre the slot is ahead. It puts the
+  AI's own destination back afterwards, and keeps 85% of that speed until the point is 60° off the nose.
 - **Logging:** BF2GameExt.log reports each slot's error every 5 s.
 - **Checks:** `tests/flyer_wingmen_abi_tests.py` audits the reads.
-- **Not yet:** played, ported to Steam/GOG, orders, ODF keys.
+
+**First test (2026-10-13, the user, a ground map).**
+- **Level flight:** wingmen held 10-25 m from their slots.
+- **Steady errors:** they sat ~20 m ahead of their slots, unable to fly as slowly as the player's 70 m/s,
+  and ~6 m under them.
+- **Turns:** hard turns threw them 100-600 m out for 10-20 s.
+- **Breaking formation:** they rolled, U-turned and flew into the player.
+- **Steering at fault:** the point was the slot carried on 0.5 s, so a wingman past its slot turned round
+  for it.
+- **Tricks at fault:** `DoTrick` (M `0x004F3D10`, thiscall(Trick), `RET 4`) does the side roll (6) and
+  the flips, which are U-turns. `UpdateIndirect` asks for a side roll near a target (M `0x004F5023`).
+
+**Second round (the user's answers).**
+- **Steering:** the point now lies across and up to the slot but always ahead of the wingman: as far
+  ahead as the slot, plus 0.4 s of the leader's flight (at least 25 m). It is pushed away within 20 m of
+  the leader, and a slow trim, from errors under 40 m only, takes out steady height and speed errors.
+- **Speeds:** `GetFlyerMaxSpeed` / `GetFlyerMinSpeed` are detoured. The flyer's own `Update` and
+  `RecalculateSpeed` (P `0x00528E70`) take its speeds from them. A wingman in formation may fly up to
+  30 m/s faster than its leader and down to 20 m/s slower (not under 10), whatever its class allows, so
+  it matches a fast, slow or boosting leader.
+- **Tricks:** `DoTrick` is detoured to do nothing for a wingman in formation. Camera shake detours it
+  too; the two chain.
+- **Orders:** the squad key works in flight. The flyer's Controllable holds its trigger at +0x60, 3 when
+  pressed, and `EntityFlyer::Update` acts on it only landed (M `0x004FE4AD`). With no wingmen it
+  recruits; otherwise it switches between form up and break off (wingmen fly and fight as the AI will
+  until called back).
+- **ODF keys on the leader's flyer class:**
+  - `WingmanClass` names the classes that may follow it, matched by the PblHash of the ODF name, which
+    `EntityClass::mId` (+0x18) holds; `EntityClass::Read` looks a ClassParent up by it (M `0x004D08F0`).
+  - `WingmanCount` and `WingmanAuto` (join at takeoff, else on the squad key only).
+  - A class that sets any of them has wingmen even with the INI off; with none, any class that can keep
+    up follows.
+- **Not yet:** played, ported to Steam/GOG, an on-screen word for the orders.

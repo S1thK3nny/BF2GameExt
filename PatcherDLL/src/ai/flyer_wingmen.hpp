@@ -3,35 +3,43 @@
 #include <stdint.h>
 
 // =============================================================================
-// Flyer wingmen, a PROTOTYPE: friendly AI flyers near the player's flyer fly in
-// a vee on it. Modtools only, off unless the INI turns it on, no orders and no
-// ODF keys yet. Its question is whether the game's own flight code can hold a
-// slot at fighter speed; BF2GameExt.log says how well each wingman holds his.
+// Flyer wingmen, a PROTOTYPE: friendly AI flyers fly a vee on the player's
+// flyer. Modtools only. BF2GameExt.log says how well each wingman holds its
+// slot.
 //
 // Stock BF2 has no way to do this. The squad key does nothing for a flyer in
 // the air, and the game's squadrons put AI flyers on their AI leader's flight
 // path (docs/RE/FlyerAI.md, "Wingmen for a player's flyer").
 //
+// Who: the player's flyer, flying, leads. Friendly AI flyers within 300 m that
+// its class lets follow it join, the nearest first: the classes its
+// WingmanClass keys name, or with none any that can keep up (top speed at least
+// 90% of the leader's). They join at takeoff (WingmanAuto, else the INI) and on
+// the squad key, which then switches them between forming up and breaking off
+// (to fly and fight as the AI will, until called back). One is let go once
+// dead, landed, flown by someone else or, in formation, further than 800 m.
+//
 // An AI flyer that is not placed on a path flies by physics:
 // EntityFlyer::UpdateIndirect runs its navigator (AILowLevel::UpdateIndirect),
 // then EntityFlyer::CalculateDest turns AILowLevel::mDest into the point it
 // steers at and the speed it asks for, avoiding barriers and keeping a safe
-// height, and AIUtil::UpdatePhysics turns those into controls. Two places
-// change, for wingmen only:
+// height, and AIUtil::UpdatePhysics turns those into controls. For wingmen in
+// formation only:
 //
-//   - UpdateIndirect is detoured. Once a second it picks the wingmen: the
-//     player's flyer, flying, leads; the nearest friendly AI flyers within
-//     300 m that are flying and can keep up (top speed at least 90% of the
-//     leader's) join, and one is let go once dead, landed, further than 800 m
-//     or flown by someone else. A wingman that flies paths (space maps) has
-//     its free-flight time held above 0, so it flies by physics instead.
-//   - Its CALL to CalculateDest goes to calc_dest_mt. For a wingman the AI's
-//     destination is swapped for its slot, carried on half a second by the
-//     leader's velocity, facing the leader's way, at the leader's speed plus
-//     0.5 m/s for every metre the slot is ahead (flyer_wingmen_core.hpp); the
-//     stock code then avoids barriers and keeps its height as for any point,
-//     and the AI's own destination goes back afterwards. Round a turn it keeps
-//     most of that speed, where the stock code would all but stop it.
+//   - UpdateIndirect is detoured: once a second it picks and lets go of
+//     wingmen, every update it reads the leader's squad key, and it holds a
+//     path flyer's free-flight time above 0 so it flies by physics.
+//   - Its CALL to CalculateDest goes to calc_dest_mt, which swaps the AI's
+//     destination for a point across and up to the wingman's slot, always ahead
+//     of the wingman along the leader's heading, pushed clear of the leader,
+//     at the leader's speed plus a catch-up and a slow trim
+//     (flyer_wingmen_core.hpp). The stock code then avoids barriers and keeps
+//     its height as for any point, and the AI's own destination goes back.
+//   - GetFlyerMaxSpeed and GetFlyerMinSpeed are detoured: a wingman may fly up
+//     to 30 m/s faster than its leader and down to 20 m/s slower, whatever its
+//     class allows, so it can match a faster, slower or boosting leader.
+//   - DoTrick is detoured: no rolls or flips, which threw wingmen out of
+//     formation and into the player.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -42,13 +50,20 @@
 //                                   speed*, myPos*) on the entity, RET 0x14;
 //                                   reads UnitControllerPtr(mCtrl) + 0x2C4 +
 //                                   0x1C, copies it out, steers at its mPos
-//   GetFlyerMaxSpeed / MinSpeed     0x004F0950 / 0x004F0A10, thiscall(), ST0
+//   GetFlyerMaxSpeed / MinSpeed     0x004F0950 / 0x004F0A10, thiscall(), ST0;
+//                                   the flyer's own update and RecalculateSpeed
+//                                   take its speeds from them
+//   EntityFlyer::DoTrick            0x004F3D10, thiscall(Trick), RET 4; 6 is
+//                                   SIDE_ROLL, the others flips
 //   EntityFlyer (from the entity)   mCtrl +0x308 (Controllable +0xC8), mState
 //                                   +0x5A4 (2 flying), flags +0x5F4 (8 flies
 //                                   paths, 0x10 sliding round a barrier, 3 a
 //                                   trick), mFreeFlyTime +0x1CDC (GetFollowingPath
 //                                   0x004D7960 places it on a path only while
-//                                   that is not above 0)
+//                                   that is not above 0); the Controllable's
+//                                   squad-key trigger +0x60, 3 when pressed
+//                                   (EntityFlyer::Update reads it only landed,
+//                                   0x004FE4AD)
 //   AILowLevel::mDest               UnitController +0x2C4 +0x1C, a
 //                                   ControllableDestination (0x34 bytes):
 //                                   mHasDest +0, mPos +4, mOriginalPos +0x10,
@@ -56,6 +71,9 @@
 //                                   (SH_FULL 0), mTaperFactor +0x2C, mMaxSpeed
 //                                   +0x30, a share of the top speed
 //                                   (AIUtil::GetTargetSpeedForRealSpeed)
+//   a flyer's class                 GameObject +0x8; its mId +0x18, the PblHash
+//                                   of its ODF name (EntityClass::Read looks a
+//                                   ClassParent up by it, 0x004D08F0)
 //   GameObject                      IsRtti vptr +0x00, GetVelocity +0x44, the
 //                                   matrix from its +0xC interface, vptr +0x40;
 //                                   alive +0x1FC bit 3, handle id +0x204, team
@@ -69,13 +87,19 @@
 // AI flies on the host and in single player only; the leader is the host's
 // own player.
 //
-// INI (unregistered while a prototype): [AI] FlyerWingmen=1 turns it on,
-// FlyerWingmenCount=3 (1 to 4), FlyerWingmenSpacing=25 (metres, 8 to 60).
+// ODF keys on a flyer class, over the INI key by key, and a class that sets
+// any has wingmen whatever FlyerWingmen says (flyer_wingmen_core.hpp):
+// WingmanClass, WingmanCount, WingmanAuto.
+//
+// INI (unregistered while a prototype): [AI] FlyerWingmen=1 gives every flyer
+// wingmen, FlyerWingmenCount=3 (0 to 4), FlyerWingmenSpacing=25 (metres, 8 to
+// 60), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key only).
 // =============================================================================
 
 extern bool  g_flyerWingmen;
 extern int   g_flyerWingmenCount;
 extern float g_flyerWingmenSpacing;
+extern bool  g_flyerWingmenAuto;
 
 void flyer_wingmen_install(uintptr_t exe_base);
 void flyer_wingmen_uninstall();

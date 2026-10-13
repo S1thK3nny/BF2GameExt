@@ -5,6 +5,7 @@
 #include "core/game_build.hpp"
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
+#include "entity/odf_gameext_props.hpp"
 #include "game/Battlefront2/Source/Character.h"
 #include "util/install_log.hpp"
 
@@ -12,17 +13,21 @@
 
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
 // See flyer_wingmen.hpp for the behaviour and the reads.
 
 bool  g_flyerWingmen        = false;
 int   g_flyerWingmenCount   = flyer_wingmen::kDefaultWingmen;
 float g_flyerWingmenSpacing = flyer_wingmen::kDefaultSpacing;
+bool  g_flyerWingmenAuto    = true;
 
 namespace {
 
+using flyer_wingmen::ClassKeys;
 using flyer_wingmen::Frame;
 using flyer_wingmen::Stats;
+using flyer_wingmen::Trim;
 using flyer_wingmen::V3;
 
 // ---- Modtools -----------------------------------------------------------------
@@ -31,6 +36,8 @@ constexpr uint32_t kFly_Ctrl         = 0x308;   // Controllable::mCtrl
 constexpr uint32_t kFly_State        = 0x5A4;
 constexpr uint32_t kFly_Flags        = 0x5F4;
 constexpr uint32_t kFly_FreeFlyTime  = 0x1CDC;
+constexpr uint32_t kCtl_Squad        = 0x60;    // the Controllable's squad-key trigger
+constexpr uint32_t kSquadPressed     = 3;       // down, and changed this update
 constexpr int      kStateFlying      = 2;
 constexpr uint8_t  kFlagPaths        = 0x08;    // flies its paths when it may
 constexpr uint8_t  kFlagSliding      = 0x10;    // sliding round a barrier
@@ -51,6 +58,8 @@ constexpr int      kSafeHeightFull = 0;
 // ---- Any build ------------------------------------------------------------------
 constexpr uint32_t kVt_IsRtti       = 0x00;   // a GameObject's or a Controller's
 constexpr uint32_t kVt_GetVelocity  = 0x44;   // GameObject
+constexpr uint32_t kGO_Class        = 0x8;    // GameObject: its class ...
+constexpr uint32_t kClass_Id        = 0x18;   // ... whose mId is the PblHash of its ODF name
 constexpr uint32_t kGO_MatrixIface  = 0xC;    // the interface a GameObject's matrix comes from ...
 constexpr uint32_t kVt_GetMatrix    = 0x40;   // ... at its vptr +0x40
 constexpr uint32_t kGO_Flags        = 0x1FC;  // bit 3: alive
@@ -64,35 +73,79 @@ constexpr uint32_t kNodePayload     = 0x0C;
 constexpr int      kMaxNodes        = 4096;
 constexpr uint32_t kRttiFlyer          = pbl_hash("EntityFlyer");
 constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
+constexpr uint32_t kHashClass = pbl_hash("WingmanClass");
+constexpr uint32_t kHashCount = pbl_hash("WingmanCount");
+constexpr uint32_t kHashAuto  = pbl_hash("WingmanAuto");
 
 constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
+constexpr double kKeyRepeat     = 0.3;   // s: one press, seen by every flyer's update that frame
 constexpr int    kMaxReports    = 400;
 
-using fn_is_rtti_t    = bool(__thiscall*)(void* self, uint32_t hash);
-using fn_get_obj_t    = uint8_t*(__thiscall*)(void* self);
-using fn_get_vec_t    = const float*(__thiscall*)(void* self);
-using fn_speed_t      = float(__thiscall*)(void* flyer);
-using fn_local_t      = uint8_t*(__cdecl*)(uint32_t localIndex);
-using fn_update_t     = bool(__fastcall*)(void* ctrl, void* edx, float dt);
-using fn_calc_dest_t  = bool(__thiscall*)(void* flyer, float dt, void* dest, float* point, float* speed,
-                                          float* myPos);
+using fn_is_rtti_t   = bool(__thiscall*)(void* self, uint32_t hash);
+using fn_get_obj_t   = uint8_t*(__thiscall*)(void* self);
+using fn_get_vec_t   = const float*(__thiscall*)(void* self);
+using fn_local_t     = uint8_t*(__cdecl*)(uint32_t localIndex);
+using fn_update_t    = bool(__fastcall*)(void* ctrl, void* edx, float dt);
+using fn_speed_t     = float(__fastcall*)(uint8_t* flyer, void* edx);
+using fn_trick_t     = void(__fastcall*)(uint8_t* flyer, void* edx, int trick);
+using fn_calc_dest_t = bool(__thiscall*)(void* flyer, float dt, void* dest, float* point, float* speed,
+                                         float* myPos);
 
-fn_update_t s_update    = nullptr;
-uintptr_t   s_calcDest  = 0;
-fn_speed_t  s_maxSpeed  = nullptr;
-fn_speed_t  s_minSpeed  = nullptr;
-fn_local_t  s_local     = nullptr;
-uint8_t**   s_list      = nullptr;   // the global holding sAICtrls
-bool        s_detoured  = false;
+// Detoured: after the install each holds the original's trampoline.
+fn_update_t s_update   = nullptr;
+fn_speed_t  s_maxSpeed = nullptr;
+fn_speed_t  s_minSpeed = nullptr;
+fn_trick_t  s_doTrick  = nullptr;
+uintptr_t   s_calcDest = 0;
+fn_local_t  s_local    = nullptr;
+uint8_t**   s_list     = nullptr;   // the global holding sAICtrls
+bool        s_detoured = false;
+bool        s_odf      = false;
 double      s_ticksPerSecond = 0.0;
 
-// A redirected call: where, and the bytes it had.
 struct Site {
    uint8_t* at = nullptr;
    uint8_t  orig[5] = {};
 };
 Site s_callSite;
+
+// ---- The ODF keys, per class ----------------------------------------------------------
+std::unordered_map<const void*, ClassKeys> s_classes;
+
+bool on_property(void* cls, uint32_t hash, const char* value)
+{
+   if (hash == kHashClass) {
+      if (cls) {
+         ClassKeys& k = s_classes[cls];
+         bool any = false;
+         flyer_wingmen::for_each_name(value, [&](const char* b, unsigned len) {
+            flyer_wingmen::add_class(k, pbl_hash(b, len));
+            any = true;
+         });
+         if (!any) flyer_wingmen::add_class(k, 0);   // an empty list: no class follows
+      }
+      return true;   // no stock SetProperty knows these
+   }
+   if (hash == kHashCount) {
+      if (cls) flyer_wingmen::set_count(s_classes[cls], value);
+      return true;
+   }
+   if (hash == kHashAuto) {
+      if (cls) flyer_wingmen::set_auto(s_classes[cls], value);
+      return true;
+   }
+   return false;
+}
+
+// Every class is made from a base: it starts with the base's keys or none, so a
+// reused address never keeps an old class's.
+void on_derive(const void* parent, void* child)
+{
+   const auto it = s_classes.find(parent);
+   if (it != s_classes.end()) s_classes[child] = flyer_wingmen::inherited(it->second);
+   else s_classes.erase(child);
+}
 
 // ---- The squadron -----------------------------------------------------------------
 struct Wingman {
@@ -100,6 +153,7 @@ struct Wingman {
    uint32_t handle = 0;
    uint8_t* uc = nullptr;      // the UnitController flying it
    int      slot = 0;
+   Trim     trim;
    Stats    stats;
 };
 
@@ -107,8 +161,11 @@ Wingman  s_wing[flyer_wingmen::kMaxWingmen];
 int      s_count = 0;
 uint8_t* s_leader = nullptr;
 uint32_t s_leaderHandle = 0;
+float    s_leaderSpeed = 0.0f;     // as last seen by a wingman's steering
+bool     s_formUp = true;          // the order: form up, or break off
 double   s_nextTick = 0.0;
 double   s_nextReport = 0.0;
+double   s_lastPress = -1e9;
 int      s_reports = 0;
 
 double seconds()
@@ -134,6 +191,17 @@ bool alive(const uint8_t* obj) { return ((*(const uint32_t*)(obj + kGO_Flags)) >
 uint32_t handle_of(const uint8_t* obj) { return *(const uint32_t*)(obj + kGO_HandleId); }
 int team_of(const uint8_t* obj) { return (int32_t)(*(const uint32_t*)(obj + kGO_Team) << 28) >> 28; }
 bool flying(const uint8_t* flyer) { return *(const int*)(flyer + kFly_State) == kStateFlying; }
+uint32_t class_id(const uint8_t* obj)
+{
+   const uint8_t* cls = *(const uint8_t* const*)(obj + kGO_Class);
+   return cls ? *(const uint32_t*)(cls + kClass_Id) : 0;
+}
+
+const ClassKeys* keys_of(const uint8_t* obj)
+{
+   const auto it = s_classes.find(*(const void* const*)(obj + kGO_Class));
+   return it == s_classes.end() ? nullptr : &it->second;
+}
 
 const float* matrix_of(uint8_t* obj)
 {
@@ -160,12 +228,23 @@ uint8_t* player_flyer()
    return obj;
 }
 
+// Whether this leader has wingmen at all: its class's keys decide where it has
+// any, else the INI.
+bool leads(const uint8_t* leader)
+{
+   const ClassKeys* k = keys_of(leader);
+   return (flyer_wingmen::sets_any(k) || g_flyerWingmen) && flyer_wingmen::count_for(k, g_flyerWingmenCount) > 0;
+}
+
 Wingman* find(const uint8_t* obj)
 {
    for (int i = 0; i < s_count; ++i)
       if (s_wing[i].obj == obj) return &s_wing[i];
    return nullptr;
 }
+
+// A wingman in formation, steered, held to its leader's speed and kept from tricks.
+bool in_formation(const uint8_t* obj) { return s_formUp && s_leader && find(obj); }
 
 void drop(int i, const char* why)
 {
@@ -179,19 +258,18 @@ void release_all(const char* why)
    if (s_count) install_log("[Wingmen] %d let go: %s", s_count, why);
    s_count = 0;
    for (auto& w : s_wing) w = Wingman{};
-   s_leader = nullptr;
-   s_leaderHandle = 0;
 }
 
 // Still a wingman? Why not, or null.
-const char* lost(const Wingman& w, const uint8_t* leader)
+const char* lost(const Wingman& w, uint8_t* leader)
 {
    if (handle_of(w.obj) != w.handle || !alive(w.obj)) return "gone";
    if (*(uint8_t* const*)(w.obj + kFly_Ctrl) != w.uc) return "flown by someone else";
    if (!flying(w.obj)) return "not flying";
    if (team_of(w.obj) != team_of(leader)) return "changed sides";
-   const float* a = (const float*)matrix_of(w.obj);
-   const float* b = (const float*)matrix_of((uint8_t*)leader);
+   if (!s_formUp) return nullptr;   // broken off, it may chase a fight anywhere
+   const float* a = matrix_of(w.obj);
+   const float* b = matrix_of(leader);
    if (!a || !b) return "no position";
    if (flyer_wingmen::length(row(a, 3) - row(b, 3)) > flyer_wingmen::kKeepRange) return "too far";
    return nullptr;
@@ -207,16 +285,18 @@ int free_slot()
    return -1;
 }
 
-// The nearest friendly AI flyers that can keep up, into the free slots.
+// The nearest friendly AI flyers its class lets follow it, into the free slots.
 void fill(uint8_t* leader, int want)
 {
    uint8_t* const list = s_list ? *s_list : nullptr;
-   if (!list) return;
+   if (!list || want <= 0) return;
+   if (want > flyer_wingmen::kMaxWingmen) want = flyer_wingmen::kMaxWingmen;
    const float* lm = matrix_of(leader);
    if (!lm) return;
    const V3 lp = row(lm, 3);
-   const float leaderMax = s_maxSpeed(leader);
+   const float leaderMax = s_maxSpeed(leader, nullptr);
    const int team = team_of(leader);
+   const ClassKeys* keys = keys_of(leader);
 
    struct Candidate { uint8_t* obj; uint8_t* uc; float d; };
    Candidate best[flyer_wingmen::kMaxWingmen];
@@ -236,7 +316,9 @@ void fill(uint8_t* leader, int want)
       if (!m) continue;
       const float d = flyer_wingmen::length(row(m, 3) - lp);
       if (!(d <= flyer_wingmen::kRecruitRange)) continue;
-      if (!flyer_wingmen::can_keep_up(s_maxSpeed(obj), leaderMax)) continue;
+      if (!flyer_wingmen::accepts(keys, class_id(obj),
+                                  flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax)))
+         continue;
       // Keep the `want` nearest, nearest first.
       if (found < want) best[found++] = {obj, uc, d};
       else if (d < best[want - 1].d) best[want - 1] = {obj, uc, d};
@@ -257,7 +339,7 @@ void fill(uint8_t* leader, int want)
       w.uc = best[i].uc;
       w.slot = slot;
       install_log("[Wingmen] slot %d: #%u joined, %.0f m off, top speed %.0f m/s against the leader's %.0f",
-                  slot + 1, w.handle, (double)best[i].d, (double)s_maxSpeed(w.obj), (double)leaderMax);
+                  slot + 1, w.handle, (double)best[i].d, (double)s_maxSpeed(w.obj, nullptr), (double)leaderMax);
    }
 }
 
@@ -271,9 +353,9 @@ void report(double now)
       const double n = s.samples;
       ++s_reports;
       install_log("[Wingmen] slot %d: off its slot by %.1f m on average, %.1f m at worst (slot %.1f m ahead, %.1f "
-                  "right, %.1f up); %.0f m/s against the leader's %.0f",
+                  "right, %.1f up); %.0f m/s against the leader's %.0f; trim %.1f m up, %.1f m/s",
                   s_wing[i].slot + 1, s.distance / n, (double)s.worst, s.ahead / n, s.right / n, s.up / n,
-                  s.speed / n, s.leaderSpeed / n);
+                  s.speed / n, s.leaderSpeed / n, (double)s_wing[i].trim.climb, (double)s_wing[i].trim.speed);
       s = Stats{};
    }
 }
@@ -281,20 +363,42 @@ void report(double now)
 void tick(double now)
 {
    uint8_t* const leader = player_flyer();
-   if (!leader) {
-      release_all("the player is not flying");
+   if (!leader || !leads(leader)) {
+      release_all(leader ? "the player's flyer leads none" : "the player is not flying");
+      s_leader = nullptr;
+      s_leaderHandle = 0;
       return;
    }
    if (leader != s_leader || handle_of(leader) != s_leaderHandle) {
       release_all("a new leader");
       s_leader = leader;
       s_leaderHandle = handle_of(leader);
+      s_formUp = true;
    }
    for (int i = s_count - 1; i >= 0; --i)
       if (const char* why = lost(s_wing[i], leader)) drop(i, why);
-   const int want = flyer_wingmen::clamp_count(g_flyerWingmenCount);
-   if (s_count < want) fill(leader, want - s_count);
+   const ClassKeys* keys = keys_of(leader);
+   const int want = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   if (s_formUp && flyer_wingmen::auto_for(keys, g_flyerWingmenAuto) && s_count < want) fill(leader, want - s_count);
    report(now);
+}
+
+// The squad key, in the air: recruits when it leads none, else switches
+// between forming up and breaking off.
+void squad_key(double now)
+{
+   if (!s_leader || handle_of(s_leader) != s_leaderHandle) return;
+   const uint32_t trigger = *(const uint32_t*)(s_leader + kFly_Controllable + kCtl_Squad);
+   if ((trigger & kSquadPressed) != kSquadPressed || now - s_lastPress < kKeyRepeat) return;
+   s_lastPress = now;
+   if (!s_count) {
+      s_formUp = true;
+      fill(s_leader, flyer_wingmen::count_for(keys_of(s_leader), g_flyerWingmenCount));
+      install_log("[Wingmen] squad key: %s", s_count ? "form up" : "no one near enough to join");
+   } else {
+      s_formUp = !s_formUp;
+      install_log("[Wingmen] squad key: %s", s_formUp ? "form up" : "break off");
+   }
 }
 
 // ---- EntityFlyer::UpdateIndirect ----------------------------------------------------
@@ -306,15 +410,49 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
          s_nextTick = now + kTickSeconds;
          tick(now);
       }
+      squad_key(now);
       // A wingman that flies paths is held off them, so it flies by physics.
       uint8_t* const obj = (uint8_t*)ctrl - kFly_Controllable;
-      if (find(obj) && (obj[kFly_Flags] & kFlagPaths)) {
+      if (in_formation(obj) && (obj[kFly_Flags] & kFlagPaths)) {
          float& t = *(float*)(obj + kFly_FreeFlyTime);
          if (!(t >= kHoldFreeFly)) t = kHoldFreeFly;
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return s_update(ctrl, edx, dt);
+}
+
+// ---- Speeds and tricks --------------------------------------------------------------
+float __fastcall hooked_max_speed(uint8_t* flyer, void* edx)
+{
+   const float v = s_maxSpeed(flyer, edx);
+   __try {
+      if (in_formation(flyer)) return flyer_wingmen::stretched_max(v, s_leaderSpeed);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   return v;
+}
+
+float __fastcall hooked_min_speed(uint8_t* flyer, void* edx)
+{
+   const float v = s_minSpeed(flyer, edx);
+   __try {
+      if (in_formation(flyer)) return flyer_wingmen::stretched_min(v, s_leaderSpeed);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   return v;
+}
+
+// Rolls and flips throw a wingman out of formation and into its leader.
+void __fastcall hooked_do_trick(uint8_t* flyer, void* edx, int trick)
+{
+   bool skip = false;
+   __try {
+      skip = in_formation(flyer);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      skip = false;
+   }
+   if (!skip) s_doTrick(flyer, edx, trick);
 }
 
 // ---- EntityFlyer::CalculateDest, at UpdateIndirect's call ---------------------------
@@ -329,10 +467,10 @@ struct Steer {
    V3       slot;
 };
 
-bool steer_before(uint8_t* flyer, Steer& st)
+bool steer_before(uint8_t* flyer, float dt, Steer& st)
 {
+   if (!in_formation(flyer)) return false;
    Wingman* const w = find(flyer);
-   if (!w || !s_leader) return false;
    if (handle_of(flyer) != w->handle || *(uint8_t* const*)(flyer + kFly_Ctrl) != w->uc) return false;
    if (handle_of(s_leader) != s_leaderHandle || !alive(s_leader)) return false;
    const float* lm = matrix_of(s_leader);
@@ -341,14 +479,24 @@ bool steer_before(uint8_t* flyer, Steer& st)
    const V3 leaderVel = velocity_of(s_leader);
    st.frame = flyer_wingmen::level_frame(row(lm, 2), row(lm, 0));
    if (!st.frame.valid || !flyer_wingmen::finite(leaderVel)) return false;
-   st.slot = flyer_wingmen::to_world(st.frame, row(lm, 3),
-                                     flyer_wingmen::slot_offset(w->slot, g_flyerWingmenSpacing));
-   st.point = flyer_wingmen::steer_point(st.slot, leaderVel);
    st.leaderSpeed = flyer_wingmen::length(leaderVel);
-   const float ahead = flyer_wingmen::in_frame(st.frame, row(wm, 3), st.slot).z;
-   const float maxSpeed = s_maxSpeed(flyer);
-   const float speed = flyer_wingmen::formation_speed(st.leaderSpeed, ahead, s_minSpeed(flyer), maxSpeed);
-   st.target = flyer_wingmen::target_for(speed, maxSpeed);
+   s_leaderSpeed = st.leaderSpeed;
+
+   const V3 me = row(wm, 3), leaderPos = row(lm, 3);
+   st.slot = flyer_wingmen::to_world(st.frame, leaderPos, flyer_wingmen::slot_offset(w->slot, g_flyerWingmenSpacing));
+   const V3 slot = flyer_wingmen::in_frame(st.frame, me, st.slot);   // the slot, from the wingman
+   flyer_wingmen::update_trim(w->trim, slot, dt);
+   const V3 steer = flyer_wingmen::keep_clear(
+      flyer_wingmen::steer_offset(slot, flyer_wingmen::lead_distance(st.leaderSpeed), w->trim.climb),
+      flyer_wingmen::in_frame(st.frame, me, leaderPos));
+   st.point = flyer_wingmen::to_world(st.frame, me, steer);
+
+   // Its speeds are the stretched ones: max and min speed answer for it so (above).
+   const float maxSpeed = s_maxSpeed(flyer, nullptr);
+   const float hi = flyer_wingmen::stretched_max(maxSpeed, st.leaderSpeed);
+   const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), st.leaderSpeed);
+   const float speed = flyer_wingmen::formation_speed(st.leaderSpeed + w->trim.speed, slot.z, lo, hi);
+   st.target = flyer_wingmen::target_for(speed, hi);
 
    uint8_t* const dest = *(uint8_t**)(flyer + kFly_Ctrl) + kUC_LowLevel + kLL_Dest;
    std::memcpy(st.saved, dest, kDestSize);
@@ -386,7 +534,7 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
    Steer st;
    bool steering = false;
    __try {
-      steering = steer_before(flyer, st);
+      steering = steer_before(flyer, dt, st);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       steering = false;
       if (st.dest) std::memcpy(st.dest, st.saved, kDestSize);
@@ -418,14 +566,13 @@ uintptr_t call_destination(const uint8_t* call)
 
 void flyer_wingmen_install(uintptr_t base)
 {
-   if (!g_flyerWingmen) return;
    if (g_build != GameBuild::Modtools) {
-      install_log("[Wingmen] NOT installed: the prototype runs on modtools only");
+      if (g_flyerWingmen) install_log("[Wingmen] NOT installed: the prototype runs on modtools only");
       return;
    }
    const auto* a = g_addr;
    if (!a->flyer_update_indirect || !a->flyer_calc_dest_call || !a->flyer_calc_dest || !a->flyer_max_speed ||
-       !a->flyer_min_speed || !a->ai_controller_list || !a->net_game_get_local_player) {
+       !a->flyer_min_speed || !a->flyer_do_trick || !a->ai_controller_list || !a->net_game_get_local_player) {
       install_log("[Wingmen] NOT installed: no address set for this build");
       return;
    }
@@ -436,6 +583,10 @@ void flyer_wingmen_install(uintptr_t base)
       starts_with(base, a->flyer_calc_dest, "\x83\xEC\x28\x53\x55\x56\x8B\xE9\x8B\x85\x08\x03\x00\x00", 14) &&
       starts_with(base, a->flyer_max_speed, "\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12) &&
       starts_with(base, a->flyer_min_speed, "\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12) &&
+      // Camera shake may have detoured DoTrick already (it checks the same
+      // prologue first); the detours chain.
+      (starts_with(base, a->flyer_do_trick, "\xD9\x05\x6C\xA0\xA2\x00\x56\x8B\xF1\x8B\x8E\x6C\x06\x00\x00", 15) ||
+       *(const uint8_t*)resolve(base, a->flyer_do_trick) == 0xE9) &&
       at[0] == 0xE8 && call_destination(at) == (uintptr_t)resolve(base, a->flyer_calc_dest);
    if (!ok) {
       install_log("[Wingmen] NOT installed: EntityFlyer's update or its calls differ");
@@ -444,33 +595,43 @@ void flyer_wingmen_install(uintptr_t base)
    LARGE_INTEGER f;
    QueryPerformanceFrequency(&f);
    s_ticksPerSecond = (double)f.QuadPart;
-   g_flyerWingmenCount = flyer_wingmen::clamp_count(g_flyerWingmenCount);
+   g_flyerWingmenCount = flyer_wingmen::count_for(nullptr, g_flyerWingmenCount);   // 0 to 4
    g_flyerWingmenSpacing = flyer_wingmen::clamp_spacing(g_flyerWingmenSpacing);
    s_calcDest = (uintptr_t)resolve(base, a->flyer_calc_dest);
-   s_maxSpeed = (fn_speed_t)resolve(base, a->flyer_max_speed);
-   s_minSpeed = (fn_speed_t)resolve(base, a->flyer_min_speed);
    s_local = (fn_local_t)resolve(base, a->net_game_get_local_player);
    s_list = (uint8_t**)resolve(base, a->ai_controller_list);
+
+   // Installed whatever the INI says: a class's keys decide for it, and with
+   // neither every call goes on to the game unchanged.
+   s_odf = odf_add_property_handler(on_property) && odf_add_derive_handler(on_derive);
+   if (!s_odf) install_log("[Wingmen] ODF keys unavailable: no listener slot left; the INI decides");
+
+   s_update = (fn_update_t)resolve(base, a->flyer_update_indirect);
+   s_maxSpeed = (fn_speed_t)resolve(base, a->flyer_max_speed);
+   s_minSpeed = (fn_speed_t)resolve(base, a->flyer_min_speed);
+   s_doTrick = (fn_trick_t)resolve(base, a->flyer_do_trick);
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   LONG r = DetourAttach(&(PVOID&)s_update, hooked_update);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_maxSpeed, hooked_max_speed);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_minSpeed, hooked_min_speed);
+   if (r == NO_ERROR) r = DetourAttach(&(PVOID&)s_doTrick, hooked_do_trick);
+   if (r != NO_ERROR || DetourTransactionCommit() != NO_ERROR) {
+      if (r != NO_ERROR) DetourTransactionAbort();
+      install_log("[Wingmen] NOT installed: detouring EntityFlyer failed (%ld)", (long)r);
+      return;
+   }
+   s_detoured = true;
 
    // The call, during the installers' writable window.
    s_callSite.at = at;
    std::memcpy(s_callSite.orig, at, 5);
    *(int32_t*)(at + 1) = (int32_t)((intptr_t)&calc_dest_mt - (intptr_t)(at + 5));
 
-   s_update = (fn_update_t)resolve(base, a->flyer_update_indirect);
-   DetourTransactionBegin();
-   DetourUpdateThread(GetCurrentThread());
-   const LONG r = DetourAttach(&(PVOID&)s_update, hooked_update);
-   if (r != NO_ERROR || DetourTransactionCommit() != NO_ERROR) {
-      if (r != NO_ERROR) DetourTransactionAbort();
-      std::memcpy(at, s_callSite.orig, 5);
-      s_callSite = Site{};
-      install_log("[Wingmen] NOT installed: detouring EntityFlyer::UpdateIndirect failed (%ld)", (long)r);
-      return;
-   }
-   s_detoured = true;
-   install_log("[Wingmen] installed (prototype): up to %d friendly AI flyers fly a vee on yours, %.0f m apart",
-               g_flyerWingmenCount, (double)g_flyerWingmenSpacing);
+   install_log("[Wingmen] installed (prototype): %s; up to %d friendly AI flyers fly a vee on yours, %.0f m apart, "
+               "%s", g_flyerWingmen ? "on for every flyer" : "off but for flyer classes with Wingman keys",
+               g_flyerWingmenCount, (double)g_flyerWingmenSpacing,
+               g_flyerWingmenAuto ? "joining at takeoff" : "joining on the squad key");
 }
 
 void flyer_wingmen_uninstall()
@@ -481,7 +642,11 @@ void flyer_wingmen_uninstall()
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
       DetourDetach(&(PVOID&)s_update, hooked_update);
+      DetourDetach(&(PVOID&)s_maxSpeed, hooked_max_speed);
+      DetourDetach(&(PVOID&)s_minSpeed, hooked_min_speed);
+      DetourDetach(&(PVOID&)s_doTrick, hooked_do_trick);
       DetourTransactionCommit();
       s_detoured = false;
    }
+   s_classes.clear();
 }

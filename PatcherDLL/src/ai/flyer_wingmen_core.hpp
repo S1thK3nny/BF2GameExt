@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdlib>
 
 // =============================================================================
 // Wingmen for a player's flyer, on their own: where each wingman's slot is, the
@@ -95,14 +96,41 @@ inline V3 in_frame(const Frame& f, V3 from, V3 to)
 
 // ---- Steering -------------------------------------------------------------------
 // The flight code turns a flyer toward a point and slows it once the point is
-// off its nose. A wingman is steered at its slot carried on by the leader's
-// velocity for kLeadSeconds, a point ahead of it while it holds station, so it
-// flies along with the formation rather than at a spot it would overrun.
-constexpr float kLeadSeconds = 0.5f;
+// off its nose. A wingman is steered across and up to its slot, at a point
+// always ahead of itself along the formation's heading: as far ahead as the
+// slot is, plus a lead. One that overruns its slot so flies on and lets its
+// speed bring it back, rather than turning round for a point behind it (the
+// first test's U-turns).
+constexpr float kLeadSeconds = 0.4f;    // the lead: this much of the leader's flight ...
+constexpr float kMinLead     = 25.0f;   // ... and never less than this, m
 
-inline V3 steer_point(V3 slot, V3 leaderVelocity)
+inline float lead_distance(float leaderSpeed)
 {
-   return slot + leaderVelocity * kLeadSeconds;
+   const float lead = std::isfinite(leaderSpeed) && leaderSpeed > 0.0f ? leaderSpeed * kLeadSeconds : 0.0f;
+   return lead > kMinLead ? lead : kMinLead;
+}
+
+// `slot` is where the slot lies from the wingman in the leader's frame;
+// `climb` the trim that holds its height (Trim). The result is in the same
+// frame, from the wingman.
+inline V3 steer_offset(V3 slot, float lead, float climb)
+{
+   return {slot.x, slot.y + climb, (slot.z > 0.0f ? slot.z : 0.0f) + lead};
+}
+
+// Clear of the leader: inside kClearance of it the point is pushed away from
+// it, across and up or down, the harder the closer.
+constexpr float kClearance = 20.0f;   // m
+
+inline V3 keep_clear(V3 steer, V3 leader)
+{
+   const float d = length(leader);
+   if (!(d < kClearance)) return steer;
+   const float push = (kClearance - d) * 2.0f;
+   V3 out = steer;
+   out.x += leader.x > 0.0f ? -push : push;
+   out.y += leader.y > 0.0f ? -push * 0.5f : push * 0.5f;
+   return out;
 }
 
 // The speed it is asked for, m/s: the leader's, plus kCatchUp for every metre
@@ -114,6 +142,48 @@ inline float formation_speed(float leaderSpeed, float slotAhead, float minSpeed,
    if (!std::isfinite(leaderSpeed) || !std::isfinite(slotAhead) || !(maxSpeed > 0.0f)) return maxSpeed > 0.0f ? maxSpeed : 0.0f;
    const float lo = minSpeed > 0.0f && minSpeed < maxSpeed ? minSpeed : 0.0f;
    return clampf(leaderSpeed + kCatchUp * slotAhead, lo, maxSpeed);
+}
+
+// Steady errors the flight code leaves (the first test's wingmen sat ~6 m
+// under their slots and ~20 m ahead) are trimmed out slowly, from errors near
+// the slot only, so a turn or a join does not wind them up: the height by
+// aiming above or below, the place along the line by speed.
+constexpr float kTrimRate     = 0.5f;    // per second, of the error added to the trim
+constexpr float kTrimNear     = 40.0f;   // m: further off its slot than this, no trimming
+constexpr float kMaxClimbTrim = 15.0f;   // m
+constexpr float kMaxSpeedTrim = 10.0f;   // m/s
+
+struct Trim {
+   float climb = 0.0f;   // m added to the height it aims at
+   float speed = 0.0f;   // m/s added to the speed it is asked for
+};
+
+inline void update_trim(Trim& t, V3 slot, float dt)
+{
+   if (!(dt > 0.0f) || dt > 0.5f || !finite(slot) || !(length(slot) < kTrimNear)) return;
+   t.climb = clampf(t.climb + slot.y * kTrimRate * dt, -kMaxClimbTrim, kMaxClimbTrim);
+   t.speed = clampf(t.speed + slot.z * kCatchUp * kTrimRate * dt, -kMaxSpeedTrim, kMaxSpeedTrim);
+}
+
+// A wingman alone may fly outside its class's speeds to match its leader's:
+// up to kStretchUp above the leader to catch up, down to kStretchDown below it
+// to wait (never under kSlowest). Its own speeds stand where they reach further.
+constexpr float kStretchUp   = 30.0f;   // m/s
+constexpr float kStretchDown = 20.0f;   // m/s
+constexpr float kSlowest     = 10.0f;   // m/s
+
+inline float stretched_max(float classMax, float leaderSpeed)
+{
+   if (!std::isfinite(leaderSpeed) || !std::isfinite(classMax)) return classMax;
+   const float need = leaderSpeed + kStretchUp;
+   return classMax > need ? classMax : need;
+}
+
+inline float stretched_min(float classMin, float leaderSpeed)
+{
+   if (!std::isfinite(leaderSpeed) || !std::isfinite(classMin)) return classMin;
+   const float need = leaderSpeed - kStretchDown > kSlowest ? leaderSpeed - kStretchDown : kSlowest;
+   return classMin < need ? classMin : need;
 }
 
 // The game's own unit for it: a share of the flyer's top speed
@@ -148,6 +218,131 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 {
    return leaderMax > 0.0f && std::isfinite(wingmanMax) && wingmanMax >= kKeepUp * leaderMax;
 }
+
+// ---- A leader class's ODF keys over the INI --------------------------------------
+// Each key a flyer class sets, itself or through ClassParent, decides that
+// setting for leaders of the class, whatever the INI says, and a class that
+// sets any of them has wingmen even with the INI's FlyerWingmen off; a key it
+// leaves out takes the INI's.
+//   WingmanClass   a class that may fly as its wingman, by ODF name; several
+//                  lines, or several names on one, add up. A child's own lines
+//                  replace the list it inherits.
+//   WingmanCount   wingmen it takes, 0 to kMaxWingmen; 0 leads none
+//   WingmanAuto    1: friendlies join it at takeoff; 0: only the squad key
+//                  recruits them
+constexpr int kMaxClasses = 16;
+
+struct ClassKeys {
+   uint32_t classes[kMaxClasses] = {};   // PblHash of each ODF name, as EntityClass::mId holds it
+   int      classCount = 0;
+   bool     hasClasses = false;
+   bool     ownClasses = false;   // its own lines have begun replacing the inherited list
+   bool     hasCount = false;
+   int      count = 0;
+   bool     hasAuto = false;
+   bool     autoForm = true;
+};
+
+// A value as an ODF writes it: spaces and quotes round it ignored.
+inline void trim(const char*& b, const char*& e)
+{
+   while (b < e && (*b == ' ' || *b == '\t' || *b == '"')) ++b;
+   while (e > b && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '"' || e[-1] == '\r' || e[-1] == '\n')) --e;
+}
+
+// Each name in a WingmanClass value: separated by spaces, commas or quotes.
+template <class F>
+inline void for_each_name(const char* value, F f)
+{
+   if (!value) return;
+   const char* p = value;
+   while (*p) {
+      while (*p == ' ' || *p == '\t' || *p == ',' || *p == '"' || *p == '\r' || *p == '\n') ++p;
+      const char* b = p;
+      while (*p && *p != ' ' && *p != '\t' && *p != ',' && *p != '"' && *p != '\r' && *p != '\n') ++p;
+      if (p > b) f(b, (unsigned)(p - b));
+   }
+}
+
+// One WingmanClass name, by its hash: the first of a class's own lines clears
+// what it inherited.
+inline void add_class(ClassKeys& k, uint32_t id)
+{
+   if (!k.ownClasses) {
+      k.classCount = 0;
+      k.ownClasses = true;
+   }
+   k.hasClasses = true;
+   if (!id) return;
+   for (int i = 0; i < k.classCount; ++i)
+      if (k.classes[i] == id) return;
+   if (k.classCount < kMaxClasses) k.classes[k.classCount++] = id;
+}
+
+inline bool read_number(const char* value, double& out)
+{
+   if (!value) return false;
+   const char* b = value;
+   const char* e = value;
+   while (*e) ++e;
+   trim(b, e);
+   if (b == e) return false;
+   char buf[32];
+   const size_t n = (size_t)(e - b) < sizeof buf - 1 ? (size_t)(e - b) : sizeof buf - 1;
+   for (size_t i = 0; i < n; ++i) buf[i] = b[i];
+   buf[n] = 0;
+   char* end = nullptr;
+   out = std::strtod(buf, &end);
+   return end && end != buf && *end == 0 && std::isfinite(out);
+}
+
+inline bool set_count(ClassKeys& k, const char* value)
+{
+   double v;
+   if (!read_number(value, v)) return false;
+   k.hasCount = true;
+   k.count = v < 0 ? 0 : v > kMaxWingmen ? kMaxWingmen : (int)v;
+   return true;
+}
+
+inline bool set_auto(ClassKeys& k, const char* value)
+{
+   double v;
+   if (!read_number(value, v)) return false;
+   k.hasAuto = true;
+   k.autoForm = v != 0.0;
+   return true;
+}
+
+// A child class starts as its parent; its own WingmanClass lines replace the list.
+inline ClassKeys inherited(const ClassKeys& parent)
+{
+   ClassKeys k = parent;
+   k.ownClasses = false;
+   return k;
+}
+
+inline bool sets_any(const ClassKeys* k) { return k && (k->hasClasses || k->hasCount || k->hasAuto); }
+
+// Whether a flyer of class `followerId` may fly as this leader's wingman: the
+// leader's list where it has one, else the INI's rule, keeping up.
+inline bool accepts(const ClassKeys* leader, uint32_t followerId, bool keepsUp)
+{
+   if (leader && leader->hasClasses) {
+      for (int i = 0; i < leader->classCount; ++i)
+         if (leader->classes[i] == followerId) return true;
+      return false;
+   }
+   return keepsUp;
+}
+
+inline int count_for(const ClassKeys* leader, int ini)
+{
+   const int n = leader && leader->hasCount ? leader->count : ini;
+   return n < 0 ? 0 : n > kMaxWingmen ? kMaxWingmen : n;
+}
+
+inline bool auto_for(const ClassKeys* leader, bool ini) { return leader && leader->hasAuto ? leader->autoForm : ini; }
 
 // ---- How well it holds its slot, for the log ----------------------------------------
 struct Stats {

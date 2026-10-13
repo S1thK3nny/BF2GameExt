@@ -327,6 +327,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_flyerWingmen              = cfg.get_bool("AI", "FlyerWingmen", false);
       g_flyerWingmenCount         = cfg.get_int("AI", "FlyerWingmenCount", 3);
       g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);
+      g_flyerWingmenAuto          = cfg.get_bool("AI", "FlyerWingmenAuto", true);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);

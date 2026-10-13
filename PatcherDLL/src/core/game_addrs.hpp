@@ -1334,6 +1334,7 @@ namespace modtools {
    constexpr uintptr_t flyer_calc_dest              = 0x004F4630;
    constexpr uintptr_t flyer_max_speed              = 0x004F0950;
    constexpr uintptr_t flyer_min_speed              = 0x004F0A10;
+   // (EntityFlyer::DoTrick is flyer_do_trick, above.)
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the
