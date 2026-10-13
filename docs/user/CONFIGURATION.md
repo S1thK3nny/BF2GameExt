@@ -57,7 +57,7 @@ Rendering and lighting for lightsaber blades. On by default. Radius and intensit
 
 ## AI
 
-Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone. The `Flyer` keys at the end are prototypes, modtools only and off by default: wingmen for your flyer, and AI flyers that fly their paths for real.
+Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 has no player term anywhere in its target selection, which is why its AI is remembered as fairer. Three of the four are on by default; set any of them to 0 for stock behaviour. `PlayerThreatFairness` is the exception and is **off** by default, because it is the one that stops the AI reacting to being aimed at, which makes them feel unresponsive rather than fair. AI will still turn on you the moment you damage them, because that path force-sets the attacker as the target and re-broadcasts to nearby squadmates; it is deliberate and is left alone. The `Flyer` keys at the end are prototypes, modtools only and off by default: wingmen for your flyer, AI flyers that fly their paths for real (chasing their attackers and flying in squadrons while they do), and AI flyers that keep clear of each other.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -79,6 +79,9 @@ Removes hardcoded biases that make BF2's AI single out the human player. SWBF1 h
 | `FlyerWingmenSpacing` | `25` | Metres between neighbours in the wingmen's vee. Range 8 to 60. A class's WingmanSlot ODF keys lay out its own formation instead |
 | `FlyerWingmenAuto` | `1` | Wingmen join you at takeoff. Set 0 to have them join only on the squad key. A class's WingmanAuto ODF key decides for it instead |
 | `FlyerRealFlight` | `0` | PROTOTYPE, modtools only. AI flyers on the map's flyer paths fly them instead of being placed on the curve: each chases a point about a second ahead along its path. A flyer class's PathFollowerRealFlight ODF key decides for it instead. Set 1 to enable |
+| `FlyerRealFlightPursuit` | `1` | With FlyerRealFlight on, an AI flyer the game turns on its attacker chases that flyer for real, steering for where it will be, for 15 s from the last time it was provoked (40 s at most), then flies back onto its paths. Set 0 for the game's own turn, a bend in its path toward where the attacker was |
+| `FlyerRealFlightSquadrons` | `1` | With FlyerRealFlight on, AI flyers gather squadrons by the game's own rule (every 5.5 to 8.5 s, the nearest friendlies heading their way, up to the path's MaxSquadSize) in their class's SquadronFormation shapes, and fly them as your wingmen fly. The game's squadrons ride splines, so none form for flyers on real flight. Set 0 for none |
+| `FlyerAvoidance` | `0` | PROTOTYPE, modtools only. Every AI flyer the AI steers (not one placed on its path) keeps clear of every other flyer, yours included: it turns away from any it would pass close to in the next 2 s and eases off behind a slower one, and no longer climbs over a flyer ahead. Set 1 to enable |
 
 ## Controller
 

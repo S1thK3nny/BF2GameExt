@@ -60,6 +60,7 @@
 #include "ai/ai_squads.hpp"
 #include "ai/flyer_wingmen.hpp"
 #include "ai/flyer_real_flight.hpp"
+#include "ai/flyer_avoidance.hpp"
 #include "ai/squad_formation_core.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -330,6 +331,9 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);
       g_flyerWingmenAuto          = cfg.get_bool("AI", "FlyerWingmenAuto", true);
       g_flyerRealFlight           = cfg.get_bool("AI", "FlyerRealFlight", false);
+      g_flyerRealFlightPursuit    = cfg.get_bool("AI", "FlyerRealFlightPursuit", true);
+      g_flyerRealFlightSquadrons  = cfg.get_bool("AI", "FlyerRealFlightSquadrons", true);
+      g_flyerAvoidance            = cfg.get_bool("AI", "FlyerAvoidance", false);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);

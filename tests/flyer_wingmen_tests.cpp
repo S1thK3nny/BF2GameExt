@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 #include <string>
 
@@ -385,6 +386,99 @@ void ripples()
    assert(near(mirrored(slot_offset(0, 20.0f), true), slot_offset(1, 20.0f)));
 }
 
+// AI squadrons, by the game's rule: a try every 5.5 to 8.5 s, the reach, who
+// may join and in what order, how many.
+void squadron_rule()
+{
+   assert(std::fabs(squadron_wait(0.0) - 5.5) < 1e-9 && std::fabs(squadron_wait(1.0) - 8.5) < 1e-9);
+   assert(std::fabs(squadron_wait(0.5) - 7.0) < 1e-9 && std::fabs(squadron_wait(-3.0) - 7.0) < 1e-9);
+   // The class's own reach (squared, as it holds it), else 30 bounding radii.
+   assert(near(squadron_reach2(40000.0f, 7.0f), 40000.0f));
+   assert(near(squadron_reach2(0.0f, 7.0f), 210.0f * 210.0f));
+   assert(near(squadron_reach2(0.0f, 0.0f), 0.0f) && near(squadron_reach2(kNan, kNan), 0.0f));
+   // Within reach, heading within the class's angle (its cosine; the default 0 is 90 degrees).
+   float a = 0.0f, b = 0.0f, c = 0.0f;
+   assert(squadron_candidate(100.0f * 100.0f, 200.0f * 200.0f, 0.9f, 0.0f, a));
+   assert(squadron_candidate(150.0f * 150.0f, 200.0f * 200.0f, 0.9f, 0.0f, b) && a > b);   // nearer first
+   assert(squadron_candidate(100.0f * 100.0f, 200.0f * 200.0f, 0.2f, 0.0f, c) && a > c);   // better lined up first
+   assert(!squadron_candidate(201.0f * 201.0f, 200.0f * 200.0f, 1.0f, 0.0f, a));           // too far
+   assert(!squadron_candidate(10.0f, 200.0f * 200.0f, -0.1f, 0.0f, a));                    // heading away
+   assert(squadron_candidate(10.0f, 200.0f * 200.0f, -0.9f, -1.0f, a));                    // -1: any heading ...
+   assert(near(a, 1.0f - 10.0f / (200.0f * 200.0f)));                                      // ... the heading left out of the score
+   assert(!squadron_candidate(kNan, 200.0f * 200.0f, 1.0f, 0.0f, a) && !squadron_candidate(10.0f, 0.0f, 1.0f, 0.0f, a));
+   // How many: the most a shape holds with its leader, then one fewer each try, a pair
+   // only when one was all there was.
+   const auto sizes = [](std::initializer_list<int> have) {
+      return [have](int n) {
+         for (int h : have)
+            if (h == n) return true;
+         return false;
+      };
+   };
+   assert(squadron_members(5, sizes({3, 4})) == 3);   // five found: four flyers, a box
+   assert(squadron_members(2, sizes({3, 4})) == 2);   // two: three flyers
+   assert(squadron_members(5, sizes({3})) == 2);      // down through the sizes to the one it has
+   assert(squadron_members(1, sizes({3, 4})) == 0);   // one: no pair shape
+   assert(squadron_members(1, sizes({2})) == 1);      // one, with a pair shape
+   assert(squadron_members(3, sizes({2})) == 0);      // never down to a pair after more
+   assert(squadron_members(0, sizes({2, 3})) == 0 && squadron_members(4, sizes({})) == 0);
+}
+
+// A map's formation shapes, as the game reads them, turned into slots from the
+// leader: Tri-form, five-form and Box-Form from the stock space maps.
+void formation_shapes()
+{
+   // Points as EntityFormation::Read leaves them: from its root.
+   const auto from_root = [](const V3* raw, int n, int root, V3* out) {
+      for (int i = 0; i < n; ++i) out[i] = raw[i] - raw[root];
+   };
+   V3 slots[kMaxWingmen];
+   // Tri-form (spa1): the root, the middle point, is the leader; the others its two
+   // members, in order, ~25 m off: left as they are.
+   const V3 tri[3] = {{-2341.548340f, -256.0f, 2047.477295f}, {-2319.903564f, -256.0f, 2061.713135f},
+                      {-2298.883057f, -256.0f, 2048.499023f}};
+   V3 triRel[3];
+   from_root(tri, 3, 1, triRel);
+   assert(shape_size(3, true) == 3);
+   assert(shape_slots(triRel, 3, 1, true, 2, slots) == 2);
+   assert(near(slots[0], {-21.644775f, 0.0f, -14.235840f}, 1e-3f) && near(slots[1], {21.020507f, 0.0f, -13.214112f}, 1e-3f));
+   assert(shape_slots(triRel, 3, 1, true, 1, slots) == 1);   // fewer members than the shape holds
+   // five-form (spa2): no root named, so the first point; its members 12.6 m off,
+   // scaled up to kMinShapeGap.
+   const V3 five[3] = {{-1902.432373f, 0.0f, -2945.223145f}, {-1893.092651f, 0.0f, -2953.621582f},
+                       {-1883.008667f, 0.0f, -2944.732178f}};
+   V3 fiveRel[3];
+   from_root(five, 3, 0, fiveRel);
+   assert(shape_slots(fiveRel, 3, 0, true, 5, slots) == 2);   // as many as it holds
+   assert(near(length(slots[0]), kMinShapeGap, 1e-3f));
+   const float scale = kMinShapeGap / length(five[1] - five[0]);
+   assert(near(slots[1], (five[2] - five[0]) * scale, 1e-3f));
+   assert(length(slots[1] - slots[0]) >= kMinShapeGap - 1e-3f);
+   // Box-Form (spa1): its root (the fifth point, the middle) is no slot; the leader takes
+   // the first corner, its members the other three.
+   const V3 box[5] = {{-2408.126953f, -256.0f, 2012.925049f}, {-2407.313232f, -256.0f, 1954.514526f},
+                      {-2338.574463f, -256.0f, 1957.552124f}, {-2338.720703f, -256.0f, 2012.261597f},
+                      {-2371.845215f, -256.0f, 1986.511597f}};
+   V3 boxRel[5];
+   from_root(box, 5, 4, boxRel);
+   assert(shape_size(5, false) == 4);
+   assert(shape_slots(boxRel, 5, 4, false, 3, slots) == 3);
+   assert(near(slots[0], box[1] - box[0], 1e-3f) && near(slots[1], box[2] - box[0], 1e-3f) &&
+          near(slots[2], box[3] - box[0], 1e-3f));
+   // Two members far behind but close together: scaled until they are kMinShapeGap apart.
+   const V3 pair[3] = {{0, 0, 0}, {-5, 0, -40}, {5, 0, -40}};
+   assert(shape_slots(pair, 3, 0, true, 2, slots) == 2);
+   assert(near(length(slots[1] - slots[0]), kMinShapeGap, 1e-3f) && near(slots[0], V3{-5, 0, -40} * 2.2f, 1e-3f));
+   // A root at 0 that is no slot: the leader at the next point.
+   const V3 line[3] = {{0, 0, 0}, {0, 0, 30}, {0, 0, -30}};
+   assert(shape_slots(line, 3, 0, false, 1, slots) == 1 && near(slots[0], {0, 0, -60}));
+   // Nothing it can use.
+   const V3 bad[2] = {{kNan, 0, 0}, {0, 0, 0}};
+   assert(shape_slots(bad, 2, 0, true, 1, slots) == 0 && shape_slots(line, 1, 0, true, 1, slots) == 0);
+   assert(shape_slots(line, 3, 5, true, 1, slots) == 0 && shape_slots(line, 3, 0, true, 0, slots) == 0);
+   assert(shape_slots(nullptr, 3, 0, true, 1, slots) == 0 && shape_size(0, true) == 0);
+}
+
 // The log's numbers.
 void stats()
 {
@@ -414,9 +508,11 @@ int main()
    slot_keys();
    slot_classes();
    ripples();
+   squadron_rule();
+   formation_shapes();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
-               "slot classes, ripples, stats).\n");
+               "slot classes, ripples, the squadron rule, formation shapes, stats).\n");
    return 0;
 }

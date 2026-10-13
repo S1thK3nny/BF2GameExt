@@ -62,6 +62,24 @@ for name, value in {
     "kFly_EnergyFlags": 0x620,
     "kTrickSideRoll": 6,
     "kTrickCount": 7,
+    # AI squadrons: the game's squadron rule and its formation shapes.
+    "kFly_Class": 0x66C,
+    "kClass_PathClass": 0x6AC,
+    "kSquad_FormationCount": 0x28,
+    "kPathClass_VsFlyer": 0x78,
+    "kClass_SquadronCos": 0x1104,
+    "kClass_SquadronDist2": 0x1108,
+    "kVt_ClassModel": 0x20,
+    "kModel_Red": 0x20,
+    "kRed_Radius": 0x94,
+    "kPath_MaxSquad": 0x84,
+    "kFly_SquadronTime": 0x1CE8,
+    "kForm_Nodes": 0x18,
+    "kForm_NodeCount": 0x1C,
+    "kForm_Root": 0x28,
+    "kForm_Flags": 0x2C,
+    "kNodeSize": 0x1C,
+    "kMaxClassFormations": 10,
 }.items():
     assert constant(source, name) == value, name
 # The reads it shares with AI squads (tests/ai_squads_abi_tests.py audits those).
@@ -79,8 +97,8 @@ assert 'pbl_hash("WingmanAuto")' in source and 'pbl_hash("WingmanSlot")' in sour
 
 mt = re.search(r"namespace modtools\s*\{(.*?)\n\s*\}\s*//\s*namespace modtools", addrs, re.S).group(1)
 NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "flyer_max_speed", "flyer_min_speed",
-         "flyer_do_trick", "flyer_mid_speed")
-EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0)
+         "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower")
+EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -178,6 +196,94 @@ checks = {
     # RollAdd and FlipAdd: in a trick, flags bit 0 rolling, bit 1 flipping.
     0x004F0A74: [("mov", "al, byte ptr [ecx + 0x5f4]"), ("fadd", "dword ptr [ecx + 0x5c0]"), ("or", "al, 1")],
     0x004F0B54: [("mov", "al, byte ptr [ecx + 0x5f4]"), ("fadd", "dword ptr [ecx + 0x5c8]"), ("or", "al, 2")],
+    # ---- AI squadrons: the game's rule (EntityFlyer::UpdatePathFollower) ----
+    # Placed on its path and not in a squadron, a flyer counts mSquadronFormationTime (+0x1CE8)
+    # down by dt; ResetSquadronTime, once it is not above 0, sets it to 7 give or take 1.5 s and
+    # says to try ...
+    0x004F31F4: [("fld", "dword ptr [esi + 0x1ce8]"), ("mov", "ecx, esi"), ("fsub", "dword ptr [esp + 0x60]"),
+                 ("fstp", "dword ptr [esi + 0x1ce8]"), ("call", "0x40158c"), ("test", "al, al"), ("je", "0x4f332f")],
+    0x0040158C: [("jmp", "0x4f08c0")],
+    0x004F08C0: [("push", "esi"), ("mov", "esi, ecx"), ("test", "byte ptr [esi + 0x78], 1"), ("jne", "0x4f08f8"),
+                 ("fld", "dword ptr [esi + 0x1ce8]"), ("fcomp", "dword ptr [0xa2a06c]"), ("fnstsw", "ax"),
+                 ("test", "ah, 0x41"), ("jp", "0x4f08f8"), ("push", "0x40400000"), ("push", "0x40e00000"),
+                 ("call", "0x40f74f"), ("fstp", "dword ptr [esi + 0x1ce8]")],
+    # ... its reach: the class's squared squadron distance (+0x1108) where not 0, else its model's
+    # bounding radius (GetModel at the class's vptr +0x20, then +0x20, +0x94) times 30, squared ...
+    0x004F3213: [("mov", "ecx, dword ptr [esi + 0x66c]"), ("fld", "dword ptr [0xa2a06c]"),
+                 ("fld", "dword ptr [ecx + 0x1108]"), ("fucompp", ""), ("fnstsw", "ax"), ("test", "ah, 0x44"),
+                 ("jnp", "0x4f323a"), ("mov", "eax, dword ptr [ecx + 0x1108]")],
+    0x004F323A: [("mov", "edx, dword ptr [ecx]"), ("call", "dword ptr [edx + 0x20]"), ("mov", "eax, dword ptr [eax + 0x20]"),
+                 ("fld", "dword ptr [eax + 0x94]"), ("fmul", "dword ptr [0xa37e18]"), ("fld", "st(0)"),
+                 ("fmul", "st(1)")],
+    # ... a flyby first (offline), else a squadron from the closest, with the class's angle (+0x1104).
+    0x004F325F: [("call", "0x40423c"), ("test", "eax, eax"), ("jne", "0x4f332f")],
+    0x004F32A6: [("mov", "edx, dword ptr [ecx + 0x1104]")],
+    0x004F32BE: [("call", "0x40fc6d")],
+    0x0040FC6D: [("jmp", "0x5e8f70")],
+    # CreateSquadronFromClosestEntities: off when networked; only a FlyerVsFlyer path class
+    # (+0x78); only with formations (the follower's squadron class, +0x28) or in a squadron
+    # already; only on a path (+0xA8); candidates from the follower list ([0x00AD3528]) ...
+    0x005E8F70: [("mov", "al, byte ptr [0xadabc2]"), ("sub", "esp, 0x74"), ("push", "ebp"), ("test", "al, al"),
+                 ("mov", "al, byte ptr [0xbe14f1]"), ("mov", "ebp, ecx"), ("jne", "0x5e8f89"),
+                 ("mov", "al, byte ptr [0xbe14f0]"), ("test", "al, al"), ("jne", "0x5e8fc7"),
+                 ("mov", "eax, dword ptr [ebp]"), ("lea", "ecx, [esp + 0x2c]"), ("push", "ecx"), ("mov", "ecx, ebp"),
+                 ("call", "dword ptr [eax + 0x1c]"), ("mov", "eax, dword ptr [eax]"), ("mov", "cl, byte ptr [eax + 0x78]"),
+                 ("test", "cl, cl"), ("je", "0x5e8fc7"), ("mov", "edx, dword ptr [ebp]"), ("mov", "ecx, ebp"),
+                 ("call", "dword ptr [edx + 4]"), ("mov", "ecx, dword ptr [eax + 0x28]"), ("test", "ecx, ecx"),
+                 ("jne", "0x5e8fbd")],
+    0x005E8FBD: [("mov", "eax, dword ptr [ebp + 0xa8]"), ("test", "eax, eax"), ("jne", "0x5e8fd0")],
+    0x005E9012: [("mov", "esi, dword ptr [0xad3528]"), ("mov", "ecx, dword ptr [esi + 0xc]")],
+    # ... within the reach (squared, [esp+0x90]) and, with an angle above -1, heading within it ...
+    0x005E90A6: [("fld", "dword ptr [esp + 0x14]"), ("fcomp", "dword ptr [esp + 0x90]"), ("fnstsw", "ax"),
+                 ("test", "ah, 0x41"), ("jp", "0x5e9158"), ("fld", "dword ptr [esp + 0x94]"),
+                 ("fcomp", "dword ptr [0xa2a9e4]")],
+    # ... and as many as the path's MaxSquadSize (+0x84) lets.
+    0x005E9172: [("mov", "eax, dword ptr [ebp + 0xa8]"), ("mov", "eax, dword ptr [eax + 0x84]")],
+    # The follower's squadron class (its vptr +4): the class's +0x6AC, where the
+    # EntitySquadronClass begins.
+    0x00413791: [("jmp", "0x4f1d90")],
+    0x004F1D90: [("mov", "eax, dword ptr [ecx + 0x2a0]"), ("test", "eax, eax"), ("je", "0x4f1da0"),
+                 ("add", "eax, 0x6ac"), ("ret", "")],
+    # EntitySquadronClass::SelectFormation: its names (+0) and count (+0x28); each found
+    # by EntityFormation::Find and kept when GetNumSlots is the size asked for.
+    0x005EDC2A: [("mov", "ebx, ecx"), ("mov", "ebp, dword ptr [ebx + 0x28]")],
+    0x005EDC51: [("mov", "eax, dword ptr [ebx + esi*4]"), ("push", "eax"), ("call", "0x4054ac"), ("mov", "edi, eax"),
+                 ("add", "esp, 4")],
+    0x005EDC91: [("mov", "ecx, edi"), ("call", "0x414f74"), ("cmp", "dword ptr [esp + 0x20], eax")],
+    0x004054AC: [("jmp", "0x5e2eb0")],
+    0x00414F74: [("jmp", "0x5e27c0")],
+    # EntityFormation::Find, cdecl(name): its list from [0x00AD33C4], each one's name at +0x14.
+    0x005E2EB0: [("push", "esi"), ("mov", "esi, dword ptr [0xad33c4]"), ("mov", "ecx, dword ptr [esi + 0xc]"),
+                 ("test", "ecx, ecx"), ("push", "edi"), ("je", "0x5e2ed6"), ("mov", "edi, dword ptr [esp + 0xc]"),
+                 ("call", "0x820190"), ("cmp", "eax, edi"), ("je", "0x5e2edb"), ("mov", "esi, dword ptr [esi + 4]"),
+                 ("mov", "ecx, dword ptr [esi + 0xc]"), ("test", "ecx, ecx"), ("jne", "0x5e2ec3"), ("pop", "edi"),
+                 ("xor", "eax, eax"), ("pop", "esi"), ("ret", "")],
+    0x00820190: [("mov", "eax, dword ptr [ecx + 0x14]"), ("ret", "")],
+    # GetNumSlots: its points (+0x18's count, +0x1C), one fewer when the root (+0x28) is no
+    # slot (+0x2C bit 0 clear); the nodes 0x1C bytes each, from +0x18.
+    0x005E27C0: [("push", "esi"), ("mov", "esi, ecx"), ("call", "0x8201a0"), ("test", "byte ptr [esi + 0x2c], 1"),
+                 ("pop", "esi"), ("jne", "0x5e27d0"), ("dec", "eax"), ("ret", "")],
+    0x008201A0: [("add", "ecx, 0x18"), ("jmp", "0x820140")],
+    0x00820140: [("mov", "eax, dword ptr [ecx + 4]"), ("ret", "")],
+    0x00820150: [("mov", "eax, dword ptr [esp + 4]"), ("mov", "edx, dword ptr [ecx]"), ("imul", "eax, eax, 0x1c"),
+                 ("add", "eax, edx"), ("ret", "4")],
+    0x005E27E0: [("mov", "al, byte ptr [ecx + 0x2c]"), ("and", "al, 1"), ("ret", "")],
+    0x005E27F0: [("mov", "eax, dword ptr [ecx + 0x28]"), ("ret", "")],
+    # Its rootisslot property sets bit 0 of +0x2C.
+    0x005E2830: [("mov", "ecx, dword ptr [esp + 8]"), ("cmp", "dword ptr [ecx], 0xc1e3fa81")],
+    0x005E285F: [("mov", "eax, dword ptr [esp + 0xc]"), ("mov", "dl, byte ptr [eax + 0x2c]")],
+    # EntityFormation::Read: each point made relative to the root's ([esp+0xc..0x14] after the
+    # GetNode call); the root's rotation turned through RotateVector into a local and dropped.
+    0x005E2CD4: [("push", "esi"), ("mov", "ecx, edi"), ("call", "0x820160"), ("fld", "dword ptr [eax]"),
+                 ("fsub", "dword ptr [esp + 0xc]"), ("push", "eax"), ("lea", "ecx, [esp + 0x1c]"),
+                 ("fstp", "dword ptr [eax]"), ("fld", "dword ptr [eax + 4]"), ("fsub", "dword ptr [esp + 0x14]"),
+                 ("fstp", "dword ptr [eax + 4]"), ("fld", "dword ptr [eax + 8]"), ("fsub", "dword ptr [esp + 0x18]"),
+                 ("fstp", "dword ptr [eax + 8]"), ("lea", "eax, [esp + 0x60]"), ("push", "eax"), ("call", "0x803f20"),
+                 ("inc", "esi"), ("cmp", "esi, ebx")],
+    # EntityFlyerClass's constructor: the squadron angle and distance 0 by default (EBX, the
+    # 0 it also gives mBoostFlyerSpeed, +0x898, which Phantom's constructor sets to 0.0).
+    0x004F9BB6: [("mov", "dword ptr [esi + 0x898], ebx")],
+    0x004FA01E: [("mov", "dword ptr [esi + 0x1104], ebx"), ("mov", "dword ptr [esi + 0x1108], ebx")],
 }
 # The stand-ins are naked and keep EDX and the XMM registers.
 for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
@@ -212,4 +318,19 @@ for va, text in ((0x004F4C10, "81EC84000000535556 8BF1"), (0x004F4630, "83EC2853
     assert image[va - base:va - base + len(want)] == want, hex(va)
 # The getters' 0.0, the zero the free-flight time is compared with.
 assert struct.unpack("<f", image[0x00A2A06C - base:0x00A2A06C - base + 4])[0] == 0.0
+# The squadron rule's constants: 30 bounding radii, an angle of -1 meaning any heading.
+assert struct.unpack("<f", image[0x00A37E18 - base:0x00A37E18 - base + 4])[0] == 30.0
+assert struct.unpack("<f", image[0x00A2A9E4 - base:0x00A2A9E4 - base + 4])[0] == -1.0
+# The squadron guards' bytes are the code's, at the offsets install_squadrons checks them.
+upf = 0x004F30C0
+for offset, text in ((0x134, r"\xD9\x86\xE8\x1C\x00\x00"),
+                     (0x153, r"\x8B\x8E\x6C\x06\x00\x00\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\x08\x11\x00\x00"),
+                     (0x17A, r"\x8B\x11\xFF\x52\x20\x8B\x40\x20\xD9\x80\x94\x00\x00\x00\xD8\x0D\x18\x7E\xA3\x00"),
+                     (0x1E6, r"\x8B\x91\x04\x11\x00\x00")):
+    want = bytes(int(b, 16) for b in text.split(r"\x")[1:])
+    assert image[upf + offset - base:upf + offset - base + len(want)] == want, hex(offset)
+    assert f'upf + 0x{offset:X}, "{text}"' in source, hex(offset)
+find_guard = r"\x56\x8B\x35\xC4\x33\xAD\x00\x8B\x4E\x0C\x85\xC9"
+assert image[0x005E2EB0 - base:0x005E2EB0 - base + 12] == bytes(int(b, 16) for b in find_guard.split(r"\x")[1:])
+assert f'"{find_guard}", 12' in source
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")

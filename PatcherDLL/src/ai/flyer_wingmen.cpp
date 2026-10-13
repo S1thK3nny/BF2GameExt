@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "flyer_wingmen.hpp"
+#include "flyer_avoidance.hpp"
 #include "flyer_real_flight.hpp"
 #include "flyer_wingmen_core.hpp"
 #include "core/game_addrs.hpp"
@@ -13,6 +14,7 @@
 #include <detours.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <unordered_map>
 
@@ -22,6 +24,7 @@ bool  g_flyerWingmen        = false;
 int   g_flyerWingmenCount   = flyer_wingmen::kDefaultWingmen;
 float g_flyerWingmenSpacing = flyer_wingmen::kDefaultSpacing;
 bool  g_flyerWingmenAuto    = true;
+bool  g_flyerRealFlightSquadrons = true;
 
 namespace {
 
@@ -64,6 +67,28 @@ constexpr uint32_t kDest_Taper    = 0x2C;
 constexpr uint32_t kDest_Speed    = 0x30;
 constexpr int      kSafeHeightFull = 0;
 
+// AI squadrons: the game's own squadron rule (EntityFlyer::UpdatePathFollower,
+// EntityPathFollower::CreateSquadronFromClosestEntities) and its shapes.
+constexpr uint32_t kFly_Class           = 0x66C;    // its EntityFlyerClass ...
+constexpr uint32_t kClass_PathClass     = 0x6AC;    // ... whose EntityPathFollowerClass begins with its EntitySquadronClass:
+                                                    //     the SquadronFormation names (PblHash), up to 10 ...
+constexpr uint32_t kSquad_FormationCount = 0x28;    // ... and how many
+constexpr uint32_t kPathClass_VsFlyer   = 0x78;     // PathFollowerFlyerVsFlyer
+constexpr uint32_t kClass_SquadronCos   = 0x1104;   // mSquadronMaxAngle, a cosine (0: within 90 degrees)
+constexpr uint32_t kClass_SquadronDist2 = 0x1108;   // mSquadronSquaredDist (0: from the model's bounding radius)
+constexpr uint32_t kVt_ClassModel       = 0x20;     // the class's GetModel ...
+constexpr uint32_t kModel_Red           = 0x20;     // ... its RedModel ...
+constexpr uint32_t kRed_Radius          = 0x94;     // ... and that one's bounding radius
+constexpr uint32_t kPath_MaxSquad       = 0x84;     // EntityPath::mMaxSquadronSize (~0: no limit)
+constexpr uint32_t kFly_SquadronTime    = 0x1CE8;   // mSquadronFormationTime, counted down to a try
+constexpr uint32_t kForm_Nodes          = 0x18;     // EntityFormation: its nodes (0x1C bytes, the position first) ...
+constexpr uint32_t kForm_NodeCount      = 0x1C;     // ... how many ...
+constexpr uint32_t kForm_Root           = 0x28;     // ... the root's ...
+constexpr uint32_t kForm_Flags          = 0x2C;     // ... bit 0: the root is a slot
+constexpr uint32_t kNodeSize            = 0x1C;
+constexpr int      kMaxClassFormations  = 10;
+constexpr int      kMaxShapePoints      = 16;
+
 // ---- Any build ------------------------------------------------------------------
 constexpr uint32_t kVt_IsRtti       = 0x00;   // a GameObject's or a Controller's
 constexpr uint32_t kVt_GetVelocity  = 0x44;   // GameObject
@@ -91,6 +116,8 @@ constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
 constexpr double kKeyRepeat     = 0.3;   // s: one press, seen by every flyer's update that frame
 constexpr int    kMaxReports    = 400;
+constexpr int    kMaxSquadLogs  = 300;
+constexpr int    kMaxCandidates = 32;
 
 using fn_is_rtti_t   = bool(__thiscall*)(void* self, uint32_t hash);
 using fn_get_obj_t   = uint8_t*(__thiscall*)(void* self);
@@ -101,6 +128,7 @@ using fn_speed_t     = float(__fastcall*)(uint8_t* flyer, void* edx);
 using fn_trick_t     = void(__fastcall*)(uint8_t* flyer, void* edx, int trick);
 using fn_calc_dest_t = bool(__thiscall*)(void* flyer, float dt, void* dest, float* point, float* speed,
                                          float* myPos);
+using fn_find_shape_t = const uint8_t*(__cdecl*)(uint32_t name);
 
 // Detoured: after the install each holds the original's trampoline.
 fn_update_t s_update   = nullptr;
@@ -111,6 +139,8 @@ fn_trick_t  s_doTrick  = nullptr;
 uintptr_t   s_calcDest = 0;
 fn_local_t  s_local    = nullptr;
 uint8_t**   s_list     = nullptr;   // the global holding sAICtrls
+fn_find_shape_t s_findShape = nullptr;   // EntityFormation::Find
+bool        s_squadrons = false;    // the squadron rule's reads checked
 bool        s_detoured = false;
 bool        s_odf      = false;
 double      s_ticksPerSecond = 0.0;
@@ -164,7 +194,7 @@ void on_derive(const void* parent, void* child)
    flyer_real_flight::on_derive(parent, child);
 }
 
-// ---- The squadron -----------------------------------------------------------------
+// ---- Formations -------------------------------------------------------------------
 struct Wingman {
    uint8_t* obj = nullptr;     // the flyer
    uint32_t handle = 0;
@@ -186,28 +216,52 @@ struct LeaderTrick {
    float  side = 0.0f;
    double at = 0.0;
 };
-LeaderTrick s_leaderTrick;
-int         s_trickLogs = 0;
-constexpr int kMaxTrickLogs = 50;
-bool        s_mirror = false;   // the formation left for right, after an odd number of the leader's flips
 
-Wingman  s_wing[flyer_wingmen::kMaxWingmen];
-int      s_count = 0;
-uint8_t* s_leader = nullptr;
-uint32_t s_leaderHandle = 0;
-float    s_leaderSpeed = 0.0f;     // as last seen by a wingman's steering: how fast it flies ...
-float    s_leaderTarget = 0.0f;    // ... and the speed its throttle asks for
-bool     s_formUp = true;          // the order: form up, or break off
+// A leader and its wingmen: the player's (always the first), or an AI squadron.
+struct Formation {
+   uint8_t*    leader = nullptr;
+   uint32_t    leaderHandle = 0;
+   uint8_t*    leaderUc = nullptr;    // an AI squadron's: the UnitController flying its leader
+   bool        ai = false;
+   Wingman     wing[flyer_wingmen::kMaxWingmen];
+   int         count = 0;
+   bool        formUp = true;         // the order: form up, or break off (the player's only)
+   bool        mirror = false;        // left for right, after an odd number of the leader's flips
+   float       leaderSpeed = 0.0f;    // as last seen by a wingman's steering: how fast it flies ...
+   float       leaderTarget = 0.0f;   // ... and the speed its throttle asks for
+   LeaderTrick trick;
+   V3          shape[flyer_wingmen::kMaxWingmen];   // an AI squadron's slots, from the map's formation shape
+   int         shapeCount = 0;        // none: the leader class's WingmanSlot lines, else the vee
+   uint32_t    shapeName = 0;
+};
+
+constexpr int kMaxFormations = 33;   // the player's, and up to 32 AI squadrons
+Formation  s_forms[kMaxFormations];
+Formation& s_player = s_forms[0];
+
 double   s_nextTick = 0.0;
 double   s_nextReport = 0.0;
+double   s_nextSquadReport = 0.0;
 double   s_lastPress = -1e9;
 int      s_reports = 0;
+int      s_trickLogs = 0;
+constexpr int kMaxTrickLogs = 50;
+int      s_squadLogs = 0;
+int      s_formed = 0;      // AI squadrons formed since the last report ...
+int      s_brokeUp = 0;     // ... and broken up
+uint32_t s_random = 0x2545F491u;
 
 double seconds()
 {
    LARGE_INTEGER t;
    QueryPerformanceCounter(&t);
    return (double)t.QuadPart / s_ticksPerSecond;
+}
+
+double random01()
+{
+   s_random = s_random * 1664525u + 1013904223u;
+   return (double)(s_random >> 8) * (1.0 / 16777216.0);
 }
 
 bool is_rtti(void* obj, uint32_t hash)
@@ -263,82 +317,12 @@ uint8_t* player_flyer()
    return obj;
 }
 
-// Whether this leader has wingmen at all: its class's keys decide where it has
-// any, else the INI.
-bool leads(const uint8_t* leader)
-{
-   const ClassKeys* k = keys_of(leader);
-   return (flyer_wingmen::sets_any(k) || g_flyerWingmen) && flyer_wingmen::count_for(k, g_flyerWingmenCount) > 0;
-}
-
-Wingman* find(const uint8_t* obj)
-{
-   for (int i = 0; i < s_count; ++i)
-      if (s_wing[i].obj == obj) return &s_wing[i];
-   return nullptr;
-}
-
-// A wingman in formation, steered, held to its leader's speed and kept from tricks.
-bool in_formation(const uint8_t* obj) { return s_formUp && s_leader && find(obj); }
-
-void drop(int i, const char* why)
-{
-   install_log("[Wingmen] slot %d (#%u) let go: %s", s_wing[i].slot + 1, s_wing[i].handle, why);
-   s_wing[i] = s_wing[--s_count];
-   s_wing[s_count] = Wingman{};
-}
-
-void release_all(const char* why)
-{
-   if (s_count) install_log("[Wingmen] %d let go: %s", s_count, why);
-   s_count = 0;
-   for (auto& w : s_wing) w = Wingman{};
-   s_mirror = false;   // a new formation starts the right way round
-}
-
-// Still a wingman? Why not, or null.
-const char* lost(const Wingman& w, uint8_t* leader)
-{
-   if (handle_of(w.obj) != w.handle || !alive(w.obj)) return "gone";
-   if (*(uint8_t* const*)(w.obj + kFly_Ctrl) != w.uc) return "flown by someone else";
-   if (!flying(w.obj)) return "not flying";
-   if (team_of(w.obj) != team_of(leader)) return "changed sides";
-   if (!s_formUp) return nullptr;   // broken off, it may chase a fight anywhere
-   const float* a = matrix_of(w.obj);
-   const float* b = matrix_of(leader);
-   if (!a || !b) return "no position";
-   if (flyer_wingmen::length(row(a, 3) - row(b, 3)) > flyer_wingmen::kKeepRange) return "too far";
-   return nullptr;
-}
-
-bool slot_taken(int slot)
-{
-   for (int i = 0; i < s_count; ++i)
-      if (s_wing[i].slot == slot) return true;
-   return false;
-}
-
-// The leader's free slots, in order, each to the nearest friendly AI flyer
-// its class lets follow and the slot lets in (a WingmanSlot line may keep it
-// for some classes).
-void fill(uint8_t* leader)
+// Every AI flyer flying, flown by its own UnitController, with that controller.
+template <class F>
+void for_each_ai_flyer(F f)
 {
    uint8_t* const list = s_list ? *s_list : nullptr;
    if (!list) return;
-   const ClassKeys* keys = keys_of(leader);
-   const int total = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
-   if (s_count >= total) return;
-   const float* lm = matrix_of(leader);
-   if (!lm) return;
-   const V3 lp = row(lm, 3);
-   const float leaderMax = s_maxSpeed(leader, nullptr);
-   const int team = team_of(leader);
-
-   // Every friendly AI flyer pool enough that may follow, the nearest first.
-   constexpr int kMaxCandidates = 32;
-   struct Candidate { uint8_t* obj; uint8_t* uc; uint32_t cls; float d; };
-   Candidate pool[kMaxCandidates];
-   int found = 0;
    uint8_t* node = *(uint8_t**)(list + kNodeNext);
    for (int i = 0; i < kMaxNodes && node; ++i) {
       uint8_t* const uc = *(uint8_t**)(node + kNodePayload);
@@ -348,38 +332,204 @@ void fill(uint8_t* leader)
       uint8_t* const owner = *(uint8_t**)(uc + kCtrl_Owner);
       if (!owner) continue;
       uint8_t* const obj = object_of(owner);
-      if (!obj || obj == leader || !is_rtti(obj, kRttiFlyer) || !alive(obj) || !flying(obj)) continue;
-      if (*(uint8_t* const*)(obj + kFly_Ctrl) != uc || team_of(obj) != team || find(obj)) continue;
-      const float* m = matrix_of(obj);
-      if (!m) continue;
-      const float d = flyer_wingmen::length(row(m, 3) - lp);
-      if (!(d <= flyer_wingmen::kRecruitRange)) continue;
-      const uint32_t cls = class_id(obj);
-      if (!flyer_wingmen::accepts(keys, cls, flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax)))
-         continue;
-      if (found < kMaxCandidates) pool[found++] = {obj, uc, cls, d};
-      else if (d < pool[kMaxCandidates - 1].d) pool[kMaxCandidates - 1] = {obj, uc, cls, d};
-      else continue;
-      for (int k = found - 1; k > 0 && pool[k].d < pool[k - 1].d; --k) {
-         const Candidate t = pool[k];
-         pool[k] = pool[k - 1];
-         pool[k - 1] = t;
-      }
+      if (!obj || !is_rtti(obj, kRttiFlyer) || !alive(obj) || !flying(obj)) continue;
+      if (*(uint8_t* const*)(obj + kFly_Ctrl) != uc) continue;
+      f(obj, uc);
    }
+}
+
+// The best few of a search, the highest key first.
+struct Candidate {
+   uint8_t* obj;
+   uint8_t* uc;
+   uint32_t cls;
+   float    key;     // the higher, the sooner taken
+   float    dist;
+};
+
+int add_candidate(Candidate* pool, int found, const Candidate& c)
+{
+   if (found == kMaxCandidates) {
+      if (!(c.key > pool[kMaxCandidates - 1].key)) return found;
+      pool[kMaxCandidates - 1] = c;
+   } else {
+      pool[found++] = c;
+   }
+   for (int k = found - 1; k > 0 && pool[k].key > pool[k - 1].key; --k) {
+      const Candidate t = pool[k];
+      pool[k] = pool[k - 1];
+      pool[k - 1] = t;
+   }
+   return found;
+}
+
+// Whether this leader has wingmen at all: its class's keys decide where it has
+// any, else the INI.
+bool leads(const uint8_t* leader)
+{
+   const ClassKeys* k = keys_of(leader);
+   return (flyer_wingmen::sets_any(k) || g_flyerWingmen) && flyer_wingmen::count_for(k, g_flyerWingmenCount) > 0;
+}
+
+Wingman* find(const uint8_t* obj, Formation** in = nullptr)
+{
+   for (Formation& f : s_forms) {
+      if (!f.leader) continue;
+      for (int i = 0; i < f.count; ++i)
+         if (f.wing[i].obj == obj) {
+            if (in) *in = &f;
+            return &f.wing[i];
+         }
+   }
+   return nullptr;
+}
+
+Formation* led_by(const uint8_t* obj)
+{
+   for (Formation& f : s_forms)
+      if (f.leader && f.leader == obj) return &f;
+   return nullptr;
+}
+
+// A wingman in formation, steered, held to its leader's speed and kept from tricks.
+bool in_formation(const uint8_t* obj)
+{
+   Formation* f = nullptr;
+   return find(obj, &f) && f->formUp;
+}
+
+const char* tag(const Formation& f) { return f.ai ? "[Squadrons]" : "[Wingmen]"; }
+
+bool squad_log()
+{
+   if (s_squadLogs >= kMaxSquadLogs) return false;
+   ++s_squadLogs;
+   return true;
+}
+
+void drop(Formation& f, int i, const char* why)
+{
+   if (!f.ai || squad_log())
+      install_log("%s slot %d (#%u) let go: %s", tag(f), f.wing[i].slot + 1, f.wing[i].handle, why);
+   f.wing[i] = f.wing[--f.count];
+   f.wing[f.count] = Wingman{};
+}
+
+void release_all(Formation& f, const char* why)
+{
+   if (f.count && (!f.ai || squad_log())) install_log("%s %d let go: %s", tag(f), f.count, why);
+   f.count = 0;
+   for (auto& w : f.wing) w = Wingman{};
+   f.mirror = false;   // a new formation starts the right way round
+   f.trick = LeaderTrick{};
+}
+
+// An AI squadron's end. Its wingmen need nothing put back: no longer in
+// formation, each goes back to real flight at its next update.
+void dissolve(Formation& f, const char* why)
+{
+   if (squad_log()) install_log("[Squadrons] #%u's squadron of %d broke up: %s", f.leaderHandle, f.count, why);
+   f = Formation{};
+   ++s_brokeUp;
+}
+
+// Still a wingman? Why not, or null.
+const char* lost(const Wingman& w, const Formation& f)
+{
+   if (handle_of(w.obj) != w.handle || !alive(w.obj)) return "gone";
+   if (*(uint8_t* const*)(w.obj + kFly_Ctrl) != w.uc) return "flown by someone else";
+   if (!flying(w.obj)) return "not flying";
+   if (team_of(w.obj) != team_of(f.leader)) return "changed sides";
+   if (!f.formUp) return nullptr;   // broken off, it may chase a fight anywhere
+   const float* a = matrix_of(w.obj);
+   const float* b = matrix_of(f.leader);
+   if (!a || !b) return "no position";
+   if (flyer_wingmen::length(row(a, 3) - row(b, 3)) > flyer_wingmen::kKeepRange) return "too far";
+   return nullptr;
+}
+
+bool slot_taken(const Formation& f, int slot)
+{
+   for (int i = 0; i < f.count; ++i)
+      if (f.wing[i].slot == slot) return true;
+   return false;
+}
+
+// Slot `slot` of a formation, from its leader, mirrored after its leader's flips.
+V3 slot_of(const Formation& f, int slot)
+{
+   const V3 s = f.ai && slot >= 0 && slot < f.shapeCount
+                   ? f.shape[slot]
+                   : flyer_wingmen::slot_for(keys_of(f.leader), slot, g_flyerWingmenSpacing);
+   return flyer_wingmen::mirrored(s, f.mirror);
+}
+
+Wingman& add_wingman(Formation& f, uint8_t* obj, uint8_t* uc, int slot)
+{
+   Wingman& w = f.wing[f.count++];
+   w = Wingman{};
+   w.obj = obj;
+   w.handle = handle_of(obj);
+   w.uc = uc;
+   w.slot = slot;
+   return w;
+}
+
+// The player calls up an AI squadron's wingman: it leaves its squadron first.
+void leave_squadron(const uint8_t* obj)
+{
+   Formation* f = nullptr;
+   if (!find(obj, &f) || !f->ai) return;
+   for (int i = 0; i < f->count; ++i)
+      if (f->wing[i].obj == obj) {
+         drop(*f, i, "called up by the player");
+         break;
+      }
+   if (!f->count) dissolve(*f, "its last wingman was called up by the player");
+}
+
+// ---- The player's wingmen ---------------------------------------------------------
+// The leader's free slots, in order, each to the nearest friendly AI flyer its
+// class lets follow and the slot lets in (a WingmanSlot line may keep it for some
+// classes). An AI squadron's wingmen may be called away from it; its leaders not.
+void fill(uint8_t* leader)
+{
+   Formation& f = s_player;
+   const ClassKeys* keys = keys_of(leader);
+   const int total = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   if (f.count >= total) return;
+   const float* lm = matrix_of(leader);
+   if (!lm) return;
+   const V3 lp = row(lm, 3);
+   const float leaderMax = s_maxSpeed(leader, nullptr);
+   const int team = team_of(leader);
+
+   // Every friendly AI flyer near enough that may follow, the nearest first.
+   Candidate pool[kMaxCandidates];
+   int found = 0;
+   for_each_ai_flyer([&](uint8_t* obj, uint8_t* uc) {
+      if (obj == leader || team_of(obj) != team) return;
+      Formation* in = nullptr;
+      if (find(obj, &in) && in == &f) return;
+      if (const Formation* led = led_by(obj); led && led->count) return;   // an AI squadron's leader
+      const float* m = matrix_of(obj);
+      if (!m) return;
+      const float d = flyer_wingmen::length(row(m, 3) - lp);
+      if (!(d <= flyer_wingmen::kRecruitRange)) return;
+      const uint32_t cls = class_id(obj);
+      if (!flyer_wingmen::accepts(keys, cls, flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax))) return;
+      found = add_candidate(pool, found, {obj, uc, cls, -d, d});
+   });
    bool used[kMaxCandidates] = {};
-   for (int slot = 0; slot < total && s_count < flyer_wingmen::kMaxWingmen; ++slot) {
-      if (slot_taken(slot)) continue;
+   for (int slot = 0; slot < total && f.count < flyer_wingmen::kMaxWingmen; ++slot) {
+      if (slot_taken(f, slot)) continue;
       for (int c = 0; c < found; ++c) {
          if (used[c] || !flyer_wingmen::slot_accepts(keys, slot, pool[c].cls)) continue;
          used[c] = true;
-         Wingman& w = s_wing[s_count++];
-         w = Wingman{};
-         w.obj = pool[c].obj;
-         w.handle = handle_of(pool[c].obj);
-         w.uc = pool[c].uc;
-         w.slot = slot;
+         leave_squadron(pool[c].obj);
+         Wingman& w = add_wingman(f, pool[c].obj, pool[c].uc, slot);
          install_log("[Wingmen] slot %d: #%u joined, %.0f m off, top speed %.0f m/s against the leader's %.0f",
-                     slot + 1, w.handle, (double)pool[c].d, (double)s_maxSpeed(w.obj, nullptr), (double)leaderMax);
+                     slot + 1, w.handle, (double)pool[c].dist, (double)s_maxSpeed(w.obj, nullptr), (double)leaderMax);
          break;
       }
    }
@@ -389,57 +539,303 @@ void report(double now)
 {
    if (now < s_nextReport || s_reports >= kMaxReports) return;
    s_nextReport = now + kReportSeconds;
-   for (int i = 0; i < s_count; ++i) {
-      Stats& s = s_wing[i].stats;
+   for (int i = 0; i < s_player.count; ++i) {
+      Wingman& w = s_player.wing[i];
+      Stats& s = w.stats;
       if (!s.samples) continue;
       const double n = s.samples;
       ++s_reports;
       install_log("[Wingmen] slot %d: off its slot by %.1f m on average, %.1f m at worst (slot %.1f m ahead, %.1f "
                   "right, %.1f up); %.0f m/s against the leader's %.0f; trim %.1f m up, %.1f m/s",
-                  s_wing[i].slot + 1, s.distance / n, (double)s.worst, s.ahead / n, s.right / n, s.up / n,
-                  s.speed / n, s.leaderSpeed / n, (double)s_wing[i].trim.climb, (double)s_wing[i].trim.speed);
+                  w.slot + 1, s.distance / n, (double)s.worst, s.ahead / n, s.right / n, s.up / n, s.speed / n,
+                  s.leaderSpeed / n, (double)w.trim.climb, (double)w.trim.speed);
       s = Stats{};
    }
+}
+
+// ---- AI squadrons -----------------------------------------------------------------
+// A flyer on real flight never joins the game's squadrons (they ride splines). Its
+// leaders gather squadrons of their own by the game's rule, flown as the
+// player's wingmen are: every 5.5 to 8.5 s a leader not in one takes the nearest
+// same-side flyers on real flight heading its way, within its class's reach, up
+// to its path's MaxSquadSize, in one of its class's SquadronFormation shapes
+// (the map's EntityFormation paths), or its WingmanSlot lines.
+const char* shape_name(uint32_t name)
+{
+   static const char* const kStock[] = {"Tri-form",  "Line-Form", "Box-Form",    "five-form",  "eschleft-form",
+                                        "eschrgt-form", "wall-form", "escort-form", "bomber-Form"};
+   for (const char* n : kStock)
+      if (pbl_hash(n) == name) return n;
+   return nullptr;
+}
+
+struct Shape {
+   uint32_t name = 0;
+   V3       points[kMaxShapePoints];
+   int      count = 0;
+   int      root = 0;
+   bool     rootIsSlot = true;
+   int      size = 0;   // flyers it holds, its leader among them
+};
+
+bool read_shape(uint32_t name, Shape& s)
+{
+   const uint8_t* const f = s_findShape ? s_findShape(name) : nullptr;
+   if (!f) return false;
+   const uint8_t* const nodes = *(const uint8_t* const*)(f + kForm_Nodes);
+   const int count = *(const int*)(f + kForm_NodeCount);
+   if (!nodes || count < 2 || count > kMaxShapePoints) return false;
+   for (int i = 0; i < count; ++i) std::memcpy(&s.points[i], nodes + i * kNodeSize, sizeof(V3));
+   s.name = name;
+   s.count = count;
+   s.root = *(const int*)(f + kForm_Root);
+   s.rootIsSlot = (f[kForm_Flags] & 1) != 0;
+   s.size = flyer_wingmen::shape_size(count, s.rootIsSlot);
+   return s.root >= 0 && s.root < count;
+}
+
+float model_radius(uint8_t* cls)
+{
+   uint8_t* const model = ((fn_get_obj_t)(*(void***)cls)[kVt_ClassModel / 4])(cls);
+   const uint8_t* const red = model ? *(const uint8_t* const*)(model + kModel_Red) : nullptr;
+   return red ? *(const float*)(red + kRed_Radius) : 0.0f;
+}
+
+Formation* free_formation()
+{
+   for (int k = 1; k < kMaxFormations; ++k)
+      if (!s_forms[k].leader) return &s_forms[k];
+   return nullptr;
+}
+
+void try_squadron(uint8_t* leader, const uint8_t* path)
+{
+   uint8_t* const cls = *(uint8_t**)(leader + kFly_Class);
+   if (!cls) return;
+   const uint8_t* const pathClass = cls + kClass_PathClass;
+   if (!pathClass[kPathClass_VsFlyer]) return;   // the game gathers FlyerVsFlyer classes only
+   const ClassKeys* keys = keys_of(leader);
+   Shape shapes[kMaxClassFormations];
+   int nShapes = 0;
+   const uint32_t named = *(const uint32_t*)(pathClass + kSquad_FormationCount);
+   for (uint32_t k = 0; k < named && k < (uint32_t)kMaxClassFormations; ++k)
+      if (read_shape(((const uint32_t*)pathClass)[k], shapes[nShapes])) ++nShapes;
+   const bool ownSlots = keys && keys->hasSlots && keys->slotCount > 0;
+   if (!nShapes && !ownSlots) return;   // no shape to fly: none, as the game
+   Formation* const f = free_formation();
+   if (!f) return;
+
+   const float* lm = matrix_of(leader);
+   if (!lm) return;
+   const V3 lp = row(lm, 3);
+   V3 lf = row(lm, 2);
+   if (!flyer_wingmen::normalise(lf)) return;
+   const float reach2 = flyer_wingmen::squadron_reach2(*(const float*)(cls + kClass_SquadronDist2), model_radius(cls));
+   const float cosMax = *(const float*)(cls + kClass_SquadronCos);
+   const float leaderMax = s_maxSpeed(leader, nullptr);
+   const int team = team_of(leader);
+
+   Candidate pool[kMaxCandidates];
+   int found = 0;
+   for_each_ai_flyer([&](uint8_t* obj, uint8_t* uc) {
+      if (obj == leader || team_of(obj) != team || find(obj) || led_by(obj) || (obj[kFly_Flags] & kFlagTrick)) return;
+      if (!flyer_real_flight::squadron_path(obj)) return;   // on real flight, on a path, not chasing
+      const float* m = matrix_of(obj);
+      if (!m) return;
+      V3 fwd = row(m, 2);
+      if (!flyer_wingmen::normalise(fwd)) return;
+      const V3 d = row(m, 3) - lp;
+      float score = 0.0f;
+      if (!flyer_wingmen::squadron_candidate(flyer_wingmen::dot(d, d), reach2, flyer_wingmen::dot(fwd, lf), cosMax, score))
+         return;
+      const uint32_t id = class_id(obj);
+      if (!flyer_wingmen::accepts(keys, id, flyer_wingmen::can_keep_up(s_maxSpeed(obj, nullptr), leaderMax))) return;
+      found = add_candidate(pool, found, {obj, uc, id, score, flyer_wingmen::length(d)});
+   });
+   if (!found) return;
+
+   // How many: up to the path's MaxSquadSize, as many as one of its shapes holds.
+   const uint32_t maxSquad = *(const uint32_t*)(path + kPath_MaxSquad);
+   int n = found < flyer_wingmen::kMaxWingmen ? found : flyer_wingmen::kMaxWingmen;
+   if (maxSquad < (uint32_t)n) n = (int)maxSquad;
+   const Shape* shape = nullptr;
+   int members = 0;
+   if (nShapes) {
+      members = flyer_wingmen::squadron_members(n, [&](int size) {
+         for (int k = 0; k < nShapes; ++k)
+            if (shapes[k].size == size) return true;
+         return false;
+      });
+      if (!members) return;
+      int fits = 0;
+      for (int k = 0; k < nShapes; ++k) fits += shapes[k].size == members + 1;
+      int pick = (int)(random01() * fits);
+      for (int k = 0; k < nShapes && !shape; ++k)
+         if (shapes[k].size == members + 1 && pick-- == 0) shape = &shapes[k];
+      if (!shape) return;
+   } else {
+      const int own = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+      members = n < own ? n : own;
+      if (members <= 0) return;
+   }
+
+   *f = Formation{};
+   f->ai = true;
+   f->leader = leader;
+   f->leaderHandle = handle_of(leader);
+   f->leaderUc = *(uint8_t**)(leader + kFly_Ctrl);
+   if (shape) {
+      f->shapeCount = flyer_wingmen::shape_slots(shape->points, shape->count, shape->root, shape->rootIsSlot, members,
+                                                 f->shape);
+      f->shapeName = shape->name;
+      if (f->shapeCount < members) members = f->shapeCount;
+   }
+   // Its slots in order, each to the best-placed candidate the slot takes.
+   bool used[kMaxCandidates] = {};
+   for (int slot = 0; slot < members; ++slot)
+      for (int c = 0; c < found; ++c) {
+         if (used[c] || (!shape && !flyer_wingmen::slot_accepts(keys, slot, pool[c].cls))) continue;
+         used[c] = true;
+         add_wingman(*f, pool[c].obj, pool[c].uc, slot);
+         break;
+      }
+   if (!f->count) {
+      *f = Formation{};
+      return;
+   }
+   ++s_formed;
+   if (squad_log()) {
+      char who[160] = {};
+      int at = 0;
+      for (int i = 0; i < f->count && at < (int)sizeof who - 24; ++i)
+         for (int c = 0; c < found; ++c)
+            if (pool[c].obj == f->wing[i].obj) {
+               at += sprintf_s(who + at, sizeof who - at, "%s#%u %.0f m", i ? ", " : "", f->wing[i].handle,
+                               (double)pool[c].dist);
+               break;
+            }
+      const char* const named_ = shape ? shape_name(shape->name) : nullptr;
+      if (shape && named_)
+         install_log("[Squadrons] #%u leads %d in %s: %s", f->leaderHandle, f->count, named_, who);
+      else if (shape)
+         install_log("[Squadrons] #%u leads %d in formation 0x%08X: %s", f->leaderHandle, f->count, shape->name, who);
+      else
+         install_log("[Squadrons] #%u leads %d in its WingmanSlot lines: %s", f->leaderHandle, f->count, who);
+   }
+}
+
+// A free AI flyer on real flight counts its squadron time down, as the game
+// does a placed one's (+0x1CE8), and tries when it runs out.
+void maybe_squadron(uint8_t* obj, float dt)
+{
+   if (!s_squadrons || !g_flyerRealFlightSquadrons || find(obj) || led_by(obj)) return;
+   const uint8_t* const path = flyer_real_flight::squadron_path(obj);
+   if (!path) return;
+   float& timer = *(float*)(obj + kFly_SquadronTime);
+   if (!std::isfinite(timer)) timer = 0.0f;
+   if (std::isfinite(dt) && dt > 0.0f) timer -= dt;
+   if (timer > 0.0f) return;
+   timer = (float)flyer_wingmen::squadron_wait(random01());
+   try_squadron(obj, path);
+}
+
+const char* leader_lost(const Formation& f)
+{
+   uint8_t* const l = f.leader;
+   if (handle_of(l) != f.leaderHandle || !alive(l)) return "its leader is gone";
+   if (*(uint8_t* const*)(l + kFly_Ctrl) != f.leaderUc) return "its leader is flown by someone else";
+   if (!flying(l)) return "its leader landed";
+   if (find(l)) return "its leader flies as a wingman";
+   if (!flyer_real_flight::on_real_flight(l)) return "its leader left real flight";
+   return nullptr;
+}
+
+void report_squadrons(double now)
+{
+   if (now < s_nextSquadReport || s_reports >= kMaxReports) return;
+   s_nextSquadReport = now + kReportSeconds;
+   int squads = 0, wingmen = 0, samples = 0;
+   double distance = 0.0;
+   float worst = 0.0f;
+   for (int k = 1; k < kMaxFormations; ++k) {
+      Formation& f = s_forms[k];
+      if (!f.leader) continue;
+      ++squads;
+      wingmen += f.count;
+      for (int i = 0; i < f.count; ++i) {
+         Stats& s = f.wing[i].stats;
+         samples += s.samples;
+         distance += s.distance;
+         if (s.worst > worst) worst = s.worst;
+         s = Stats{};
+      }
+   }
+   if (squads || s_formed || s_brokeUp) {
+      ++s_reports;
+      install_log("[Squadrons] %d AI squadrons flying, %d wingmen in them, off their slots by %.1f m on average, %.1f "
+                  "m at worst; %d formed and %d broke up in %.0f s",
+                  squads, wingmen, samples ? distance / samples : 0.0, (double)worst, s_formed, s_brokeUp,
+                  kReportSeconds);
+   }
+   s_formed = 0;
+   s_brokeUp = 0;
+}
+
+void tick_squadrons(double now)
+{
+   for (int k = 1; k < kMaxFormations; ++k) {
+      Formation& f = s_forms[k];
+      if (!f.leader) continue;
+      if (const char* why = leader_lost(f)) {
+         dissolve(f, why);
+         continue;
+      }
+      for (int i = f.count - 1; i >= 0; --i)
+         if (const char* why = lost(f.wing[i], f)) drop(f, i, why);
+      if (!f.count) dissolve(f, "no wingmen left");
+   }
+   report_squadrons(now);
 }
 
 void tick(double now)
 {
    uint8_t* const leader = player_flyer();
    if (!leader || !leads(leader)) {
-      release_all(leader ? "the player's flyer leads none" : "the player is not flying");
-      s_leader = nullptr;
-      s_leaderHandle = 0;
-      return;
+      release_all(s_player, leader ? "the player's flyer leads none" : "the player is not flying");
+      s_player.leader = nullptr;
+      s_player.leaderHandle = 0;
+   } else {
+      if (leader != s_player.leader || handle_of(leader) != s_player.leaderHandle) {
+         release_all(s_player, "a new leader");
+         s_player.leader = leader;
+         s_player.leaderHandle = handle_of(leader);
+         s_player.formUp = true;
+      }
+      for (int i = s_player.count - 1; i >= 0; --i)
+         if (const char* why = lost(s_player.wing[i], s_player)) drop(s_player, i, why);
+      const ClassKeys* keys = keys_of(leader);
+      const int want = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+      if (s_player.formUp && flyer_wingmen::auto_for(keys, g_flyerWingmenAuto) && s_player.count < want) fill(leader);
+      report(now);
    }
-   if (leader != s_leader || handle_of(leader) != s_leaderHandle) {
-      release_all("a new leader");
-      s_leader = leader;
-      s_leaderHandle = handle_of(leader);
-      s_formUp = true;
-   }
-   for (int i = s_count - 1; i >= 0; --i)
-      if (const char* why = lost(s_wing[i], leader)) drop(i, why);
-   const ClassKeys* keys = keys_of(leader);
-   const int want = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
-   if (s_formUp && flyer_wingmen::auto_for(keys, g_flyerWingmenAuto) && s_count < want) fill(leader);
-   report(now);
+   tick_squadrons(now);
 }
 
 // The squad key, in the air: recruits when it leads none, else switches
 // between forming up and breaking off.
 void squad_key(double now)
 {
-   if (!s_leader || handle_of(s_leader) != s_leaderHandle) return;
-   const uint32_t trigger = *(const uint32_t*)(s_leader + kFly_Controllable + kCtl_Squad);
+   if (!s_player.leader || handle_of(s_player.leader) != s_player.leaderHandle) return;
+   const uint32_t trigger = *(const uint32_t*)(s_player.leader + kFly_Controllable + kCtl_Squad);
    if ((trigger & kSquadPressed) != kSquadPressed || now - s_lastPress < kKeyRepeat) return;
    s_lastPress = now;
-   if (!s_count) {
-      s_formUp = true;
-      fill(s_leader);
-      install_log("[Wingmen] squad key: %s", s_count ? "form up" : "no one near enough to join");
+   if (!s_player.count) {
+      s_player.formUp = true;
+      fill(s_player.leader);
+      install_log("[Wingmen] squad key: %s", s_player.count ? "form up" : "no one near enough to join");
    } else {
-      s_formUp = !s_formUp;
-      install_log("[Wingmen] squad key: %s", s_formUp ? "form up" : "break off");
+      s_player.formUp = !s_player.formUp;
+      install_log("[Wingmen] squad key: %s", s_player.formUp ? "form up" : "break off");
    }
 }
 
@@ -452,52 +848,55 @@ const char* trick_name(int trick, float side)
    return trick >= 0 && trick < kTrickCount ? kNames[trick] : "trick";
 }
 
-// From DoTrick's stand-in, before the leader's trick runs: what was asked, and
+// From DoTrick's stand-in, before a leader's trick runs: what was asked, and
 // which way a side roll goes (the game sets mSideRoll.x from the strafe key
 // first). A leader already in a trick is refused, so that call is passed over.
 void note_leader_trick(const uint8_t* flyer, int trick)
 {
-   if (flyer != s_leader || !s_formUp || !s_count || (flyer[kFly_Flags] & kFlagTrick)) return;
+   Formation* const f = led_by(flyer);
+   if (!f || !f->formUp || !f->count || (flyer[kFly_Flags] & kFlagTrick)) return;
    if (trick < 0 || trick >= kTrickCount) return;
-   s_leaderTrick.requested = trick;
-   s_leaderTrick.side = *(const float*)(flyer + kFly_SideRoll);
-   s_leaderTrick.at = seconds();
+   f->trick.requested = trick;
+   f->trick.side = *(const float*)(flyer + kFly_SideRoll);
+   f->trick.at = seconds();
 }
 
 // Once the leader is in its trick, each wingman in formation gets its turn.
-void ripple_leader_trick(double now)
+void ripple_leader_trick(Formation& f, double now)
 {
-   if (s_leaderTrick.requested < 0) return;
-   if (!s_leader || handle_of(s_leader) != s_leaderHandle || !s_formUp) {
-      s_leaderTrick = LeaderTrick{};
+   if (f.trick.requested < 0) return;
+   if (!f.leader || handle_of(f.leader) != f.leaderHandle || !f.formUp) {
+      f.trick = LeaderTrick{};
       return;
    }
-   if (!(s_leader[kFly_Flags] & kFlagTrick)) {
-      if (now - s_leaderTrick.at > flyer_wingmen::kTrickWait) s_leaderTrick = LeaderTrick{};   // refused
+   if (!(f.leader[kFly_Flags] & kFlagTrick)) {
+      if (now - f.trick.at > flyer_wingmen::kTrickWait) f.trick = LeaderTrick{};   // refused
       return;
    }
    // The trick it did: its class may have turned a flip into a side roll.
-   const int done = *(const int*)(s_leader + kFly_LastTrick);
-   const int trick = done >= 0 && done < kTrickCount ? done : s_leaderTrick.requested;
+   const int done = *(const int*)(f.leader + kFly_LastTrick);
+   const int trick = done >= 0 && done < kTrickCount ? done : f.trick.requested;
    int slots[flyer_wingmen::kMaxWingmen];
-   for (int i = 0; i < s_count; ++i) slots[i] = s_wing[i].slot;
-   for (int i = 0; i < s_count; ++i) {
-      Wingman& w = s_wing[i];
+   for (int i = 0; i < f.count; ++i) slots[i] = f.wing[i].slot;
+   for (int i = 0; i < f.count; ++i) {
+      Wingman& w = f.wing[i];
       w.trick = trick;
-      w.trickSide = s_leaderTrick.side;
-      w.trickAt = now + flyer_wingmen::ripple_delay(flyer_wingmen::ripple_rank(w.slot, slots, s_count));
+      w.trickSide = f.trick.side;
+      w.trickAt = now + flyer_wingmen::ripple_delay(flyer_wingmen::ripple_rank(w.slot, slots, f.count));
       w.holding = true;   // straight on until its copy is done
    }
    // A flip turns the leader round: its wingmen take the slots on the side they
    // come out on.
-   if (flyer_wingmen::is_flip(trick)) s_mirror = !s_mirror;
+   if (flyer_wingmen::is_flip(trick)) f.mirror = !f.mirror;
    if (s_trickLogs < kMaxTrickLogs) {
       ++s_trickLogs;
-      install_log("[Wingmen] the leader's %s: %d wingmen copy it, %.2f s apart%s", trick_name(trick, s_leaderTrick.side),
-                  s_count, flyer_wingmen::kTrickRipple,
-                  flyer_wingmen::is_flip(trick) ? (s_mirror ? "; the formation now mirrored" : "; the formation back the right way round") : "");
+      install_log("%s #%u's %s: %d wingmen copy it, %.2f s apart%s", tag(f), f.leaderHandle,
+                  trick_name(trick, f.trick.side), f.count, flyer_wingmen::kTrickRipple,
+                  flyer_wingmen::is_flip(trick) ? (f.mirror ? "; the formation now mirrored"
+                                                            : "; the formation back the right way round")
+                                                : "");
    }
-   s_leaderTrick = LeaderTrick{};
+   f.trick = LeaderTrick{};
 }
 
 // A wingman holding course goes back to its slot once its copy has ended and
@@ -513,26 +912,26 @@ void update_hold(Wingman& w, double now)
 }
 
 // A wingman's turn: the same trick the same way, free of energy.
-void copy_trick(Wingman& w, double now)
+void copy_trick(const Formation& f, Wingman& w, double now)
 {
    const int trick = w.trick;
    w.trick = -1;
    w.holdUntil = now + flyer_wingmen::kTrickSettle;   // if it does not trick, it settles from here
-   uint8_t* const f = w.obj;
-   if (handle_of(f) != w.handle || !alive(f) || !flying(f) || !in_formation(f) || (f[kFly_Flags] & kFlagTrick)) return;
+   uint8_t* const fl = w.obj;
+   if (handle_of(fl) != w.handle || !alive(fl) || !flying(fl) || !f.formUp || (fl[kFly_Flags] & kFlagTrick)) return;
    if (trick == kTrickSideRoll) {
-      float* const side = (float*)(f + kFly_SideRoll);
+      float* const side = (float*)(fl + kFly_SideRoll);
       side[0] = w.trickSide < 0.0f ? -1.0f : 1.0f;
       side[1] = 0.0f;
       side[2] = 0.0f;
    }
    // Whatever DoTrick spends goes back, and a spent-out bar does not refuse it.
-   float& energy = *(float*)(f + kFly_EnergyValue);
-   uint32_t& energyFlags = *(uint32_t*)(f + kFly_EnergyFlags);
+   float& energy = *(float*)(fl + kFly_EnergyValue);
+   uint32_t& energyFlags = *(uint32_t*)(fl + kFly_EnergyFlags);
    const float keptEnergy = energy;
    const uint32_t keptFlags = energyFlags;
    energyFlags = keptFlags & ~1u;
-   s_doTrick(f, nullptr, trick);   // the trampoline, past the stand-in that keeps wingmen from tricks
+   s_doTrick(fl, nullptr, trick);   // the trampoline, past the stand-in that keeps wingmen from tricks
    energy = keptEnergy;
    energyFlags = keptFlags;
 }
@@ -548,10 +947,20 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
       }
       squad_key(now);
       uint8_t* const obj = (uint8_t*)ctrl - kFly_Controllable;
-      ripple_leader_trick(now);
-      if (Wingman* w = find(obj)) {
-         if (w->trick >= 0 && now >= w->trickAt) copy_trick(*w, now);
+      for (Formation& f : s_forms)
+         if (f.leader && f.trick.requested >= 0) ripple_leader_trick(f, now);
+      Formation* f = nullptr;
+      if (Wingman* w = find(obj, &f)) {
+         if (w->trick >= 0 && now >= w->trickAt) copy_trick(*f, *w, now);
          update_hold(*w, now);
+         // Turned on by an attacker while in formation: an AI squadron's leader
+         // takes it on, the whole squadron with it; the player's wingmen leave
+         // that to the player.
+         if (f->formUp) {
+            uint8_t* const leader = f->ai && handle_of(f->leader) == f->leaderHandle && alive(f->leader) ? f->leader
+                                                                                                         : nullptr;
+            flyer_real_flight::pass_attacker(obj, leader);
+         }
       }
       if (in_formation(obj)) {
          // A wingman that flies paths is held off them, so it flies by physics.
@@ -562,6 +971,7 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
          }
       } else {
          flyer_real_flight::on_update(obj, dt);   // its paths flown for real, where it may
+         maybe_squadron(obj, dt);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
@@ -571,8 +981,8 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
 // ---- Speeds and tricks --------------------------------------------------------------
 // A wingman's speeds stretch round both how fast its leader flies and the
 // speed it is heading for: braking or boosting, the wingman may go there too.
-float high_speed() { return s_leaderTarget > s_leaderSpeed ? s_leaderTarget : s_leaderSpeed; }
-float low_speed() { return s_leaderTarget < s_leaderSpeed ? s_leaderTarget : s_leaderSpeed; }
+float high_speed(const Formation& f) { return f.leaderTarget > f.leaderSpeed ? f.leaderTarget : f.leaderSpeed; }
+float low_speed(const Formation& f) { return f.leaderTarget < f.leaderSpeed ? f.leaderTarget : f.leaderSpeed; }
 
 // The getters touch only EAX, ECX and the FPU stack, and their callers know it:
 // EntityFlyer::Update keeps the flyer in EDX across GetFlyerMaxSpeed and loads
@@ -583,7 +993,8 @@ float __cdecl max_speed_for(uint8_t* flyer)
 {
    const float v = s_maxSpeed(flyer, nullptr);
    __try {
-      if (in_formation(flyer)) return flyer_wingmen::stretched_max(v, high_speed());
+      Formation* f = nullptr;
+      if (find(flyer, &f) && f->formUp) return flyer_wingmen::stretched_max(v, high_speed(*f));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return v;
@@ -593,7 +1004,8 @@ float __cdecl min_speed_for(uint8_t* flyer)
 {
    const float v = s_minSpeed(flyer, nullptr);
    __try {
-      if (in_formation(flyer)) return flyer_wingmen::stretched_min(v, low_speed());
+      Formation* f = nullptr;
+      if (find(flyer, &f) && f->formUp) return flyer_wingmen::stretched_min(v, low_speed(*f));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
    return v;
@@ -685,7 +1097,7 @@ __declspec(naked) void min_speed_mt()
 
 // Rolls and flips of their own throw a wingman out of formation and into its
 // leader; it copies its leader's instead (copy_trick, which calls past this). True
-// to let the trick through. The leader's own is noted for its wingmen to copy.
+// to let the trick through. A leader's own is noted for its wingmen to copy.
 bool __cdecl trick_allowed(uint8_t* flyer, int trick)
 {
    __try {
@@ -739,38 +1151,39 @@ __declspec(naked) void do_trick_mt()
 
 // ---- EntityFlyer::CalculateDest, at UpdateIndirect's call ---------------------------
 struct Steer {
-   Wingman* w = nullptr;
-   uint8_t* dest = nullptr;          // AILowLevel::mDest
-   uint8_t  saved[kDestSize] = {};   // the AI's own
-   V3       point;                   // where it is steered
-   float    target = 0.0f;           // the speed asked for, a share of its top speed
-   float    leaderSpeed = 0.0f;
-   Frame    frame;
-   V3       slot;
+   Formation* f = nullptr;
+   Wingman*   w = nullptr;
+   uint8_t*   dest = nullptr;          // AILowLevel::mDest
+   uint8_t    saved[kDestSize] = {};   // the AI's own
+   V3         point;                   // where it is steered
+   float      target = 0.0f;           // the speed asked for, a share of its top speed
+   float      leaderSpeed = 0.0f;
+   Frame      frame;
+   V3         slot;
 };
 
 bool steer_before(uint8_t* flyer, float dt, Steer& st)
 {
-   if (!in_formation(flyer)) return false;
-   Wingman* const w = find(flyer);
+   Formation* f = nullptr;
+   Wingman* const w = find(flyer, &f);
+   if (!w || !f->formUp) return false;
    if (handle_of(flyer) != w->handle || *(uint8_t* const*)(flyer + kFly_Ctrl) != w->uc) return false;
-   if (handle_of(s_leader) != s_leaderHandle || !alive(s_leader)) return false;
-   const float* lm = matrix_of(s_leader);
+   uint8_t* const leader = f->leader;
+   if (handle_of(leader) != f->leaderHandle || !alive(leader)) return false;
+   const float* lm = matrix_of(leader);
    const float* wm = matrix_of(flyer);
    if (!lm || !wm) return false;
-   const V3 leaderVel = velocity_of(s_leader);
+   const V3 leaderVel = velocity_of(leader);
    st.frame = flyer_wingmen::level_frame(row(lm, 2), row(lm, 0));
    if (!st.frame.valid || !flyer_wingmen::finite(leaderVel)) return false;
    st.leaderSpeed = flyer_wingmen::length(leaderVel);
-   s_leaderSpeed = st.leaderSpeed;
+   f->leaderSpeed = st.leaderSpeed;
    // Braking or boosting, the leader's throttle says so before its speed does.
-   const float aim = *(const float*)(s_leader + kFly_TargetSpeed);
-   s_leaderTarget = std::isfinite(aim) && aim > 0.0f ? aim : st.leaderSpeed;
+   const float aim = *(const float*)(leader + kFly_TargetSpeed);
+   f->leaderTarget = std::isfinite(aim) && aim > 0.0f ? aim : st.leaderSpeed;
 
    const V3 me = row(wm, 3), leaderPos = row(lm, 3);
-   st.slot = flyer_wingmen::to_world(
-      st.frame, leaderPos,
-      flyer_wingmen::mirrored(flyer_wingmen::slot_for(keys_of(s_leader), w->slot, g_flyerWingmenSpacing), s_mirror));
+   st.slot = flyer_wingmen::to_world(st.frame, leaderPos, slot_of(*f, w->slot));
    const V3 slot = flyer_wingmen::in_frame(st.frame, me, st.slot);   // the slot, from the wingman
    if (!w->holding) flyer_wingmen::update_trim(w->trim, slot, dt);
    const V3 steer = flyer_wingmen::keep_clear(
@@ -781,9 +1194,9 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
 
    // Its speeds are the stretched ones, as its getters answer for it (above),
    // and the target the one the game's throttle turns into that speed.
-   const float hi = flyer_wingmen::stretched_max(s_maxSpeed(flyer, nullptr), high_speed());
-   const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), low_speed());
-   float speed = flyer_wingmen::formation_speed(s_leaderTarget + w->trim.speed, slot.z, lo, hi);
+   const float hi = flyer_wingmen::stretched_max(s_maxSpeed(flyer, nullptr), high_speed(*f));
+   const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), low_speed(*f));
+   float speed = flyer_wingmen::formation_speed(f->leaderTarget + w->trim.speed, slot.z, lo, hi);
 
    // Through the leader's trick and its own copy: straight off its nose, at the
    // leader's speed.
@@ -791,7 +1204,7 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    if (w->holding && flyer_wingmen::normalise(nose)) {
       st.point = me + nose * flyer_wingmen::kHoldAhead;
       heading = nose;
-      speed = flyer_wingmen::formation_speed(s_leaderTarget, 0.0f, lo, hi);
+      speed = flyer_wingmen::formation_speed(f->leaderTarget, 0.0f, lo, hi);
    }
    st.target = flyer_wingmen::target_for_speed(speed, lo, s_midSpeed(flyer, nullptr), hi);
 
@@ -805,6 +1218,7 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
    *(int*)(st.dest + kDest_Safe) = kSafeHeightFull;
    *(float*)(st.dest + kDest_Taper) = 0.0f;
    *(float*)(st.dest + kDest_Speed) = st.target;
+   st.f = f;
    st.w = w;
    return true;
 }
@@ -829,7 +1243,7 @@ void steer_after(uint8_t* flyer, Steer& st, bool steered, float* speed)
 bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float* point, float* speed, float* myPos)
 {
    Steer st;
-   flyer_real_flight::Steer onPath;   // a flyer on real flight, at its carrot
+   flyer_real_flight::Steer onPath;   // a flyer on real flight, at its carrot or its target
    bool steering = false, chasing = false;
    __try {
       steering = steer_before(flyer, dt, st);
@@ -852,6 +1266,13 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
          flyer_real_flight::restore(onPath);
       }
    }
+   // Every AI flyer, however steered, clear of the flyers around it.
+   if (r && flyer_avoidance::active()) {
+      __try {
+         flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+   }
    return r;
 }
 
@@ -868,6 +1289,27 @@ uintptr_t call_destination(const uint8_t* call)
    return (uintptr_t)dest;
 }
 
+// The squadron rule's reads, as the game's own code makes them: EntityFormation::Find
+// walking its list; UpdatePathFollower counting the squadron time (+0x1CE8) down,
+// then reading the class's squadron distance (+0x1108), else its model's bounding
+// radius (GetModel at the class's vptr +0x20, +0x20, +0x94) times 30, and its angle
+// (+0x1104).
+bool install_squadrons(uintptr_t base)
+{
+   const auto* a = g_addr;
+   if (!a->entity_formation_find || !a->flyer_update_path_follower) return false;
+   const uint8_t* const upf = (const uint8_t*)resolve(base, a->flyer_update_path_follower);
+   const bool ok =
+      starts_with(base, a->entity_formation_find, "\x56\x8B\x35\xC4\x33\xAD\x00\x8B\x4E\x0C\x85\xC9", 12) &&
+      std::memcmp(upf + 0x134, "\xD9\x86\xE8\x1C\x00\x00", 6) == 0 &&
+      std::memcmp(upf + 0x153, "\x8B\x8E\x6C\x06\x00\x00\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\x08\x11\x00\x00", 18) == 0 &&
+      std::memcmp(upf + 0x17A, "\x8B\x11\xFF\x52\x20\x8B\x40\x20\xD9\x80\x94\x00\x00\x00\xD8\x0D\x18\x7E\xA3\x00", 20) == 0 &&
+      std::memcmp(upf + 0x1E6, "\x8B\x91\x04\x11\x00\x00", 6) == 0;
+   if (!ok) return false;
+   s_findShape = (fn_find_shape_t)resolve(base, a->entity_formation_find);
+   return true;
+}
+
 } // namespace
 
 void flyer_wingmen_install(uintptr_t base)
@@ -875,6 +1317,7 @@ void flyer_wingmen_install(uintptr_t base)
    if (g_build != GameBuild::Modtools) {
       if (g_flyerWingmen) install_log("[Wingmen] NOT installed: the prototype runs on modtools only");
       if (g_flyerRealFlight) install_log("[RealFlight] NOT installed: the prototype runs on modtools only");
+      if (g_flyerAvoidance) install_log("[Avoidance] NOT installed: the prototype runs on modtools only");
       return;
    }
    const auto* a = g_addr;
@@ -903,7 +1346,8 @@ void flyer_wingmen_install(uintptr_t base)
    LARGE_INTEGER f;
    QueryPerformanceFrequency(&f);
    s_ticksPerSecond = (double)f.QuadPart;
-   g_flyerWingmenCount = flyer_wingmen::count_for(nullptr, g_flyerWingmenCount);   // 0 to 4
+   s_random ^= (uint32_t)f.QuadPart;
+   g_flyerWingmenCount = flyer_wingmen::count_for(nullptr, g_flyerWingmenCount);   // 0 to 8
    g_flyerWingmenSpacing = flyer_wingmen::clamp_spacing(g_flyerWingmenSpacing);
    s_calcDest = (uintptr_t)resolve(base, a->flyer_calc_dest);
    s_local = (fn_local_t)resolve(base, a->net_game_get_local_player);
@@ -948,11 +1392,24 @@ void flyer_wingmen_install(uintptr_t base)
    borrowed.minSpeed = s_minSpeed;
    borrowed.midSpeed = s_midSpeed;
    borrowed.wingman = &in_formation;
-   flyer_real_flight::install(base, borrowed);
+   const bool realFlight = flyer_real_flight::install(base, borrowed);
+
+   // AI squadrons need real flight (they gather flyers on it).
+   s_squadrons = realFlight && install_squadrons(base);
+   if (realFlight)
+      install_log("[Squadrons] %s", !s_squadrons ? "NOT installed: the squadron rule's reads differ"
+                                    : g_flyerRealFlightSquadrons
+                                       ? "installed (prototype): AI flyers on real flight gather squadrons by the "
+                                         "game's rule, in its formation shapes"
+                                       : "off ([AI] FlyerRealFlightSquadrons=0)");
+
+   // Avoidance runs in the CalculateDest stand-in above.
+   flyer_avoidance::install(base);
 }
 
 void flyer_wingmen_uninstall()
 {
+   flyer_avoidance::uninstall();
    flyer_real_flight::uninstall();
    if (s_callSite.at) protected_write(s_callSite.at, s_callSite.orig, 5);
    s_callSite = Site{};
@@ -966,5 +1423,8 @@ void flyer_wingmen_uninstall()
       DetourTransactionCommit();
       s_detoured = false;
    }
+   for (Formation& f : s_forms) f = Formation{};
+   s_squadrons = false;
+   s_findShape = nullptr;
    s_classes.clear();
 }

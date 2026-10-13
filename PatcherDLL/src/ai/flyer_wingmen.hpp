@@ -56,7 +56,31 @@
 //
 // Real flight on paths (flyer_real_flight.hpp) rides on the same hooks and ODF
 // listener: a flyer not in formation goes to it from the UpdateIndirect detour
-// and the CalculateDest stand-in.
+// and the CalculateDest stand-in. Avoidance (flyer_avoidance.hpp) runs in the
+// same stand-in, after the steering, for every AI flyer.
+//
+// AI squadrons (FlyerRealFlightSquadrons): the player's formation is one of up
+// to 33. The game's squadrons ride splines, so a flyer on real flight never
+// joins one; its leaders gather their own by the game's rule
+// (EntityFlyer::UpdatePathFollower, CreateSquadronFromClosestEntities), flown as
+// the player's wingmen are:
+//
+//   - A free AI flyer on real flight, on a path and not chasing counts its
+//     mSquadronFormationTime (+0x1CE8) down, and on 0 sets it to 7 +- 1.5 s and
+//     tries: a FlyerVsFlyer class (its path class +0x78) with SquadronFormation
+//     names (its EntitySquadronClass at +0x6AC: the names, their count +0x28)
+//     takes the same-side AI flyers on real flight within its reach (the
+//     class's +0x1108, else its model's bounding radius times 30, squared) and
+//     heading within its angle (+0x1104, a cosine), the best placed first, up to
+//     its path's MaxSquadSize (+0x84), as many as one of its shapes holds.
+//   - The shape is the map's EntityFormation of that name
+//     (EntityFormation::Find): its points from its root node, the leader at the
+//     root (or the first other point when the root is no slot), scaled until
+//     no two flyers are nearer than 22 m. A class with WingmanSlot lines and no
+//     SquadronFormation flies those.
+//   - A wingman turned on by an attacker hands it to its leader, which chases it
+//     with the squadron behind it. The player may call wingmen away from an AI
+//     squadron, never its leader.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -100,6 +124,16 @@
 //                                   vptr +0x20
 //   the AI flyers                   sAICtrls (game_addrs ai_controller_list),
 //                                   as ai_squads.cpp walks it
+//   the squadron rule               UpdatePathFollower 0x004F30C0 (the time
+//                                   +0x1CE8 at +0x134, the reach at +0x153 and
+//                                   +0x17A, the angle at +0x1E6),
+//                                   CreateSquadronFromClosestEntities 0x005E8F70,
+//                                   SelectFormation 0x005EDC20
+//   EntityFormation                 Find 0x005E2EB0 (cdecl(name)); its nodes +0x18
+//                                   (0x1C bytes each, the position first), their
+//                                   count +0x1C, the root's +0x28, +0x2C bit 0
+//                                   the root is a slot; Read leaves the points
+//                                   relative to the root (0x005E2CD4)
 //
 // AI flies on the host and in single player only; the leader is the host's
 // own player.
@@ -115,13 +149,15 @@
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
 // 60, the vee's), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key
-// only).
+// only); FlyerRealFlightSquadrons=0 for no AI squadrons (on by default, with
+// FlyerRealFlight).
 // =============================================================================
 
 extern bool  g_flyerWingmen;
 extern int   g_flyerWingmenCount;
 extern float g_flyerWingmenSpacing;
 extern bool  g_flyerWingmenAuto;
+extern bool  g_flyerRealFlightSquadrons;
 
 void flyer_wingmen_install(uintptr_t exe_base);
 void flyer_wingmen_uninstall();

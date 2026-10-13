@@ -39,15 +39,31 @@ for name, value in {
     "kFly_NextBarrierCheck": 0x650,
     "kModel_RigidMask": 0x114,
     "kModel_OrdnanceMask": 0x12C,
+    # The chase.
+    "kFol_Path": 0xA8,
+    "kFol_Attacker": 0xB4,
+    "kChar_Unit": 0x148,
+    "kChar_Vehicle": 0x14C,
+    "kChar_Remote": 0x150,
+    "kVt_CollisionOwner": 0x38,
 }.items():
     assert constant(source, name) == value, name
 # The reads it shares with the wingmen (tests/flyer_wingmen_abi_tests.py audits those).
 for name in ("kFly_Ctrl", "kFly_State", "kFly_Flags", "kFly_FreeFlyTime", "kStateFlying", "kFlagPaths", "kFlagSliding",
              "kUC_LowLevel", "kLL_Dest", "kDestSize", "kDest_Has", "kDest_Pos", "kDest_Original", "kDest_Dir",
              "kDest_Safe", "kDest_Taper", "kDest_Speed", "kSafeHeightFull", "kVt_IsRtti", "kVt_GetVelocity",
-             "kGO_Class", "kGO_MatrixIface", "kVt_GetMatrix", "kGO_Flags", "kGO_HandleId"):
+             "kGO_Class", "kGO_MatrixIface", "kVt_GetMatrix", "kGO_Flags", "kGO_HandleId", "kGO_Team",
+             "kOwner_Trackable", "kVt_GetTrackable"):
     assert constant(source, name) == constant(wingmen, name), name
 assert 'pbl_hash("UnitController")' in source and 'pbl_hash("PathFollowerRealFlight")' in source
+assert 'pbl_hash("EntityFlyer")' in source
+# The chase comes before the carrot's step, so the follower never acts on the attacker
+# itself (its step is where ShotAtByEnemy runs); RaiseHeight's ray passes over flyers for a
+# chasing flyer and with avoidance on.
+on_update = re.search(r"void on_update\(uint8_t\* flyer, float dt\)\s*\{(.*?)\n\}", source, re.S).group(1)
+assert on_update.index("update_chase(i, flyer, now)") < on_update.index("step(i, flyer, dt, now)")
+assert "g_flyerRealFlightPursuit && update_chase" in on_update
+assert "flyer_avoidance::active() || chasing(i)" in source
 assert "static_assert(sizeof(BranchParams) == 0x24" in source
 assert "static_assert(offsetof(BranchParams, fallbackToClosest) == 0x21" in source
 # The wingmen's hooks call into it.
@@ -191,6 +207,61 @@ checks = {
     0x00435649: [("cmp", "eax, 0x400"), ("je", "0x435679")],
     0x00435679: [("lea", "eax, [ecx + 0x12c]"), ("ret", "4")],
     0x0043562E: [("lea", "eax, [ecx + 0x114]"), ("ret", "4")],
+    # ---- The chase ----
+    # EntityFlyer::Update (the attacker's; ESI the flyer it targets, EBX its own Controllable):
+    # a FlyerVsFlyer target (its class's path class, +0x6AC + 0x78) that flies paths, flying,
+    # alive, in no trick, not already turning ... every 2 s at most, after a reaction delay,
+    # the target's TargetReact(attacker) through the thunk 0x0040550B.
+    0x004FDC69: [("mov", "al, byte ptr [esi + 0x5f4]"), ("test", "al, 8"), ("je", "0x4fdd1f"),
+                 ("cmp", "dword ptr [esi + 0x5a4], 2"), ("jne", "0x4fdd1f"), ("mov", "ecx, dword ptr [esi + 0x1fc]"),
+                 ("shr", "ecx, 3"), ("test", "cl, 1"), ("je", "0x4fdd1f"), ("test", "al, 3"), ("jne", "0x4fdd1f"),
+                 ("mov", "al, byte ptr [esi + 0x49d]"), ("test", "al, al"), ("jne", "0x4fdd1f"),
+                 ("mov", "al, byte ptr [esi + 0x49e]"), ("test", "al, al"), ("jne", "0x4fdd1f")],
+    0x004FDD0D: [("push", "edi"), ("mov", "ecx, esi"), ("call", "0x40550b"),
+                 ("mov", "dword ptr [ebx + 0x1aac], 0x40000000")],
+    0x0040550B: [("jmp", "0x4f0c30")],
+    # TargetReact: thiscall(attacker Controllable) on the entity, RET 4. Within 700 m, turn and
+    # attack zeroes the free-flight time (+0x1CDC) and sets mAttacker (follower +0xB4, the
+    # entity's +0x480) to the attacker's Character (its Controllable's +0xCC) ...
+    0x004F0C30: [("sub", "esp, 0x10"), ("push", "ebp"), ("push", "esi"), ("mov", "esi, ecx"),
+                 ("mov", "eax, dword ptr [esi + 0x3cc]"), ("lea", "ecx, [esi + 0x3cc]"), ("push", "edi"),
+                 ("call", "dword ptr [eax + 0xc]"), ("mov", "edi, dword ptr [esp + 0x20]")],
+    0x004F0CB1: [("fcomp", "dword ptr [0xa3cab8]")],
+    0x004F0D2B: [("test", "byte ptr [esi + 0x78], 1"), ("jne", "0x4f0d3f"), ("xor", "eax, eax"),
+                 ("mov", "dword ptr [esi + 0x1cdc], eax"), ("mov", "dword ptr [esi + 0x1ce0], eax"),
+                 ("mov", "eax, dword ptr [esi + 0x308]"), ("mov", "edx, dword ptr [edi + 0xcc]"), ("push", "eax"),
+                 ("mov", "dword ptr [esi + 0x480], edx")],
+    # (Evading instead winds the follower's weave, mStrafeTimer +0x70, the entity's +0x43C.)
+    0x004F0E05: [("fstp", "dword ptr [esi + 0x43c]"), ("pop", "ebx"), ("pop", "edi"), ("pop", "esi"), ("pop", "ebp"),
+                 ("add", "esp, 0x10"), ("ret", "4")],
+    # ... which the follower's next Update acts on: ShotAtByEnemy (through 0x004112A7) after
+    # EndOfSegment, from the step itself.
+    0x005ECA9E: [("push", "esi"), ("mov", "ecx, ebx"), ("call", "0x4112a7")],
+    0x004112A7: [("jmp", "0x5ebda0")],
+    # ShotAtByEnemy: FlyerVsFlyer only; mAttacker (+0xB4) a Character whose controllable is its
+    # remote (+0x150), else its vehicle (+0x14C), else its unit (+0x148); not while queueing
+    # (+0xD1) or at its slowest (+0xD2).
+    0x005EBDA0: [("sub", "esp, 0x94"), ("push", "esi"), ("push", "edi"), ("mov", "edi, dword ptr [esp + 0xa0]"),
+                 ("mov", "eax, dword ptr [edi]"), ("mov", "esi, ecx"), ("mov", "cl, byte ptr [eax + 0x78]"),
+                 ("test", "cl, cl"), ("je", "0x5ec08c"), ("mov", "eax, dword ptr [esi + 0xb4]"), ("test", "eax, eax"),
+                 ("je", "0x5ec08c"), ("mov", "ecx, dword ptr [eax + 0x150]"), ("test", "ecx, ecx"), ("je", "0x5ebdda"),
+                 ("mov", "eax, ecx"), ("jmp", "0x5ebdee"), ("mov", "ecx, dword ptr [eax + 0x14c]"), ("test", "ecx, ecx"),
+                 ("je", "0x5ebde8"), ("mov", "eax, ecx"), ("jmp", "0x5ebdee"), ("mov", "eax, dword ptr [eax + 0x148]"),
+                 ("test", "eax, eax"), ("je", "0x5ec08c"), ("mov", "al, byte ptr [esi + 0xd1]"), ("test", "al, al"),
+                 ("jne", "0x5ec08c"), ("mov", "al, byte ptr [esi + 0xd2]"), ("test", "al, al"), ("jne", "0x5ec08c")],
+    # The follower's mPath (+0xA8), whose MaxSquadSize the squadrons read.
+    0x005EBE22: [("mov", "ecx, dword ptr [esi + 0xa8]")],
+    # ---- RaiseHeight's ray over flyers ----
+    # The ray callback: each object's GameObject from its CollisionObject's vptr +0x38, against
+    # the ignore list ([data+8], [data+0xC] entries); a hit is that CollisionObject ...
+    0x00429E00: [("mov", "eax, dword ptr [esp + 4]"), ("test", "eax, eax"), ("push", "edi"), ("je", "0x429e10"),
+                 ("lea", "edi, [eax - 4]"), ("test", "edi, edi"), ("jne", "0x429e14"), ("mov", "al, 1"),
+                 ("pop", "edi"), ("ret", ""), ("mov", "eax, dword ptr [edi]"), ("push", "esi"), ("mov", "ecx, edi"),
+                 ("call", "dword ptr [eax + 0x38]"), ("mov", "esi, dword ptr [esp + 0x10]"),
+                 ("mov", "edx, dword ptr [esi + 0xc]")],
+    0x00429E34: [("mov", "edx, dword ptr [esi + 8]"), ("cmp", "eax, dword ptr [edx + ecx*4]")],
+    # ... and RaiseHeight takes the hit's own sphere from it (its stack +4, index +8, else +0xC).
+    0x004F42BB: [("mov", "ecx, dword ptr [esp + 0x20]"), ("mov", "edx, dword ptr [ecx + 4]"), ("test", "edx, edx")],
 }
 
 decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "flyer_real_flight.hpp"
+#include "flyer_avoidance.hpp"
 #include "flyer_real_flight_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -18,10 +19,12 @@
 // See flyer_real_flight.hpp for the behaviour and the reads.
 
 bool g_flyerRealFlight = false;
+bool g_flyerRealFlightPursuit = true;
 
 namespace {
 
 using flyer_real_flight::Borrowed;
+using flyer_real_flight::Pursuit;
 using flyer_real_flight::Stats;
 using flyer_wingmen::V3;
 
@@ -42,7 +45,12 @@ constexpr uint32_t kFly_FreeFlyTime  = 0x1CDC;
 constexpr uint32_t kModel_RigidMask    = 0x114;  // CollisionModel: the bodies vehicles hit (VehicleCollision) ...
 constexpr uint32_t kModel_OrdnanceMask = 0x12C;  // ... and those ordnance hits, which its RayHit can be held to
 constexpr uint32_t kFol_LandNow      = 0xD5;     // EntityPathFollower::mbLandNow
+constexpr uint32_t kFol_Path         = 0xA8;     // EntityPathFollower::mPath, the path it is on
+constexpr uint32_t kFol_Attacker     = 0xB4;     // EntityPathFollower::mAttacker, the Character TargetReact turns it on
 constexpr uint32_t kVt_BranchParams  = 0x1C;     // the follower's GetBranchParams
+constexpr uint32_t kChar_Unit        = 0x148;    // a Character's controllables, as Character::GetControllable
+constexpr uint32_t kChar_Vehicle     = 0x14C;    // takes them: its remote, else its vehicle, else
+constexpr uint32_t kChar_Remote      = 0x150;    // its unit
 constexpr int      kStateFlying      = 2;
 constexpr uint8_t  kFlagPaths        = 0x08;     // flies its paths when it may
 constexpr uint8_t  kFlagSliding      = 0x10;     // sliding round a barrier
@@ -69,6 +77,11 @@ constexpr uint32_t kGO_MatrixIface  = 0xC;    // the interface a GameObject's ma
 constexpr uint32_t kVt_GetMatrix    = 0x40;   // ... at its vptr +0x40
 constexpr uint32_t kGO_Flags        = 0x1FC;  // bit 3: alive
 constexpr uint32_t kGO_HandleId     = 0x204;
+constexpr uint32_t kGO_Team         = 0x234;  // the low 4 bits, signed
+constexpr uint32_t kOwner_Trackable = 0x18;   // a Controllable's Trackable interface ...
+constexpr uint32_t kVt_GetTrackable = 0x20;   // ... whose vptr +0x20 gives the GameObject
+constexpr uint32_t kVt_CollisionOwner = 0x38; // a CollisionObject's GameObject, as the ray callback asks it
+constexpr uint32_t kRttiFlyer          = pbl_hash("EntityFlyer");
 constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
 constexpr uint32_t kHashRealFlight     = pbl_hash("PathFollowerRealFlight");
 
@@ -76,6 +89,8 @@ constexpr double kStaleSeconds  = 0.5;   // a carrot its flyer's update has not 
 constexpr double kReportSeconds = 5.0;
 constexpr int    kMaxReports    = 400;
 constexpr int    kMaxCarrots    = 128;
+constexpr int    kMaxRaySkips   = 4;     // flyers RaiseHeight's ray passes over before it takes a hit as it is
+constexpr int    kMaxChaseLogs  = 200;
 
 // EntityPathFollower::BranchParams, as GetBranchParams fills it.
 struct BranchParams {
@@ -97,6 +112,7 @@ static_assert(offsetof(BranchParams, fallbackToClosest) == 0x21, "mFallbackToClo
 
 using fn_is_rtti_t       = bool(__thiscall*)(void* self, uint32_t hash);
 using fn_get_vec_t       = const float*(__thiscall*)(void* self);
+using fn_get_obj_t       = uint8_t*(__thiscall*)(void* self);
 using fn_branch_params_t = BranchParams*(__thiscall*)(void* follower, BranchParams* out);
 using fn_step_t          = bool(__thiscall*)(void* follower, BranchParams* params, float dt, float* velocityOut,
                                              float* matrixOut, int forceBranch, float boostRatio, float energyRatio);
@@ -160,6 +176,21 @@ V3 velocity_of(uint8_t* obj)
 }
 
 V3 row(const float* m, int r) { return {m[r * 4], m[r * 4 + 1], m[r * 4 + 2]}; }   // right, up, forward, position
+
+int team_of(const uint8_t* obj) { return (int32_t)(*(const uint32_t*)(obj + kGO_Team) << 28) >> 28; }
+
+// The flyer a Character flies (its controllable, as Character::GetControllable
+// picks it), or null when that is not a flyer.
+uint8_t* flyer_of(const uint8_t* character)
+{
+   uint8_t* ctl = *(uint8_t* const*)(character + kChar_Remote);
+   if (!ctl) ctl = *(uint8_t* const*)(character + kChar_Vehicle);
+   if (!ctl) ctl = *(uint8_t* const*)(character + kChar_Unit);
+   if (!ctl) return nullptr;
+   void* const trackable = ctl + kOwner_Trackable;
+   uint8_t* const obj = ((fn_get_obj_t)(*(void***)trackable)[kVt_GetTrackable / 4])(trackable);
+   return obj && is_rtti(obj, kRttiFlyer) ? obj : nullptr;
+}
 
 // Its class's key where it has one, else the INI.
 bool wants(const uint8_t* flyer)
@@ -236,6 +267,10 @@ struct Carrot {
    float    speed = 0.0f;          // the path's speed, as the carrot flies it
    float    lead = flyer_real_flight::kMinLead;
    float    distance = 0.0f;       // from the flyer, at the last update
+   Pursuit  chase;                 // chasing its attacker, the carrot waiting
+   uint8_t* target = nullptr;
+   uint32_t targetHandle = 0;
+   double   calmUntil = 0.0;       // back on its paths after a chase: no new one before this
 };
 
 Carrot s_carrots[kMaxCarrots];
@@ -244,6 +279,9 @@ int    s_started = 0;
 bool   s_full = false;
 double s_nextReport = 0.0;
 int    s_reports = 0;
+int    s_chases = 0;     // chases begun since the last report
+int    s_chaseLogs = 0;
+int    s_raySkips = 0;   // flyers RaiseHeight's ray passed over since the last report
 
 int find(const uint8_t* obj)
 {
@@ -264,6 +302,8 @@ int live(const uint8_t* obj)
 
 void forget(int i) { s_carrots[i] = Carrot{}; }
 
+bool chasing(int i) { return i >= 0 && s_carrots[i].chase.on; }
+
 // The carrot from where the flyer is, its follower cleared: the next step
 // branches onto a path from here.
 void start(Carrot& c, uint8_t* flyer)
@@ -280,24 +320,92 @@ void report(double now)
 {
    if (now < s_nextReport || s_reports >= kMaxReports) return;
    s_nextReport = now + kReportSeconds;
-   int onPaths = 0, waiting = 0;
+   int onPaths = 0, waiting = 0, chasingNow = 0;
    for (const Carrot& c : s_carrots) {
       if (!c.obj || now - c.seen > kStaleSeconds) continue;
       ++onPaths;
       if (c.pathless) ++waiting;
+      if (c.chase.on) ++chasingNow;
    }
    Stats& s = s_stats;
    if (onPaths || s.restarts || s.pathless || s_started) {
       const double n = s.samples ? s.samples : 1;
       ++s_reports;
-      install_log("[RealFlight] %d AI flyers on real flight (%d waiting for a path, %d started); carrot %.0f m ahead "
-                  "on average against a lead of %.0f, %.0f m at worst; %.0f m/s against the path's %.0f; %d carrots "
-                  "started over, %d paths not found",
-                  onPaths, waiting, s_started, s.distance / n, s.lead / n, (double)s.worst, s.speed / n, s.carrot / n,
-                  s.restarts, s.pathless);
+      install_log("[RealFlight] %d AI flyers on real flight (%d waiting for a path, %d started, %d chasing, %d chases "
+                  "begun); carrot %.0f m ahead on average against a lead of %.0f, %.0f m at worst; %.0f m/s against "
+                  "the path's %.0f; %d carrots started over, %d paths not found; RaiseHeight passed over %d flyers",
+                  onPaths, waiting, s_started, chasingNow, s_chases, s.distance / n, s.lead / n, (double)s.worst,
+                  s.speed / n, s.carrot / n, s.restarts, s.pathless, s_raySkips);
    }
    s = Stats{};
    s_started = 0;
+   s_chases = 0;
+   s_raySkips = 0;
+}
+
+// ---- The chase ------------------------------------------------------------------------
+// A flyer TargetReact turned on its attacker has that attacker's Character in
+// its follower's mAttacker, which the follower's next step would act on
+// (ShotAtByEnemy bends the path round toward it). A flyer on real flight takes
+// it first and chases the attacker's flyer itself, the carrot waiting, until
+// the chase runs out or the target is gone; then the carrot starts over from it
+// and the follower branches back onto the paths.
+const char* chase_over(const Carrot& c, uint8_t* flyer, double now)
+{
+   if (flyer_real_flight::pursuit_over(c.chase, now)) return "the chase ran out";
+   uint8_t* const t = c.target;
+   if (!t || handle_of(t) != c.targetHandle || !alive(t)) return "the target is gone";
+   if (!flying(t)) return "the target landed";
+   if (team_of(t) == team_of(flyer)) return "the target is on its side now";
+   const float* tm = matrix_of(t);
+   const float* m = matrix_of(flyer);
+   if (!tm || !m) return "no position";
+   if (!(flyer_wingmen::length(row(tm, 3) - row(m, 3)) <= flyer_real_flight::kPursuitLoseRange)) return "the target got away";
+   return nullptr;
+}
+
+// True while it chases (the carrot not stepped this update).
+bool update_chase(int i, uint8_t* flyer, double now)
+{
+   Carrot& c = s_carrots[i];
+   uint8_t*& attacker = *(uint8_t**)(flyer + kFly_Follower + kFol_Attacker);
+   if (attacker) {
+      uint8_t* const t = flyer_of(attacker);
+      if (t) {
+         attacker = nullptr;   // ours to chase, not the follower's bend
+         if (now >= c.calmUntil && t != flyer && alive(t) && flying(t) && team_of(t) != team_of(flyer)) {
+            if (!c.chase.on || c.target != t || handle_of(t) != c.targetHandle) {
+               const float* tm = matrix_of(t);
+               const float* m = matrix_of(flyer);
+               if (s_chaseLogs < kMaxChaseLogs && tm && m) {
+                  ++s_chaseLogs;
+                  install_log("[RealFlight] #%u turns on #%u, %.0f m off%s", c.handle, handle_of(t),
+                              (double)flyer_wingmen::length(row(tm, 3) - row(m, 3)),
+                              c.chase.on ? " (a new attacker)" : "");
+               }
+               c.chase = Pursuit{};
+               c.target = t;
+               c.targetHandle = handle_of(t);
+               ++s_chases;
+            }
+            flyer_real_flight::provoke(c.chase, now);
+         }
+      }
+   }
+   if (!c.chase.on) return false;
+   if (const char* why = chase_over(c, flyer, now)) {
+      if (s_chaseLogs < kMaxChaseLogs) {
+         ++s_chaseLogs;
+         install_log("[RealFlight] #%u breaks off after %.0f s: %s", c.handle, now - c.chase.started, why);
+      }
+      c.chase = Pursuit{};
+      c.target = nullptr;
+      c.targetHandle = 0;
+      c.calmUntil = now + flyer_real_flight::kPursuitCooldown;
+      start(c, flyer);   // back onto its paths from here
+      return false;
+   }
+   return true;
 }
 
 // One update of the carrot: the follower stepped on it, as far as the flyer's
@@ -391,16 +499,14 @@ void __fastcall free_reset_mt(uint8_t* follower, void*, void* pathClass)
 // RaiseHeight's CALL to CollisionManager::RayHit: cdecl(start, dir, length,
 // hit*, normal*, ignore list, ignore count, type mask, ordnance only), the
 // fraction of the length in ST0. Its ignore list is the flyer itself.
-float __cdecl raise_ray_mt(const float* start, const float* dir, float length, void** hit, float* normal,
-                           uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly)
+//
+// A flyer ahead is a rigid object to it, to climb over at 20 m/s. With
+// avoidance on (which keeps flyers clear of each other), and for a flyer
+// chasing another, the ray passes over flyers: each one it hits is added to
+// the ignore list and the ray cast again.
+float vehicle_ray(const float* start, const float* dir, float length, void** hit, float* normal, uint8_t** ignore,
+                  int ignoreCount, int typeMask, int ordnanceOnly, bool vehicles)
 {
-   bool vehicles = false;
-   __try {
-      uint8_t* const flyer = ignore && ignoreCount > 0 ? ignore[0] : nullptr;
-      vehicles = flyer && (live(flyer) >= 0 || (s_borrowed.wingman && s_borrowed.wingman(flyer)));
-   } __except (EXCEPTION_EXECUTE_HANDLER) {
-      vehicles = false;
-   }
    if (!vehicles) return s_rayHit(start, dir, length, hit, normal, ignore, ignoreCount, typeMask, ordnanceOnly);
    float fraction = 1.0f;
    s_vehicleRay = true;
@@ -410,6 +516,45 @@ float __cdecl raise_ray_mt(const float* start, const float* dir, float length, v
       s_vehicleRay = false;
    }
    return fraction;
+}
+
+// The GameObject a hit belongs to, when it is a flyer.
+uint8_t* flyer_hit(void* hit)
+{
+   if (!hit) return nullptr;
+   uint8_t* const owner = ((fn_get_obj_t)(*(void***)hit)[kVt_CollisionOwner / 4])(hit);
+   return owner && is_rtti(owner, kRttiFlyer) ? owner : nullptr;
+}
+
+float __cdecl raise_ray_mt(const float* start, const float* dir, float length, void** hit, float* normal,
+                           uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly)
+{
+   bool vehicles = false, overFlyers = false;
+   __try {
+      uint8_t* const flyer = ignore && ignoreCount > 0 ? ignore[0] : nullptr;
+      const int i = flyer ? live(flyer) : -1;
+      vehicles = flyer && (i >= 0 || (s_borrowed.wingman && s_borrowed.wingman(flyer)));
+      overFlyers = flyer && hit && ignoreCount == 1 && (flyer_avoidance::active() || chasing(i));
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      vehicles = overFlyers = false;
+   }
+   if (!overFlyers) return vehicle_ray(start, dir, length, hit, normal, ignore, ignoreCount, typeMask, ordnanceOnly, vehicles);
+   uint8_t* skip[1 + kMaxRaySkips] = {ignore[0]};
+   int count = 1;
+   float fraction = 1.0f;
+   for (;;) {
+      fraction = vehicle_ray(start, dir, length, hit, normal, skip, count, typeMask, ordnanceOnly, vehicles);
+      if (!(fraction < 1.0f) || count > kMaxRaySkips) return fraction;
+      uint8_t* other = nullptr;
+      __try {
+         other = flyer_hit(*hit);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+         other = nullptr;
+      }
+      if (!other) return fraction;   // not a flyer: climb over it, as the game does
+      skip[count++] = other;
+      ++s_raySkips;
+   }
 }
 
 // CollisionModel::RayHit, detoured: thiscall(matrix, pose, start, dir, length,
@@ -501,12 +646,43 @@ void on_update(uint8_t* flyer, float dt)
    Carrot& c = s_carrots[i];
    c.seen = now;
    hold(flyer);
+   if (g_flyerRealFlightPursuit && update_chase(i, flyer, now)) {
+      report(now);
+      return;   // chasing: the carrot waits
+   }
    if (c.pathless) {
       if (now < c.retryAt) return;   // the AI flies it meanwhile
       start(c, flyer);
    }
    step(i, flyer, dt, now);
    report(now);
+}
+
+bool pursuing(const uint8_t* flyer)
+{
+   if (!s_installed) return false;
+   return chasing(live(flyer));
+}
+
+bool on_real_flight(const uint8_t* flyer) { return s_installed && live(flyer) >= 0; }
+
+const uint8_t* squadron_path(const uint8_t* flyer)
+{
+   if (!s_installed) return nullptr;
+   const int i = live(flyer);
+   if (i < 0 || s_carrots[i].pathless || s_carrots[i].chase.on) return nullptr;
+   return *(const uint8_t* const*)(flyer + kFly_Follower + kFol_Path);
+}
+
+void pass_attacker(uint8_t* wingman, uint8_t* leader)
+{
+   uint8_t*& attacker = *(uint8_t**)(wingman + kFly_Follower + kFol_Attacker);
+   if (!attacker) return;
+   if (leader) {
+      uint8_t*& theirs = *(uint8_t**)(leader + kFly_Follower + kFol_Attacker);
+      if (!theirs && !pursuing(leader)) theirs = attacker;
+   }
+   attacker = nullptr;
 }
 
 void release(uint8_t* flyer)
@@ -523,15 +699,34 @@ bool steer_before(uint8_t* flyer, Steer& st)
    const int i = live(flyer);
    if (i < 0) return false;
    const Carrot& c = s_carrots[i];
-   if (c.pathless) return false;
-   const V3 point = row(c.m, 3);
-   V3 heading = row(c.m, 2);
-   if (!flyer_wingmen::finite(point) || !flyer_wingmen::normalise(heading)) return false;
-
    const float hi = s_borrowed.maxSpeed(flyer, nullptr);
    const float lo = s_borrowed.minSpeed(flyer, nullptr);
    const float mid = s_borrowed.midSpeed(flyer, nullptr);
-   st.target = flyer_wingmen::target_for_speed(flyer_speed(c.speed, c.distance, c.lead, lo, hi), lo, mid, hi);
+   V3 point, heading;
+   if (c.chase.on) {
+      // At where its target will be, flat out to close, at its speed once behind it.
+      const float* tm = c.target && handle_of(c.target) == c.targetHandle ? matrix_of(c.target) : nullptr;
+      const float* m = matrix_of(flyer);
+      if (!tm || !m) return false;
+      const V3 me = row(m, 3), target = row(tm, 3), targetVel = velocity_of(c.target);
+      point = pursuit_point(me, flyer_wingmen::length(velocity_of(flyer)), target, targetVel);
+      heading = point - me;
+      V3 nose = row(m, 2), to = target - me;
+      const float d = flyer_wingmen::length(to);
+      if (!flyer_wingmen::finite(point) || !flyer_wingmen::normalise(heading) || !flyer_wingmen::normalise(nose) ||
+          !flyer_wingmen::normalise(to))
+         return false;
+      st.target = flyer_wingmen::target_for_speed(
+         pursuit_speed(d, flyer_wingmen::dot(nose, to), flyer_wingmen::length(targetVel), lo, hi), lo, mid, hi);
+      st.keepCos = kPursuitKeepCos;
+   } else {
+      if (c.pathless) return false;
+      point = row(c.m, 3);
+      heading = row(c.m, 2);
+      if (!flyer_wingmen::finite(point) || !flyer_wingmen::normalise(heading)) return false;
+      st.target = flyer_wingmen::target_for_speed(flyer_speed(c.speed, c.distance, c.lead, lo, hi), lo, mid, hi);
+      st.keepCos = flyer_wingmen::kKeepSpeedCos;
+   }
 
    uint8_t* const dest = *(uint8_t**)(flyer + kFly_Ctrl) + kUC_LowLevel + kLL_Dest;
    std::memcpy(st.saved, dest, kDestSize);
@@ -566,7 +761,7 @@ void steer_after(uint8_t* flyer, Steer& st, bool steered, const float* point, fl
    if (!m) return;
    V3 to = V3{st.point[0], st.point[1], st.point[2]} - row(m, 3);
    const float cosOff = flyer_wingmen::normalise(to) ? flyer_wingmen::dot(to, row(m, 2)) : 1.0f;
-   *speed = flyer_wingmen::keep_speed(*speed, st.target, cosOff);
+   *speed = flyer_wingmen::keep_speed(*speed, st.target, cosOff, st.keepCos);
 }
 
 bool install(uintptr_t base, const Borrowed& borrowed)

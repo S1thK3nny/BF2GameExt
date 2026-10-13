@@ -82,7 +82,9 @@ SECTION_BLURBS = OrderedDict([
      "that path force-sets the attacker as the target and re-broadcasts to "
      "nearby squadmates; it is deliberate and is left alone. The `Flyer` keys "
      "at the end are prototypes, modtools only and off by default: wingmen for "
-     "your flyer, and AI flyers that fly their paths for real."),
+     "your flyer, AI flyers that fly their paths for real (chasing their "
+     "attackers and flying in squadrons while they do), and AI flyers that keep "
+     "clear of each other."),
     ("Controller",
      "Gamepad support. Pad buttons are rebound on the game's own controls "
      "screen and kept per profile; see [CONTROLLER.md](CONTROLLER.md)."),

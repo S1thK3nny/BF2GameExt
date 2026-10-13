@@ -454,6 +454,12 @@
     <ClInclude Include="src\ai\ai_sprint_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\flyer_avoidance.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\flyer_avoidance_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\flyer_real_flight.hpp">
       <Filter>ai</Filter>
     </ClInclude>
@@ -907,6 +913,9 @@
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\ai_sprint.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\flyer_avoidance.cpp">
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\flyer_real_flight.cpp">

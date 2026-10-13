@@ -218,13 +218,13 @@ inline float target_for_speed(float speed, float minSpeed, float midSpeed, float
 
 // The flight code all but stops a flyer whose point is more than ~26 degrees
 // off its nose. A wingman in formation flies its formation speed until the
-// point is kKeepSpeedCos off its nose; past that it slows to turn, as the
-// stock code would have it.
+// point is kKeepSpeedCos off its nose (`keepCos`, for others steered the same
+// way); past that it slows to turn, as the stock code would have it.
 constexpr float kKeepSpeedCos = 0.5f;    // 60 degrees
 
-inline float keep_speed(float stockTarget, float formationTarget, float offNoseCos)
+inline float keep_speed(float stockTarget, float formationTarget, float offNoseCos, float keepCos = kKeepSpeedCos)
 {
-   if (!std::isfinite(offNoseCos) || offNoseCos < kKeepSpeedCos || !std::isfinite(formationTarget)) return stockTarget;
+   if (!std::isfinite(offNoseCos) || offNoseCos < keepCos || !std::isfinite(formationTarget)) return stockTarget;
    return formationTarget;
 }
 
@@ -502,6 +502,102 @@ inline int count_for(const ClassKeys* leader, int ini)
 }
 
 inline bool auto_for(const ClassKeys* leader, bool ini) { return leader && leader->hasAuto ? leader->autoForm : ini; }
+
+// ---- AI squadrons: the game's own rule, flown -----------------------------------------
+// The game's squadrons ride splines, so a flyer on real flight never joins one
+// (docs/RE/FlyerAI.md, "Real flight on paths"). Its leaders form squadrons of
+// their own instead, by the game's rule (EntityFlyer::UpdatePathFollower and
+// EntityPathFollower::CreateSquadronFromClosestEntities): every 5.5 to 8.5 s a
+// leader not in one gathers the nearest same-side flyers heading its way, up to
+// its path's MaxSquadSize, in one of its class's SquadronFormation shapes.
+constexpr double kSquadronWaitMid   = 7.0;   // s between tries ...
+constexpr double kSquadronWaitRange = 3.0;   // ... give or take half of this
+constexpr float  kSquadronReach     = 30.0f; // a class with no squadron distance gathers within its bounding radius times this
+
+inline double squadron_wait(double random01)
+{
+   const double r = random01 >= 0.0 && random01 <= 1.0 ? random01 : 0.5;
+   return kSquadronWaitMid + (r - 0.5) * kSquadronWaitRange;
+}
+
+// How far a leader gathers its squadron, squared: its class's squadron distance
+// (squared, as the class holds it) where set, else its bounding radius times
+// kSquadronReach.
+inline float squadron_reach2(float classSquared, float boundingRadius)
+{
+   if (std::isfinite(classSquared) && classSquared > 0.0f) return classSquared;
+   if (!std::isfinite(boundingRadius) || !(boundingRadius > 0.0f)) return 0.0f;
+   const float r = boundingRadius * kSquadronReach;
+   return r * r;
+}
+
+// Whether a flyer `dist2` (squared) away, heading `cosHeading` off the leader's
+// heading, may join, and its score (the higher, the sooner it is taken): within
+// the reach, and, with a class angle above -1 (its cosine), heading within it.
+inline bool squadron_candidate(float dist2, float reach2, float cosHeading, float cosMax, float& score)
+{
+   if (!std::isfinite(dist2) || !(reach2 > 0.0f) || dist2 > reach2) return false;
+   const float c = cosMax > -1.0f ? cosHeading : cosMax;
+   if (!std::isfinite(c) || c < cosMax) return false;
+   score = (1.0f - dist2 / reach2) + (c + 1.0f);
+   return true;
+}
+
+// How many members a squadron takes, from `candidates` (already capped by the
+// path's MaxSquadSize): the most that one of the class's shapes holds with its
+// leader, trying one fewer each time, but a pair only when one candidate was
+// all there was (the game's loop). `has(n)` says whether a shape holds n flyers.
+template <class Has>
+inline int squadron_members(int candidates, Has has)
+{
+   for (int k = candidates; k > 0; --k) {
+      if (has(k + 1)) return k;
+      if (k <= 2) break;   // the next try would be a pair
+   }
+   return 0;
+}
+
+// A map's formation shape (an EntityFormation path): its points, made relative
+// to its root node when the map loads (EntityFormation::Read; the root's
+// rotation is meant to be taken out too, but the game drops the result, so the
+// offsets are in the path's axes). The game puts the leader at the root when the
+// root is a slot, else at the first other point, and its members at the rest, in
+// order, each offset turned by the leader's heading (x right, y up, z ahead).
+// Placed flyers sit closer than flown ones may: the shape is scaled up until no
+// two of its flyers are nearer than kMinShapeGap.
+constexpr float kMinShapeGap = 22.0f;   // m
+
+inline int shape_size(int points, bool rootIsSlot) { return points <= 0 ? 0 : rootIsSlot ? points : points - 1; }
+
+// The first `members` members' offsets from the leader, into `out`; how many
+// there are (0 for a shape it cannot read).
+inline int shape_slots(const V3* points, int count, int root, bool rootIsSlot, int members, V3* out)
+{
+   if (!points || count <= 1 || root < 0 || root >= count || members <= 0) return 0;
+   for (int i = 0; i < count; ++i)
+      if (!finite(points[i])) return 0;
+   const int leader = rootIsSlot ? root : (root == 0 ? 1 : 0);
+   int n = 0;
+   for (int i = 0; i < count && n < members && n < kMaxWingmen; ++i) {
+      if (i == leader || (!rootIsSlot && i == root)) continue;
+      out[n++] = points[i] - points[leader];
+   }
+   // The nearest two flyers, the leader among them, at least kMinShapeGap apart.
+   float nearest = -1.0f;
+   for (int i = 0; i < n; ++i) {
+      const float d = length(out[i]);
+      if (nearest < 0.0f || d < nearest) nearest = d;
+      for (int j = i + 1; j < n; ++j) {
+         const float e = length(out[i] - out[j]);
+         if (e < nearest) nearest = e;
+      }
+   }
+   if (nearest > 0.01f && nearest < kMinShapeGap) {
+      const float scale = kMinShapeGap / nearest;
+      for (int i = 0; i < n; ++i) out[i] = out[i] * scale;
+   }
+   return n;
+}
 
 // ---- How well it holds its slot, for the log ----------------------------------------
 struct Stats {

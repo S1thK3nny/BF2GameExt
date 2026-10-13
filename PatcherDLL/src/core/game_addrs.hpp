@@ -1357,6 +1357,16 @@ namespace modtools {
    constexpr uintptr_t flyer_raise_ray_call         = 0x004F429E;
    constexpr uintptr_t collision_ray_hit            = 0x0042E230;
    constexpr uintptr_t collision_model_ray_hit      = 0x004359C0;
+   // Flyer-to-flyer avoidance and AI squadrons (prototypes, modtools only).
+   // Every EntityPathFollower (one in every EntityFlyer, at its +0x3CC) links
+   // itself into one list in its constructor (the link-in is at
+   // flyer_follower_link): the list's head node (+4 the first node; a node's +4
+   // the next, +0xC its follower; the head's own +0xC is null), its count at
+   // +0x10. EntityFormation::Find, cdecl(uint32_t nameHash): the map's formation
+   // shape of that name (an EntityFormation path), or null.
+   constexpr uintptr_t flyer_follower_list          = 0x00AD3524;
+   constexpr uintptr_t flyer_follower_link          = 0x005E8AE3;
+   constexpr uintptr_t entity_formation_find        = 0x005E2EB0;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

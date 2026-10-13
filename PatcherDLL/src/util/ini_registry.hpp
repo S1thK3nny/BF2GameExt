@@ -83,6 +83,9 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("AI", "FlyerWingmenSpacing", "25", "Metres between neighbours in the wingmen's vee. Range 8 to 60. A class's WingmanSlot ODF keys lay out its own formation instead"),
    INI_ENTRY("AI", "FlyerWingmenAuto", "1", "Wingmen join you at takeoff. Set 0 to have them join only on the squad key. A class's WingmanAuto ODF key decides for it instead"),
    INI_ENTRY("AI", "FlyerRealFlight", "0", "PROTOTYPE, modtools only. AI flyers on the map's flyer paths fly them instead of being placed on the curve: each chases a point about a second ahead along its path. A flyer class's PathFollowerRealFlight ODF key decides for it instead. Set 1 to enable"),
+   INI_ENTRY("AI", "FlyerRealFlightPursuit", "1", "With FlyerRealFlight on, an AI flyer the game turns on its attacker chases that flyer for real, steering for where it will be, for 15 s from the last time it was provoked (40 s at most), then flies back onto its paths. Set 0 for the game's own turn, a bend in its path toward where the attacker was"),
+   INI_ENTRY("AI", "FlyerRealFlightSquadrons", "1", "With FlyerRealFlight on, AI flyers gather squadrons by the game's own rule (every 5.5 to 8.5 s, the nearest friendlies heading their way, up to the path's MaxSquadSize) in their class's SquadronFormation shapes, and fly them as your wingmen fly. The game's squadrons ride splines, so none form for flyers on real flight. Set 0 for none"),
+   INI_ENTRY("AI", "FlyerAvoidance", "0", "PROTOTYPE, modtools only. Every AI flyer the AI steers (not one placed on its path) keeps clear of every other flyer, yours included: it turns away from any it would pass close to in the next 2 s and eases off behind a slower one, and no longer climbs over a flyer ahead. Set 1 to enable"),
 
    // [Controller] — gamepad support
    INI_ENTRY("Controller", "Enabled", "1", "Enable gamepad / controller support"),

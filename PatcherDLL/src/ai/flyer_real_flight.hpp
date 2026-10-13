@@ -46,6 +46,20 @@
 //     which, for a flyer on real flight or a wingman in formation, sends the
 //     ray out held to "ordnance" bodies while CollisionModel::RayHit (detoured)
 //     reads each model's vehicle mask (VehicleCollision) as its ordnance mask.
+//   - The chase (FlyerRealFlightPursuit): TargetReact's turn and attack sets the
+//     follower's mAttacker, which its next step would bend the path toward.
+//     Before each step the attacker is taken instead (cleared) and, when it
+//     flies a flyer on another side, chased: the carrot waits and the flyer is
+//     steered at where the target will be, at its speed once close behind it
+//     (flyer_real_flight_core.hpp), for 15 s from the last provocation (40 s
+//     at most), until the target dies, lands or gets 1000 m away. Then the
+//     carrot starts over from the flyer, so it branches back onto its paths,
+//     and it turns on no one for 4 s.
+//   - RaiseHeight's ray passes over flyers for a chasing flyer, and for every
+//     flyer with avoidance on (flyer_avoidance.hpp): a flyer it hits (a
+//     CollisionObject whose GameObject, its vptr +0x38, is an EntityFlyer) is
+//     added to the ray's ignore list and the ray cast again, at most 4 times;
+//     else a flyer ahead makes it climb and slow to 20 m/s.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -83,10 +97,21 @@
 //   CollisionModel::RayHit          0x004359C0, thiscall, 9 arguments, RET 0x24,
 //                                   ST0; ordnance mask +0x12C, vehicle +0x114
 //   EntityFlyer (from the entity)   the path follower +0x3CC (mPath +0xA8,
-//                                   mbLandNow +0xD5 within it), network proxy
-//                                   +0x78 bit 0, class +0x66C (its
+//                                   mAttacker +0xB4, mbLandNow +0xD5 within it),
+//                                   network proxy +0x78 bit 0, class +0x66C (its
 //                                   EntityPathFollowerClass +0x6AC); the rest as
 //                                   flyer_wingmen.hpp
+//   TargetReact                     0x004F0C30, thiscall(attacker Controllable)
+//                                   on the entity, RET 4, from the attacker's
+//                                   EntityFlyer::Update (0x004FDD10); turn and
+//                                   attack writes the attacker's Character (its
+//                                   Controllable +0xCC) to mAttacker (0x004F0D4C)
+//   ShotAtByEnemy                   0x005EBDA0, from the follower's Update
+//                                   (0x005ECA9E): mAttacker's flyer is its
+//                                   Character's remote +0x150, else vehicle
+//                                   +0x14C, else unit +0x148
+//   the ray callback                0x00429E00: a CollisionObject's GameObject
+//                                   from its vptr +0x38, against the ignore list
 //
 // AI flies on the host and in single player only.
 //
@@ -94,10 +119,12 @@
 // paths for real, 0 places it as the stock game does.
 //
 // INI: [AI] FlyerRealFlight=1 for every AI flyer that flies paths (off by
-// default).
+// default); FlyerRealFlightPursuit=0 leaves the turn on an attacker to the
+// game (on by default).
 // =============================================================================
 
 extern bool g_flyerRealFlight;
+extern bool g_flyerRealFlightPursuit;
 
 namespace flyer_real_flight {
 
@@ -139,10 +166,23 @@ struct Steer {
    uint8_t  saved[0x34] = {};
    float    point[3] = {};
    float    target = 0.0f;    // the speed asked for, a share of its top speed
+   float    keepCos = 0.5f;   // that speed held until the point is this far off its nose (a cosine)
    int      carrot = -1;
 };
 bool steer_before(uint8_t* flyer, Steer& st);
 void steer_after(uint8_t* flyer, Steer& st, bool steered, const float* point, float* speed);
 void restore(Steer& st);   // after a fault between the two
+
+// For the AI squadrons (flyer_wingmen.cpp):
+bool pursuing(const uint8_t* flyer);        // on real flight, chasing its attacker
+bool on_real_flight(const uint8_t* flyer);  // its carrot kept by its last update
+// The path a flyer on real flight is flying (its follower's), or null while it
+// waits for one or chases.
+const uint8_t* squadron_path(const uint8_t* flyer);
+// A wingman's attacker (its follower's mAttacker, which TargetReact sets) handed
+// to its leader to chase, unless the leader has one or chases already; with no
+// leader, dropped. The wingman's follower is not stepped while it flies in
+// formation, so left there it would start a chase when it is let go.
+void pass_attacker(uint8_t* wingman, uint8_t* leader);
 
 } // namespace flyer_real_flight

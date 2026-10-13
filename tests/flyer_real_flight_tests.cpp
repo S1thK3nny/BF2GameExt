@@ -200,6 +200,94 @@ void chasing()
                (double)(kWide - length(b.pos - centre)), (double)std::fabs(c.pos.x - 2.0f * kPin));
 }
 
+// ---- Pursuit ---------------------------------------------------------------------------
+// Where it steers: the target led by up to kPursuitLeadMax of its flight.
+void pursuit_points()
+{
+   const V3 me{0, 0, 0}, flank{60, 0, 0};
+   assert(near(pursuit_point(me, 80.0f, {0, 0, 40}, flank).x, 30.0f));                      // 0.5 s out
+   assert(near(pursuit_point(me, 80.0f, {0, 0, 400}, flank).x, 60.0f * kPursuitLeadMax));   // capped
+   assert(near(pursuit_point(me, 5.0f, {0, 0, 20}, flank).x, 60.0f));                       // closing at least kPursuitMinSpeed
+   const V3 still = pursuit_point(me, 80.0f, {0, 0, 400}, {kNan, 0, 0});                    // no velocity: the target
+   assert(near(still.x, 0.0f) && near(still.z, 400.0f));
+   assert(near(pursuit_point(me, kNan, {0, 0, 20}, flank).x, 60.0f));
+}
+
+// Its speed: flat out far off or off its nose; the target's, give or take, close behind it.
+void pursuit_speeds()
+{
+   assert(near(pursuit_speed(kPursuitGap, 1.0f, 70.0f, 50.0f, 100.0f), 70.0f));
+   assert(near(pursuit_speed(kPursuitGap + 20.0f, 1.0f, 70.0f, 50.0f, 100.0f), 80.0f));
+   assert(near(pursuit_speed(kPursuitGap - 20.0f, 1.0f, 70.0f, 50.0f, 100.0f), 60.0f));
+   assert(near(pursuit_speed(10.0f, 1.0f, 70.0f, 50.0f, 100.0f), 50.0f));         // its slowest
+   assert(near(pursuit_speed(800.0f, 1.0f, 70.0f, 50.0f, 100.0f), 100.0f));       // closing
+   assert(near(pursuit_speed(kPursuitGap, 0.5f, 70.0f, 50.0f, 100.0f), 100.0f));  // turning onto it
+   assert(near(pursuit_speed(kNan, 1.0f, 70.0f, 50.0f, 100.0f), 100.0f) && near(pursuit_speed(100.0f, 1.0f, 70.0f, 50.0f, 0.0f), 0.0f));
+   assert(near(pursuit_speed(100.0f, 1.0f, 70.0f, 50.0f, kNan), 0.0f));   // no top speed to read
+}
+
+// The chase's clock: kPursuitSeconds from each provocation, at most kPursuitMaxSeconds.
+void pursuit_clock()
+{
+   Pursuit p;
+   assert(pursuit_over(p, 0.0));
+   Pursuit off;
+   off.until = 1e9;
+   assert(pursuit_over(off, 0.0));   // not begun: over, whatever its clock says
+   provoke(p, 100.0);
+   assert(p.on && !pursuit_over(p, 114.9) && pursuit_over(p, 115.0));
+   provoke(p, 110.0);
+   assert(!pursuit_over(p, 124.9) && pursuit_over(p, 125.0));
+   provoke(p, 135.0);
+   assert(std::fabs(p.until - (100.0 + kPursuitMaxSeconds)) < 1e-9 && pursuit_over(p, 140.0));
+}
+
+// A target flying a steady circle (20 degrees a second at 70 m/s) chased by a
+// flyer that turns 90 degrees a second: it comes round onto the target's tail
+// and stays near the gap, the target ahead of its nose.
+void pursuing()
+{
+   constexpr float kDt = 1.0f / 60.0f, kTurn = 1.5708f, kAccel = 30.0f, kMin = 40.0f, kMax = 100.0f;
+   constexpr float kCircle = 0.349f, kTargetSpeed = 70.0f, kRadius = kTargetSpeed / kCircle;
+   V3 me{0, 0, -600}, heading{1, 0, 0};   // 600 m off, heading across its circle
+   float speed = 70.0f;
+   float settledLo = 1e9f, settledHi = 0.0f, worstCos = 1.0f;
+   for (float t = 0.0f; t < 40.0f; t += kDt) {
+      const float a = t * kCircle;
+      const V3 target{kRadius * std::sin(a), 0.0f, kRadius - kRadius * std::cos(a)};
+      const V3 targetVel{kTargetSpeed * std::cos(a), 0.0f, kTargetSpeed * std::sin(a)};
+      const V3 point = pursuit_point(me, speed, target, targetVel);
+      V3 to = target - me;
+      const float d = length(to);
+      normalise(to);
+      const float ahead = flyer_wingmen::dot(heading, to);
+      const float asked = pursuit_speed(d, ahead, kTargetSpeed, kMin, kMax);
+      if (t > 20.0f) {
+         settledLo = d < settledLo ? d : settledLo;
+         settledHi = d > settledHi ? d : settledHi;
+         worstCos = ahead < worstCos ? ahead : worstCos;
+      }
+      V3 want = point - me;
+      if (normalise(want)) {
+         const float c = flyer_wingmen::clampf(flyer_wingmen::dot(heading, want), -1.0f, 1.0f);
+         const float angle = std::acos(c);
+         const float turn = angle < kTurn * kDt ? angle : kTurn * kDt;
+         if (angle > 1e-5f) {
+            const float side = heading.z * want.x - heading.x * want.z > 0.0f ? 1.0f : -1.0f;
+            const float s = std::sin(turn) * side, k = std::cos(turn);
+            heading = {heading.x * k + heading.z * s, 0.0f, heading.z * k - heading.x * s};
+            normalise(heading);
+         }
+      }
+      speed += flyer_wingmen::clampf(asked - speed, -kAccel * kDt, kAccel * kDt);
+      me = me + heading * (speed * kDt);
+   }
+   assert(settledLo > 40.0f && settledHi < 200.0f && worstCos > 0.8f);
+   std::printf("  pursuit of a circling target: %.0f-%.0f m behind it after 20 s, never more than %.0f degrees off "
+               "its nose\n",
+               (double)settledLo, (double)settledHi, (double)(std::acos(worstCos) * 57.29578f));
+}
+
 } // namespace
 
 int main()
@@ -212,7 +300,11 @@ int main()
    switches();
    stats();
    chasing();
+   pursuit_points();
+   pursuit_speeds();
+   pursuit_clock();
+   pursuing();
    std::printf("Flyer real flight tests passed (leads, pacing, losing, carrot speeds, flyer speeds, switches, stats, "
-               "chasing).\n");
+               "chasing, pursuit points, pursuit speeds, the pursuit clock, pursuing).\n");
    return 0;
 }

@@ -244,6 +244,8 @@
     <ClInclude Include="src\ai\ai_update_budget.hpp" />
     <ClInclude Include="src\ai\ai_sprint.hpp" />
     <ClInclude Include="src\ai\ai_sprint_core.hpp" />
+    <ClInclude Include="src\ai\flyer_avoidance.hpp" />
+    <ClInclude Include="src\ai\flyer_avoidance_core.hpp" />
     <ClInclude Include="src\ai\flyer_real_flight.hpp" />
     <ClInclude Include="src\ai\flyer_real_flight_core.hpp" />
     <ClInclude Include="src\ai\flyer_wingmen.hpp" />
@@ -314,6 +316,7 @@
     <ClCompile Include="src\util\game_log_lock.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\ai\ai_sprint.cpp" />
+    <ClCompile Include="src\ai\flyer_avoidance.cpp" />
     <ClCompile Include="src\ai\flyer_real_flight.cpp" />
     <ClCompile Include="src\ai\flyer_wingmen.cpp" />
     <ClCompile Include="src\ai\squad_formation.cpp" />
