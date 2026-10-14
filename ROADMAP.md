@@ -466,10 +466,32 @@ first test; later rounds added speed matching, the squad key, ODF keys (`Wingman
 formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
 squadrons do. Orders are built, unplayed: wingmen called up from anywhere, losses made up, form up and
 engage on the squad key, attack my target and cover me on the comm keys' attack and defend, a line on the
-HUD for each, and a try at landing beside the player
+HUD for each, and landing beside the player (pilots get out unless `WingmanExitOnLand = 0`; `WingmanLand = 0`
+lets the flight go instead)
 ([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play
-them; cycling formations; Steam and GOG. Details in
+them; more ODF keys (`Wingman = 0`, `WingmanRole`, `WingmanStartOrder`, `WingmanEngageRange`); cycling
+formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
+
+**Wingmen from Lua** - Missions cannot script a flight. Add Lua calls to call up and dismiss wingmen, add
+or remove named units, give orders (with a target), lock the flight, pick its formation and call signs, and
+events for a wingman joining, being lost, scoring a kill, an order given and the flight landing.
+
+**AI goals of their own** - AI goals are a team's; each unit just sits in one until it respawns
+(docs/RE/AISystem.md, "Team goals, joined per unit"). Give a unit its own: keep it in a chosen goal across
+respawns, or a goal made for it (a tiny weight draws no one else), from Lua (`SetUnitGoal`, `ClearUnitGoal`,
+`GetUnitGoal`, `SetUnitOrder` for follow, get in, get out).
+
+**More AI goals** - The game holds 20 AI goals at once across all teams (`AIGoalManager::mGoals[20]` and a
+20-entry `AIGoal` pool), too few once units get goals of their own. Raise it to 64: a bigger pool, the array
+moved, every loop over it patched, on each build.
+
+**Ground AI into the air** - A trooper following you cannot board your single-seat fighter, so it stops
+following. Send each one to the nearest free friendly flyer (`EVT_SC_GetIntoVehicle`), call it into your
+flight first once it flies, and after you land have it get out and follow you on foot again.
+
+**AI hint nodes** - What each hint node type does is not written down, and land hints reportedly never
+worked. Research them all and why land hints fail (an agent's report: docs/RE/HintNodes.md).
 
 **Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
 rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or

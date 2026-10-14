@@ -41,11 +41,11 @@
 //     real flight's chase does (flyer_real_flight_core.hpp); at anything else in
 //     passes, a dive at it with the safe height let go near it (SH_TAPER), out
 //     short of it or once past it, on and 60 m up, back in. How far is its own,
-//     from its primary weapon's MaxRange (channel 0's, the furthest its AI
-//     fires; MinRange as a floor) and its cruising speed (flyer_orders_core.hpp,
-//     run_shape): back in from MaxRange, out a quarter of it short (never inside
-//     MinRange, never nearer than 2.5 s of its speed); behind a flyer, 7.5% of
-//     it back (50 to 200 m). Its AI's attack is
+//     from its primary weapon's ranges (channel 0's MinRange, OptimalRange,
+//     MaxRange, as its AI fights) and its cruising speed (flyer_orders_core.hpp,
+//     run_shape): back in from MaxRange, in through its optimal range, out just
+//     before its MinRange (10% outside it), never nearer than 2.5 s of its speed;
+//     behind a flyer, 7.5% of MaxRange back (50 to 200 m). Its AI's attack is
 //     aimed at its target (ForceSetAttackHelperTarget, at most every 0.5 s, and
 //     only while aimed elsewhere), so it fires at it. One further than 2500 m
 //     from its leader comes back.

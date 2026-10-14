@@ -727,25 +727,29 @@ Passes fly_passes(const flyer_orders::RunShape& shape, float speed, V3 start)
 void ground_runs()
 {
    using namespace flyer_orders;
-   // The shape, from the weapon's MaxRange and the speed, on one scale.
+   // The shape, from the weapon's ranges and the speed, on one scale: in from
+   // MaxRange, out just before MinRange or where it needs the room to pull out.
    const RunShape laser = run_shape(0.0f, 800.0f, 1600.0f, 60.0f);    // stock fighters' multilasers
-   assert(near(laser.breakAt, 400.0f) && near(laser.extendTo, 1600.0f) && near(laser.gap, 120.0f));
-   assert(near((float)laser.extendFor, 1200.0f / 60.0f + (float)kTurnBack, 1e-3f));
+   assert(near(laser.breakAt, 150.0f) && near(laser.extendTo, 1600.0f) && near(laser.gap, 120.0f));
+   assert(near((float)laser.extendFor, 1450.0f / 60.0f + (float)kTurnBack, 1e-3f));
    const RunShape recoil = run_shape(0.0f, 300.0f, 600.0f, 40.0f);    // a gunship's recoilless cannon
-   assert(near(recoil.breakAt, 150.0f) && near(recoil.extendTo, 600.0f) && near(recoil.gap, kMinGap));
+   assert(near(recoil.breakAt, 100.0f) && near(recoil.extendTo, 600.0f) && near(recoil.gap, kMinGap));
    const RunShape chain = run_shape(0.0f, 200.0f, 400.0f, 80.0f);     // a chaingun on a fast ship: room to pull out
    assert(near(chain.breakAt, 200.0f) && near(chain.extendTo, 400.0f));
    const RunShape speeder = run_shape(0.0f, 100.0f, 200.0f, 60.0f);   // short reach: turning room sets the way out
    assert(near(speeder.breakAt, 150.0f) && near(speeder.extendTo, 270.0f));
-   const RunShape torpedo = run_shape(500.0f, 800.0f, 1600.0f, 60.0f); // never inside its MinRange
-   assert(near(torpedo.breakAt, 500.0f) && near(torpedo.extendTo, 1600.0f));
+   const RunShape torpedo = run_shape(200.0f, 800.0f, 1600.0f, 60.0f); // just before its MinRange
+   assert(near(torpedo.breakAt, 220.0f) && near(torpedo.extendTo, 1600.0f));
+   const RunShape bombs = run_shape(25.0f, 150.0f, 300.0f, 60.0f);     // a short MinRange: the room decides
+   assert(near(bombs.breakAt, 150.0f));
    // No MaxRange: twice the optimal; no ranges at all: the default; a crawl counts
    // as kSlowestRun; a long reach keeps its gap at kMaxGap.
    assert(near(run_shape(0.0f, 500.0f, 0.0f, 60.0f).extendTo, 1000.0f));
    assert(near(run_shape(0.0f, kNan, kNan, 60.0f).extendTo, kDefaultRange));
    assert(near(run_shape(0.0f, 40.0f, 80.0f, 1.0f).breakAt, kSlowestRun * kPullOutSeconds));
    assert(near(run_shape(0.0f, 40.0f, 80.0f, kNan).breakAt, kSlowestRun * kPullOutSeconds));
-   assert(near(run_shape(-50.0f, 800.0f, 1600.0f, 60.0f).breakAt, 400.0f));
+   assert(near(run_shape(-50.0f, 800.0f, 1600.0f, 60.0f).breakAt, 150.0f));
+   assert(near(run_shape(kNan, 800.0f, 1600.0f, 60.0f).breakAt, 150.0f));
    assert(near(run_shape(0.0f, 4000.0f, 8000.0f, 60.0f).gap, kMaxGap));
 
    Run r;
@@ -753,7 +757,9 @@ void ground_runs()
    assert(!r.extending);
    update_run(r, laser, 1000.0f, 1.0f, 0.5);
    assert(!r.extending);                                  // diving in, inside where it turns back: in
-   update_run(r, laser, 390.0f, 1.0f, 1.0);
+   update_run(r, laser, 300.0f, 1.0f, 0.8);
+   assert(!r.extending);                                  // well inside its optimal range: still in
+   update_run(r, laser, 140.0f, 1.0f, 1.0);
    assert(r.extending && r.since == 1.0);
    update_run(r, laser, 1000.0f, -1.0f, 2.0);
    assert(r.extending);                                   // still pulling out
@@ -778,11 +784,12 @@ void ground_runs()
 
    // Flown: a fighter and a gunship keep coming back, pull out about where their
    // weapons say, and never run off. Measured: the fighter 4 passes in the 2
-   // minutes, 151 to 1634 m from the target; the gunship 7, 57 to 625 m.
+   // minutes, 54 to 1638 m from the target; the gunship 7, 34 to 625 m (both
+   // passing over it).
    const Passes fighter = fly_passes(laser, 60.0f, V3{0, 300, -1500});
-   assert(fighter.passes >= 3 && fighter.closest > 100.0f && fighter.furthest < laser.extendTo + 100.0f);
+   assert(fighter.passes >= 3 && fighter.closest > 30.0f && fighter.furthest < laser.extendTo + 100.0f);
    const Passes gunship = fly_passes(recoil, 40.0f, V3{0, 150, -600});
-   assert(gunship.passes >= 5 && gunship.closest > 40.0f && gunship.furthest < recoil.extendTo + 100.0f);
+   assert(gunship.passes >= 5 && gunship.closest > 20.0f && gunship.furthest < recoil.extendTo + 100.0f);
 }
 
 // Landing beside the leader: a slot's place on the ground, whether the ground

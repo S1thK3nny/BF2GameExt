@@ -925,15 +925,17 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
 - **Chasing:** a flyer in the air as real flight's chase (lead pursuit, flat out to close, then at its speed);
   anything else in passes: a dive at it (`SH_TAPER`), out short of it or once past it, on and 60 m up, back
   in. The distances are each wingman's own (the user: "primary weapon values should be taken into account vs
-  a blanket 150m pull out", then "I'd prefer it utilises maxRange more"), from its primary weapon's
-  `MaxRange` (channel 0's weapon; the furthest its AI fires; twice `OptimalRange` without one; `MinRange` a
-  floor) and its cruising speed: it comes back in from `MaxRange`, so every pass fires through the weapon's
-  whole reach, pulls out a quarter of it short (never inside `MinRange`, never nearer than 2.5 s of its speed:
-  a flyer turning 90 degrees a second carries on 1.4 to 2.1 s of its speed toward the target as it pulls
-  out), and sits 7.5% of it behind a flyer (50 to 200 m). Stock fighters' lasers (0/800/1600 m) at 60 m/s:
-  back from 1600 m, out at 400 m, 120 m behind (simulated: 4 passes in 2 minutes, 151 to 1634 m from the
-  target). A gunship's recoilless cannon (0/300/600 m) at 40 m/s: back from 600 m, out at 150 m, 50 m behind
-  (7 passes, 57 to 625 m). Its AI's attack
+  a blanket 150m pull out", then "I'd prefer it utilises maxRange more", then "Strafing should run into
+  optimal range, pulling out just before minrange"), from its primary weapon's ranges (channel 0's weapon:
+  `MinRange`, `OptimalRange`, `MaxRange`, the ranges its AI fights at; twice `OptimalRange` without a
+  `MaxRange`) and its cruising speed: it comes back in from `MaxRange`, runs in through its optimal range, and
+  pulls out just before its `MinRange` (10% outside it), never nearer than 2.5 s of its speed (a flyer turning
+  90 degrees a second carries on 1.4 to 2.1 s of its speed toward the target as it pulls out; with no
+  `MinRange` that room decides); behind a flyer it sits 7.5% of `MaxRange` back (50 to 200 m). Stock
+  fighters' lasers (0/800/1600 m) at 60 m/s: back from 1600 m, out at 150 m, 120 m behind (simulated: 4
+  passes in 2 minutes, 54 to 1638 m from the target, passing over it). A gunship's recoilless cannon
+  (0/300/600 m) at 40 m/s: back from 600 m, out at 100 m, 50 m behind (7 passes, 34 to 625 m). Torpedoes
+  (MinRange 200) pull out at 220 m. Its AI's attack
   is aimed at its target, at most every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing
   wingman flies at its own speeds, copies no tricks and may pull its own.
 - **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from

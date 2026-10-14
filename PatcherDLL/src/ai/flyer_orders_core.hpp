@@ -102,23 +102,26 @@ inline int pick_foe(V3 me, const Foe* foes, int n)
 // ---- Passes at a target on the ground, and the gap behind a flyer -------------------------
 // A flyer cannot hang behind a tank as it does behind a fighter: it dives at it,
 // pulls out short of it (or once past it), flies on and up, then turns back for
-// the next pass. How far is each wingman's own, from its primary weapon's
-// MaxRange (its ODF's: the furthest its AI fires) and its cruising speed, on one
-// scale, so each pass fires through the whole of the weapon's reach:
+// the next pass. How far is each wingman's own, from its primary weapon's ranges
+// (its ODF's MinRange, OptimalRange, MaxRange: the ranges its AI fights at) and
+// its cruising speed, on one scale, so each pass fires from the weapon's
+// furthest reach in through its optimal range:
 //   - it turns back in from its MaxRange (and at least kTurnSeconds of flight
 //     past the pull-out each way); it gives up pulling out after the time that
 //     takes, plus kTurnBack to come round;
-//   - it pulls out kBreakShare of its MaxRange short, never inside its MinRange
-//     and never nearer than kPullOutSeconds of its speed (the room it needs to
-//     pull out: a flyer turning 90 degrees a second carries on 1.4 to 2.1 s of
-//     its speed toward the target as it pulls out);
+//   - it pulls out just before its MinRange (kMinRangeMargin of it), and never
+//     nearer than kPullOutSeconds of its speed: the room it needs to pull out (a
+//     flyer turning 90 degrees a second carries on 1.4 to 2.1 s of its speed
+//     toward the target as it pulls out), which is what decides it for a
+//     weapon with no MinRange;
 //   - behind a flyer in the air it settles kGapShare of its MaxRange back,
 //     kMinGap to kMaxGap.
 // A weapon with no MaxRange counts twice its OptimalRange, else kDefaultRange.
 // Stock fighters' lasers (0/800/1600 m) at 60 m/s come back in from 1600 m and
-// pull out at 400 m, 120 m behind a flyer; a gunship's recoilless cannon
-// (0/300/600) at 40 m/s from 600 m, out at 150 m.
-constexpr float  kBreakShare     = 0.25f;
+// pull out at 150 m, 120 m behind a flyer; a gunship's recoilless cannon
+// (0/300/600) at 40 m/s from 600 m, out at 100 m; torpedoes (MinRange 200) at
+// 220 m.
+constexpr float  kMinRangeMargin = 1.1f;
 constexpr float  kPullOutSeconds = 2.5f;    // s
 constexpr float  kTurnSeconds    = 1.0f;    // s
 constexpr double kTurnBack       = 3.0;     // s
@@ -144,11 +147,9 @@ inline RunShape run_shape(float minRange, float optimal, float maxRange, float s
                                                                   : kDefaultRange;
    const float v = std::isfinite(speed) && speed > kSlowestRun ? speed : kSlowestRun;
    const float pull = v * kPullOutSeconds;
-   const float least = std::isfinite(minRange) && minRange > 0.0f ? minRange : 0.0f;
+   const float least = std::isfinite(minRange) && minRange > 0.0f ? minRange * kMinRangeMargin : 0.0f;
    RunShape s;
-   s.breakAt = reach * kBreakShare;
-   if (s.breakAt < least) s.breakAt = least;
-   if (s.breakAt < pull) s.breakAt = pull;
+   s.breakAt = least > pull ? least : pull;
    s.extendTo = s.breakAt + 2.0f * v * kTurnSeconds;
    if (s.extendTo < reach) s.extendTo = reach;
    s.extendFor = (double)((s.extendTo - s.breakAt) / v) + kTurnBack;
