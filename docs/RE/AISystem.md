@@ -649,6 +649,33 @@ Singleton that manages high-level AI goals (capture CP, defend, destroy target, 
 - `GiveDifferentOrder` - forces a unit to a different goal
 - `PrintInfoConsole`/`PrintInfoInstConsole` - debug output
 
+### Team goals, joined per unit (read 2026-10-14)
+
+The user asked whether AI units can have goals of their own rather than their team's. Read in P.
+
+- **Goals belong to a team.** `AddGoal(team, type, weight, target)` (P `0x0047DF90`, Lua `AddAIGoal`) makes a
+  Conquest, Destroy (a target), Defend (a target), Deathmatch, CTF offense or defense, or Follow (a character
+  or object) goal; at most 20 at once across all teams. Each `AIGoal` holds its team, weight, an enabled flag
+  and its own list of members (`mUnitList`, a `PblList<Character>`).
+- **Membership is per unit.** Every AI character sits in exactly one goal's list (its `Character::mGoalNode`).
+  `AssignUnit` (P `0x0047E370`) puts a unit with none in the enabled goal of its team that is least full for
+  its weight (members ÷ (weight share × team size)). `AIGoalManager::Update` (P `0x0047EA80`, every 1 s) gives
+  every AI character without a goal one, then updates each goal, which hands its members their commands. A
+  unit keeps its goal until it respawns (`Character::Respawn` calls `ReassignIfNeeded`, P `0x0047E990`:
+  remove, then `AssignUnit` again) or changes team.
+- **So a unit can have a goal of its own:** move it into a chosen goal's list and put it back there after
+  each respawn; or make a goal just for it: a goal with a tiny weight is already "full" with one member, so
+  `AssignUnit` never adds others to it. The 20-goal cap is the limit.
+- **Orders on top of goals, per unit:** the squad commands, sent with `UnitController::SendEvent` (as
+  `ai_squads.cpp` sends them): `EVT_SC_FollowChr` (16) and `EVT_SC_FollowChrLoose` (17), `EVT_SC_StopFollowChr`
+  (18), `EVT_SC_GetIntoVehicle` (19, the vehicle in the event's object) and `EVT_SC_GetOutOfVehicle` (20,
+  which also keeps the unit out of vehicles for 20 s). `UnitAgent::HandleSquadCommandEvent` (P `0x007844D0`)
+  turns them into follow, board and unboard commands. The unit leaves its goal's commands while it obeys and
+  returns to them after.
+- **The flyer wingmen touch neither:** an AI pilot's goal keeps running under them (its fly agent still picks
+  its own destinations); they replace where it steers and what it aims at each frame, and keep it from its
+  own landings. Let go, it carries on with its goal.
+
 ---
 
 ## Key Insight: The "Bubble" System

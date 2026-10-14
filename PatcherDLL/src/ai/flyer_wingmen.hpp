@@ -41,36 +41,41 @@
 //     real flight's chase does (flyer_real_flight_core.hpp); at anything else in
 //     passes, a dive at it with the safe height let go near it (SH_TAPER), out
 //     short of it or once past it, on and 60 m up, back in. How far is its own,
-//     from its primary weapon (channel 0's MinRange, OptimalRange, MaxRange, as
-//     its AI fights) and its cruising speed (flyer_orders_core.hpp, run_shape):
-//     out a quarter of the optimal range short (never inside MinRange, never
-//     nearer than 2.5 s of its speed), back in from the optimal range; behind a
-//     flyer, 15% of the optimal range back (50 to 200 m). Its AI's attack is
+//     from its primary weapon's MaxRange (channel 0's, the furthest its AI
+//     fires; MinRange as a floor) and its cruising speed (flyer_orders_core.hpp,
+//     run_shape): back in from MaxRange, out a quarter of it short (never inside
+//     MinRange, never nearer than 2.5 s of its speed); behind a flyer, 7.5% of
+//     it back (50 to 200 m). Its AI's attack is
 //     aimed at its target (ForceSetAttackHelperTarget, at most every 0.5 s, and
 //     only while aimed elsewhere), so it fires at it. One further than 2500 m
 //     from its leader comes back.
 //
-// Landing with the player (FlyerWingmenLand, a try): when the player's flyer
-// lands (state 3 landing, 0 landed), each wingman is given its slot's place on
+// Landing with the player (a try; the leader class's WingmanLand, else the INI's
+// FlyerWingmenLand; with 0 the wingmen break off as the player lands): when the
+// player's flyer lands (state 3 landing, 0 landed; a player can land only in a
+// landing region, Lua AddLandingRegion), each wingman is given its slot's place on
 // the ground beside it, 1.5 times out and never nearer than 15 m, where a ray
 // down from 40 m up (CollisionManager::RayHit, the flyer's own landing ray's
 // types 0x190) finds ground within 4 m of the leader's and flat; it comes down
 // toward 15 m over it, at its slowest (the stretch lets it go to 10 m/s) from
 // 300 m in, and lands (EntityFlyer::Land) once within 40 m of it across and
-// 40 m up. Where there is no such ground, or it is up again before its leader,
-// it circles 200 m round a point 150 m over the leader. When the player takes
-// off (state 1) the landed ones take off too (EntityFlyer::TakeOff) and form up
-// again. While landed the squad key is the game's (seats), and the comm keys
-// order nothing.
+// 40 m up (EntityFlyer::Land needs no landing region). Once down its pilot gets
+// out (and it is let go), unless its own class says WingmanExitOnLand = 0: then
+// it waits aboard, and when the player takes off (state 1) it takes off too
+// (EntityFlyer::TakeOff) and forms up again. Where there is no such ground, or
+// it is up again before its leader, it circles 200 m round a point 150 m over
+// the leader. While landed the squad key is the game's (seats), and the comm
+// keys order nothing.
 //
-// Waiting aboard: an AI pilot gets out only through its fly agent's own landing
-// (UnitFlyAgent's FLY state lands at a map land hint within 80 m,
-// IsNearLandingPt; landed, its DROPOFF state calls SetExitVehicle). For a
-// wingman, the agent's CALL to IsNearLandingPt answers no, and its two CALLs to
-// TakeOff (its TAKEOFF and FLY states) do nothing while it waits landed beside
-// its leader. A class with WingmanExitOnLand = 1 gets its pilot out once landed
-// beside its leader instead (AILowLevel::SetExitVehicle with no command post, as
-// the AI's own end-of-game exit), and is let go.
+// Getting out: stock, an AI pilot gets out only through its fly agent's own
+// landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within 80 m,
+// one at a command post its team may spawn at, IsNearLandingPt and
+// HintManager::RequestLandHints; landed, its DROPOFF state calls SetExitVehicle
+// with that post). For a wingman the agent's CALL to IsNearLandingPt answers no
+// (it lands only with its leader), and its two CALLs to TakeOff (its TAKEOFF
+// and FLY states) do nothing while it is down beside its leader. Landed there
+// its pilot is got out with AILowLevel::SetExitVehicle and no command post, as
+// the AI's own end-of-game exit does.
 //
 // An AI flyer that is not placed on a path flies by physics:
 // EntityFlyer::UpdateIndirect runs its navigator (AILowLevel::UpdateIndirect),
@@ -246,8 +251,9 @@
 // names that the map has, else the first of its SquadronFormation shapes that
 // holds all its wingmen (else the largest); else the vee. The free slots fill
 // in order, each with the nearest flyer that may take it. On the class that
-// flies as a wingman: WingmanExitOnLand = 1 gets its pilot out when it lands
-// beside its leader (else it waits aboard).
+// flies as a wingman: WingmanExitOnLand = 0 keeps its pilot aboard when it lands
+// beside its leader, to take off with it (else it gets out). On the leader's:
+// WingmanLand = 0 lets its wingmen go as it lands (else they land with it).
 //
 // A map or mod may word the messages its own way under the localisation keys
 // game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown

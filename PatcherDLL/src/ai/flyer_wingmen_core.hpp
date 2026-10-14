@@ -305,11 +305,14 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //                  Without any, the first of the class's SquadronFormation
 //                  shapes that holds all its wingmen (else the largest), as
 //                  the AI's squadrons take theirs from the same list.
+//   WingmanLand    1: when its pilot lands, its wingmen land beside it; 0:
+//                  they are let go (break off) instead. Without it, the INI's
+//                  FlyerWingmenLand.
 // And one on the class that flies AS a wingman (it does not give a class
 // wingmen of its own):
-//   WingmanExitOnLand  1: landed beside its leader, its pilot gets out (and it
-//                  is let go); 0 (or none): it waits aboard and takes off with
-//                  its leader.
+//   WingmanExitOnLand  1 (or none): landed beside its leader, its pilot gets out
+//                  (and it is let go); 0: it waits aboard and takes off with its
+//                  leader.
 constexpr int kMaxClasses         = 16;
 constexpr int kMaxSlotClasses     = 4;
 constexpr int kMaxClassFormations = 10;   // as many as a class's SquadronFormation lines (EntitySquadronClass)
@@ -333,8 +336,10 @@ struct ClassKeys {
    int      formationCount = 0;
    bool     hasFormations = false;
    bool     ownFormations = false;   // its own lines have begun replacing the inherited list
+   bool     hasLand = false;         // WingmanLand
+   bool     landWith = true;
    bool     hasExitOnLand = false;   // WingmanExitOnLand: as a wingman, not a leader
-   bool     exitOnLand = false;
+   bool     exitOnLand = true;
 };
 
 // A value as an ODF writes it: spaces and quotes round it ignored.
@@ -484,8 +489,21 @@ inline bool set_exit_on_land(ClassKeys& k, const char* value)
    return true;
 }
 
-// Whether a wingman of this class gets out once landed beside its leader.
-inline bool exits_on_land(const ClassKeys* k) { return k && k->hasExitOnLand && k->exitOnLand; }
+// Whether a wingman of this class gets out once landed beside its leader: yes
+// unless its class says WingmanExitOnLand = 0.
+inline bool exits_on_land(const ClassKeys* k) { return !k || !k->hasExitOnLand || k->exitOnLand; }
+
+inline bool set_land(ClassKeys& k, const char* value)
+{
+   double v;
+   if (!read_number(value, v)) return false;
+   k.hasLand = true;
+   k.landWith = v != 0.0;
+   return true;
+}
+
+// Whether this leader's wingmen land with it: its class's WingmanLand, else the INI.
+inline bool lands_with(const ClassKeys* leader, bool ini) { return leader && leader->hasLand ? leader->landWith : ini; }
 
 // A child class starts as its parent; its own WingmanClass, WingmanSlot and
 // WingmanFormation lines replace the lists.
@@ -500,7 +518,7 @@ inline ClassKeys inherited(const ClassKeys& parent)
 
 inline bool sets_any(const ClassKeys* k)
 {
-   return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots || k->hasFormations);
+   return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots || k->hasFormations || k->hasLand);
 }
 
 // Whether a flyer of class `followerId`, one that may follow this leader, may

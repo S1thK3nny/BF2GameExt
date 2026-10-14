@@ -605,5 +605,5 @@ def pbl_hash(text):
 assert pbl_hash("game.squadcommand.follow") == 0x731FD493
 for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost"):
     assert f'pbl_hash("game.wingmen.{key}")' in source, key
-assert 'pbl_hash("WingmanExitOnLand")' in source
+assert 'pbl_hash("WingmanExitOnLand")' in source and 'pbl_hash("WingmanLand")' in source
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")

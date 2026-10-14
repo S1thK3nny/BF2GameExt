@@ -150,6 +150,7 @@ constexpr uint32_t kHashAuto  = pbl_hash("WingmanAuto");
 constexpr uint32_t kHashSlot  = pbl_hash("WingmanSlot");
 constexpr uint32_t kHashFormation = pbl_hash("WingmanFormation");
 constexpr uint32_t kHashExitOnLand = pbl_hash("WingmanExitOnLand");
+constexpr uint32_t kHashLand = pbl_hash("WingmanLand");
 
 constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
@@ -255,6 +256,10 @@ bool on_property(void* cls, uint32_t hash, const char* value)
       if (cls) flyer_wingmen::set_exit_on_land(s_classes[cls], value);
       return true;
    }
+   if (hash == kHashLand) {
+      if (cls) flyer_wingmen::set_land(s_classes[cls], value);
+      return true;
+   }
    if (hash == kHashSlot) {
       if (cls)
          flyer_wingmen::add_slot(s_classes[cls], value, [](const char* b, unsigned n) { return pbl_hash(b, n); });
@@ -321,7 +326,7 @@ enum : int {
    kLandCircle  = 2,   // circling overhead: no level ground beside its leader
    kLandDown    = 3,   // landing or landed
    kLandLeaving = 4,   // taking off with its leader
-   kLandOut     = 5,   // landed, its pilot getting out (WingmanExitOnLand)
+   kLandOut     = 5,   // landed, its pilot getting out (unless WingmanExitOnLand = 0)
 };
 
 // The leader's DoTrick, seen before it runs; it went ahead if the leader is in a
@@ -438,7 +443,8 @@ V3 velocity_of(uint8_t* obj)
 V3 row(const float* m, int r) { return {m[r * 4], m[r * 4 + 1], m[r * 4 + 2]}; }   // right, up, forward, position
 
 // The flyer the host's own player flies, while it flies (or, with its wingmen
-// landing with it, while it lands, sits landed and takes off again).
+// landing with it, its class's WingmanLand or the INI's FlyerWingmenLand, while
+// it lands, sits landed and takes off again; else they break off as it lands).
 uint8_t* player_flyer()
 {
    uint8_t* const chr = s_local ? s_local(0) : nullptr;
@@ -446,7 +452,8 @@ uint8_t* player_flyer()
    if (!vehicle) return nullptr;
    uint8_t* const obj = object_of(vehicle);
    if (!obj || !is_rtti(obj, kRttiFlyer) || !alive(obj)) return nullptr;
-   if (flying(obj) || (g_flyerWingmenLand && s_land && on_or_near_ground(obj))) return obj;
+   if (flying(obj)) return obj;
+   if (s_land && on_or_near_ground(obj) && flyer_wingmen::lands_with(keys_of(obj), g_flyerWingmenLand)) return obj;
    return nullptr;
 }
 
@@ -1446,14 +1453,14 @@ void update_landing(Formation& f, uint8_t* leader)
       if (w.land == kLandLeaving && flying(w.obj)) w.land = kLandNone;   // up again: to its slot
       // Up again before its leader (it should wait aboard): it circles.
       if (w.land == kLandDown && flying(w.obj) && f.landing) w.land = kLandCircle;
-      // Down, one whose class says so gets out (AILowLevel::SetExitVehicle, with
-      // no command post, as the AI's own end-of-game exit asks); the rest wait.
+      // Down, it gets out (AILowLevel::SetExitVehicle, with no command post, as
+      // the AI's own end-of-game exit asks), unless its class says
+      // WingmanExitOnLand = 0: then it waits aboard for its leader.
       if (w.land == kLandDown && state_of(w.obj) == kStateLanded && s_exitVehicle &&
           flyer_wingmen::exits_on_land(keys_of(w.obj))) {
          s_exitVehicle(w.uc + kUC_LowLevel, nullptr);
          w.land = kLandOut;
-         if (order_log()) install_log("[Wingmen] slot %d (#%u) landed: its pilot gets out (WingmanExitOnLand)",
-                                      w.slot + 1, w.handle);
+         if (order_log()) install_log("[Wingmen] slot %d (#%u) landed: its pilot gets out", w.slot + 1, w.handle);
       }
    }
 }
@@ -1500,7 +1507,7 @@ void tick(double now)
          reset_orders(s_player);
          choose_player_shape(leader);
       }
-      if (g_flyerWingmenLand && s_land) update_landing(s_player, leader);
+      if (s_land && flyer_wingmen::lands_with(keys_of(leader), g_flyerWingmenLand)) update_landing(s_player, leader);
       for (int i = s_player.count - 1; i >= 0; --i)
          if (const char* why = lost(s_player.wing[i], s_player, now)) drop(s_player, i, why);
       if (flying(leader) && !s_player.landing) {
@@ -2278,8 +2285,9 @@ bool __fastcall land_hint_mt(uint8_t* agent, void*)
 
 // The fly agent's TAKEOFF and FLY states take a landed flyer up
 // (EntityFlyer::TakeOff, thiscall() on the flyer). A wingman landed beside its
-// leader waits for it instead: they take off together (end_landing calls
-// TakeOff itself). Each caller returns straight after the call.
+// leader stays down instead: its pilot gets out, or (WingmanExitOnLand = 0) it
+// waits to take off with its leader (end_landing calls TakeOff itself). Each
+// caller returns straight after the call.
 void __fastcall agent_take_off_mt(uint8_t* flyer, void*)
 {
    bool wait = false;
@@ -2413,17 +2421,19 @@ void flyer_wingmen_install(uintptr_t base)
    else
       install_log("[Wingmen] orders NOT installed: their reads differ; the squad key forms up or engages, with no "
                   "message");
-   if (!g_flyerWingmenLand)
-      install_log("[Wingmen] landing with you off ([AI] FlyerWingmenLand=0): wingmen are let go when you land");
-   else if (install_landing(base))
-      install_log("[Wingmen] landing with you installed: wingmen land beside you, or circle overhead, and take off "
-                  "with you; %s",
-                  install_waiting(base) ? "they wait aboard (WingmanExitOnLand = 1 on a class gets its pilots out)"
-                                        : "NOT kept aboard (the fly agent's calls differ): near a land hint their "
-                                          "AI may land and get out");
-   else
+   // Installed whatever the INI says: a leader class's WingmanLand decides for it.
+   if (install_landing(base)) {
+      const bool kept = install_waiting(base);
+      install_log("[Wingmen] landing with you installed (%s): wingmen land beside you, or circle overhead, and their "
+                  "pilots get out (WingmanExitOnLand = 0 on a class keeps them aboard to take off with you); %s",
+                  g_flyerWingmenLand ? "on, but for classes with WingmanLand = 0"
+                                     : "off ([AI] FlyerWingmenLand=0), but for classes with WingmanLand = 1",
+                  kept ? "none lands at a land hint on its own"
+                       : "NOT kept from landing at land hints on their own, nor aboard (the fly agent's calls differ)");
+   } else {
       install_log("[Wingmen] landing with you NOT installed: EntityFlyer's Land or TakeOff differ; wingmen are let go "
                   "when you land");
+   }
 
    // Real flight on paths rides on these hooks (flyer_real_flight.hpp).
    flyer_real_flight::Borrowed borrowed;

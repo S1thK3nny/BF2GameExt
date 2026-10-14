@@ -925,14 +925,15 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
 - **Chasing:** a flyer in the air as real flight's chase (lead pursuit, flat out to close, then at its speed);
   anything else in passes: a dive at it (`SH_TAPER`), out short of it or once past it, on and 60 m up, back
   in. The distances are each wingman's own (the user: "primary weapon values should be taken into account vs
-  a blanket 150m pull out"), from its primary weapon's ranges (channel 0's weapon: `MinRange`,
-  `OptimalRange`, `MaxRange`, the ranges its AI fights at) and its cruising speed: it pulls out a quarter of
-  the optimal range short (never inside `MinRange`, never nearer than 2.5 s of its speed: a flyer turning 90
-  degrees a second carries on 1.4 to 2.1 s of its speed toward the target as it pulls out), comes back in
-  from the optimal range, and sits 15% of the optimal range behind a flyer (50 to 200 m). Stock fighters'
-  lasers (0/800/1600 m) at 60 m/s: out at 200 m, back from 800 m, 120 m behind (simulated: 7 passes in 2
-  minutes, 73 to 836 m from the target). A gunship's recoilless cannon (0/300/600 m) at 40 m/s: out at 100 m,
-  back from 300 m, 50 m behind (13 passes, 31 to 324 m, its passes going over the target). Its AI's attack
+  a blanket 150m pull out", then "I'd prefer it utilises maxRange more"), from its primary weapon's
+  `MaxRange` (channel 0's weapon; the furthest its AI fires; twice `OptimalRange` without one; `MinRange` a
+  floor) and its cruising speed: it comes back in from `MaxRange`, so every pass fires through the weapon's
+  whole reach, pulls out a quarter of it short (never inside `MinRange`, never nearer than 2.5 s of its speed:
+  a flyer turning 90 degrees a second carries on 1.4 to 2.1 s of its speed toward the target as it pulls
+  out), and sits 7.5% of it behind a flyer (50 to 200 m). Stock fighters' lasers (0/800/1600 m) at 60 m/s:
+  back from 1600 m, out at 400 m, 120 m behind (simulated: 4 passes in 2 minutes, 151 to 1634 m from the
+  target). A gunship's recoilless cannon (0/300/600 m) at 40 m/s: back from 600 m, out at 150 m, 50 m behind
+  (7 passes, 57 to 625 m). Its AI's attack
   is aimed at its target, at most every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing
   wingman flies at its own speeds, copies no tricks and may pull its own.
 - **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from
@@ -941,22 +942,30 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
-- **Landing with the player** (`FlyerWingmenLand`, on by default; a try): when the player's flyer lands, each
+- **Landing with the player** (a try; the leader class's `WingmanLand`, else the INI's `FlyerWingmenLand`, on by
+  default; with 0 the wingmen break off as the player lands): a player can land only inside a landing region
+  (Lua `AddLandingRegion`, `TriggerRegionManager` TRIGGER_LANDING; the flyer's land key and speeds check
+  `mInLandingRegionFactor`, M +0x5FC), but `EntityFlyer::Land` needs none. When the player's flyer lands, each
   wingman is given its slot's place on the ground, 1.5 times out and at least 15 m from the leader, where a ray
   down from 40 m up finds ground within 4 m of the leader's and flat (its up at least 0.85); it comes down
   toward 15 m over it, at its slowest from 300 m in (its stretch lets it fly at 10 m/s), and lands once within
-  40 m across and 40 m up. With no such ground, or if it is up again first, it circles 200 m round a point
-  150 m over the leader. When the player takes off, those landed take off too and form up again.
-- **Waiting aboard:** an AI pilot gets out only through its fly agent's own landing: `UnitFlyAgent`'s FLY
-  state (4) lands at a map land hint within 80 m (`IsNearLandingPt`, P `0x00790AC0`, M `0x005AED00`, every 3 s,
-  `RequestLandHints`), its LAND state (5) waits for the flyer to be down, then DROPOFF (6) calls
-  `SetExitVehicle` (`AILowLevel::SetExitVehicle`, M `0x005A2170`: the exit flag 8 at +0x74, the post at +0x78).
-  `UnitController::UpdateHighLevel` also gets AI out at the end of a game; `UnitFlyAgent` swallows damage, so no
-  pilot bails out. For a wingman the agent's one CALL to `IsNearLandingPt` (M `0x005AFDD3`) answers no, and its
-  two CALLs to `TakeOff` (TAKEOFF and FLY states, M `0x005AF154`, `0x005AF323`) do nothing while it waits
-  landed beside its leader. `WingmanExitOnLand = 1` on the class that flies as a wingman gets its pilot out
-  once landed instead (`SetExitVehicle` with no post, as the end-of-game exit does, M `0x005A079E`); it is
-  then let go.
+  40 m across and 40 m up. Once down its pilot gets out and it is let go (the user: "Make getting out on land
+  the default"), unless its own class says `WingmanExitOnLand = 0`: then it waits aboard, and when the player
+  takes off it takes off too and forms up again. With no such ground, or if it is up again first, it circles
+  200 m round a point 150 m over the leader.
+- **Getting out:** stock, an AI pilot gets out only through its fly agent's own landing: `UnitFlyAgent`'s
+  FLY state (4) lands at an AI "land" hint node within 80 m (`IsNearLandingPt`, P `0x00790AC0`, M `0x005AED00`,
+  every 3 s; `HintManager::RequestLandHints`, P `0x005EC510`: hint type 0x20, each tied to a command post its
+  team may spawn at; not the players' landing regions), its LAND state (5) waits for the flyer to be down,
+  then DROPOFF (6) calls `SetExitVehicle` with that post (`AILowLevel::SetExitVehicle`, M `0x005A2170`: the
+  exit flag 8 at +0x74, the post at +0x78). `UnitController::UpdateHighLevel` also gets AI out at the end of
+  a game; `UnitFlyAgent` swallows damage, so no pilot bails out. For a wingman the agent's one CALL to
+  `IsNearLandingPt` (M `0x005AFDD3`) answers no (it lands only with its leader), and its two CALLs to
+  `TakeOff` (TAKEOFF and FLY states, M `0x005AF154`, `0x005AF323`) do nothing while it is down beside its
+  leader. Landed there, its pilot is got out with `SetExitVehicle` and no post, as the end-of-game exit does
+  (M `0x005A079E`). The squad command `EVT_SC_GetOutOfVehicle` (20) would do the same through the unit's
+  command queue, and keep it out of vehicles for 20 s (`UnitAgent::HandleSquadCommandEvent`, P
+  `0x007844D0`).
 - **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes' shapes and the passes flown, landing and
   the circle overhead, simulated); `tests/flyer_wingmen_abi_tests.py` (149 modtools checks, every guard's
   bytes); the mutation suite's `orders` (all caught).
