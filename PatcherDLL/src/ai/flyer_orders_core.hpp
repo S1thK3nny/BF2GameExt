@@ -309,13 +309,14 @@ struct Run {
 };
 
 // `aheadCos`: the cosine between its nose and the line to the target. Past it
-// (behind it, inside where it would turn back) it pulls out as well.
-inline void update_run(Run& r, const RunShape& s, float distance, float aheadCos, double now)
+// (behind it, inside where it would turn back) it pulls out as well, and so it
+// does inside where it would turn back with its line to the target `blocked`.
+inline void update_run(Run& r, const RunShape& s, float distance, float aheadCos, double now, bool blocked = false)
 {
    if (!std::isfinite(distance)) return;
    if (!r.extending) {
       const bool passed = std::isfinite(aheadCos) && aheadCos < 0.0f && distance < s.extendTo;
-      if (distance < s.breakAt || passed) {
+      if (distance < s.breakAt || passed || (blocked && distance < s.extendTo)) {
          r.extending = true;
          r.since = now;
       }
@@ -325,13 +326,120 @@ inline void update_run(Run& r, const RunShape& s, float distance, float aheadCos
    }
 }
 
-// Where it steers while pulling out: straight on along its heading, levelled,
-// and up.
-inline V3 extend_point(V3 me, V3 nose)
+// Where it steers while pulling out along `out`: straight on along its heading,
+// flattened off `out`, and kRunClimb out (up, for a target under open sky).
+inline V3 extend_point_along(V3 me, V3 nose, V3 out)
 {
-   V3 flat{nose.x, 0.0f, nose.z};
-   if (!flyer_wingmen::normalise(flat)) flat = V3{0.0f, 0.0f, 1.0f};
-   return me + flat * kRunOut + V3{0.0f, kRunClimb, 0.0f};
+   V3 flat = nose - out * flyer_wingmen::dot(nose, out);
+   if (!flyer_wingmen::normalise(flat)) {
+      const V3 any = std::fabs(out.y) < 0.9f ? V3{0.0f, 1.0f, 0.0f} : V3{0.0f, 0.0f, 1.0f};
+      flat = any - out * flyer_wingmen::dot(any, out);
+      flyer_wingmen::normalise(flat);
+   }
+   return me + flat * kRunOut + out * kRunClimb;
+}
+
+inline V3 extend_point(V3 me, V3 nose) { return extend_point_along(me, nose, V3{0.0f, 1.0f, 0.0f}); }
+
+// ---- Line of sight, and targets shut in from above -------------------------------------
+// A wingman fires only with nothing solid between it and its target: the line to
+// it is looked along to kSightShort short of it, so what the target is mounted
+// on right at it does not count.
+//
+// A pass assumes open sky over its target. Where a ray down onto the target from
+// kOpenReach overhead meets something first (a hardpoint under a capital ship's
+// hull, a gun under an overhang), the passes come in along its most open side
+// instead (pick_open): of kApproachDirs directions out from it (up first, the
+// other five axes, the eight corners), those whose line in from kOpenReach out
+// is clear, the nearest the wingman's side, up a little first; with none clear,
+// the clearest. Off that side (further than kOnSideCos from it, seen from the
+// target) the wingman flies out to kSetupRange along it first, by way of a point
+// it reaches in a straight line where the straight line there is blocked
+// (pick_via), else further out across that side, at its own height, until it
+// sees the setup point (escape_point); and it pulls out along it, not up. The
+// rays look in from kOpenReach out, so what they meet is the outside of whatever
+// shuts the target in (begun nearer, they could begin inside a big ship).
+constexpr float kSightShort   = 10.0f;    // m
+constexpr int   kApproachDirs = 14;
+constexpr float kOpenReach    = 500.0f;   // m
+constexpr float kSetupRange   = 400.0f;   // m
+constexpr float kOnSideCos    = 0.5f;     // within 60 degrees of the open side
+constexpr float kUpBias       = 0.25f;
+constexpr float kEscapeStep   = 400.0f;   // m
+
+inline V3 approach_dir(int k)
+{
+   constexpr float c = 0.57735027f;   // 1 / sqrt(3)
+   switch (k) {
+   case 0: return V3{0.0f, 1.0f, 0.0f};
+   case 1: return V3{0.0f, -1.0f, 0.0f};
+   case 2: return V3{1.0f, 0.0f, 0.0f};
+   case 3: return V3{-1.0f, 0.0f, 0.0f};
+   case 4: return V3{0.0f, 0.0f, 1.0f};
+   case 5: return V3{0.0f, 0.0f, -1.0f};
+   default: {
+      const int n = k - 6;
+      return V3{n & 1 ? -c : c, n & 2 ? -c : c, n & 4 ? -c : c};
+   }
+   }
+}
+
+// `clear[k]`: how far out along approach_dir(k) its line in is clear (kOpenReach:
+// all of it); `toMe`: from the target to the wingman.
+inline int pick_open(const float* clear, V3 toMe)
+{
+   const bool aimed = flyer_wingmen::normalise(toMe);
+   int best = -1, clearest = -1;
+   float bestScore = 0.0f;
+   for (int k = 0; k < kApproachDirs; ++k) {
+      if (std::isfinite(clear[k]) && (clearest < 0 || clear[k] > clear[clearest])) clearest = k;
+      if (!(clear[k] >= kOpenReach)) continue;
+      const V3 d = approach_dir(k);
+      const float score = (aimed ? flyer_wingmen::dot(d, toMe) : 0.0f) + kUpBias * d.y;
+      if (best < 0 || score > bestScore) {
+         best = k;
+         bestScore = score;
+      }
+   }
+   return best >= 0 ? best : clearest >= 0 ? clearest : 0;
+}
+
+// Whether the wingman is on its target's open side, to pass at it from there.
+inline bool on_open_side(V3 me, V3 target, V3 open)
+{
+   V3 to = me - target;
+   if (!flyer_wingmen::normalise(to)) return true;
+   return flyer_wingmen::dot(to, open) >= kOnSideCos;
+}
+
+inline V3 setup_point(V3 target, V3 open) { return target + open * kSetupRange; }
+
+// Of the points out along each approach direction, the nearest the wingman
+// reaches in a straight line and that sees the setup point; -1 for none.
+inline int pick_via(const bool* reachable, const bool* seesSetup, const float* dist)
+{
+   int best = -1;
+   for (int k = 0; k < kApproachDirs; ++k)
+      if (reachable[k] && seesSetup[k] && std::isfinite(dist[k]) && (best < 0 || dist[k] < dist[best])) best = k;
+   return best;
+}
+
+// With no such point: kEscapeStep further out from the target across its open
+// side (the line from the target to it, the open side taken out), at its own
+// height along that side; right over the target, along its heading so.
+inline V3 escape_point(V3 me, V3 target, V3 open, V3 nose)
+{
+   V3 out = me - target;
+   out = out - open * flyer_wingmen::dot(out, open);
+   if (!flyer_wingmen::normalise(out)) {
+      out = nose - open * flyer_wingmen::dot(nose, open);
+      if (!flyer_wingmen::normalise(out)) {
+         const V3 any = std::fabs(open.y) < 0.9f ? V3{0.0f, 1.0f, 0.0f} : V3{0.0f, 0.0f, 1.0f};
+         out = any - open * flyer_wingmen::dot(any, open);
+         flyer_wingmen::normalise(out);
+      }
+   }
+   return me + out * kEscapeStep;
 }
 
 // ---- Landing with the leader ------------------------------------------------------------

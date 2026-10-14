@@ -134,7 +134,9 @@ for text in (r'"\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10', r'"\x8B\x86\x38\
              r'"\x80\x49\x74\x08\x8B\x44\x24\x04\x89\x41\x78\xC2\x04\x00", 14',
              # The markers: TargetManager::AddMarker and RemoveMarker.
              r'"\x8B\x44\x24\x04\x83\xEC\x0C\x55\x33\xED\x3B\xC5", 12',
-             r'"\x8B\x44\x24\x08\x55\x8B\x6C\x24\x08\x85\xED", 11'):
+             r'"\x8B\x44\x24\x08\x55\x8B\x6C\x24\x08\x85\xED", 11',
+             # Holding fire: AttackHelper::Reset.
+             r'"\xDB\x05\x84\x19\xAD\x00\x53\x33\xDB\x56\x8B\xF1\xD9\x5E\x1C", 15'):
     assert text in source, text
 core = (SRC / "ai/flyer_wingmen_core.hpp").read_text()
 assert constant(core, "kMaxClassFormations") == 10 and constant(core, "kMaxShapePoints") == 16
@@ -160,11 +162,12 @@ NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "fl
          "hud_message", "hud_message_color", "localize_find", "player_controller_update",
          "processed_inputs_get_digital", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
          "fly_agent_land_hint_call", "fly_agent_land_hint", "fly_agent_take_off_call", "fly_agent_take_off_call2",
-         "ai_set_exit_vehicle", "target_manager_add_marker", "target_manager_remove_marker")
+         "ai_set_exit_vehicle", "target_manager_add_marker", "target_manager_remove_marker",
+         "attack_helper_reset")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
           0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x0059B460, 0x00743A30,
           0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
-          0x005A2170, 0x0048E3A0, 0x0048E650)
+          0x005A2170, 0x0048E3A0, 0x0048E650, 0x005B4230)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -402,6 +405,18 @@ checks = {
     0x0059EC20: [("mov", "eax, dword ptr [ecx + 0x2c0]"), ("test", "eax, eax"), ("je", "0x59ec32"),
                  ("lea", "ecx, [eax + 0x10]"), ("jmp", "0x4166d0"), ("ret", "4")],
     0x004166D0: [("jmp", "0x5b43d0")],
+    # SetVisibleTarget first calls AttackHelper::Reset (thiscall() on the AttackHelper, RET):
+    # its priority from 0x00AD1984, the target and its handle cleared, mWaitingForTarget
+    # (+0x2C) and mTargetVisible (+8) false, last seen at -1000 (+0x18), the wait delay
+    # reset, mAllowEnemyUnseen (+0x24) false. ForceSetAttackHelperTarget cannot clear a
+    # target itself: SetVisibleTarget then reads the target's position.
+    0x00407AA9: [("jmp", "0x5b4230")],
+    0x005B4230: [("fild", "dword ptr [0xad1984]"), ("push", "ebx"), ("xor", "ebx, ebx"), ("push", "esi"),
+                 ("mov", "esi, ecx"), ("fstp", "dword ptr [esi + 0x1c]"), ("mov", "dword ptr [esi], ebx"),
+                 ("mov", "dword ptr [esi + 4], ebx"), ("mov", "byte ptr [esi + 0x2c], bl"),
+                 ("mov", "byte ptr [esi + 8], bl"), ("mov", "dword ptr [esi + 0x18], 0xc47a0000"),
+                 ("call", "0x41062c"), ("mov", "byte ptr [esi + 0x24], bl"), ("pop", "esi"), ("pop", "ebx"),
+                 ("ret", "")],
     0x005B43D0: [("sub", "esp, 0xc"), ("push", "esi"), ("push", "edi"), ("mov", "esi, ecx"), ("call", "0x407aa9"),
                  ("mov", "edi, dword ptr [esp + 0x18]"), ("test", "edi, edi"), ("mov", "dword ptr [esi], edi"),
                  ("je", "0x5b43ee"), ("mov", "eax, dword ptr [edi + 0x204]")],

@@ -74,7 +74,7 @@ constexpr uint32_t kCtl_Reticule       = 0x164;  // Controllable::mReticuleTarge
 constexpr uint32_t kCtl_ReticuleHandle = 0x168;
 constexpr int      kReticuleChannels   = 2;
 constexpr uint32_t kUC_Agent           = 0x2C0;  // UnitController::mAgent ...
-constexpr uint32_t kAgent_AttackTarget = 0x10;   // ... its AttackHelper's target ...
+constexpr uint32_t kAgent_AttackTarget = 0x10;   // ... its AttackHelper (its target first) ...
 constexpr uint32_t kAgent_AttackHandle = 0x14;   // ... and that one's handle
 // The comm keys, read where the player's controller reads its other inputs:
 // PlayerController::mJoystick, its ProcessedInputs, whose +0x10 has bit n set
@@ -174,6 +174,13 @@ constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
 constexpr double kKeyRepeat     = 0.3;   // s: one press, seen by every flyer's update that frame
 constexpr double kForceEvery    = 0.5;   // s between settings of a chasing wingman's attack target
+constexpr double kSightEvery    = 0.25;  // s between looks along its line to its target
+constexpr double kOpenEvery     = 2.0;   // s between workings-out of its target's open side
+constexpr float  kViaReached    = 100.0f;   // m: the way round to the open side, passed
+constexpr double kExitAgain     = 2.0;   // s: a landed wingman's pilot asked to get out again ...
+constexpr int    kExitTries     = 4;     // ... this many times in all
+constexpr double kLandStuck     = 10.0;  // s still coming down after being told to land: logged
+constexpr double kSettleFor     = 20.0;  // s a landed wingman of a leader gone has to get its pilot out
 constexpr int    kMaxReports    = 400;
 constexpr int    kMaxSquadLogs  = 300;
 constexpr int    kMaxOrderLogs  = 400;
@@ -192,6 +199,7 @@ using fn_calc_dest_t = bool(__thiscall*)(void* flyer, float dt, void* dest, floa
 using fn_find_shape_t = const uint8_t*(__cdecl*)(uint32_t name);
 using fn_locked_t     = uint8_t*(__thiscall*)(void* controllable);
 using fn_force_t      = void(__thiscall*)(void* uc, void* target);
+using fn_attack_reset_t = void(__thiscall*)(void* attackHelper);
 using fn_affiliation_t = int(__thiscall*)(void* me, void* other);
 using fn_message_t    = void(__cdecl*)(int player, const wchar_t* text, const uint8_t* color);
 using fn_localize_t   = const wchar_t*(__cdecl*)(uint32_t hash, bool nullIfMissing);
@@ -225,6 +233,7 @@ double      s_ticksPerSecond = 0.0;
 // Orders (null until their reads are checked).
 fn_locked_t      s_lockedTarget = nullptr;   // Controllable::GetTargetLockedObj
 fn_force_t       s_forceTarget  = nullptr;   // UnitController::ForceSetAttackHelperTarget
+fn_attack_reset_t s_attackReset = nullptr;   // AttackHelper::Reset: its target let go (holding fire)
 fn_affiliation_t s_affiliation  = nullptr;   // GameObject::GetAffiliationToMe
 fn_message_t     s_message      = nullptr;   // the HUD's message line
 const uint8_t*   s_messageColor = nullptr;   // the trooper squad commands' colour
@@ -360,8 +369,20 @@ struct Wingman {
    int      land = 0;          // one of the kLand values below
    V3       spot;              // where it lands
    bool     touchedDown = false;   // landed beside its leader (OnWingmanLanded)
+   double   landAt = 0.0;      // told to land (EntityFlyer::Land) ...
+   bool     stuckLogged = false;   // ... and said to be still coming down long after
+   double   exitAt = 0.0;      // its pilot last asked to get out ...
+   int      exitTries = 0;     // ... how many times
    int      pilot = -1;        // the character flying it as it joined (a script's events), or -1
    uint32_t markTeams = 0;     // the player's wingman: the teams its marker shows to, while it has one
+   // Its target's line of sight and open side (flyer_orders_core.hpp):
+   bool     sees = true;       // nothing solid between it and its target, as last looked ...
+   double   seenAt = -1e9;     // ... when
+   V3       open{0.0f, 1.0f, 0.0f};   // the side its passes come in along (up: open sky) ...
+   bool     sky = true;        // ... its target is under open sky: passes as at the ground ...
+   double   openAt = -1e9;     // ... as worked out then ...
+   bool     hasVia = false;    // ... and the way round to that side where the straight line there is blocked
+   V3       via;
 };
 
 // A wingman of the player's while the player lands and takes off.
@@ -1359,6 +1380,12 @@ void chase(Wingman& w, uint8_t* t, double now)
    w.run = flyer_orders::Run{false, now};
    w.chasedFrom = now;
    w.forcedAt = -1e9;
+   w.sees = true;
+   w.seenAt = -1e9;
+   w.sky = true;
+   w.open = V3{0.0f, 1.0f, 0.0f};
+   w.openAt = -1e9;
+   w.hasVia = false;
    // Its passes and its gap, from its own weapon at its cruising speed.
    float minRange = 0.0f, optimal = 0.0f, maxRange = 0.0f;
    const bool armed = primary_ranges(w.obj, minRange, optimal, maxRange);
@@ -1471,13 +1498,58 @@ void set_order(Formation& f, Order o, double now, bool quiet = false)
    if (f.leader && flying(f.leader) && !f.landing) assign_targets(f, f.leader, now);
 }
 
+// Whether anything is in the way from one point to another (the same ray, the
+// same types); how far along the first thing is.
+bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = nullptr)
+{
+   if (!s_rayHit) return false;
+   V3 dir = to - from;
+   const float length = flyer_wingmen::length(dir);
+   if (!(length > 0.01f) || !flyer_wingmen::normalise(dir)) return false;
+   const float start[3] = {from.x, from.y, from.z};
+   const float d[3] = {dir.x, dir.y, dir.z};
+   void* hit = nullptr;
+   float normal[3] = {0.0f, 1.0f, 0.0f};
+   uint8_t* ignore[2] = {ignoreA, ignoreB};
+   const float fraction = s_rayHit(start, d, length, &hit, normal, ignore, ignoreB ? 2 : 1, kGroundMask, 0);
+   if (!(fraction >= 0.0f && fraction < 1.0f)) return false;
+   if (along) *along = fraction * length;
+   return true;
+}
+
+// Whether a wingman sees its target: nothing solid (the landing ray's types:
+// buildings, props, terrain, water; not vehicles) on the line to it, looked
+// along to kSightShort short of it.
+bool sees_target(uint8_t* flyer, uint8_t* t)
+{
+   const V3 me = position_of(flyer), at = position_of(t);
+   V3 dir = at - me;
+   const float d = flyer_wingmen::length(dir);
+   if (!(d > flyer_orders::kSightShort) || !flyer_wingmen::normalise(dir)) return true;
+   return !blocked(me, at - dir * flyer_orders::kSightShort, flyer, t);
+}
+
 // A chasing wingman's AI aims and fires at its target: its AttackHelper is
 // set to it (as UnitFlyAgent::IsNearATAT forces a walker on its crew), no
-// more than every kForceEvery, and only while it aims at something else.
+// more than every kForceEvery, and only while it aims at something else; but
+// only while it sees it (sees_target, looked at every kSightEvery). Without the
+// line, the AttackHelper's target is let go (AttackHelper::Reset, as it is
+// before every new target: ForceSetAttackHelperTarget cannot take none, it reads
+// the target's position), so it holds its fire at that one and takes on what
+// its own sight finds.
 void force_target(Wingman& w, double now)
 {
-   if (!s_forceTarget || !w.target || now - w.forcedAt < kForceEvery) return;
-   if (!valid_target(w.target, w.targetHandle) || attack_target_of(w.uc) == w.target) return;
+   if (!w.target || !valid_target(w.target, w.targetHandle)) return;
+   if (now - w.seenAt >= kSightEvery) {
+      w.sees = sees_target(w.obj, w.target);
+      w.seenAt = now;
+   }
+   if (!w.sees) {
+      if (s_attackReset && attack_target_of(w.uc) == w.target)
+         if (uint8_t* const agent = *(uint8_t**)(w.uc + kUC_Agent)) s_attackReset(agent + kAgent_AttackTarget);
+      return;
+   }
+   if (!s_forceTarget || now - w.forcedAt < kForceEvery || attack_target_of(w.uc) == w.target) return;
    w.forcedAt = now;
    s_forceTarget(w.uc, w.target);
 }
@@ -1762,25 +1834,6 @@ bool ground_at(V3 from, float length, uint8_t* ignoreA, uint8_t* ignoreB, float&
    return true;
 }
 
-// Whether anything is in the way from one point to another (the same ray, the
-// same types); how far along the first thing is.
-bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = nullptr)
-{
-   if (!s_rayHit) return false;
-   V3 dir = to - from;
-   const float length = flyer_wingmen::length(dir);
-   if (!(length > 0.01f) || !flyer_wingmen::normalise(dir)) return false;
-   const float start[3] = {from.x, from.y, from.z};
-   const float d[3] = {dir.x, dir.y, dir.z};
-   void* hit = nullptr;
-   float normal[3] = {0.0f, 1.0f, 0.0f};
-   uint8_t* ignore[2] = {ignoreA, ignoreB};
-   const float fraction = s_rayHit(start, d, length, &hit, normal, ignore, ignoreB ? 2 : 1, kGroundMask, 0);
-   if (!(fraction >= 0.0f && fraction < 1.0f)) return false;
-   if (along) *along = fraction * length;
-   return true;
-}
-
 // Whether something is over a point within kLandProbe: a roof (a hangar's).
 bool roofed(V3 at, uint8_t* ignoreA, uint8_t* ignoreB, float* height = nullptr)
 {
@@ -1903,6 +1956,7 @@ void end_landing(Formation& f)
 // Once a second: the leader's state, and each wingman's.
 void update_landing(Formation& f, uint8_t* leader)
 {
+   const double now = seconds();
    const int ls = state_of(leader);
    const bool down = ls == kStateLanding || ls == kStateLanded;
    if (down && !f.landing) start_landing(f, leader, seconds());
@@ -1920,12 +1974,95 @@ void update_landing(Formation& f, uint8_t* leader)
       // Down, it gets out (AILowLevel::SetExitVehicle, with no command post, as
       // the AI's own end-of-game exit asks), unless its class says
       // WingmanExitOnLand = 0: then it waits aboard for its leader.
+      // Asked again every kExitAgain while its pilot is still aboard (its flyer
+      // still flown by its controller; once out, it is let go, "landed"),
+      // kExitTries in all.
       if (w.land == kLandDown && state_of(w.obj) == kStateLanded && s_exitVehicle &&
           flyer_wingmen::exits_on_land(keys_of(w.obj))) {
          s_exitVehicle(w.uc + kUC_LowLevel, nullptr);
          w.land = kLandOut;
+         w.exitAt = now;
+         w.exitTries = 1;
          if (order_log()) install_log("[Wingmen] slot %d (#%u) landed: its pilot gets out", w.slot + 1, w.handle);
+      } else if (w.land == kLandOut && s_exitVehicle && state_of(w.obj) == kStateLanded &&
+                 *(uint8_t* const*)(w.obj + kFly_Ctrl) == w.uc && now - w.exitAt >= kExitAgain &&
+                 w.exitTries < kExitTries) {
+         s_exitVehicle(w.uc + kUC_LowLevel, nullptr);
+         w.exitAt = now;
+         ++w.exitTries;
+         if (order_log())
+            install_log("[Wingmen] slot %d (#%u) still aboard: its pilot asked to get out again (%d)", w.slot + 1,
+                        w.handle, w.exitTries);
       }
+      if (w.land == kLandDown && state_of(w.obj) == kStateLanding && now - w.landAt > kLandStuck && !w.stuckLogged) {
+         w.stuckLogged = true;
+         if (order_log())
+            install_log("[Wingmen] slot %d (#%u) still coming down %.0f s after it was told to land, %.0f m from its "
+                        "spot",
+                        w.slot + 1, w.handle, now - w.landAt, (double)flyer_orders::across(position_of(w.obj), w.spot));
+      }
+   }
+}
+
+// ---- Getting out with the leader gone -------------------------------------------------
+// A wingman landed or landing beside a leader whose pilot got out (so the flight
+// is let go) still gets its own pilot out: it settles, and is asked to get out
+// once down, again every kExitAgain, kExitTries in all, for kSettleFor at most.
+// Meanwhile its fly agent does not take it up again (agent_take_off_mt).
+struct Settling {
+   uint8_t* obj = nullptr;
+   uint32_t handle = 0;
+   uint8_t* uc = nullptr;
+   double   since = 0.0;
+   double   exitAt = -1e9;
+   int      tries = 0;
+};
+constexpr int kMaxSettling = 2 * flyer_wingmen::kMaxWingmen;
+Settling s_settling[kMaxSettling];
+int      s_settlingCount = 0;
+
+void settle(const Formation& f, double now)
+{
+   if (!s_exitVehicle) return;
+   for (int i = 0; i < f.count; ++i) {
+      const Wingman& w = f.wing[i];
+      if ((w.land != kLandDown && w.land != kLandOut) || !flyer_wingmen::exits_on_land(keys_of(w.obj))) continue;
+      if (handle_of(w.obj) != w.handle || *(uint8_t* const*)(w.obj + kFly_Ctrl) != w.uc) continue;
+      if (s_settlingCount >= kMaxSettling) return;
+      Settling& e = s_settling[s_settlingCount++];
+      e = Settling{w.obj, w.handle, w.uc, now, w.land == kLandOut ? w.exitAt : -1e9, w.exitTries};
+      if (order_log())
+         install_log("[Wingmen] slot %d (#%u) gets its pilot out once down, its leader gone", w.slot + 1, w.handle);
+   }
+}
+
+bool settling(const uint8_t* obj)
+{
+   for (int i = 0; i < s_settlingCount; ++i)
+      if (s_settling[i].obj == obj && handle_of(obj) == s_settling[i].handle) return true;
+   return false;
+}
+
+void update_settling(double now)
+{
+   for (int i = s_settlingCount - 1; i >= 0; --i) {
+      Settling& e = s_settling[i];
+      const bool gone = handle_of(e.obj) != e.handle || !alive(e.obj);
+      const bool out = !gone && *(uint8_t* const*)(e.obj + kFly_Ctrl) != e.uc;
+      if (!gone && !out && now - e.since <= kSettleFor) {
+         if (s_exitVehicle && state_of(e.obj) == kStateLanded && now - e.exitAt >= kExitAgain && e.tries < kExitTries) {
+            s_exitVehicle(e.uc + kUC_LowLevel, nullptr);
+            e.exitAt = now;
+            ++e.tries;
+         }
+         continue;
+      }
+      if (order_log())
+         install_log("[Wingmen] #%u %s", e.handle,
+                     out ? "landed: its pilot got out" : gone ? "gone before its pilot got out"
+                                                           : "still aboard: no longer asked to get out");
+      s_settling[i] = s_settling[--s_settlingCount];
+      s_settling[s_settlingCount] = Settling{};
    }
 }
 
@@ -1936,6 +2073,8 @@ void maybe_land(Wingman& w)
    if (w.land != kLandComing || !flying(w.obj) || !flyer_orders::may_land(position_of(w.obj), w.spot)) return;
    s_land(w.obj);
    w.land = kLandDown;
+   w.landAt = seconds();
+   w.stuckLogged = false;
    if (order_log())
       install_log("[Wingmen] slot %d (#%u) lands %.0f m from its spot", w.slot + 1, w.handle,
                   (double)flyer_orders::across(position_of(w.obj), w.spot));
@@ -1976,8 +2115,10 @@ const Line& line_for(Order o)
 
 void tick(double now)
 {
+   update_settling(now);
    uint8_t* const leader = player_flyer();
    if (!leader || !leads(leader)) {
+      if (s_player.landing) settle(s_player, now);
       release_all(s_player, leader ? "the player's flyer leads none" : "the player is not flying", "leader");
       s_player.leader = nullptr;
       s_player.leaderHandle = 0;
@@ -1987,6 +2128,7 @@ void tick(double now)
       reset_orders(s_player);
    } else {
       if (leader != s_player.leader || handle_of(leader) != s_player.leaderHandle) {
+         if (s_player.landing) settle(s_player, now);
          release_all(s_player, "a new leader", "leader");
          s_player.leader = leader;
          s_player.leaderHandle = handle_of(leader);
@@ -2574,6 +2716,55 @@ void write_dest(uint8_t* flyer, Steer& st, V3 heading, int safeHeight)
 // speed once its own gap behind it; at anything else, passes
 // (flyer_orders_core.hpp): a dive at it with the safe height let go near it,
 // then out and up, as far as its own weapon makes them; at its own speeds.
+// Its target's open side (flyer_orders_core.hpp, pick_open), worked out again
+// every kOpenEvery: a ray in onto it from kOpenReach out along each approach
+// direction, up first; with up clear, open sky. Off that side and with the
+// straight line out to it blocked, the nearest point kSetupRange out along an
+// approach direction it reaches in a straight line and that sees the setup
+// point (pick_via), else further out across that side (escape_point), looked at
+// again in kOpenEvery.
+void refresh_open(uint8_t* flyer, Wingman& w, V3 target, double now)
+{
+   if (now - w.openAt < kOpenEvery) return;
+   w.openAt = now;
+   uint8_t* const t = w.target;
+   float clear[flyer_orders::kApproachDirs];
+   for (int k = 0; k < flyer_orders::kApproachDirs; ++k) {
+      const V3 d = flyer_orders::approach_dir(k);
+      float along = 0.0f;
+      clear[k] = blocked(target + d * flyer_orders::kOpenReach, target + d * flyer_orders::kSightShort, flyer, t, &along)
+                    ? flyer_orders::kOpenReach - along
+                    : flyer_orders::kOpenReach;
+   }
+   const V3 me = position_of(flyer);
+   const bool wasSky = w.sky;
+   w.sky = clear[0] >= flyer_orders::kOpenReach;
+   w.open = w.sky ? V3{0.0f, 1.0f, 0.0f} : flyer_orders::approach_dir(flyer_orders::pick_open(clear, me - target));
+   w.hasVia = false;
+   if (!w.sky && !flyer_orders::on_open_side(me, target, w.open)) {
+      const V3 setup = flyer_orders::setup_point(target, w.open);
+      if (blocked(me, setup, flyer, t)) {
+         bool reach[flyer_orders::kApproachDirs], seesSetup[flyer_orders::kApproachDirs];
+         float dist[flyer_orders::kApproachDirs];
+         for (int k = 0; k < flyer_orders::kApproachDirs; ++k) {
+            const V3 p = target + flyer_orders::approach_dir(k) * flyer_orders::kSetupRange;
+            dist[k] = flyer_wingmen::length(p - me);
+            reach[k] = dist[k] >= kViaReached && !blocked(me, p, flyer, t);   // not one it is at
+            seesSetup[k] = reach[k] && !blocked(p, setup, flyer, t);
+         }
+         const int v = flyer_orders::pick_via(reach, seesSetup, dist);
+         const float* wm = matrix_of(flyer);
+         const V3 nose = wm ? row(wm, 2) : V3{0.0f, 0.0f, 1.0f};
+         w.hasVia = true;
+         w.via = v >= 0 ? target + flyer_orders::approach_dir(v) * flyer_orders::kSetupRange
+                        : flyer_orders::escape_point(me, target, w.open, nose);
+      }
+   }
+   if (w.sky != wasSky && order_log())
+      install_log("[Wingmen] slot %d (#%u): #%u is %s", w.slot + 1, w.handle, w.targetHandle,
+                  w.sky ? "under open sky: passes as ever" : "shut in from above: passes along its open side");
+}
+
 bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
 {
    uint8_t* const t = w.target;
@@ -2599,14 +2790,25 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
       st.point = flyer_real_flight::pursuit_point(me, mySpeed, target, targetVel);
       speed = flyer_real_flight::pursuit_speed(d, aheadCos, flyer_wingmen::length(targetVel), lo, hi, w.shape.gap);
    } else {
-      flyer_orders::update_run(w.run, w.shape, d, aheadCos, now);
-      if (w.run.extending) {
-         st.point = flyer_orders::extend_point(me, nose);
+      refresh_open(flyer, w, target, now);
+      if (!w.run.extending && !w.sky && !flyer_orders::on_open_side(me, target, w.open)) {
+         // Round to its open side first; past the way round, it looks again now.
+         if (w.hasVia && flyer_wingmen::length(w.via - me) < kViaReached) {
+            w.openAt = -1e9;
+            refresh_open(flyer, w, target, now);
+         }
+         st.point = w.hasVia ? w.via : flyer_orders::setup_point(target, w.open);
          speed = hi;
       } else {
-         st.point = flyer_real_flight::pursuit_point(me, mySpeed, target, targetVel);
-         speed = mid;
-         safe = kSafeHeightTaper;
+         flyer_orders::update_run(w.run, w.shape, d, aheadCos, now, !w.sees);
+         if (w.run.extending) {
+            st.point = flyer_orders::extend_point_along(me, nose, w.open);
+            speed = hi;
+         } else {
+            st.point = flyer_real_flight::pursuit_point(me, mySpeed, target, targetVel);
+            speed = mid;
+            safe = kSafeHeightTaper;
+         }
       }
    }
    V3 heading = st.point - me;
@@ -2874,6 +3076,12 @@ bool install_orders(uintptr_t base)
    s_messageColor = (const uint8_t*)resolve(base, a->hud_message_color);
    s_localize = (fn_localize_t)resolve(base, a->localize_find);
    s_commKeys = install_comm_keys(base);
+   // Holding fire: AttackHelper::Reset, thiscall() on the AttackHelper, RET, as
+   // SetVisibleTarget calls it before taking a target (its mCurPriority from
+   // 0x00AD1984 first, then the target and its handle cleared).
+   if (a->attack_helper_reset &&
+       starts_with(base, a->attack_helper_reset, "\xDB\x05\x84\x19\xAD\x00\x53\x33\xDB\x56\x8B\xF1\xD9\x5E\x1C", 15))
+      s_attackReset = (fn_attack_reset_t)resolve(base, a->attack_helper_reset);
    return true;
 }
 
@@ -2931,7 +3139,7 @@ void __fastcall agent_take_off_mt(uint8_t* flyer, void*)
    __try {
       Formation* f = nullptr;
       const Wingman* w = find(flyer, &f);
-      wait = w && f->landing && w->land == kLandDown;
+      wait = (w && f->landing && w->land == kLandDown) || settling(flyer);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       wait = false;
    }
@@ -3359,6 +3567,8 @@ void flyer_wingmen_mission_end()
    s_lostReason = nullptr;
    s_commHeld = 0;
    s_squadHold = flyer_orders::SquadHold{};
+   for (Settling& e : s_settling) e = Settling{};
+   s_settlingCount = 0;
    s_mapShapesLogged = false;
 }
 
@@ -3437,10 +3647,12 @@ void flyer_wingmen_install(uintptr_t base)
                g_flyerWingmenAuto ? "called up at takeoff" : "called up on the squad key");
    if (install_orders(base))
       install_log("[Wingmen] orders installed: the squad key calls a flight up, picks the friendly flyer under your "
-                  "reticule, or forms up or engages, and held for a second breaks the flight off; %s",
+                  "reticule, or forms up or engages, and held for a second breaks the flight off; %s; a chasing "
+                  "wingman fires only with a line of sight to its target%s",
                   s_commKeys ? "the comm keys Attack and Defend (F11 and F12 by default) order attack my target and "
                                "cover me"
-                             : "the comm keys' orders NOT installed (the player's inputs are read differently)");
+                             : "the comm keys' orders NOT installed (the player's inputs are read differently)",
+                  s_attackReset ? "" : " (its own AI may still fire without one: AttackHelper::Reset differs)");
    else
       install_log("[Wingmen] orders NOT installed: their reads differ; the squad key forms up or engages, with no "
                   "message");
@@ -3508,6 +3720,7 @@ void flyer_wingmen_uninstall()
    s_exitVehicle = nullptr;
    s_lockedTarget = nullptr;
    s_forceTarget = nullptr;
+   s_attackReset = nullptr;
    s_affiliation = nullptr;
    s_message = nullptr;
    s_messageColor = nullptr;

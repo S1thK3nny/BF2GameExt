@@ -1011,6 +1011,93 @@ void squad_key_rules()
    assert(call_up_order(false, Order::Cover) == Order::Cover);
 }
 
+// A pass's line of sight and its target's open side (a hardpoint under a
+// capital ship's hull): the approach directions, which side is open, being on
+// it, the way round to it, pulling out along any side, and a blocked run
+// broken off.
+void attack_sides()
+{
+   using namespace flyer_orders;
+   for (int k = 0; k < kApproachDirs; ++k) {
+      assert(near(length(approach_dir(k)), 1.0f, 1e-4f));
+      for (int j = 0; j < k; ++j) assert(!near(approach_dir(k), approach_dir(j)));
+   }
+   assert(kApproachDirs == 14 && near(approach_dir(0), V3{0, 1, 0}) && near(approach_dir(1), V3{0, -1, 0}));
+   // All of it open, 500 m in along each: up from above or from on top of it,
+   // and up a little before a corner as near the wingman.
+   float clear[kApproachDirs];
+   for (float& c : clear) c = 500.0f;
+   assert(pick_open(clear, V3{0, 300, 50}) == 0 && pick_open(clear, V3{}) == 0);
+   assert(pick_open(clear, V3{0.6f, 0.8f, 0}) == 0);
+   clear[5] = 499.0f;
+   assert(pick_open(clear, V3{0, 0, -300}) != 5);   // not quite open
+   // Under a hull: up and the upper corners shut, the rest open. From below and
+   // to one side, that side; from straight below, down; from above the ship, the
+   // first side as near.
+   for (int k = 0; k < kApproachDirs; ++k) clear[k] = approach_dir(k).y > 0.1f ? 40.0f : 500.0f;
+   assert(pick_open(clear, V3{300, -200, 0}) == 2);
+   assert(pick_open(clear, V3{0, -300, 0}) == 1);
+   assert(pick_open(clear, V3{0, 300, 0}) == 2);
+   // None open: the clearest, NaN never.
+   for (int k = 0; k < kApproachDirs; ++k) clear[k] = 10.0f * (float)k;
+   assert(pick_open(clear, V3{0, 300, 0}) == kApproachDirs - 1);
+   clear[0] = kNan;
+   clear[kApproachDirs - 1] = kNan;
+   assert(pick_open(clear, V3{0, 300, 0}) == kApproachDirs - 2);
+   for (float& c : clear) c = kNan;
+   assert(pick_open(clear, V3{0, 300, 0}) == 0);
+   // On the open side: within 60 degrees of it, seen from the target.
+   const V3 down{0, -1, 0};
+   assert(on_open_side(V3{0, -300, 0}, V3{}, down) && !on_open_side(V3{0, 300, 0}, V3{}, down));
+   assert(on_open_side(V3{0.819f, -0.574f, 0}, V3{}, down));    // 55 degrees off
+   assert(!on_open_side(V3{0.906f, -0.423f, 0}, V3{}, down));   // 65 degrees off
+   assert(on_open_side(V3{5, 5, 5}, V3{5, 5, 5}, down));        // on top of it
+   assert(near(setup_point(V3{10, 20, 30}, down), V3{10, -380, 30}));
+   // The way round: the nearest point it reaches that sees the setup point.
+   bool reach[kApproachDirs] = {}, sees[kApproachDirs] = {};
+   float dist[kApproachDirs];
+   for (int k = 0; k < kApproachDirs; ++k) dist[k] = 100.0f + (float)k;
+   assert(pick_via(reach, sees, dist) == -1);
+   reach[3] = sees[3] = true;
+   reach[5] = sees[5] = true;
+   reach[2] = true;
+   sees[4] = true;
+   assert(pick_via(reach, sees, dist) == 3);
+   dist[2] = dist[4] = 1.0f;   // nearer, but each only one of the two
+   assert(pick_via(reach, sees, dist) == 3);
+   dist[5] = 50.0f;
+   assert(pick_via(reach, sees, dist) == 5);
+   dist[3] = kNan;
+   dist[5] = 60.0f;
+   assert(pick_via(reach, sees, dist) == 5);   // NaN never
+   dist[5] = kNan;
+   assert(pick_via(reach, sees, dist) == -1);
+   // Else out across the open side at its own height; right over the target,
+   // along its heading flattened; straight up its nose, still across.
+   assert(near(escape_point(V3{100, 300, 0}, V3{}, down, V3{0, 0, 1}), V3{500, 300, 0}));
+   assert(near(escape_point(V3{0, 300, 0}, V3{}, down, V3{0, 0.6f, 0.8f}), V3{0, 300, 400}));
+   const V3 upNose = escape_point(V3{0, 300, 0}, V3{}, down, V3{0, 1, 0});
+   assert(near(upNose.y, 300.0f) && near(length(upNose - V3{0, 300, 0}), 400.0f, 1e-2f));
+   // Pulling out along a side; up is the pull-out passes at the ground make.
+   assert(near(extend_point_along(V3{}, V3{0, 0, 1}, V3{0, 1, 0}), extend_point(V3{}, V3{0, 0, 1})));
+   assert(near(extend_point_along(V3{0, -300, 0}, V3{0, 0.6f, 0.8f}, down), V3{0, -360, 300}));
+   const V3 outNose = extend_point_along(V3{}, down, down);
+   assert(near(outNose.y, -60.0f) && near(length(V3{outNose.x, 0, outNose.z}), 300.0f, 1e-2f));
+   // A run with its line blocked breaks off inside where it would turn back; not
+   // further out, nor with the line clear.
+   const RunShape s = run_shape(0.0f, 800.0f, 1600.0f, 60.0f);
+   Run r{false, 0.0};
+   update_run(r, s, 1000.0f, 1.0f, 1.0, true);
+   assert(r.extending && r.since == 1.0);
+   Run far{false, 0.0};
+   update_run(far, s, s.extendTo + 100.0f, 1.0f, 1.0, true);
+   assert(!far.extending);
+   Run seen{false, 0.0};
+   update_run(seen, s, 1000.0f, 1.0f, 1.0, false);
+   assert(!seen.extending);
+   assert(kSightShort == 10.0f);
+}
+
 int main()
 {
    the_vee();
@@ -1038,10 +1125,11 @@ int main()
    landing_places();
    mission_keys();
    squad_key_rules();
+   attack_sides();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
                "orders, passes at the ground, landing, landing places, mission keys, the squad key's hold and "
-               "picks).\n");
+               "picks, attack sides).\n");
    return 0;
 }

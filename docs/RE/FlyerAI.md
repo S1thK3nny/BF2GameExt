@@ -952,6 +952,30 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   (MinRange 200) pull out at 220 m. Its AI's attack
   is aimed at its target, at most every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing
   wingman flies at its own speeds, copies no tricks and may pull its own.
+- **Line of sight and the open side** (the user, 2026-10-14: "They don't seem to need line of sight before
+  trying to kill it, meaning they'll shoot a hardpoint on the underside of a ship from the top"). Forcing
+  the AttackHelper skips the AI's own choice of what it can see, and its fire follows its aim, hull or no
+  hull; and a pass treated everything off the ground as on open ground (in from wherever, out 60 m up).
+  Now a wingman fires only while a ray along its line to 10 m short of its target (the landing ray's types:
+  `COLL_STATIC`, terrain, water, so capital ships but no vehicles) meets nothing, looked along every
+  0.25 s; without it the AttackHelper's target is let go with `AttackHelper::Reset` (P `0x0040635C`
+  thunk, M `0x005B4230`: no target, not visible, last seen at -1000, as `SetVisibleTarget` starts;
+  `ForceSetAttackHelperTarget(null)` would crash, `SetVisibleTarget` going on to
+  `AIUtil::GetHisVisionTargetPos`, which calls through the target), and a pass inside where it would turn
+  back breaks off. A target off the ground whose ray down from 500 m up meets something first is shut in
+  from above; of 14 directions (the axes, the corners) the rays in onto it from 500 m out that are clear,
+  the nearest to the wingman, up a little first, is its open side (the rays look in from outside, so they
+  meet the outside of what shuts it in; begun nearer they could begin inside a big ship). Off that side
+  the wingman flies out to 400 m along it first: straight, else by the nearest of the 14 points 400 m out
+  it reaches in a straight line that sees there, else 400 m further out across that side at its own
+  height, looked at again every 2 s. It pulls out along the open side. Under open sky, passes are as they
+  were. `flyer_orders_core.hpp`: `pick_open`, `on_open_side`, `pick_via`, `escape_point`,
+  `extend_point_along`; `update_run` breaks a blocked run off.
+- **Forming up near a hangar** (the user: "how do wingmen attempting to form up work when I'm in a hangar
+  for example and they're still in open space?"): each flies straight at its slot beside the leader; the
+  game's CalculateDest lifts its point over what is in the way (it only climbs) and avoidance steers round
+  flyers only, so nothing routes a wingman through the hangar's mouth. Offered: a trail of the leader's
+  path for wingmen whose line to their slot is blocked, and the formation closing up under a roof.
 - **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from
   an attack or cover, form up). The comm keys Attack and Defend (F11 and F12 by default) order attack my target
   and cover me as each goes down, read from the player's processed inputs (its controller's +0x88, bits 26 and
@@ -1012,6 +1036,14 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   up again. One with no place, or up again first, circles 200 m round a point 150 m over the leader; with the
   leader under a roof, where that would take it into the roof (or the ship or the mountain round the hangar),
   it is let go instead (`GetWingmanLostReason` "noroom").
+- **Getting out, for sure** (the user, 2026-10-14: "AI don't always leave their ship when they land it as
+  wingmen"). In the user's log one wingman touched down and the player got out a second later, before the
+  once-a-second landing update had seen it landed: the flight was let go ("the player is not flying") with
+  its pilot still aboard. And `SetExitVehicle` was asked once only. Now a landed wingman still aboard is
+  asked again every 2 s, four times in all, and one landing or landed when the leader's pilot gets out (or
+  the leader changes) keeps being asked for 20 s, its fly agent kept from taking it up meanwhile. One still
+  coming down 10 s after `EntityFlyer::Land` is logged with its distance from its spot (one landed 25 m from
+  it, as far as the landing radius lets it, on ground nobody checked).
 - **Installing alongside other fixes:** `EntityFlyer::Land` may be detoured first by the LandOnArrival fix and
   `EntityFlyer::TakeOff` by the carrier fixes (`flyer_carrier_fixes.cpp`, from `lua_hooks_install`, before
   `flyer_wingmen_install`), each only adding to it, so a JMP at either is taken as theirs. The first build

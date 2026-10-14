@@ -74,8 +74,19 @@
 //     before its MinRange (10% outside it), never nearer than 2.5 s of its speed;
 //     behind a flyer, 7.5% of MaxRange back (50 to 200 m). Its AI's attack is
 //     aimed at its target (ForceSetAttackHelperTarget, at most every 0.5 s, and
-//     only while aimed elsewhere), so it fires at it. One further than 2500 m
-//     from its leader comes back.
+//     only while aimed elsewhere), so it fires at it, but only while it sees it:
+//     a ray (the landing ray's types, so buildings, props and capital ships but
+//     no vehicles) along the line to 10 m short of it, looked along every
+//     0.25 s; without the line its AttackHelper's target is let go
+//     (AttackHelper::Reset, ForceSetAttackHelperTarget taking no "none") and a
+//     pass inside where it would turn back is broken off. A target off the
+//     ground shut in from above (a ray down onto it from 500 m up meets
+//     something first: a hardpoint under a hull) is passed at along its most open
+//     side instead (rays in onto it from 500 m out along 14 directions, the
+//     nearest clear one to the wingman), the wingman first flying out to 400 m
+//     along it, round what is in the way, and pulling out along it, not up
+//     (flyer_orders_core.hpp, pick_open). One further than 2500 m from its
+//     leader comes back.
 //
 // Landing with the player (a try; the leader class's WingmanLand, else the INI's
 // FlyerWingmenLand; with 0 the wingmen break off as the player lands): when the
@@ -93,7 +104,9 @@
 // a low roof), at its slowest (the stretch lets it go to 10 m/s) from 300 m in,
 // and lands (EntityFlyer::Land) once within 25 m of it across and 40 m up
 // (EntityFlyer::Land needs no landing region). Once down its pilot gets out (and
-// it is let go), unless its own class says WingmanExitOnLand = 0: then it waits
+// it is let go; asked again every 2 s while still aboard, four times in all, and
+// still asked for 20 s once the player has got out and the flight is let go),
+// unless its own class says WingmanExitOnLand = 0: then it waits
 // aboard, and when the player takes off (state 1) it takes off too
 // (EntityFlyer::TakeOff) and forms up again. One with no place, or up again
 // before its leader, circles 200 m round a point 150 m over the leader, or, with
@@ -244,7 +257,11 @@
 //   an AI's attack                  UnitController +0x2C0 its agent, whose
 //                                   AttackHelper (+0x10) holds the target (+0,
 //                                   handle +4); ForceSetAttackHelperTarget
-//                                   0x0059EC20 (thiscall(target), RET 4)
+//                                   0x0059EC20 (thiscall(target), RET 4; its
+//                                   SetVisibleTarget reads the target, so never
+//                                   null); AttackHelper::Reset 0x005B4230
+//                                   (thiscall() on the AttackHelper, RET), as
+//                                   SetVisibleTarget calls it first
 //   the message line                0x006AECD0, cdecl(player, text, color*):
 //                                   player%d.message.color, then
 //                                   player%d.message; the trooper commands'

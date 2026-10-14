@@ -1403,6 +1403,10 @@ namespace modtools {
    // MapRemoveEntityMarker (0x00471E1C, popping 0xC) call them.
    constexpr uintptr_t target_manager_add_marker    = 0x0048E3A0;
    constexpr uintptr_t target_manager_remove_marker = 0x0048E650;
+   // AttackHelper::Reset, thiscall() on the AttackHelper (UnitAgent +0x10), RET:
+   // no target (handle cleared, not visible, last seen at -1000), as
+   // SetVisibleTarget (0x005B43D0, from ForceSetAttackHelperTarget) calls it first.
+   constexpr uintptr_t attack_helper_reset          = 0x005B4230;
    // EntityFlyer::TakeOff, thiscall() on the entity, RET: from landed or landing
    // to taking off (state 1), its free-flight and trick times zeroed (Lua's
    // EntityFlyerTakeOff, 0x004729D4, and the player's own, 0x004FE7F6, call it).
