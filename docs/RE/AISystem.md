@@ -676,6 +676,45 @@ The user asked whether AI units can have goals of their own rather than their te
   its own destinations); they replace where it steers and what it aims at each frame, and keep it from its
   own landings. Let go, it carries on with its goal.
 
+### The goal limit and units' own goals (built 2026-10-14, modtools only)
+
+`ai/ai_goals.cpp`, `[LimitIncreases] AIGoalLimit` (64). Read in P for the names, then M.
+
+- **The limit is two things.** `AIUtil::Init` sizes `AIGoal::sMemoryPool` to 20 elements of 0x3C (the largest
+  goal: Defend, Destroy, Follow), M `0x0058CD3E`. And `AIGoalManager` (0x6C bytes, heap: `Create`, M
+  `0x005CD5B0`, `operator new(0x6C)` then the constructor, into `mInstance` M `0x00B8FAA4`) ends with
+  `mGoals[20]` at +0x1C, so the array grows in place with a bigger allocation: `Create` is replaced (the game's
+  own `operator new`, M `0x007E34A0`, so its destructor's `operator delete` matches, and its constructor, which
+  clears 20 slots; the stand-in clears 65), and the pool's count becomes the limit.
+- **Every loop over the array counts to 20** and is patched to the limit: `AddGoal` (`CMP EDI, 0x14`, M
+  `0x005CD19C`), `DeleteGoal` (M `0x005CD4E8`), `ClearAllGoals` (counted down, M `0x005CD55A`), `FindGoal` (M
+  `0x005CDD32`), `Update` (counted down, M `0x005CDEE4`) and the debug listing `PrintInfoInstConsole` (M
+  `0x005CDA70`: its loop unrolled five at a time, `CMP EDX, 0x14` at +0xA0, its "none of this team" test at
+  +0xB7, which must become the loop's end, the first multiple of five at or past the limit, and its list at
+  +0x126). The unrolled loop reads up to four slots past the last below the limit, so the manager keeps one
+  slot more than the limit allows, always empty. Its `ADD EAX, 0x14` steps five pointers, not a count.
+- **`AssignUnit` (M `0x005CD5E0`) keeps the weights in a 20-float array on its stack**, so it is replaced: the
+  same rule (`ai_goals_core.hpp`, `pick_goal`: the team's enabled goals, the least full for its weight share,
+  the first on a tie, under 1e11, M `0x00A4A3C0`; a total below 0 counts as 1) over the limit. Its callers,
+  `MakeSureUnitHasGoal` and `ReassignIfNeeded`, return straight after it. `MakeSureUnitHasGoal` does keep ECX
+  live across its call to `FindGoal` (it calls `AssignUnit` after with no `MOV ECX`), which is why `FindGoal`
+  is only byte-patched.
+- **Units' own goals** (Lua `SetUnitGoal`, `ClearUnitGoal`, `GetUnitGoal`): a character's goal of its own is
+  kept per character index. The replaced `AssignUnit` puts a unit back in its own while that is an enabled
+  goal of its team (respawn calls `ReassignIfNeeded`, M `0x005CDCD0`: `RemoveUnit` M `0x005CDA00`, then
+  `AssignUnit`), and passes goals kept for others over in the weighted pick (their weight left out of the
+  total). `DeleteGoal` and `ClearAllGoals` are detoured to drop the keeps of goals gone, before the pool hands
+  the memory to a new goal. `SetUnitGoal` moves the unit at once, as `ReassignIfNeeded` would. Every mission
+  starts with none (`Create`). A goal is the pointer the stock `AddAIGoal(team, type, weight, target)` returns
+  (P `0x00650D80`; a number target is a character for a Follow goal).
+- **Callers checked:** the Lua `ClearAIGoals` and `DeleteAIGoal` return straight after their calls, and
+  `AIUtil::Init` makes plain calls after `Create`; nothing keeps a register live across the replaced
+  functions. The other `mInstance` readers (`RequestSpawnPoint`, `Respawn`, `SetTeam`, the Lua functions) go
+  through these methods; M `0x005CD0A0`, `0x005CD0B0`, `0x005CD0C0` and `0x005CD0D0` are empty stubs.
+- **Checks:** `tests/ai_goals_tests.cpp` (the limit, the listing's end, the pick against the stock rule's
+  corners, kept goals), `tests/ai_goals_abi_tests.py` (every count's bytes and instruction, `Create`'s shape and
+  its constructor, `AssignUnit`'s reads, the RETs), the `goals` mutation suite. Not played.
+
 ---
 
 ## Key Insight: The "Bubble" System

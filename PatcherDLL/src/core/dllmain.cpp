@@ -51,6 +51,7 @@
 #include "util/mp_spawn_delay.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "ai/ai_goals.hpp"
 #include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "entity/foleyfx_region_fix.hpp"
@@ -311,6 +312,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_walkerStompFix            = cfg.get_bool("Fixes", "WalkerStompFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
+      g_aiGoalLimit               = cfg.get_int("LimitIncreases", "AIGoalLimit", 64);
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
       g_contentCensusNames        = cfg.get_bool("Diagnostic", "ContentCensusNames", false);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
@@ -458,6 +460,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    foleyfx_region_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
+   ai_goals_install(exe_base);         // Detours .text, byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread
    scene_tree_depth_guard_install(exe_base); // crash fix, always on
    prop_generator_fix_install(exe_base);     // rewrites a CALL rel32 - needs the RW window

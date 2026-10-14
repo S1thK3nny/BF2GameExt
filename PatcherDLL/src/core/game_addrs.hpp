@@ -1410,6 +1410,23 @@ namespace modtools {
    constexpr uintptr_t fly_agent_take_off_call      = 0x005AF154;
    constexpr uintptr_t fly_agent_take_off_call2     = 0x005AF323;
    constexpr uintptr_t ai_set_exit_vehicle          = 0x005A2170;
+   // The AI goal manager (ai/ai_goals.cpp): AIUtil::Init's PUSH 0x3C; PUSH 0x14
+   // for AIGoal::sMemoryPool; AIGoalManager::Create (cdecl(), operator new(0x6C)
+   // and the constructor, into mInstance) and mInstance; AddGoal, DeleteGoal,
+   // ClearAllGoals, AssignUnit, RemoveUnit (the character on the stack, RET 4),
+   // the debug listing, FindGoal and Update, each counting mGoals to 20
+   // (thiscall, RET 4 but Create and Update).
+   constexpr uintptr_t ai_goal_pool_setup           = 0x0058CD3C;
+   constexpr uintptr_t ai_goal_manager_create       = 0x005CD5B0;
+   constexpr uintptr_t ai_goal_manager_instance     = 0x00B8FAA4;
+   constexpr uintptr_t ai_goal_add                  = 0x005CD130;
+   constexpr uintptr_t ai_goal_delete               = 0x005CD4D0;
+   constexpr uintptr_t ai_goal_clear_all            = 0x005CD550;
+   constexpr uintptr_t ai_goal_assign_unit          = 0x005CD5E0;
+   constexpr uintptr_t ai_goal_remove_unit          = 0x005CDA00;
+   constexpr uintptr_t ai_goal_print                = 0x005CDA70;
+   constexpr uintptr_t ai_goal_find                 = 0x005CDD00;
+   constexpr uintptr_t ai_goal_update               = 0x005CDE20;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

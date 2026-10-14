@@ -478,14 +478,10 @@ them; cycling formations; Steam and GOG. Details in
 wingmen or the AI's. Give wingmen call signs for the HUD's lines and radio chatter ("Red Two: copy"), and
 let a script make or break an AI squadron (`SetSquadron(leader, {members}, formation)`, `BreakSquadron`).
 
-**AI goals of their own** - AI goals are a team's; each unit just sits in one until it respawns
-(docs/RE/AISystem.md, "Team goals, joined per unit"). Give a unit its own: keep it in a chosen goal across
-respawns, or a goal made for it (a tiny weight draws no one else), from Lua (`SetUnitGoal`, `ClearUnitGoal`,
-`GetUnitGoal`, `SetUnitOrder` for follow, get in, get out).
-
-**More AI goals** - The game holds 20 AI goals at once across all teams (`AIGoalManager::mGoals[20]` and a
-20-entry `AIGoal` pool), too few once units get goals of their own. Raise it to 64: a bigger pool, the array
-moved, every loop over it patched, on each build.
+**AI goals on Steam and GOG, and orders per unit** - The 64-goal limit and units' own goals
+(`SetUnitGoal`) are built on modtools only (docs/RE/AISystem.md, "The goal limit and units' own goals").
+Port them to Steam and GOG, and add `SetUnitOrder` for the squad orders a unit can be given on top of its
+goal (follow, get in, get out).
 
 **Ground AI into the air** - A trooper following you cannot board your single-seat fighter, so it stops
 following. Send each one to the nearest free friendly flyer (`EVT_SC_GetIntoVehicle`), call it into your

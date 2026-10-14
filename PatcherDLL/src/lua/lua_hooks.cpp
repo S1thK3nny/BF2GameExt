@@ -38,6 +38,7 @@
 #include "util/snd_engine_open_fix.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "ai/ai_goals.hpp"
 #include "util/content_census.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
@@ -389,6 +390,7 @@ void lua_hooks_uninstall()
    foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
+   ai_goals_uninstall();
    content_census_uninstall();
    ai_update_budget_uninstall();
    ai_sprint_uninstall();

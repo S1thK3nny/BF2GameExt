@@ -131,6 +131,11 @@ Scripts can check the running version through `GameExt.version`.
   modtools only, `[AI] FlyerWingmen=0`; orders, landing and the Lua side not yet tested in play.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#flyer-wingmen) and
   [Lua API](docs/user/LUA_API.md#flyer-wingmen).
+- **AI goal limit and units' own goals** - Up to 64 AI goals at once instead of 20
+  (`[LimitIncreases] AIGoalLimit=64`), and `SetUnitGoal`, `ClearUnitGoal` and `GetUnitGoal`
+  give an AI unit a goal of its own that it keeps across respawns and no one else joins.
+  Modtools only for now; not yet tested in play.
+  See [Lua API](docs/user/LUA_API.md#ai-goals).
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

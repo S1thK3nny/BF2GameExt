@@ -176,6 +176,26 @@ OnWingmanLost(function(charIndex, flyer)
 end)
 ```
 
+## AI Goals
+
+*Modtools only for now, with `[LimitIncreases] AIGoalLimit` above 20 (64 by default). Single player and the host.*
+
+AI goals belong to a team: the game puts each AI unit in one of its team's goals by weight and keeps it there until it respawns. These give a unit a goal of its own. A goal is what the game's own `AddAIGoal` returns. Up to 64 goals may be set at once, not 20.
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetUnitGoal(charIndex, goal)` | Puts the AI unit in `goal`, a goal of its own team, now and again after every respawn. The goal is kept for the units scripts put in it: no one else joins it by weight, whatever its weight. Returns true if done. | 1.2.0 |
+| `ClearUnitGoal(charIndex)` | Back to its team's goals by weight. Returns true if it had a goal of its own. | 1.2.0 |
+| `GetUnitGoal(charIndex)` | The goal the unit is in now, as `AddAIGoal` gave it, or nil. | 1.2.0 |
+
+Deleting a goal (`DeleteAIGoal`, `ClearAIGoals`) frees its units to the weighted rule. A new mission starts with none.
+
+```lua
+-- Character 5, an attacker, holds cp3 whatever its team's goals say, across respawns.
+local hold = AddAIGoal(ATT, "Defend", 1, "cp3")
+SetUnitGoal(5, hold)
+```
+
 ## Loading Screen
 
 | Function | Description | Since |

@@ -142,6 +142,15 @@
     <ClInclude Include="src\lua\lua_wingmen.hpp">
       <Filter>lua</Filter>
     </ClInclude>
+    <ClInclude Include="src\lua\lua_goals.hpp">
+      <Filter>lua</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_goals.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\ai_goals_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\debug_commands\command_registry.hpp">
       <Filter>debug_commands</Filter>
     </ClInclude>
@@ -695,6 +704,12 @@
     </ClCompile>
     <ClCompile Include="src\lua\lua_wingmen.cpp">
       <Filter>lua</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lua\lua_goals.cpp">
+      <Filter>lua</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\ai_goals.cpp">
+      <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\debug_commands\debug_command.cpp">
       <Filter>debug_commands</Filter>
