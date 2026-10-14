@@ -715,6 +715,44 @@ The user asked whether AI units can have goals of their own rather than their te
   corners, kept goals), `tests/ai_goals_abi_tests.py` (every count's bytes and instruction, `Create`'s shape and
   its constructor, `AssignUnit`'s reads, the RETs), the `goals` mutation suite. Not played.
 
+### The comm keys' requests and the AI's own aid (read 2026-10-14)
+
+The user asked for the comm keys in single player, with the AI doing what they say. Read in P.
+
+- **What a comm key sends.** `RawControllerInputs::TeamOrderInputProcess` (runs only networked, see
+  docs/RE/FlyerAI.md) queues team chat through `NetGame::AddChatMessageToQue` (P `0x00684440`) with a `Code`:
+  `Spotted` 0, `NeedMedic` 1, `NeedRepair` 2, `NeedAmmo` 3, `NeedPickup` 4, `NeedBackup` 5,
+  `AttackPosition` 6, `DefendPosition` 7. The host passes it on (`ReadChatMessageFromClient`, P `0x0069BE80`)
+  and each machine shows it (`ReadChatMessageFromServer`, P `0x0069BFA0`, then `DisplayMessage`, P
+  `0x0068D030`: the text, team-only lines in green, and for a code `TeamAssistManager::AddRequest`).
+- **`TeamAssistManager`** (one, made for every mission by `PostLoad`, P `0x005CD4A7`). `AddRequest(code,
+  character)` (P `0x007775A0`) makes a `TeamAssist` (pool, 0x14 bytes) for the requester (its controllable's
+  trackable: its vehicle or itself), its team's mask and a timer (`sDuration`); the constructor (P
+  `0x007773F0`) puts a `hud_objective_icon_circle` marker on the requester for its team
+  (`TargetManager::AddMarker`, scale 3, flashing and pulsing; docs/RE/FlyerAI.md, "Markers") and plays the
+  request's shout (`AI::VOHelper::Play(VOT_TA_First + code)`). `Update` (P `0x007776D0`) counts the timers
+  down and deletes the expired. Nothing else reads the list: no AI acts on a request, online or not.
+- **The AI's own aid** (`RepairHelper`, one per `UnitAgent`; data: the agent, `mAidType`, `mContactTime`
+  +0xC, `mPathing`, `mPathTime`, `mHealth`, `mSearchTime`, `mAidTarget` +0x20 a handle,
+  `mCheckForRecipientTime` +0x28). `CheckForRecipientAndInit` (P `0x00738EF0`), in two of its agent's states,
+  every 5 s: what it can give (`CalcMyAidTypes`: repair, health, ammo, from its weapons), then friendlies
+  within 75 m (`TeamManager::GetObjectsInRange`, at most 50) that need it (`FindAidNeed`) and have an open
+  `RT_REPAIR` reservation, the nearest (a player under extra conditions on its speed and facing); it
+  reserves it, sets `mAidTarget`, stands still and says `VOT_RepairStart`. `Update` keeps the target alive
+  and reserved, takes up the aid weapon (`SetAidWpn`), aims (`AILowLevel::SetTarget`) and closes in;
+  `FireRepairWeapon` (P `0x007398F0`) fires a `WeaponRepair` while lined up, or a `WeaponDispenser` once
+  per contact (`VOT_GivePowerup`).
+- **For the comm keys (agreed with the user, 2026-10-14):** every key plays the stock marker and shout by
+  calling `AddRequest` itself; Spotted marks the enemy under the crosshair and nearby AI that can see it
+  aim at it where they stand (`ForceSetAttackHelperTarget`); Medic, Repair and Ammo point the nearest
+  capable AI's `RepairHelper` at the player from further than 75 m; Backup gives a few nearby AI a timed
+  Defend goal on the player (they fight round it, no formation: the user, "they should not strictly
+  follow you like how F4 makes them"); Attack a timed Destroy goal on the enemy under the crosshair, else
+  the spot aimed at; Defend (the user: "aim at a friendly under the cross hair, OR if nothing and they can
+  reach it then the position you are aiming at") a timed Defend goal on that friendly, a command post, or
+  the spot (a bare spot needs a stand-in, unread); Pickup last, hovers first (the user: "what exactly
+  picks you up. Hovers, walkers, flyers?"), and as a passenger Attack and Defend direct the driver.
+
 ---
 
 ## Key Insight: The "Bubble" System

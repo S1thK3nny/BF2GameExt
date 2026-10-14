@@ -28,6 +28,7 @@ int   g_flyerWingmenCount   = flyer_wingmen::kDefaultWingmen;
 float g_flyerWingmenSpacing = flyer_wingmen::kDefaultSpacing;
 bool  g_flyerWingmenAuto    = true;
 bool  g_flyerWingmenLand    = true;
+bool  g_flyerWingmenMarkers = true;
 bool  g_flyerRealFlightSquadrons = true;
 
 namespace {
@@ -49,6 +50,7 @@ constexpr uint32_t kFly_FreeFlyTime  = 0x1CDC;
 constexpr uint32_t kFly_TargetSpeed  = 0x598;   // the speed its throttle asks for (Controllable +0x358)
 constexpr uint32_t kCtl_Squad        = 0x60;    // the Controllable's squad-key trigger
 constexpr uint32_t kSquadPressed     = 3;       // down, and changed this update
+constexpr uint32_t kSquadDown        = 1;       // down (the trooper squad key's hold tests it)
 constexpr int      kStateLanded      = 0;       // EntityFlyer::State: landed ...
 constexpr int      kStateTakeoff     = 1;       // ... taking off ...
 constexpr int      kStateFlying      = 2;       // ... flying ...
@@ -195,6 +197,10 @@ using fn_message_t    = void(__cdecl*)(int player, const wchar_t* text, const ui
 using fn_localize_t   = const wchar_t*(__cdecl*)(uint32_t hash, bool nullIfMissing);
 using fn_ray_hit_t    = float(__cdecl*)(const float* start, const float* dir, float length, void** hit, float* normal,
                                         uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly);
+using fn_add_marker_t = void(__cdecl*)(void* obj, void* region, uint32_t icon, float scale, uint32_t teams,
+                                       uint32_t color, uint32_t hudTarget, uint32_t flash, uint32_t pulse,
+                                       float pulseFrom);
+using fn_remove_marker_t = void(__cdecl*)(void* obj, void* region, uint32_t teams);
 using fn_flyer_t      = void(__thiscall*)(void* flyer);
 using fn_land_hint_t  = bool(__thiscall*)(void* agent);
 using fn_exit_t       = void(__thiscall*)(void* lowLevel, void* commandPost);
@@ -225,6 +231,10 @@ const uint8_t*   s_messageColor = nullptr;   // the trooper squad commands' colo
 fn_localize_t    s_localize     = nullptr;
 bool             s_commKeys     = false;     // the comm keys' reads checked
 uint32_t         s_commHeld     = 0;         // the comm keys' bits held at the last look
+flyer_orders::SquadHold s_squadHold;         // the squad key held down: breaking the flight off
+// The player's wingmen's markers (null until their reads are checked).
+fn_add_marker_t    s_addMarker    = nullptr; // TargetManager::AddMarker
+fn_remove_marker_t s_removeMarker = nullptr; // TargetManager::RemoveMarker
 // Landing with the player (null until their reads are checked).
 fn_ray_hit_t     s_rayHit  = nullptr;        // CollisionManager::RayHit
 fn_flyer_t       s_land    = nullptr;        // EntityFlyer::Land
@@ -351,6 +361,7 @@ struct Wingman {
    V3       spot;              // where it lands
    bool     touchedDown = false;   // landed beside its leader (OnWingmanLanded)
    int      pilot = -1;        // the character flying it as it joined (a script's events), or -1
+   uint32_t markTeams = 0;     // the player's wingman: the teams its marker shows to, while it has one
 };
 
 // A wingman of the player's while the player lands and takes off.
@@ -385,6 +396,8 @@ struct Formation {
    uint32_t    attackHandle = 0;
    bool        quiet = false;         // the order is a mission script's: no line on the HUD
    bool        called = false;        // the player called wingmen: losses are made up even without WingmanAuto
+   bool        brokenOff = false;     // the player broke the flight off: none joins on its own until called again
+   bool        handPicked = false;    // the player picked its wingmen one by one: losses are not made up
    bool        landing = false;       // the player's flyer is landing or landed: its wingmen land too ...
    V3          pad;                   // ... beside where it came down ...
    Frame       padFrame;              // ... facing as it was ...
@@ -740,11 +753,43 @@ void lost_event(const Formation& f, const Wingman& w, const char* code)
    queue_event(LuaEventId::WingmanLost, w.pilot, handle_of(w.obj) == w.handle ? w.obj : nullptr, code);
 }
 
+// ---- The player's wingmen's markers (FlyerWingmenMarkers) -------------------------------
+// The game's own target markers (TargetManager, as objectives', Lua's
+// MapAddEntityMarker's and the comm keys' requests' are): a steady cyan circle
+// over each wingman on the map, and, as a "common" HUD target, its bracket on
+// screen in the same colour; for the player's team, from the moment a wingman
+// joins until it leaves. There are 32 between all markers (AddMarker takes no
+// more and says nothing).
+constexpr uint32_t kMarkerIcon  = pbl_hash("hud_objective_icon_circle");
+constexpr uint32_t kMarkerColor = pbl_hash("cyan");
+constexpr float    kMarkerScale = 3.0f;
+
+void mark(Wingman& w, const uint8_t* leader)
+{
+   if (!s_addMarker || !g_flyerWingmenMarkers || w.markTeams || !leader) return;
+   const int team = team_of(leader);
+   if (team < 0) return;
+   const uint32_t teams = 1u << team;
+   s_addMarker(w.obj, nullptr, kMarkerIcon, kMarkerScale, teams, kMarkerColor, 1, 0, 0, 0.0f);
+   w.markTeams = teams;
+}
+
+// Taken down while its flyer is still the one it was (a wingman shot down is let
+// go while its wreck is). Once its handle has moved on the game shows the marker
+// no more, but keeps its slot taken until the mission ends.
+void unmark(Wingman& w)
+{
+   if (!w.markTeams) return;
+   if (s_removeMarker && handle_of(w.obj) == w.handle) s_removeMarker(w.obj, nullptr, w.markTeams);
+   w.markTeams = 0;
+}
+
 void drop(Formation& f, int i, const char* why, const char* code = nullptr)
 {
    if (!f.ai || squad_log())
       install_log("%s slot %d (#%u) let go: %s", tag(f), f.wing[i].slot + 1, f.wing[i].handle, why);
    lost_event(f, f.wing[i], code);
+   unmark(f.wing[i]);
    f.wing[i] = f.wing[--f.count];
    f.wing[f.count] = Wingman{};
 }
@@ -752,7 +797,10 @@ void drop(Formation& f, int i, const char* why, const char* code = nullptr)
 void release_all(Formation& f, const char* why, const char* code = nullptr)
 {
    if (f.count && (!f.ai || squad_log())) install_log("%s %d let go: %s", tag(f), f.count, why);
-   for (int i = 0; i < f.count; ++i) lost_event(f, f.wing[i], code);
+   for (int i = 0; i < f.count; ++i) {
+      lost_event(f, f.wing[i], code);
+      unmark(f.wing[i]);
+   }
    f.count = 0;
    for (auto& w : f.wing) w = Wingman{};
    f.mirror = false;   // a new formation starts the right way round
@@ -1059,6 +1107,7 @@ void enlist(uint8_t* obj, uint8_t* uc, int slot, float dist, float leaderMax, do
       install_log("[Wingmen] slot %d: #%u joined%s, %.0f m off, top speed %.0f m/s against the leader's %.0f", slot + 1,
                   w.handle, named ? " (named by the mission)" : "", (double)dist, (double)s_maxSpeed(w.obj, nullptr),
                   (double)leaderMax);
+   mark(w, s_player.leader);
    queue_event(LuaEventId::WingmanJoin, w.pilot, obj);
 }
 
@@ -1187,6 +1236,8 @@ constexpr Line kSayNoTarget   = {pbl_hash("game.wingmen.notarget"), L"Wingmen: n
 constexpr Line kSayNone       = {pbl_hash("game.wingmen.none"), L"Wingmen: no one to call up"};
 constexpr Line kSayTargetDown = {pbl_hash("game.wingmen.targetdown"), L"Wingmen: target down"};
 constexpr Line kSayTargetLost = {pbl_hash("game.wingmen.targetlost"), L"Wingmen: target lost"};
+constexpr Line kSayBreakOff   = {pbl_hash("game.wingmen.breakoff"), L"Wingmen: break off"};
+constexpr Line kSayJoin       = {pbl_hash("game.wingmen.join"), L"Wingmen: one joins you"};
 
 void say(const Line& line)
 {
@@ -1900,7 +1951,15 @@ void reset_orders(Formation& f)
    f.attackHandle = 0;
    f.quiet = false;
    f.called = false;
+   f.brokenOff = false;
+   f.handPicked = false;
    f.landing = false;
+}
+
+// Whether the player's flight is made up to its size now (tops_up).
+bool topping_up(const ClassKeys* keys)
+{
+   return flyer_orders::tops_up(s_locked, s_player.brokenOff, s_player.handPicked, s_player.called, auto_now(keys));
 }
 
 // The order a flight starts with: the mission's standing order
@@ -1946,12 +2005,13 @@ void tick(double now)
          // The flyers the mission names join first. Then losses are made up
          // whenever they happen, whatever the order: once the player has called
          // wingmen, or from takeoff with WingmanAuto; never in a flight the
-         // mission locked.
+         // mission locked, nor after the player broke one off, nor in one it
+         // picked by hand (topping_up).
          const int before = s_player.count;
          join_roster(leader, now);
          const ClassKeys* keys = keys_of(leader);
          const int want = flyer_wingmen::flight_size(s_scriptSize, keys, g_flyerWingmenCount);
-         if (!s_locked && (s_player.called || auto_now(keys)) && s_player.count < want) fill(leader, now);
+         if (topping_up(keys) && s_player.count < want) fill(leader, now);
          if (s_player.count > before && s_player.order != Order::FormUp) assign_targets(s_player, leader, now);
       }
       report(now);
@@ -1966,25 +2026,131 @@ bool player_leads_now()
           flying(s_player.leader);
 }
 
-// The squad key, in the air: calls wingmen up when it leads none (with the
-// order the flight starts with; not in a flight the mission locked), else
+// The friendly AI flyer in the air under the player's reticule, and the
+// controller flying it; null for none.
+uint8_t* aimed_flyer(uint8_t* leader, uint8_t** uc)
+{
+   uint8_t* const ctl = leader + kFly_Controllable;
+   for (int k = 0; k < kReticuleChannels; ++k) {
+      uint8_t* const t = *(uint8_t**)(ctl + kCtl_Reticule + k * 8);
+      if (!t || handle_of(t) != *(const uint32_t*)(ctl + kCtl_ReticuleHandle + k * 8)) continue;
+      if (t == leader || !is_rtti(t, kRttiFlyer) || !alive(t) || !flying(t) || team_of(t) != team_of(leader)) continue;
+      uint8_t* const c = *(uint8_t**)(t + kFly_Ctrl);
+      if (!c || !is_rtti(c, kRttiUnitController)) continue;   // flown by a player
+      *uc = c;
+      return t;
+   }
+   return nullptr;
+}
+
+// The squad key with a flyer under the reticule (flyer_orders_core.hpp,
+// pick_verdict): one the flight has room for, and that may fly with this leader
+// as fill would take it, joins in its first free slot that takes its class (an
+// AI squadron's leader leaves its squadron to it). Picked into an empty flight,
+// the flight is the player's own pick: in form up, and not made up to its size.
+flyer_orders::Pick pick(uint8_t* leader, double now)
+{
+   uint8_t* uc = nullptr;
+   uint8_t* const t = aimed_flyer(leader, &uc);
+   Formation* in = nullptr;
+   const bool ours = t && find(t, &in) && in == &s_player;
+   const ClassKeys* keys = keys_of(leader);
+   const float leaderMax = s_maxSpeed(leader, nullptr);
+   bool mayJoin = false, room = false;
+   int slot = -1;
+   if (t && !ours) {
+      const uint32_t cls = class_id(t);
+      mayJoin = flyer_wingmen::may_follow(keys_of(t)) && !excluded(handle_of(t)) &&
+                flyer_wingmen::accepts(keys, cls, flyer_wingmen::can_keep_up(s_maxSpeed(t, nullptr), leaderMax));
+      int total = flyer_wingmen::flight_size(s_scriptSize, keys, g_flyerWingmenCount);
+      const int cap = capacity(s_player, keys);
+      if (total > cap) total = cap;
+      slot = free_slot(s_player, keys, cls, false);
+      room = s_player.count < total && slot >= 0;
+   }
+   const flyer_orders::Pick v = flyer_orders::pick_verdict(t != nullptr, ours, s_locked, mayJoin, room);
+   if (v == flyer_orders::Pick::Refuse)
+      install_log("[Wingmen] squad key on #%u: %s", handle_of(t),
+                  s_locked  ? "the mission locked your flight (SetWingmenLocked)"
+                  : !mayJoin ? "it may not fly with you (its class or yours)"
+                             : "your flight has no room for it");
+   if (v != flyer_orders::Pick::Join) return v;
+   if (Formation* led = led_by(t); led && led->count) dissolve(*led, "its leader was picked by the player");
+   const bool first = s_player.count == 0;
+   const float d = flyer_wingmen::length(position_of(t) - position_of(leader));
+   enlist(t, uc, slot, std::isfinite(d) ? d : 0.0f, leaderMax, now, false);
+   if (first) {
+      s_player.handPicked = true;
+      s_player.brokenOff = false;
+      s_player.called = false;
+      set_order(s_player, Order::FormUp, now);
+   } else if (s_player.order != Order::FormUp) {
+      assign_targets(s_player, leader, now);
+   }
+   say(kSayJoin);
+   install_log("[Wingmen] squad key on #%u: it joins your flight (%d)%s", handle_of(t), s_player.count,
+               first ? ", picked by hand: losses are not made up" : "");
+   return v;
+}
+
+// The squad key held (flyer_orders_core.hpp, squad_hold): the flight breaks off,
+// every wingman let go, and none joins on its own until the squad key calls a
+// flight up again, in form up, or picks one. Not a flight the mission locked.
+void break_off()
+{
+   if (s_locked) {
+      install_log("[Wingmen] squad key held: the mission locked your flight (SetWingmenLocked); it stays");
+      return;
+   }
+   const int n = s_player.count;
+   release_all(s_player, "broken off by the player", "breakoff");
+   s_player.brokenOff = true;
+   s_player.called = false;
+   s_player.handPicked = false;
+   s_player.order = Order::FormUp;
+   s_player.resume = Order::FormUp;
+   s_player.attackTarget = nullptr;
+   s_player.attackHandle = 0;
+   say(kSayBreakOff);
+   install_log("[Wingmen] squad key held: break off, %d let go; none joins on its own until the squad key calls a "
+               "flight up or picks one",
+               n);
+}
+
+// The squad key, in the air. Held for a second, it breaks the flight off
+// (break_off), as the trooper squad key's hold lets its followers go; as it goes
+// down, with a friendly AI flyer under the reticule, it picks that one (pick),
+// else it calls wingmen up when it leads none (in the order the flight starts
+// with, or form up after a break off; not in a flight the mission locked), else
 // switches between forming up and engaging (from an attack or cover, forming
 // up).
 void squad_key(double now)
 {
-   if (!player_leads_now()) return;
+   if (!player_leads_now()) {
+      s_squadHold = flyer_orders::SquadHold{};
+      return;
+   }
    const uint32_t trigger = *(const uint32_t*)(s_player.leader + kFly_Controllable + kCtl_Squad);
-   if ((trigger & kSquadPressed) != kSquadPressed || now - s_lastPress < kKeyRepeat) return;
+   const bool pressed = (trigger & kSquadPressed) == kSquadPressed;
+   if (flyer_orders::squad_hold(s_squadHold, (trigger & kSquadDown) != 0, pressed, now)) {
+      break_off();
+      return;
+   }
+   if (!pressed || now - s_lastPress < kKeyRepeat) return;
    s_lastPress = now;
+   if (pick(s_player.leader, now) != flyer_orders::Pick::None) return;
    if (!s_player.count) {
       if (s_locked) {
          say(kSayNone);
          install_log("[Wingmen] squad key: the mission locked your flight (SetWingmenLocked); no one called up");
          return;
       }
+      const bool afterBreakOff = s_player.brokenOff;
+      s_player.brokenOff = false;
+      s_player.handPicked = false;
       s_player.called = true;
       fill(s_player.leader, now);
-      const Order start = start_order_for(s_player.leader);
+      const Order start = flyer_orders::call_up_order(afterBreakOff, start_order_for(s_player.leader));
       if (s_player.count) set_order(s_player, start, now);
       say(s_player.count ? line_for(start) : kSayNone);
       install_log("[Wingmen] squad key: %s%s", s_player.count ? "called up, " : "no one to call up",
@@ -2666,6 +2832,22 @@ bool install_comm_keys(uintptr_t base)
                       26);
 }
 
+// The wingmen's markers: TargetManager::AddMarker(object, region, icon, scale,
+// teams, colour, hudTarget, flash, pulse, pulseFrom) and RemoveMarker(object,
+// region, teams), both cdecl, the caller popping, as Lua's MapAddEntityMarker
+// and MapRemoveEntityMarker call them.
+bool install_markers(uintptr_t base)
+{
+   const auto* a = g_addr;
+   if (!a->target_manager_add_marker || !a->target_manager_remove_marker) return false;
+   if (!starts_with(base, a->target_manager_add_marker, "\x8B\x44\x24\x04\x83\xEC\x0C\x55\x33\xED\x3B\xC5", 12) ||
+       !starts_with(base, a->target_manager_remove_marker, "\x8B\x44\x24\x08\x55\x8B\x6C\x24\x08\x85\xED", 11))
+      return false;
+   s_addMarker = (fn_add_marker_t)resolve(base, a->target_manager_add_marker);
+   s_removeMarker = (fn_remove_marker_t)resolve(base, a->target_manager_remove_marker);
+   return true;
+}
+
 // The orders' reads and calls, as the game's own code makes them.
 bool install_orders(uintptr_t base)
 {
@@ -2845,7 +3027,7 @@ void refresh(double now)
    join_roster(leader, now);
    const ClassKeys* keys = keys_of(leader);
    const int want = flyer_wingmen::flight_size(s_scriptSize, keys, g_flyerWingmenCount);
-   if (!s_locked && (s_player.called || auto_now(keys)) && s_player.count < want) fill(leader, now);
+   if (topping_up(keys) && s_player.count < want) fill(leader, now);
    if (s_player.count > before && s_player.order != Order::FormUp) assign_targets(s_player, leader, now);
 }
 
@@ -2987,6 +3169,8 @@ int call(bool setSize, int size)
       s_scriptAuto = 1;
       if (setSize) s_scriptSize = size < 0 ? -1 : size > flyer_wingmen::kMaxWingmen ? flyer_wingmen::kMaxWingmen : size;
       s_player.called = true;
+      s_player.brokenOff = false;    // over the player's break off ...
+      s_player.handPicked = false;   // ... and its own pick
       install_log("[Wingmen] the mission calls your wingmen up (%d)", s_scriptSize);
       refresh(seconds());
       n = player_leads_now() ? s_player.count : 0;
@@ -3174,6 +3358,7 @@ void flyer_wingmen_mission_end()
    s_eventCount = 0;
    s_lostReason = nullptr;
    s_commHeld = 0;
+   s_squadHold = flyer_orders::SquadHold{};
    s_mapShapesLogged = false;
 }
 
@@ -3251,13 +3436,20 @@ void flyer_wingmen_install(uintptr_t base)
                g_flyerWingmenCount, (double)g_flyerWingmenSpacing,
                g_flyerWingmenAuto ? "called up at takeoff" : "called up on the squad key");
    if (install_orders(base))
-      install_log("[Wingmen] orders installed: the squad key forms up or engages; %s",
+      install_log("[Wingmen] orders installed: the squad key calls a flight up, picks the friendly flyer under your "
+                  "reticule, or forms up or engages, and held for a second breaks the flight off; %s",
                   s_commKeys ? "the comm keys Attack and Defend (F11 and F12 by default) order attack my target and "
                                "cover me"
                              : "the comm keys' orders NOT installed (the player's inputs are read differently)");
    else
       install_log("[Wingmen] orders NOT installed: their reads differ; the squad key forms up or engages, with no "
                   "message");
+   if (install_markers(base))
+      install_log("[Wingmen] markers installed: %s",
+                  g_flyerWingmenMarkers ? "each of your wingmen has a cyan circle on the map and a bracket on screen"
+                                        : "off ([AI] FlyerWingmenMarkers=0)");
+   else
+      install_log("[Wingmen] markers NOT installed: TargetManager's markers differ");
    // Installed whatever the INI says: a leader class's WingmanLand decides for it.
    if (install_landing(base)) {
       const bool kept = install_waiting(base);
@@ -3322,6 +3514,8 @@ void flyer_wingmen_uninstall()
    s_localize = nullptr;
    s_commKeys = false;
    s_commHeld = 0;
+   s_addMarker = nullptr;
+   s_removeMarker = nullptr;
    s_land = nullptr;
    s_takeOff = nullptr;
    s_rayHit = nullptr;

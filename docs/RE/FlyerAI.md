@@ -958,6 +958,34 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   27); online their team chat still goes out. In the air only. The first build caught the comm keys' chat
   call instead, which single player never makes, so they did nothing offline (the user, 2026-10-14: "I've been
   pressing F11 and F12 with a wingman at my side, nothing").
+- **Picking and breaking off** (the user, 2026-10-14: "direct recruitment by aiming at a flyer whilst you're
+  in one and pressing F4, only if your squadron can accomodate it else do nothing", "a break-off command,
+  which disbands the AI wingmen altogether", "hold F4. Works identically to ground unit follow that way",
+  "After break-off, the next F4 press should be form up"). The trooper's squad key (`EntitySoldier::Update`,
+  M from `0x00549851`, EBX its Controllable) acts on the press (the trigger's low two bits both set), and
+  while bit 0 stays set adds the update's time to a hold timer (+0x7B4); past 1.0 (M `0x00A2A290`) it lets
+  every follower go (`EVT_SC_StopFollowChr`), once a hold. The flyer's squad key does the same: on the
+  press, a friendly AI flyer in the air under the reticule (`mReticuleTarget`, either channel) joins in
+  the first free slot that takes its class if the flight has room and it may fly with this leader as a
+  call-up would take it (else nothing happens); held a second, the flight breaks off. Then none joins on
+  its own until the squad key calls a flight up again, in form up whatever its start order, or picks one;
+  a flight picked from empty is not made up to its size (`flyer_orders_core.hpp`: `squad_hold`, `tops_up`,
+  `pick_verdict`, `call_up_order`).
+- **Markers** (the user: "Some sort of HUD indicator for wingmen units"): the game's own target markers.
+  `TargetManager::AddMarker` (P `0x00773CA0`, M `0x0048E3A0`; cdecl(object, region, icon hash, scale, team
+  mask, colour hash, showHudTarget, flashAlpha, pulseSize, pulse start)) fills one of 32 `Marker` slots
+  (`gMarkers`, 40 bytes: the actor's handle, region, team mask, icon, scale, colour, showHudTarget, pulse
+  start, the two flags); `RemoveMarker` (P `0x00774620`, M `0x0048E650`; cdecl(object, region, team mask))
+  takes the team's bits off every marker on that object. The map draws them (`HUD::ElementMap::
+  UpdateMarkerIcons`, P `0x00602980`: the player's team's, at the object's smoothed position, flashing or
+  pulsing by the two flags); with showHudTarget the object is also a "common" HUD target
+  (`LockOnManager::AddTargetCommon`, P `0x0063A190`, 32 of them), which `HUD::ElementTarget` brackets on
+  screen in the marker's colour. `LockOnManager::Update` (P `0x0063D0B0`) picks the player's locks from its
+  own nearest targets and only keeps the common ones' visibility, so a common target is not a lock. Colours
+  by name from the table at M `0x00ACA978` (black, red, green, blue, cyan, magenta, yellow, orange; filled at
+  start-up). Each of the player's wingmen gets a steady cyan `hud_objective_icon_circle` (scale 3, the
+  comm keys' requests' icon) with its bracket, from joining to leaving. A marker whose object's handle moves
+  on before it is removed is drawn no more but keeps its slot until the mission ends.
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
@@ -1012,7 +1040,7 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   `0x007844D0`).
 - **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes' shapes and the passes flown, landing and
   the places tried, the heights under a roof and the circle overhead, simulated);
-  `tests/flyer_wingmen_abi_tests.py` (150 modtools checks, every guard's bytes, the guards on functions other
+  `tests/flyer_wingmen_abi_tests.py` (159 modtools checks, every guard's bytes, the guards on functions other
   features detour); the mutation suite's `orders` (all caught).
 
 ### What to watch in play
@@ -1022,7 +1050,8 @@ N s`, `order: engage, 3 wingmen`, `comm key: attack my target, #t (locked, in th
 takes on #t`, `back to its slot after N s: why`, `the attack's target is down: back to ...`, and every 5 s
 `[Wingmen] engage: 3 wingmen, 1 in their slots, 0 flying in, 2 chasing`; each chase names the weapon ranges
 it was shaped from (`its weapon's ranges 0/800/1600 m: pulls out at 200 m, back in from 800 m, 120 m behind a
-flyer`); landing: `landing with you installed` at start-up, then `the leader comes down [under a roof]: N land
+flyer`); the squad key: `squad key on #t: it joins your flight (n)`, `... your flight has no room for it`,
+`squad key held: break off, n let go`, `markers installed` at start-up; landing: `landing with you installed` at start-up, then `the leader comes down [under a roof]: N land
 beside it, M circle overhead, K let go (nowhere to land under the roof)`, `slot N (#a) lands beside you X m off
 (place k of 5)`, `slot N (#a) lands X m from its spot`, `landed: its pilot gets out`, `the leader takes off: N
 of its wingmen take off with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own

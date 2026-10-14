@@ -91,6 +91,61 @@ inline Order start_order(const flyer_wingmen::ClassKeys* k)
    return k && k->hasStartOrder ? (Order)k->startOrder : Order::FormUp;
 }
 
+// ---- The squad key's hold, and who joins ------------------------------------------------
+// Held kBreakOffHold after it goes down, the squad key breaks the flight off,
+// once a press, as the trooper squad key's hold lets its followers go
+// (EntitySoldier::Update: the trigger's bit 0 held past 1 s). The press itself
+// acts first, as the trooper's does.
+constexpr double kBreakOffHold = 1.0;   // s
+
+struct SquadHold {
+   double since = -1.0;   // when the key went down, or -1 while it is up
+   bool   fired = false;  // this press broke the flight off
+};
+
+// The key as seen now (`down`: held; `pressed`: it went down this update):
+// whether this is when it breaks the flight off.
+inline bool squad_hold(SquadHold& h, bool down, bool pressed, double now)
+{
+   if (!down) {
+      h = SquadHold{};
+      return false;
+   }
+   if (pressed || h.since < 0.0) {
+      h.since = now;
+      h.fired = false;
+      return false;
+   }
+   if (h.fired || !(now - h.since >= kBreakOffHold)) return false;
+   h.fired = true;
+   return true;
+}
+
+// Whether losses are made up: once the player called the flight up, or from
+// takeoff with WingmanAuto; never in a flight the mission locked, nor once the
+// player broke the flight off (until the squad key calls one up again), nor in
+// a flight the player picked by hand.
+inline bool tops_up(bool locked, bool brokenOff, bool handPicked, bool called, bool autoOn)
+{
+   return !locked && !brokenOff && !handPicked && (called || autoOn);
+}
+
+// The squad key with a flyer under the reticule: none to pick (not a friendly AI
+// flyer, or one of the flight already), so the key does what it does; one that
+// joins; or one that cannot (the flight is full or locked, or that flyer may
+// not fly with this leader), so the key does nothing.
+enum class Pick : uint8_t { None, Join, Refuse };
+
+inline Pick pick_verdict(bool friendlyAiFlyer, bool ours, bool locked, bool mayJoin, bool room)
+{
+   if (!friendlyAiFlyer || ours) return Pick::None;
+   return !locked && mayJoin && room ? Pick::Join : Pick::Refuse;
+}
+
+// The order a flight the squad key calls up starts with: after the player broke
+// one off, form up; else the flight's start order.
+inline Order call_up_order(bool afterBreakOff, Order start) { return afterBreakOff ? Order::FormUp : start; }
+
 // ---- Joining from afar ----------------------------------------------------------------
 // Recruits come from anywhere on the map and fly in at their stretched speeds
 // (the leader's plus 30 m/s). One counts as joined once within kJoinedRange of

@@ -466,14 +466,24 @@ first test; later rounds added speed matching, the squad key, ODF keys (`Wingman
 formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
 squadrons do. Orders are built (the squad key's played; the comm keys and landing fixed after the first
 play, unplayed since): wingmen called up from anywhere, losses made up, form up and engage on the squad
-key, attack my target and cover me on the comm keys Attack and Defend (F11, F12), a line on the HUD for
-each, and landing beside the player, under a roof too (pilots get out unless `WingmanExitOnLand = 0`;
+key, which also picks the friendly flyer under the reticule and, held, breaks the flight off, a marker on
+each wingman, attack my target and cover me on the comm keys Attack and Defend (F11, F12), a line on the
+HUD for each, and landing beside the player, under a roof too (pilots get out unless `WingmanExitOnLand = 0`;
 `WingmanLand = 0` lets the flight go instead), the keys `Wingman = 0`, `WingmanRole`, `WingmanStartOrder` and
 `WingmanEngageRange`, and Lua calls and events for missions (`CallWingmen`, `AddWingman`, `SetWingmenOrder`,
 `SetWingmenLocked`, `OnWingmanLost` ...; docs/user/LUA_API.md)
 ([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play
 them; cycling formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
+
+**The comm keys in single player** - The eight comm keys (F5 to F12) make team chat only online, and no
+AI acts on them even there. Make each a request the AI answers offline too: Spotted, Medic, Repair, Ammo,
+Backup, Attack, Defend, then Pickup (the design agreed with the user on 2026-10-14, and the game's own
+pieces for it, in docs/RE/AISystem.md, "The comm keys' requests and the AI's own aid").
+
+**A demonstration campaign map** - Nothing shows the new AI off in one place. Once the AI work is in,
+put together a simple campaign map (the user asked for help with one, 2026-10-14) that walks through
+each feature: squads and formations, wingmen and their orders, landing, the comm keys, AI goals.
 
 **Wingmen call signs and AI flights from Lua** - Missions can script the player's flight but not name its
 wingmen or the AI's. Give wingmen call signs for the HUD's lines and radio chatter ("Red Two: copy"), and

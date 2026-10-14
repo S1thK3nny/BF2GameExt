@@ -1395,6 +1395,14 @@ namespace modtools {
    constexpr uintptr_t hud_message_color            = 0x00AE2170;
    constexpr uintptr_t localize_find                = 0x007F3720;
    constexpr uintptr_t processed_inputs_get_digital = 0x00743A30;
+   // TargetManager's markers (the map's icons, and with hudTarget a "common" HUD
+   // target bracket on screen), 32 in all: AddMarker, cdecl(object, region, icon
+   // hash, scale, team mask, colour hash, hudTarget, flash, pulse, pulse start),
+   // and RemoveMarker, cdecl(object, region, team mask), as Lua's
+   // MapAddEntityMarker (0x00471D72, the caller popping 0x28) and
+   // MapRemoveEntityMarker (0x00471E1C, popping 0xC) call them.
+   constexpr uintptr_t target_manager_add_marker    = 0x0048E3A0;
+   constexpr uintptr_t target_manager_remove_marker = 0x0048E650;
    // EntityFlyer::TakeOff, thiscall() on the entity, RET: from landed or landing
    // to taking off (state 1), its free-flight and trick times zeroed (Lua's
    // EntityFlyerTakeOff, 0x004729D4, and the player's own, 0x004FE7F6, call it).

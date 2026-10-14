@@ -20,6 +20,28 @@
 // off (3 minutes at most) to reach its slot. One is let go once dead, landed,
 // flown by someone else or, in its slot, further than 800 m.
 //
+// The player may also pick them one at a time: the squad key with a friendly AI
+// flyer in the air under the reticule (Controllable::mReticuleTarget, either
+// channel) takes that one into the first free slot that takes its class, if the
+// flight has room and it may fly with this leader as a call-up would take it,
+// else does nothing. A flight picked from empty is the player's own: it starts
+// in form up and its losses are not made up. Held for a second (the trigger's
+// bit 0, as EntitySoldier::Update's squad key holds to let its followers go:
+// its hold time against 1.0 at 0x00A2A290), the squad key breaks the flight
+// off: every wingman let go ("breakoff"), and none joins on its own, WingmanAuto
+// or not, until the squad key calls a flight up again, in form up whatever it
+// would start with, or picks one; a script's CallWingmen undoes it too. A
+// flight the mission locked is neither picked into nor broken off.
+//
+// Markers (FlyerWingmenMarkers): the game's own target markers
+// (TargetManager::AddMarker, as objectives', Lua's MapAddEntityMarker's and the
+// comm keys' requests' are), a steady cyan hud_objective_icon_circle over each
+// of the player's wingmen on the map (HUD::ElementMap::UpdateMarkerIcons) and,
+// as a "common" HUD target (LockOnManager::AddTargetCommon, display only, not
+// a lock), a bracket on screen in the same colour (HUD::ElementTarget), for the
+// player's team, from joining to leaving. The game holds 32 markers between
+// them all and adds none past that, silently.
+//
 // Orders (flyer_orders_core.hpp), with a line on the HUD's message line as the
 // trooper squad commands show theirs:
 //
@@ -33,10 +55,11 @@
 //     the order the attack interrupted.
 //   - Cover me: each takes on an AI whose attack is aimed at the leader within
 //     1200 m (its agent's AttackHelper target), chased until 1500 m off.
-//   - Keys: the squad key calls wingmen up when there are none, else switches
-//     between form up and engage (from an attack or cover, form up); the comm
-//     keys Attack and Defend (F11 and F12 by default) order attack my target
-//     and cover me as they go down. They are read from the player's processed
+//   - Keys: the squad key calls wingmen up when there are none (or picks the
+//     friendly flyer under the reticule), else switches between form up and
+//     engage (from an attack or cover, form up), and held breaks the flight
+//     off (above); the comm keys Attack and Defend (F11 and F12 by default)
+//     order attack my target and cover me as they go down. They are read from the player's processed
 //     inputs (Comm_Chat_6 and _7): the game makes team chat of the comm keys
 //     only online (RawControllerInputs::ReadLatest runs its comm-key processing
 //     only in a networked game), but turns their bindings into those inputs
@@ -228,6 +251,19 @@
 //                                   colour at 0x00AE2170 (EntitySoldier
 //                                   0x00549A35); localisation 0x007F3720,
 //                                   cdecl(hash, nullIfMissing)
+//   the squad key held              Controllable +0x60 bit 0 down (bits 0 and 1:
+//                                   pressed this update); the trooper's hold
+//                                   lets its followers go past 1.0 s
+//                                   (EntitySoldier::Update 0x00549D07, the 1.0
+//                                   at 0x00A2A290)
+//   markers                         TargetManager::AddMarker 0x0048E3A0,
+//                                   cdecl(object, region, icon, scale, teams,
+//                                   colour, hudTarget, flash, pulse, pulseFrom),
+//                                   and RemoveMarker 0x0048E650, cdecl(object,
+//                                   region, teams), as Lua's MapAddEntityMarker
+//                                   (0x00471D72) and MapRemoveEntityMarker
+//                                   (0x00471E1C) call them; "cyan" in the
+//                                   colour table (0x00ACA9A0)
 //   the comm keys                   the player's ProcessedInputs, at its
 //                                   PlayerController +0x88 (PlayerController::
 //                                   Update 0x0059B6A2); bit n of +0x10 for
@@ -286,14 +322,14 @@
 // other way round).
 //
 // A map or mod may word the messages its own way under the localisation keys
-// game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown
-// and .targetlost; else they are English.
+// game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown,
+// .targetlost, .breakoff and .join; else they are English.
 //
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
 // 60, the vee's), FlyerWingmenAuto=1 (called up at takeoff; 0: on the squad key
-// first); FlyerRealFlightSquadrons=0 for no AI squadrons (on by default, with
-// FlyerRealFlight).
+// first); FlyerWingmenMarkers=0 for no markers; FlyerRealFlightSquadrons=0 for
+// no AI squadrons (on by default, with FlyerRealFlight).
 // =============================================================================
 
 extern bool  g_flyerWingmen;
@@ -301,6 +337,7 @@ extern int   g_flyerWingmenCount;
 extern float g_flyerWingmenSpacing;
 extern bool  g_flyerWingmenAuto;
 extern bool  g_flyerWingmenLand;
+extern bool  g_flyerWingmenMarkers;
 extern bool  g_flyerRealFlightSquadrons;
 
 void flyer_wingmen_install(uintptr_t exe_base);
@@ -338,8 +375,8 @@ void flyer_wingmen_mission_end();
 //     own choice again. SetWingmenLand over WingmanLand and the INI.
 //   - Events (lua/lua_events.hpp; each fn(charIndex, object)): OnWingmanJoin
 //     and OnWingmanLost (the pilot, its flyer; GetWingmanLostReason says why:
-//     killed, pilot, landed, noroom, team, far, late, removed, dismissed, formation,
-//     leader), OnWingmenOrder (the player, an attack's target), OnWingmanLanded
+//     killed, pilot, landed, noroom, team, far, late, removed, dismissed,
+//     breakoff, formation, leader), OnWingmenOrder (the player, an attack's target), OnWingmanLanded
 //     (the pilot, its flyer, down beside the player). Queued and fired once the
 //     flyer's own update is done, so a callback may change the flight.
 // =============================================================================

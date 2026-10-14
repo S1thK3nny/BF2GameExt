@@ -333,6 +333,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);
       g_flyerWingmenAuto          = cfg.get_bool("AI", "FlyerWingmenAuto", true);
       g_flyerWingmenLand          = cfg.get_bool("AI", "FlyerWingmenLand", true);
+      g_flyerWingmenMarkers       = cfg.get_bool("AI", "FlyerWingmenMarkers", true);
       g_flyerRealFlight           = cfg.get_bool("AI", "FlyerRealFlight", false);
       g_flyerRealFlightPursuit    = cfg.get_bool("AI", "FlyerRealFlightPursuit", true);
       g_flyerRealFlightSquadrons  = cfg.get_bool("AI", "FlyerRealFlightSquadrons", true);

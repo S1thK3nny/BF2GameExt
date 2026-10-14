@@ -966,6 +966,51 @@ void mission_keys()
    assert(flight_size(20, &four, 3) == kMaxWingmen);
 }
 
+// The squad key's hold (it breaks the flight off after a second, once a press,
+// as the trooper squad key's hold lets followers go), when losses are made up,
+// whom an aimed squad key picks, and the order a flight called up after a break
+// off starts with.
+void squad_key_rules()
+{
+   using namespace flyer_orders;
+   SquadHold h;
+   // Pressed at 10 s and held: it breaks off at 11 s, once.
+   assert(!squad_hold(h, true, true, 10.0));
+   assert(!squad_hold(h, true, false, 10.5) && !squad_hold(h, true, false, 10.99));
+   assert(squad_hold(h, true, false, 11.0));
+   assert(!squad_hold(h, true, false, 11.5) && !squad_hold(h, true, false, 20.0));   // once a press
+   // Let go: a new hold next time, and a tap breaks nothing off.
+   assert(!squad_hold(h, false, false, 21.0) && h.since < 0.0 && !h.fired);
+   assert(!squad_hold(h, true, true, 22.0) && !squad_hold(h, true, false, 22.5) && !squad_hold(h, false, false, 22.6));
+   assert(!squad_hold(h, true, false, 30.0));   // down again, its press unseen: it counts from here
+   assert(squad_hold(h, true, false, 31.0));
+   // A press while it seemed held (let go and pressed between looks) counts from that press.
+   SquadHold g;
+   assert(!squad_hold(g, true, true, 0.0) && !squad_hold(g, true, false, 0.9));
+   assert(!squad_hold(g, true, true, 0.95) && !squad_hold(g, true, false, 1.5) && squad_hold(g, true, false, 1.95));
+   // Broken off, then let go and pressed again between looks: the new hold breaks off again.
+   SquadHold r;
+   assert(!squad_hold(r, true, true, 0.0) && squad_hold(r, true, false, 1.0));
+   assert(!squad_hold(r, true, true, 5.0) && squad_hold(r, true, false, 6.0));
+   SquadHold n;
+   assert(!squad_hold(n, true, true, 0.0) && !squad_hold(n, true, false, kNan));
+   // Losses made up: called up, or WingmanAuto; never locked, broken off or picked by hand.
+   assert(tops_up(false, false, false, true, false) && tops_up(false, false, false, false, true));
+   assert(!tops_up(false, false, false, false, false));
+   assert(!tops_up(true, false, false, true, true) && !tops_up(false, true, false, true, true) &&
+          !tops_up(false, false, true, true, true));
+   // An aimed squad key: no friendly AI flyer there, or one of the flight, and the key does what it does.
+   assert(pick_verdict(false, false, false, true, true) == Pick::None);
+   assert(pick_verdict(true, true, false, true, true) == Pick::None);
+   assert(pick_verdict(true, false, false, true, true) == Pick::Join);
+   assert(pick_verdict(true, false, true, true, true) == Pick::Refuse);    // the mission locked the flight
+   assert(pick_verdict(true, false, false, false, true) == Pick::Refuse);  // it may not fly with this leader
+   assert(pick_verdict(true, false, false, true, false) == Pick::Refuse);  // no room
+   // Called up after a break off: form up, whatever the flight starts with otherwise.
+   assert(call_up_order(true, Order::Engage) == Order::FormUp && call_up_order(false, Order::Engage) == Order::Engage);
+   assert(call_up_order(false, Order::Cover) == Order::Cover);
+}
+
 int main()
 {
    the_vee();
@@ -992,9 +1037,11 @@ int main()
    landing();
    landing_places();
    mission_keys();
+   squad_key_rules();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
-               "orders, passes at the ground, landing, landing places, mission keys).\n");
+               "orders, passes at the ground, landing, landing places, mission keys, the squad key's hold and "
+               "picks).\n");
    return 0;
 }

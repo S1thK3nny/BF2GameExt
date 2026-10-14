@@ -136,7 +136,7 @@ A **unit** is a flyer or other world object, given the way the game's own functi
 
 | Function | Description | Since |
 |----------|-------------|-------|
-| `CallWingmen([count])` | Calls wingmen up now if the player flies, and at every takeoff after. `count` sets how many are called up on their own (0 to 8; a negative number: the class's own number again). Returns how many fly with the player. | 1.2.0 |
+| `CallWingmen([count])` | Calls wingmen up now if the player flies, and at every takeoff after, even after the player broke a flight off or picked one by hand. `count` sets how many are called up on their own (0 to 8; a negative number: the class's own number again). Returns how many fly with the player. | 1.2.0 |
 | `DismissWingmen()` | Lets the flight go and forgets the flyers named to it. None is called up on its own again until `CallWingmen` or the squad key. Returns how many were let go. | 1.2.0 |
 | `AddWingman(unit)` | Names a flyer to the player's flight: it joins as soon as it is a friendly AI flyer in the air, from anywhere, before any called up on its own and whatever its class's keys say. Up to 8 named. Returns true once named. | 1.2.0 |
 | `RemoveWingman(unit)` | Unnames it and lets it go. It is never called up on its own again. | 1.2.0 |
@@ -149,7 +149,7 @@ A **unit** is a flyer or other world object, given the way the game's own functi
 | `GetWingman(i)` | The `i`th wingman, 1 first, in slot order: its pilot's character index and its flyer. nil past the last. | 1.2.0 |
 | `IsWingman(unit)` | Whether it flies in the player's flight. | 1.2.0 |
 | `GetWingmanLeader(unit)` | The character index of whoever it flies as a wingman of: the player, or an AI squadron leader's pilot. nil if it flies as no one's. | 1.2.0 |
-| `GetWingmanLostReason()` | Inside `OnWingmanLost`, why: `"killed"`, `"pilot"` (someone else flies it), `"landed"`, `"noroom"` (nowhere to land beside the player under a roof), `"team"`, `"far"`, `"late"`, `"removed"`, `"dismissed"`, `"formation"` (the new formation holds fewer) or `"leader"` (the player stopped leading). nil anywhere else. | 1.2.0 |
+| `GetWingmanLostReason()` | Inside `OnWingmanLost`, why: `"killed"`, `"pilot"` (someone else flies it), `"landed"`, `"noroom"` (nowhere to land beside the player under a roof), `"team"`, `"far"`, `"late"`, `"removed"`, `"dismissed"`, `"breakoff"` (the player held the squad key), `"formation"` (the new formation holds fewer) or `"leader"` (the player stopped leading). nil anywhere else. | 1.2.0 |
 
 The events are engine events like `OnCharacterExitVehicle`, with the same `Name`, `Team` and `Class` filters on the character and a `Release` function each:
 

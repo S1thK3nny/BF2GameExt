@@ -131,7 +131,10 @@ for text in (r'"\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10', r'"\x8B\x86\x38\
              r'"\x51\x56\x8B\xF1\xE8", 5', r'up1 - 0xF, "\x83\xB8\xA4\x05\x00\x00\x02", 7',
              r'up1 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7', r'up2 - 0x16, "\x83\xB8\xA4\x05\x00\x00\x02", 7',
              r'up2 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7',
-             r'"\x80\x49\x74\x08\x8B\x44\x24\x04\x89\x41\x78\xC2\x04\x00", 14'):
+             r'"\x80\x49\x74\x08\x8B\x44\x24\x04\x89\x41\x78\xC2\x04\x00", 14',
+             # The markers: TargetManager::AddMarker and RemoveMarker.
+             r'"\x8B\x44\x24\x04\x83\xEC\x0C\x55\x33\xED\x3B\xC5", 12',
+             r'"\x8B\x44\x24\x08\x55\x8B\x6C\x24\x08\x85\xED", 11'):
     assert text in source, text
 core = (SRC / "ai/flyer_wingmen_core.hpp").read_text()
 assert constant(core, "kMaxClassFormations") == 10 and constant(core, "kMaxShapePoints") == 16
@@ -157,11 +160,11 @@ NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "fl
          "hud_message", "hud_message_color", "localize_find", "player_controller_update",
          "processed_inputs_get_digital", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
          "fly_agent_land_hint_call", "fly_agent_land_hint", "fly_agent_take_off_call", "fly_agent_take_off_call2",
-         "ai_set_exit_vehicle")
+         "ai_set_exit_vehicle", "target_manager_add_marker", "target_manager_remove_marker")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
           0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x0059B460, 0x00743A30,
           0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
-          0x005A2170)
+          0x005A2170, 0x0048E3A0, 0x0048E650)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -465,6 +468,27 @@ checks = {
     0x00743A30: [("mov", "edx, ecx"), ("mov", "ecx, dword ptr [esp + 4]"), ("cmp", "ecx, 0x1e"), ("jge", "0x743a53"),
                  ("mov", "eax, 1"), ("shl", "eax, cl"), ("and", "eax, dword ptr [edx + 0x10]"),
                  ("and", "eax, 0x3fffffff")],
+    # ---- The squad key's hold, as the trooper squad key's -----------------------------------
+    # EntitySoldier::Update (EBX its Controllable): a press is the trigger's low two bits both
+    # set ...
+    0x00549851: [("mov", "eax, dword ptr [ebx + 0x60]"), ("and", "eax, 3"), ("cmp", "al, 3")],
+    # ... and while bit 0 stays set its hold time grows by the update's time and, past the
+    # 1.0 at 0x00A2A290, lets its followers go (then waits for the key to come up).
+    0x00549D07: [("test", "byte ptr [ebx + 0x60], 1"), ("je", "0x549e84"), ("fld", "dword ptr [ebp + 8]"),
+                 ("fadd", "dword ptr [ebx + 0x7b4]"), ("fst", "dword ptr [ebx + 0x7b4]"),
+                 ("fcomp", "dword ptr [0xa2a290]")],
+    0x00549E84: [("mov", "dword ptr [ebx + 0x7b4], 0")],
+    # ---- The wingmen's markers ----------------------------------------------------------------
+    # Lua's MapAddEntityMarker calls TargetManager::AddMarker with ten dwords and pops them ...
+    0x00471D6F: [("push", "0"), ("push", "ebp"), ("call", "0x407e50"), ("add", "esp, 0x28")],
+    0x00407E50: [("jmp", "0x48e3a0")],
+    0x0048E3A0: [("mov", "eax, dword ptr [esp + 4]"), ("sub", "esp, 0xc"), ("push", "ebp"), ("xor", "ebp, ebp"),
+                 ("cmp", "eax, ebp")],
+    # ... and MapRemoveEntityMarker TargetManager::RemoveMarker with three.
+    0x00471E18: [("push", "edx"), ("push", "0"), ("push", "esi"), ("call", "0x413214"), ("add", "esp, 0xc")],
+    0x00413214: [("jmp", "0x48e650")],
+    0x0048E650: [("mov", "eax, dword ptr [esp + 8]"), ("push", "ebp"), ("mov", "ebp, dword ptr [esp + 8]"),
+                 ("test", "ebp, ebp")],
     # ---- Landing with the player ----------------------------------------------------------
     # EntityFlyer::Land, thiscall() on the entity: flying, taking off or landing (2, 1, 3)
     # becomes landing (3); it ends in a tail call through its vtable (no arguments) ...
@@ -612,7 +636,8 @@ def pbl_hash(text):
         h = ((h ^ ((b if b < 0x80 else b - 0x100) & 0xFFFFFFFF | 0x20)) * 0x01000193) & 0xFFFFFFFF
     return h
 assert pbl_hash("game.squadcommand.follow") == 0x731FD493
-for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost"):
+for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost", "breakoff",
+            "join"):
     assert f'pbl_hash("game.wingmen.{key}")' in source, key
 assert 'pbl_hash("WingmanExitOnLand")' in source and 'pbl_hash("WingmanLand")' in source
 # The keys a mission sets, as no stock ODF key hashes: none of their hashes is in
@@ -686,5 +711,13 @@ for name in sorted(set(re.findall(r"starts_with\(base,\s*a->(\w+),\s*\"", source
         accepts = r"*(const uint8_t*)resolve(base, a->" + name + ") == 0xE9"
         assert accepts in source, f"{name} is detoured by {conflicts[name]}: its guard must take a JMP"
 assert {"entity_flyer_land", "entity_flyer_take_off", "flyer_do_trick"} <= set(conflicts), conflicts
+# The trooper squad key's hold time, which the wingmen's matches.
+assert struct.unpack("<f", image[0x00A2A290 - base:0x00A2A294 - base])[0] == 1.0
+orders_core = (SRC / "ai/flyer_orders_core.hpp").read_text()
+assert "constexpr double kBreakOffHold = 1.0;" in orders_core and constant(source, "kSquadDown") == 1
+# The markers' colour by name, as the game's colour table (filled at start-up)
+# lists it, and their icon, as the comm keys' requests' is.
+assert int.from_bytes(image[0x00ACA9A0 - base:0x00ACA9A4 - base], "little") == pbl_hash("cyan")
+assert 'pbl_hash("cyan")' in source and 'pbl_hash("hud_objective_icon_circle")' in source
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed; "
       f"{len(conflicts)} functions other features detour take their JMP")

@@ -124,6 +124,8 @@ Scripts can check the running version through `GameExt.version`.
   not yet tested in play.
 - **Flyer wingmen** - Friendly AI flyers fly in formation on the player's flyer, take orders
   from the squad and comm keys (form up, engage, attack my target, cover me) and land with it.
+  Aim the squad key at a friendly flyer to pick it, hold it to break the flight off; each
+  wingman has a marker on the map and on screen (`[AI] FlyerWingmenMarkers=1`).
   Flyer classes set who flies with whom, the formation, the first order, the engage range and a
   wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
   flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with
