@@ -541,6 +541,43 @@ inline float across(V3 a, V3 b)
    return std::sqrt(dx * dx + dz * dz);
 }
 
+// ---- Landing right away -------------------------------------------------------------
+// The user (2026-10-14): "When I land, AI should land right away. If their land is
+// interrupted by landing on top of something, that's when they re-check and try
+// to find a clear spot." A wingman within kLandNowRange of its leader as the
+// leader comes down lands where it is (land_here): where a ray down meets ground
+// within kLandReach, level with the leader's and flat (level_spot), and no flyer
+// or vehicle is between it and that ground. Else it is given a place
+// (land_tries). One coming down onto a flyer or vehicle (nearer under it than
+// the ground), still not down kLandStuck after it was told to land, or landed on
+// top of one, is interrupted (landing_interrupted): it takes off again and is
+// given a clear place, kLandRetries times at most, after which it circles (or,
+// under a roof, is let go).
+constexpr float  kLandNowRange = 150.0f;   // m
+constexpr float  kLandReach    = 200.0f;   // m: how far down the ground and what is on it are looked for
+constexpr double kLandStuck    = 8.0;      // s
+constexpr int    kLandRetries  = 2;
+
+// `below`: how far under it the ground is (infinity for none within kLandReach);
+// `onto`: how far under it a flyer or vehicle is (infinity for none).
+inline bool land_here(bool nearLeader, float below, float hitY, float normalY, float groundY, float onto)
+{
+   return nearLeader && below <= kLandReach && !(onto < below) && level_spot(hitY, normalY, groundY);
+}
+
+enum class Interrupt : uint8_t { None, Onto, Stuck, OnTop };
+
+// `landing`: in the game's landing state (coming down); `landed`: down;
+// `since`: seconds since it was told to land.
+inline Interrupt landing_interrupted(bool landing, bool landed, double since, float below, float onto)
+{
+   const bool over = onto < below;   // NaN or infinity: no
+   if (landing && over) return Interrupt::Onto;
+   if (landing && since > kLandStuck) return Interrupt::Stuck;
+   if (landed && over) return Interrupt::OnTop;
+   return Interrupt::None;
+}
+
 // Whether a place is kLandSpacing from each of the `n` already taken.
 inline bool spaced(V3 spot, const V3* taken, int n)
 {

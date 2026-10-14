@@ -59,7 +59,10 @@
 //     friendly flyer under the reticule), else switches between form up and
 //     engage (from an attack or cover, form up), and held breaks the flight
 //     off (above); the comm keys Attack and Defend (F11 and F12 by default)
-//     order attack my target and cover me as they go down. They are read from the player's processed
+//     order attack my target and cover me as they go down, and the comm key
+//     Spotted (F5) switches the flight to its next formation: the vee, its
+//     leader class's own WingmanSlot layout, and each of the map's formation
+//     shapes that holds it, round (Comm_Chat_0, input 20). They are read from the player's processed
 //     inputs (Comm_Chat_6 and _7): the game makes team chat of the comm keys
 //     only online (RawControllerInputs::ReadLatest runs its comm-key processing
 //     only in a networked game), but turns their bindings into those inputs
@@ -91,7 +94,14 @@
 // Landing with the player (a try; the leader class's WingmanLand, else the INI's
 // FlyerWingmenLand; with 0 the wingmen break off as the player lands): when the
 // player's flyer lands (state 3 landing, 0 landed; a player can land only in a
-// landing region, Lua AddLandingRegion), each wingman, in slot order, is given
+// landing region, Lua AddLandingRegion), each wingman within 150 m of it lands
+// right away where it is (the user: "When I land, AI should land right away"),
+// where a ray down finds ground within 200 m level with the leader's and flat
+// and no flyer or vehicle (COLL_RIGID, which the landing ray goes through) on
+// the way down. Coming down onto a flyer or vehicle, still not down 8 s after it
+// was told to land, or down on top of one, it takes off again and is given a
+// clear place as below, twice at most (flyer_orders_core.hpp, land_here,
+// landing_interrupted). Any other, in slot order, is given
 // a place on the ground beside it (flyer_orders_core.hpp, land_tries): its
 // slot's place 1.5 times out and never nearer than 15 m, else nearer, the other
 // side or behind the leader, 12 m from the others' places, where a ray down
@@ -340,7 +350,8 @@
 //
 // A map or mod may word the messages its own way under the localisation keys
 // game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown,
-// .targetlost, .breakoff and .join; else they are English.
+// .targetlost, .breakoff, .join and .formation (the formation's name follows it);
+// else they are English.
 //
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to

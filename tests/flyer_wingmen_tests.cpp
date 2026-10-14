@@ -1098,6 +1098,38 @@ void attack_sides()
    assert(kSightShort == 10.0f);
 }
 
+// Landing right away (the user: "When I land, AI should land right away"), and a
+// landing interrupted: onto a flyer or vehicle, not down in time, or down on top
+// of one.
+void landing_now()
+{
+   using namespace flyer_orders;
+   const float inf = std::numeric_limits<float>::infinity();
+   // Near, ground 60 m down, level with the leader's and flat, nothing on it: here.
+   assert(land_here(true, 60.0f, 101.0f, 1.0f, 100.0f, inf));
+   assert(!land_here(false, 60.0f, 101.0f, 1.0f, 100.0f, inf));    // not near its leader
+   assert(!land_here(true, inf, 101.0f, 1.0f, 100.0f, inf));       // no ground within reach
+   assert(!land_here(true, 201.0f, 101.0f, 1.0f, 100.0f, inf));    // ground past 200 m
+   assert(land_here(true, 200.0f, 101.0f, 1.0f, 100.0f, inf));
+   assert(!land_here(true, 60.0f, 120.0f, 1.0f, 100.0f, inf));     // not level with the leader's
+   assert(!land_here(true, 60.0f, 101.0f, 0.5f, 100.0f, inf));     // a slope
+   assert(!land_here(true, 60.0f, 101.0f, 1.0f, 100.0f, 30.0f));   // a ship on the way down
+   assert(land_here(true, 60.0f, 101.0f, 1.0f, 100.0f, 80.0f));    // one under the ground (a deck below)
+   assert(!land_here(true, kNan, 101.0f, 1.0f, 100.0f, inf));
+   // Coming down onto something; not down after 8 s; down on top of something.
+   assert(landing_interrupted(true, false, 1.0, 50.0f, 20.0f) == Interrupt::Onto);
+   assert(landing_interrupted(true, false, 1.0, 50.0f, inf) == Interrupt::None);
+   assert(landing_interrupted(true, false, 1.0, 50.0f, 60.0f) == Interrupt::None);   // past the ground
+   assert(landing_interrupted(true, false, 8.5, 50.0f, inf) == Interrupt::Stuck);
+   assert(landing_interrupted(true, false, 7.5, 50.0f, inf) == Interrupt::None);
+   assert(landing_interrupted(true, false, 9.0, inf, inf) == Interrupt::Stuck);       // nothing under it at all
+   assert(landing_interrupted(false, true, 20.0, 4.0f, 1.5f) == Interrupt::OnTop);
+   assert(landing_interrupted(false, true, 20.0, 1.0f, inf) == Interrupt::None);      // down on the ground
+   assert(landing_interrupted(false, false, 20.0, 50.0f, 1.0f) == Interrupt::None);   // flying
+   assert(landing_interrupted(true, false, 1.0, kNan, 1.0f) == Interrupt::None);
+   assert(kLandRetries == 2 && kLandNowRange == 150.0f);
+}
+
 int main()
 {
    the_vee();
@@ -1126,10 +1158,11 @@ int main()
    mission_keys();
    squad_key_rules();
    attack_sides();
+   landing_now();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
                "orders, passes at the ground, landing, landing places, mission keys, the squad key's hold and "
-               "picks, attack sides).\n");
+               "picks, attack sides, landing right away).\n");
    return 0;
 }

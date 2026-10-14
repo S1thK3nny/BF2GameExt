@@ -17,6 +17,7 @@
 #include <detours.h>
 
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
@@ -84,6 +85,7 @@ constexpr uint32_t kPC_Inputs          = 0x88;
 constexpr uint32_t kInputs_Bits        = 0x10;
 constexpr int      kInputCommAttack    = 26;     // ePROCESSEDINPUT_Comm_Chat_6: the comm key Attack (F11 by default) ...
 constexpr int      kInputCommDefend    = 27;     // ... Comm_Chat_7, Defend (F12)
+constexpr int      kInputCommFormation = 20;     // Comm_Chat_0, Spotted (F5): in a flyer, the formation key
 constexpr int      kSafeHeightTaper    = 1;      // SH_TAPER: a dive at the ground lets the safe height go
 // A flyer's primary weapon and the ranges its AI fights at (its weapon ODF's).
 constexpr uint32_t kFly_Weapons        = 0x6B8;  // EntityFlyer::mWeapon[4] ...
@@ -179,7 +181,6 @@ constexpr double kOpenEvery     = 2.0;   // s between workings-out of its target
 constexpr float  kViaReached    = 100.0f;   // m: the way round to the open side, passed
 constexpr double kExitAgain     = 2.0;   // s: a landed wingman's pilot asked to get out again ...
 constexpr int    kExitTries     = 4;     // ... this many times in all
-constexpr double kLandStuck     = 10.0;  // s still coming down after being told to land: logged
 constexpr double kSettleFor     = 20.0;  // s a landed wingman of a leader gone has to get its pilot out
 constexpr int    kMaxReports    = 400;
 constexpr int    kMaxSquadLogs  = 300;
@@ -370,7 +371,7 @@ struct Wingman {
    V3       spot;              // where it lands
    bool     touchedDown = false;   // landed beside its leader (OnWingmanLanded)
    double   landAt = 0.0;      // told to land (EntityFlyer::Land) ...
-   bool     stuckLogged = false;   // ... and said to be still coming down long after
+   int      landTries = 0;     // ... its landings interrupted so far
    double   exitAt = 0.0;      // its pilot last asked to get out ...
    int      exitTries = 0;     // ... how many times
    int      pilot = -1;        // the character flying it as it joined (a script's events), or -1
@@ -393,6 +394,7 @@ enum : int {
    kLandDown    = 3,   // landing or landed
    kLandLeaving = 4,   // taking off with its leader
    kLandOut     = 5,   // landed, its pilot getting out (unless WingmanExitOnLand = 0)
+   kLandSeek    = 6,   // its landing interrupted: taking off again, for a clear place
 };
 
 // The leader's DoTrick, seen before it runs; it went ahead if the leader is in a
@@ -1500,7 +1502,7 @@ void set_order(Formation& f, Order o, double now, bool quiet = false)
 
 // Whether anything is in the way from one point to another (the same ray, the
 // same types); how far along the first thing is.
-bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = nullptr)
+bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = nullptr, int types = kGroundMask)
 {
    if (!s_rayHit) return false;
    V3 dir = to - from;
@@ -1511,7 +1513,7 @@ bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = 
    void* hit = nullptr;
    float normal[3] = {0.0f, 1.0f, 0.0f};
    uint8_t* ignore[2] = {ignoreA, ignoreB};
-   const float fraction = s_rayHit(start, d, length, &hit, normal, ignore, ignoreB ? 2 : 1, kGroundMask, 0);
+   const float fraction = s_rayHit(start, d, length, &hit, normal, ignore, ignoreB ? 2 : 1, types, 0);
    if (!(fraction >= 0.0f && fraction < 1.0f)) return false;
    if (along) *along = fraction * length;
    return true;
@@ -1834,6 +1836,29 @@ bool ground_at(V3 from, float length, uint8_t* ignoreA, uint8_t* ignoreB, float&
    return true;
 }
 
+// What is under a wingman, kLandReach down at most (flyer_orders_core.hpp,
+// land_here): how far the ground is (the landing ray's types; infinity for
+// none), its height and how far up it faces; and how far a flyer or vehicle is
+// (COLL_RIGID, as EntityFlyer and the other vehicles give GameObject; the
+// landing ray goes through them; infinity for none).
+constexpr int kVehicleTypes = 0x8;
+
+void look_down(uint8_t* self, float& below, float& hitY, float& normalY, float& onto)
+{
+   const V3 at = position_of(self);
+   below = onto = std::numeric_limits<float>::infinity();
+   hitY = at.y;
+   normalY = 1.0f;
+   float y = 0.0f, up = 0.0f;
+   if (ground_at(at, flyer_orders::kLandReach, self, nullptr, y, up)) {
+      below = at.y - y;
+      hitY = y;
+      normalY = up;
+   }
+   float along = 0.0f;
+   if (blocked(at, at - V3{0.0f, flyer_orders::kLandReach, 0.0f}, self, nullptr, &along, kVehicleTypes)) onto = along;
+}
+
 // Whether something is over a point within kLandProbe: a roof (a hangar's).
 bool roofed(V3 at, uint8_t* ignoreA, uint8_t* ignoreB, float* height = nullptr)
 {
@@ -1890,7 +1915,7 @@ void start_landing(Formation& f, uint8_t* leader, double now)
    float roof = flyer_orders::kLandProbe;
    f.padRoof = roofed(V3{f.pad.x, f.padGround + 1.0f, f.pad.z}, leader, nullptr, &roof) ? roof + 1.0f
                                                                                        : flyer_orders::kNoRoof;
-   int beside = 0, over = 0, gone = 0;
+   int here = 0, beside = 0, over = 0, gone = 0;
    V3 taken[flyer_wingmen::kMaxWingmen];
    int nTaken = 0;
    bool letGo[flyer_wingmen::kMaxWingmen] = {};
@@ -1906,6 +1931,24 @@ void start_landing(Formation& f, uint8_t* leader, double now)
       w.joining = false;
       w.holding = false;
       w.trick = -1;
+      w.landTries = 0;
+      // Near, over level ground with nothing on it: straight down where it is.
+      const V3 at = position_of(w.obj);
+      float below = 0.0f, hitY = 0.0f, normalY = 0.0f, onto = 0.0f;
+      look_down(w.obj, below, hitY, normalY, onto);
+      const bool nearLeader = flyer_wingmen::length(at - f.pad) <= flyer_orders::kLandNowRange;
+      if (s_land && flyer_orders::land_here(nearLeader, below, hitY, normalY, f.padGround, onto)) {
+         s_land(w.obj);
+         w.land = kLandDown;
+         w.spot = V3{at.x, hitY, at.z};
+         w.landAt = now;
+         taken[nTaken++] = w.spot;
+         ++here;
+         if (order_log())
+            install_log("[Wingmen] slot %d (#%u) lands where it is, %.0f m from you, %.0f m up", w.slot + 1, w.handle,
+                        (double)flyer_orders::across(at, f.pad), (double)below);
+         continue;
+      }
       V3 spot = f.pad;
       const int k = land_place(f, leader, w, rank, taken, nTaken, spot);
       if (k >= 0) {
@@ -1928,9 +1971,42 @@ void start_landing(Formation& f, uint8_t* leader, double now)
    for (int i = f.count - 1; i >= 0; --i)
       if (letGo[i]) drop(f, i, "nowhere to land beside you, under a roof", "noroom");
    if (order_log())
-      install_log("[Wingmen] the leader comes down%s: %d land beside it, %d circle overhead, %d let go (nowhere to land "
-                  "under the roof)",
-                  f.padRoof < flyer_orders::kNoRoof ? " under a roof" : "", beside, over, gone);
+      install_log("[Wingmen] the leader comes down%s: %d land where they are, %d fly to a place beside it, %d circle "
+                  "overhead, %d let go (nowhere to land under the roof)",
+                  f.padRoof < flyer_orders::kNoRoof ? " under a roof" : "", here, beside, over, gone);
+}
+
+// A wingman whose landing was interrupted, up again: a clear place beside its
+// leader (land_place, away from the others' places and from where they are), else,
+// past kLandRetries, or with none, it circles overhead (under a roof, let go).
+void re_place(Formation& f, uint8_t* leader, int i, double now)
+{
+   Wingman& w = f.wing[i];
+   V3 taken[flyer_wingmen::kMaxWingmen + 1];
+   int nTaken = 0, rank = 0;
+   taken[nTaken++] = f.pad;
+   for (int j = 0; j < f.count; ++j) {
+      if (j == i) continue;
+      const Wingman& o = f.wing[j];
+      if (o.slot < w.slot) ++rank;
+      if (o.land == kLandComing) taken[nTaken++] = o.spot;
+      else if (o.land == kLandDown || o.land == kLandOut) taken[nTaken++] = position_of(o.obj);
+   }
+   V3 spot = f.pad;
+   const int k = w.landTries > flyer_orders::kLandRetries ? -1 : land_place(f, leader, w, rank, taken, nTaken, spot);
+   if (k >= 0) {
+      w.spot = spot;
+      w.land = kLandComing;
+      if (order_log())
+         install_log("[Wingmen] slot %d (#%u) lands at a clear place %.0f m from you (place %d of %d)", w.slot + 1,
+                     w.handle, (double)flyer_orders::across(spot, f.pad), k + 1, flyer_orders::kLandTries);
+   } else if (f.padRoof < flyer_orders::kNoRoof) {
+      drop(f, i, "nowhere clear to land beside you, under a roof", "noroom");
+   } else {
+      w.spot = f.pad;
+      w.land = kLandCircle;
+      if (order_log()) install_log("[Wingmen] slot %d (#%u): nowhere clear to land; it circles", w.slot + 1, w.handle);
+   }
 }
 
 // The leader takes off again (or did not land after all): so do they.
@@ -1961,6 +2037,35 @@ void update_landing(Formation& f, uint8_t* leader)
    const bool down = ls == kStateLanding || ls == kStateLanded;
    if (down && !f.landing) start_landing(f, leader, seconds());
    else if (!down && f.landing) end_landing(f);
+   if (f.landing) {
+      // Interrupted (flyer_orders_core.hpp, landing_interrupted): coming down onto a
+      // flyer or vehicle, still not down, or down on top of one. It takes off again
+      // and, up, is given a clear place (re_place).
+      for (int i = 0; i < f.count; ++i) {
+         Wingman& w = f.wing[i];
+         if (w.land == kLandSeek) {
+            if (flying(w.obj)) re_place(f, leader, i, now);
+            continue;
+         }
+         if (w.land != kLandDown || !s_takeOff) continue;
+         const int st = state_of(w.obj);
+         float below = 0.0f, hitY = 0.0f, normalY = 0.0f, onto = 0.0f;
+         look_down(w.obj, below, hitY, normalY, onto);
+         const flyer_orders::Interrupt why =
+            flyer_orders::landing_interrupted(st == kStateLanding, st == kStateLanded, now - w.landAt, below, onto);
+         if (why == flyer_orders::Interrupt::None) continue;
+         if (order_log())
+            install_log("[Wingmen] slot %d (#%u) %s: it looks for a clear place (%d of %d)", w.slot + 1, w.handle,
+                        why == flyer_orders::Interrupt::Onto    ? "was coming down onto a flyer or vehicle"
+                        : why == flyer_orders::Interrupt::Stuck ? "has not touched down"
+                                                                : "landed on top of a flyer or vehicle",
+                        w.landTries + 1, flyer_orders::kLandRetries);
+         w.landTries++;
+         s_takeOff(w.obj);
+         w.land = kLandSeek;
+         w.touchedDown = false;
+      }
+   }
    for (int i = 0; i < f.count; ++i) {
       Wingman& w = f.wing[i];
       if (w.land == kLandLeaving && flying(w.obj)) w.land = kLandNone;   // up again: to its slot
@@ -1993,13 +2098,6 @@ void update_landing(Formation& f, uint8_t* leader)
          if (order_log())
             install_log("[Wingmen] slot %d (#%u) still aboard: its pilot asked to get out again (%d)", w.slot + 1,
                         w.handle, w.exitTries);
-      }
-      if (w.land == kLandDown && state_of(w.obj) == kStateLanding && now - w.landAt > kLandStuck && !w.stuckLogged) {
-         w.stuckLogged = true;
-         if (order_log())
-            install_log("[Wingmen] slot %d (#%u) still coming down %.0f s after it was told to land, %.0f m from its "
-                        "spot",
-                        w.slot + 1, w.handle, now - w.landAt, (double)flyer_orders::across(position_of(w.obj), w.spot));
       }
    }
 }
@@ -2074,7 +2172,6 @@ void maybe_land(Wingman& w)
    s_land(w.obj);
    w.land = kLandDown;
    w.landAt = seconds();
-   w.stuckLogged = false;
    if (order_log())
       install_log("[Wingmen] slot %d (#%u) lands %.0f m from its spot", w.slot + 1, w.handle,
                   (double)flyer_orders::across(position_of(w.obj), w.spot));
@@ -2317,7 +2414,91 @@ uint32_t comm_bits(uint8_t* leader)
    if (!ctrl || !is_rtti(ctrl, kRttiPlayerController)) return 0;
    const uint8_t* const inputs = *(const uint8_t* const*)(ctrl + kPC_Inputs);
    if (!inputs) return 0;
-   return *(const uint32_t*)(inputs + kInputs_Bits) & ((1u << kInputCommAttack) | (1u << kInputCommDefend));
+   return *(const uint32_t*)(inputs + kInputs_Bits) &
+          ((1u << kInputCommAttack) | (1u << kInputCommDefend) | (1u << kInputCommFormation));
+}
+
+// ---- The formation key ------------------------------------------------------------------
+// The comm key Spotted (F5 by default) in the air (the user, 2026-10-14: "We'll
+// utilise an unused Fnum key whilst in a flyer, so anything from F5 to F10. F5
+// is best I think"): the flight's next formation, round: the vee, its leader
+// class's own WingmanSlot layout where it has one, and each of the map's
+// formation shapes that holds the flight (as many slots as it has wingmen or
+// calls up), in the map's order. A wingman whose slot the new one lacks moves to
+// a free one (reslot). It holds until the player leads from another flyer, or a
+// mission script sets one (SetWingmenFormation).
+void reslot();
+
+void say_formation(const char* name)
+{
+   if (!s_message) return;
+   const wchar_t* prefix = L"Wingmen formation:";
+   if (s_localize)
+      if (const wchar_t* own = s_localize(pbl_hash("game.wingmen.formation"), true); own && *own) prefix = own;
+   wchar_t text[128];
+   swprintf_s(text, L"%s %S", prefix, name ? name : "");
+   uint8_t color[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+   if (s_messageColor) std::memcpy(color, s_messageColor, sizeof color);
+   s_message(0, text, color);
+}
+
+void cycle_formation()
+{
+   Formation& f = s_player;
+   uint8_t* const leader = f.leader;
+   const ClassKeys* keys = keys_of(leader);
+   int want = flyer_wingmen::flight_size(s_scriptSize, keys, g_flyerWingmenCount);
+   if (want < f.count) want = f.count;
+   // The choices, in turn: 0 the vee, 1 the class's own layout, 2 a map shape.
+   constexpr int kMaxChoices = 2 + kMaxMapShapes;
+   int kinds[kMaxChoices];
+   uint32_t names[kMaxChoices];
+   int n = 0;
+   kinds[n] = 0;
+   names[n++] = 0;
+   if (keys && keys->hasSlots && keys->slotCount >= want) {
+      kinds[n] = 1;
+      names[n++] = 0;
+   }
+   if (s_shapeList) {
+      uint8_t* node = *(uint8_t**)(s_shapeList + kList_Next);
+      for (int i = 0; i < 1024 && node && node != s_shapeList && n < kMaxChoices; ++i) {
+         const uint8_t* const fm = *(const uint8_t* const*)(node + kList_Payload);
+         if (!fm) break;   // the head: the list's end
+         node = *(uint8_t**)(node + kList_Next);
+         Shape sh;
+         if (!read_shape_at(fm, sh) || sh.size - 1 < want) continue;
+         kinds[n] = 2;
+         names[n++] = sh.name;
+      }
+   }
+   // Which it flies now, and the next.
+   int cur = 0;
+   for (int k = 0; k < n; ++k)
+      if ((f.shapeCount > 0 && kinds[k] == 2 && names[k] == f.shapeName) ||
+          (f.shapeCount == 0 && !f.vee && kinds[k] == 1))
+         cur = k;
+   const int next = (cur + 1) % n;
+   f.vee = kinds[next] == 0;
+   f.shapeCount = 0;
+   f.shapeName = 0;
+   char label[32] = "vee";
+   if (kinds[next] == 1) {
+      std::snprintf(label, sizeof label, "%s", "own");
+   } else if (kinds[next] == 2) {
+      Shape sh;
+      if (read_shape(names[next], sh)) {
+         const MapShapes m = map_shapes();
+         f.shapeCount = shape_slots_for(sh, m.unturn, sh.size - 1, f.shape);
+         f.shapeName = sh.name;
+      }
+      if (const char* nm = shape_name(names[next])) std::snprintf(label, sizeof label, "%s", nm);
+      else std::snprintf(label, sizeof label, "%d of %d", next, n - 1);
+   }
+   reslot();
+   say_formation(label);
+   install_log("[Wingmen] formation key: %s (%d of %d formations that hold %d), %d wingmen", label, next + 1, n, want,
+               f.count);
 }
 
 // The comm keys' Attack and Defend (F11 and F12 by default), in the air with
@@ -2331,8 +2512,10 @@ void comm_key(double now)
       return;
    }
    const uint32_t held = comm_bits(s_player.leader);
-   const uint32_t pressed = held & ~s_commHeld;
+   const uint32_t went = held & ~s_commHeld;
    s_commHeld = held;
+   if (went & (1u << kInputCommFormation)) cycle_formation();
+   const uint32_t pressed = went & ((1u << kInputCommAttack) | (1u << kInputCommDefend));
    if (!pressed) return;
    const bool defend = (pressed & (1u << kInputCommAttack)) == 0;   // both at once: the attack
    if (!s_player.count) {

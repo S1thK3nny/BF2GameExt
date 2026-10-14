@@ -94,6 +94,8 @@ for name, value in {
     "kInputs_Bits": 0x10,
     "kInputCommAttack": 26,
     "kInputCommDefend": 27,
+    "kInputCommFormation": 20,
+    "kVehicleTypes": 0x8,
     "kSafeHeightTaper": 1,
     "kStateLanded": 0,
     "kStateTakeoff": 1,
@@ -652,7 +654,7 @@ def pbl_hash(text):
     return h
 assert pbl_hash("game.squadcommand.follow") == 0x731FD493
 for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost", "breakoff",
-            "join"):
+            "join", "formation"):
     assert f'pbl_hash("game.wingmen.{key}")' in source, key
 assert 'pbl_hash("WingmanExitOnLand")' in source and 'pbl_hash("WingmanLand")' in source
 # The keys a mission sets, as no stock ODF key hashes: none of their hashes is in

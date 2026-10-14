@@ -1036,6 +1036,25 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   up again. One with no place, or up again first, circles 200 m round a point 150 m over the leader; with the
   leader under a roof, where that would take it into the roof (or the ship or the mountain round the hangar),
   it is let go instead (`GetWingmanLostReason` "noroom").
+- **Landing right away, and again elsewhere when interrupted** (the user, 2026-10-14: "When I land, AI should
+  land right away. If their land is interrupted by landing on top of something, that's when they re-check and
+  try to find a clear spot"). As the leader comes down, each wingman within 150 m of it lands where it is
+  (`EntityFlyer::Land`) where a ray down finds ground within 200 m, level with the leader's and flat, and a
+  second ray down (`COLL_RIGID` 0x8, the flyers and vehicles, which the landing ray's 0x190 goes through)
+  meets no flyer or vehicle above that ground; the rest are given places as before. Every second while it is
+  told to land: one coming down onto a flyer or vehicle, still not down 8 s after `Land`, or down on top of
+  one (a flyer or vehicle nearer under it than the ground) takes off again (`EntityFlyer::TakeOff`) and, up,
+  is given a clear place beside its leader away from the others' places and from where they are, twice at
+  most; then it circles (under a roof, it is let go). `flyer_orders_core.hpp`: `land_here`,
+  `landing_interrupted`.
+- **The formation key** (the user: "We'll utilise an unused Fnum key whilst in a flyer, so anything from F5 to
+  F10. F5 is best I think"): the comm key Spotted, `ePROCESSEDINPUT_Comm_Chat_0` (input 20, F5 by default in
+  every control mode; flyer mode leaves only "previous primary" and "previous secondary weapon" unbound,
+  `RawControllerInputs::sDefaultKeyboardBindings`, P initialiser `0x0043B1E0`), read from the player's processed
+  inputs as Attack and Defend are. Each press: the flight's next formation of the vee, its leader class's own
+  WingmanSlot layout, and each of the map's formation shapes that holds it (as many slots as it has wingmen
+  or calls up), round, in the map's order; wingmen whose slot the new one lacks move to free ones. "Wingmen
+  formation: <name>" on the message line (`game.wingmen.formation`).
 - **Getting out, for sure** (the user, 2026-10-14: "AI don't always leave their ship when they land it as
   wingmen"). In the user's log one wingman touched down and the player got out a second later, before the
   once-a-second landing update had seen it landed: the flight was let go ("the player is not flying") with
