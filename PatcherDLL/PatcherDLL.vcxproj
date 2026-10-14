@@ -246,6 +246,7 @@
     <ClInclude Include="src\ai\ai_sprint_core.hpp" />
     <ClInclude Include="src\ai\flyer_avoidance.hpp" />
     <ClInclude Include="src\ai\flyer_avoidance_core.hpp" />
+    <ClInclude Include="src\ai\flyer_orders_core.hpp" />
     <ClInclude Include="src\ai\flyer_real_flight.hpp" />
     <ClInclude Include="src\ai\flyer_real_flight_core.hpp" />
     <ClInclude Include="src\ai\flyer_wingmen.hpp" />

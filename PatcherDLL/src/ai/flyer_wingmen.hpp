@@ -11,13 +11,52 @@
 // the air, and the game's squadrons put AI flyers on their AI leader's flight
 // path (docs/RE/FlyerAI.md, "Wingmen for a player's flyer").
 //
-// Who: the player's flyer, flying, leads. Friendly AI flyers within 300 m that
-// its class lets follow it join, the nearest first: the classes its
+// Who: the player's flyer, flying, leads. Friendly AI flyers its class lets
+// follow it are called up, the nearest first, however far: the classes its
 // WingmanClass keys name, or with none any that can keep up (top speed at least
-// 90% of the leader's). They join at takeoff (WingmanAuto, else the INI) and on
-// the squad key, which then switches them between forming up and breaking off
-// (to fly and fight as the AI will, until called back). One is let go once
-// dead, landed, flown by someone else or, in formation, further than 800 m.
+// 90% of the leader's). They are called at takeoff (WingmanAuto, else the INI)
+// or on the squad key; from then on losses are made up whenever they happen. One
+// further than 150 m flies in, and has 20 s plus 1 s for every 20 m it started
+// off (3 minutes at most) to reach its slot. One is let go once dead, landed,
+// flown by someone else or, in its slot, further than 800 m.
+//
+// Orders (flyer_orders_core.hpp), with a line on the HUD's message line as the
+// trooper squad commands show theirs:
+//
+//   - Form up: hold their slots.
+//   - Engage: each takes on an enemy within 800 m of the leader (flyers before
+//     vehicles on the ground, spread before doubling up; troops on foot are
+//     left alone), chased until 1000 m from the leader, else holds its slot.
+//   - Attack my target: all on the player's lock, else the enemy under its
+//     reticule, as the order is given (with neither, "no target" and nothing
+//     changes); chased until it is down or 3000 m from the leader, then back to
+//     the order the attack interrupted.
+//   - Cover me: each takes on an AI whose attack is aimed at the leader within
+//     1200 m (its agent's AttackHelper target), chased until 1500 m off.
+//   - Keys: the squad key calls wingmen up when there are none, else switches
+//     between form up and engage (from an attack or cover, form up); the comm
+//     keys' attack and defend (TeamOrderInputProcess codes 6 and 7) order
+//     attack my target and cover me, and still send their team chat.
+//   - A chasing wingman flies at its own speeds: behind a flyer in the air as
+//     real flight's chase does (flyer_real_flight_core.hpp); at anything else in
+//     passes, a dive at it with the safe height let go near it (SH_TAPER), out
+//     150 m short or once past it, on and 60 m up, back in from 700 m or after
+//     8 s. Its AI's attack is aimed at its target (ForceSetAttackHelperTarget,
+//     at most every 0.5 s, and only while aimed elsewhere), so it fires at it.
+//     One further than 2500 m from its leader comes back.
+//
+// Landing with the player (FlyerWingmenLand, a try): when the player's flyer
+// lands (state 3 landing, 0 landed), each wingman is given its slot's place on
+// the ground beside it, 1.5 times out and never nearer than 15 m, where a ray
+// down from 40 m up (CollisionManager::RayHit, the flyer's own landing ray's
+// types 0x190) finds ground within 4 m of the leader's and flat; it comes down
+// toward 15 m over it, at its slowest (the stretch lets it go to 10 m/s) from
+// 300 m in, and lands (EntityFlyer::Land) once within 40 m of it across and
+// 40 m up. Where there is no such ground, or its AI takes it up again, it
+// circles 200 m round a point 150 m over the leader. When the player takes off
+// (state 1) the landed ones take off too (EntityFlyer::TakeOff) and form up
+// again. While landed the squad key is the game's (seats), and the comm keys
+// order nothing.
 //
 // An AI flyer that is not placed on a path flies by physics:
 // EntityFlyer::UpdateIndirect runs its navigator (AILowLevel::UpdateIndirect),
@@ -140,6 +179,31 @@
 //                                   the root is a slot; Read leaves the points
 //                                   relative to the root (0x005E2CD4); every
 //                                   node's z negated on load (0x00820470)
+//   the player's targets            Controllable::GetTargetLockedObj 0x005E0C70
+//                                   (thiscall(), EAX; kept at +0x138); the
+//                                   reticule's at Controllable +0x164 (handle
+//                                   +0x168), a second channel 8 bytes on, as the
+//                                   trooper squad command reads it (0x0054985F)
+//   enemies                         GameObject::GetAffiliationToMe 0x0055F840
+//                                   (thiscall(other), RET 4): below 0
+//   an AI's attack                  UnitController +0x2C0 its agent, whose
+//                                   AttackHelper (+0x10) holds the target (+0,
+//                                   handle +4); ForceSetAttackHelperTarget
+//                                   0x0059EC20 (thiscall(target), RET 4)
+//   the message line                0x006AECD0, cdecl(player, text, color*):
+//                                   player%d.message.color, then
+//                                   player%d.message; the trooper commands'
+//                                   colour at 0x00AE2170 (EntitySoldier
+//                                   0x00549A35); localisation 0x007F3720,
+//                                   cdecl(hash, nullIfMissing)
+//   the comm keys                   TeamOrderInputProcess 0x00745D00, its CALL
+//                                   to NetGame::AddChatMessageToQue (0x0070C260,
+//                                   cdecl, 7 dwords, the code the fifth) at
+//                                   0x00745DC3
+//   landing                         EntityFlyer::Land 0x004F1380 and TakeOff
+//                                   0x004F8B70, thiscall() on the entity;
+//                                   CollisionManager::RayHit 0x0042E230 (as
+//                                   real flight's raise_ray_mt calls it)
 //
 // AI flies on the host and in single player only; the leader is the host's
 // own player.
@@ -155,10 +219,14 @@
 // holds all its wingmen (else the largest); else the vee. The free slots fill
 // in order, each with the nearest flyer that may take it.
 //
+// A map or mod may word the messages its own way under the localisation keys
+// game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown
+// and .targetlost; else they are English.
+//
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
-// 60, the vee's), FlyerWingmenAuto=1 (join at takeoff; 0: on the squad key
-// only); FlyerRealFlightSquadrons=0 for no AI squadrons (on by default, with
+// 60, the vee's), FlyerWingmenAuto=1 (called up at takeoff; 0: on the squad key
+// first); FlyerRealFlightSquadrons=0 for no AI squadrons (on by default, with
 // FlyerRealFlight).
 // =============================================================================
 
@@ -166,6 +234,7 @@ extern bool  g_flyerWingmen;
 extern int   g_flyerWingmenCount;
 extern float g_flyerWingmenSpacing;
 extern bool  g_flyerWingmenAuto;
+extern bool  g_flyerWingmenLand;
 extern bool  g_flyerRealFlightSquadrons;
 
 void flyer_wingmen_install(uintptr_t exe_base);

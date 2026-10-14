@@ -460,6 +460,9 @@
     <ClInclude Include="src\ai\flyer_avoidance_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\flyer_orders_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\flyer_real_flight.hpp">
       <Filter>ai</Filter>
     </ClInclude>

@@ -1370,6 +1370,35 @@ namespace modtools {
    constexpr uintptr_t flyer_follower_link          = 0x005E8AE3;
    constexpr uintptr_t entity_formation_find        = 0x005E2EB0;
    constexpr uintptr_t entity_formation_list        = 0x00AD33C0;
+   // Wingmen orders (a prototype, modtools only). Controllable::
+   // GetTargetLockedObj, thiscall() on a Controllable, the GameObject in EAX,
+   // RET: a player's from its LockOnManager, kept at +0x138 (+0x13C its handle).
+   // UnitController::ForceSetAttackHelperTarget, thiscall(GameObject*), RET 4:
+   // its agent (+0x2C0) and that one's AttackHelper (+0x10, the target there
+   // and its handle at +4) through AttackHelper::SetVisibleTarget.
+   // GameObject::GetAffiliationToMe, thiscall(GameObject* other), RET 4: below
+   // 0 an enemy. The HUD's message line, cdecl(int player, const wchar_t*
+   // text, const RedColor* color): sends player%d.message.color, then
+   // player%d.message, as the trooper squad commands show theirs (EntitySoldier
+   // 0x00549A6D); their colour is hud_message_color. The localisation lookup,
+   // cdecl(uint32_t hash, bool nullIfMissing), a wide string. RawControllerInputs::
+   // TeamOrderInputProcess (thiscall, RET) and its one CALL to NetGame::
+   // AddChatMessageToQue, cdecl(bool, uint localIndex, uint64, Code code,
+   // const wchar_t* text, uint mask), the comm keys' codes 0-7 (6 attack,
+   // 7 defend).
+   constexpr uintptr_t controllable_locked_target   = 0x005E0C70;
+   constexpr uintptr_t uc_force_attack_target       = 0x0059EC20;
+   constexpr uintptr_t object_affiliation           = 0x0055F840;
+   constexpr uintptr_t hud_message                  = 0x006AECD0;
+   constexpr uintptr_t hud_message_color            = 0x00AE2170;
+   constexpr uintptr_t localize_find                = 0x007F3720;
+   constexpr uintptr_t team_order_input             = 0x00745D00;
+   constexpr uintptr_t team_order_chat_call         = 0x00745DC3;
+   constexpr uintptr_t add_chat_message             = 0x0070C260;
+   // EntityFlyer::TakeOff, thiscall() on the entity, RET: from landed or landing
+   // to taking off (state 1), its free-flight and trick times zeroed (Lua's
+   // EntityFlyerTakeOff, 0x004729D4, and the player's own, 0x004FE7F6, call it).
+   constexpr uintptr_t entity_flyer_take_off        = 0x004F8B70;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

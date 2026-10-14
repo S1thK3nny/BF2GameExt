@@ -265,9 +265,10 @@ inline V3 mirrored(V3 slot, bool mirror) { return mirror ? V3{-slot.x, slot.y, s
 
 // ---- Who flies as one -------------------------------------------------------------
 // Only a flyer that can keep up: its top speed at least kKeepUp of the leader's.
+// Called up from anywhere on the map (flyer_orders_core.hpp, joining); once in its
+// slot, one further off than kKeepRange is let go.
 constexpr float kKeepUp       = 0.9f;
-constexpr float kRecruitRange = 300.0f;   // m: friendlies this near join
-constexpr float kKeepRange    = 800.0f;   // m: a wingman further off than this is let go
+constexpr float kKeepRange    = 800.0f;   // m
 
 inline bool can_keep_up(float wingmanMax, float leaderMax)
 {

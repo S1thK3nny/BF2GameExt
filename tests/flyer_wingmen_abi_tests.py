@@ -83,8 +83,38 @@ for name, value in {
     "kNode_Rotation": 0x0C,
     "kList_Next": 0x04,
     "kList_Payload": 0x0C,
+    # Orders: the player's targets, what an AI's attack is aimed at, the comm keys' codes.
+    "kCtl_Reticule": 0x164,
+    "kCtl_ReticuleHandle": 0x168,
+    "kReticuleChannels": 2,
+    "kUC_Agent": 0x2C0,
+    "kAgent_AttackTarget": 0x10,
+    "kAgent_AttackHandle": 0x14,
+    "kCommAttack": 6,
+    "kCommDefend": 7,
+    "kSafeHeightTaper": 1,
+    "kStateLanded": 0,
+    "kStateTakeoff": 1,
+    "kStateLanding": 3,
+    "kGroundMask": 0x190,
 }.items():
     assert constant(source, name) == value, name
+assert 'pbl_hash("EntitySoldier")' in source
+assert 'static_assert(pbl_hash("game.squadcommand.follow") == 0x731FD493u' in source
+# The orders' guards, as install_orders checks them.
+for text in (r'"\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10', r'"\x8B\x86\x38\x01\x00\x00", 6',
+             r'"\x8B\x81\xC0\x02\x00\x00\x85\xC0\x74\x08\x8D\x48\x10\xE9", 14',
+             r'"\x53\x55\x56\x8B\xF1\x8B\x86\x34\x02\x00\x00", 11',
+             r'"\x8B\x44\x24\x0C\x83\xEC\x10\x56\x8B\x74\x24\x18\x69\xF6\x28\x03\x00\x00", 18',
+             r'"\x8B\x44\x24\x04\x50\x68\x00\x80\x00\x00", 10',
+             r'"\x83\xEC\x20\x8B\x41\x08\x55\x56\x57\x33\xFF\x69\xC0\x02\x01\x00\x00"',
+             r'call - 0x13, "\x50\x57\x6A\x00\x6A\x00\x6A\x00", 8', r'call - 3, "\x50\x6A\x00", 3',
+             r'call + 5, "\x83\xC4\x1C", 3', r'"\x55\x8B\xEC\x83\xEC\x20\x0F\xB6\x45\x08", 10',
+             # Landing's: Land (or a detour's JMP), TakeOff, RayHit.
+             r'"\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00", 9',
+             r'"\x51\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00\x85\xC0\x57", 13',
+             r'"\xD9\x05\x90\xA2\xA2\x00\x8B\x54\x24\x10", 10'):
+    assert text in source, text
 core = (SRC / "ai/flyer_wingmen_core.hpp").read_text()
 assert constant(core, "kMaxClassFormations") == 10 and constant(core, "kMaxShapePoints") == 16
 assert 'pbl_hash("WingmanFormation")' in source
@@ -104,9 +134,12 @@ assert 'pbl_hash("WingmanAuto")' in source and 'pbl_hash("WingmanSlot")' in sour
 mt = re.search(r"namespace modtools\s*\{(.*?)\n\s*\}\s*//\s*namespace modtools", addrs, re.S).group(1)
 NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "flyer_max_speed", "flyer_min_speed",
          "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower",
-         "entity_formation_list")
+         "entity_formation_list", "controllable_locked_target", "uc_force_attack_target", "object_affiliation",
+         "hud_message", "hud_message_color", "localize_find", "team_order_input", "team_order_chat_call",
+         "add_chat_message", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
-          0x00AD33C0)
+          0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x00745D00, 0x00745DC3,
+          0x0070C260, 0x004F8B70, 0x004F1380, 0x0042E230)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -313,6 +346,128 @@ checks = {
     # 0 it also gives mBoostFlyerSpeed, +0x898, which Phantom's constructor sets to 0.0).
     0x004F9BB6: [("mov", "dword ptr [esi + 0x898], ebx")],
     0x004FA01E: [("mov", "dword ptr [esi + 0x1104], ebx"), ("mov", "dword ptr [esi + 0x1108], ebx")],
+    # ---- Orders --------------------------------------------------------------------------
+    # Controllable::GetTargetLockedObj, thiscall() on a Controllable: a player's (mPlayerId
+    # +0xD4 not below 0) from its LockOnManager, kept at +0x138 with its handle at +0x13C,
+    # the GameObject in EAX, plain RET.
+    0x005E0C70: [("push", "esi"), ("mov", "esi, ecx"), ("push", "edi"), ("mov", "edi, dword ptr [esi + 0xd4]"),
+                 ("test", "edi, edi"), ("jl", "0x5e0ceb")],
+    0x005E0CEB: [("mov", "eax, dword ptr [esi + 0x138]"), ("test", "eax, eax"), ("je", "0x5e0d17"),
+                 ("mov", "ecx, dword ptr [eax + 0x204]"), ("cmp", "ecx, dword ptr [esi + 0x13c]"), ("je", "0x5e0d19")],
+    0x005E0D17: [("xor", "eax, eax"), ("pop", "edi"), ("pop", "esi"), ("ret", "")],
+    # The Controllable's constructor clears the lock and both reticule targets (+0x164, its
+    # handle +0x168; the second channel 8 bytes on).
+    0x005E0492: [("mov", "dword ptr [esi + 0x138], ebx"), ("mov", "dword ptr [esi + 0x13c], ebx")],
+    0x005E04B5: [("mov", "dword ptr [esi + 0x164], ebx"), ("mov", "dword ptr [esi + 0x168], ebx"),
+                 ("lea", "eax, [esi + 0x164]"), ("add", "eax, 8"), ("mov", "dword ptr [eax], ebx"),
+                 ("mov", "dword ptr [eax + 4], ebx")],
+    # The trooper squad command reads the reticule target the same way, and asks
+    # GetAffiliationToMe (thiscall(other) on its soldier) about it: below 0 an enemy, which
+    # it will not recruit.
+    0x0054985F: [("mov", "edi, dword ptr [ebx + 0x164]"), ("test", "edi, edi"), ("je", "0x549d07"),
+                 ("mov", "eax, dword ptr [edi + 0x204]"), ("cmp", "eax, dword ptr [ebx + 0x168]")],
+    0x0054988E: [("push", "edi"), ("mov", "ecx, esi"), ("call", "0x415e10"), ("test", "eax, eax"), ("jl", "0x549d07")],
+    0x00415E10: [("jmp", "0x55f840")],
+    0x0055F840: [("push", "ebx"), ("push", "ebp"), ("push", "esi"), ("mov", "esi, ecx"),
+                 ("mov", "eax, dword ptr [esi + 0x234]")],
+    0x0055F88D: [("ret", "4")],
+    # UnitController::ForceSetAttackHelperTarget, thiscall(GameObject*), RET 4: its agent
+    # (+0x2C0), whose AttackHelper (+0x10) AttackHelper::SetVisibleTarget sets: the target at
+    # +0, its handle at +4.
+    0x0059EC20: [("mov", "eax, dword ptr [ecx + 0x2c0]"), ("test", "eax, eax"), ("je", "0x59ec32"),
+                 ("lea", "ecx, [eax + 0x10]"), ("jmp", "0x4166d0"), ("ret", "4")],
+    0x004166D0: [("jmp", "0x5b43d0")],
+    0x005B43D0: [("sub", "esp, 0xc"), ("push", "esi"), ("push", "edi"), ("mov", "esi, ecx"), ("call", "0x407aa9"),
+                 ("mov", "edi, dword ptr [esp + 0x18]"), ("test", "edi, edi"), ("mov", "dword ptr [esi], edi"),
+                 ("je", "0x5b43ee"), ("mov", "eax, dword ptr [edi + 0x204]")],
+    0x005B43F0: [("push", "edi"), ("mov", "ecx, esi"), ("mov", "dword ptr [esi + 4], eax")],
+    0x005B441B: [("ret", "4")],
+    # The trooper squad command's message: "game.squadcommand.follow" looked up (cdecl(hash,
+    # bool), the caller pops) ...
+    0x00549A04: [("push", "0"), ("push", "0x731fd493"), ("call", "0x7f3720"), ("add", "esp, 8")],
+    0x007F3720: [("mov", "eax, dword ptr [esp + 4]"), ("push", "eax"), ("push", "0x8000"), ("push", "0xd2d88c"),
+                 ("call", "0x7e1a40"), ("add", "esp, 0xc"), ("test", "eax, eax"), ("jne", "0x7f374b"),
+                 ("mov", "cl, byte ptr [esp + 8]"), ("test", "cl, cl"), ("setne", "al"), ("dec", "eax"),
+                 ("and", "eax, 0xa73e0c"), ("ret", "")],
+    # ... shown with its colour (the four bytes at 0x00AE2170, by value) ...
+    0x00549A35: [("mov", "dl, byte ptr [0xae2170]"), ("push", "ecx"), ("mov", "eax, esp"),
+                 ("mov", "byte ptr [eax], dl"), ("mov", "cl, byte ptr [0xae2171]"), ("mov", "byte ptr [eax + 1], cl"),
+                 ("mov", "dl, byte ptr [0xae2172]"), ("mov", "byte ptr [eax + 2], dl"),
+                 ("mov", "edx, dword ptr [esp + 0x18]"), ("mov", "cl, byte ptr [0xae2173]"), ("push", "edx"),
+                 ("push", "0"), ("push", "esi"), ("mov", "byte ptr [eax + 3], cl"), ("call", "0x40c3bf"),
+                 ("add", "esp, 8"), ("mov", "ecx, eax"), ("call", "0x40e5f7")],
+    0x0040C3BF: [("jmp", "0x67e970")],
+    0x0040E5F7: [("jmp", "0x67ebb0")],
+    # ... through the player's HUD object, which for its first slot calls the message line
+    # (0x00401EFB to 0x006AECD0) with the viewport, the text and the colour's address.
+    0x0067EBEA: [("mov", "ecx, dword ptr [esp + 0xc]"), ("mov", "edx, dword ptr [esp]"),
+                 ("lea", "eax, [esp + 0x10]"), ("push", "eax"), ("push", "ecx"), ("push", "edx"),
+                 ("call", "0x401efb"), ("add", "esp, 0xc")],
+    0x00401EFB: [("jmp", "0x6aecd0")],
+    # The message line, cdecl(int player, const wchar_t* text, const RedColor* color): the
+    # colour's event (+0x1A0 of the player's 0x328 bytes from 0x00BA3B68) sent when there is
+    # one, then the text's (+0x19C), plain RET.
+    0x006AECD0: [("mov", "eax, dword ptr [esp + 0xc]"), ("sub", "esp, 0x10"), ("push", "esi"),
+                 ("mov", "esi, dword ptr [esp + 0x18]"), ("imul", "esi, esi, 0x328"), ("add", "esi, 0xba3b68"),
+                 ("test", "eax, eax"), ("je", "0x6aed0f"), ("push", "eax"), ("mov", "eax, dword ptr [esi + 0x1a0]")],
+    0x006AED0F: [("mov", "ecx, dword ptr [esp + 0x1c]"), ("mov", "edx, dword ptr [esi + 0x19c]"), ("push", "ecx"),
+                 ("push", "edx"), ("lea", "ecx, [esp + 0x14]"), ("call", "0x414231"),
+                 ("lea", "ecx, [esp + 0xc]"), ("call", "0x4098b3")],
+    0x004098B3: [("jmp", "0x6ada90")],
+    0x006AED3A: [("ret", "")],
+    # HUD::GameEvents::Open registers those two: player%d.message (a string, 8) at
+    # 0x00BA3D04 and player%d.message.color (7) at 0x00BA3D08.
+    0x006AF75E: [("push", "1"), ("push", "0xa5f258"), ("push", "8"), ("mov", "dword ptr [0xba3d00], eax"),
+                 ("call", "0x40a394"), ("add", "esp, 0x48"), ("push", "1"), ("push", "0xa5f23c"), ("push", "7"),
+                 ("mov", "dword ptr [0xba3d04], eax"), ("call", "0x40a394"), ("push", "1"), ("push", "0xa5f21c"),
+                 ("push", "1"), ("mov", "dword ptr [0xba3d08], eax")],
+    # RawControllerInputs::TeamOrderInputProcess (thiscall, RET): the comm keys (rows 0x14 on,
+    # 6 bytes each, in the control mode's 0x102 bytes) ...
+    0x00745D00: [("sub", "esp, 0x20"), ("mov", "eax, dword ptr [ecx + 8]"), ("push", "ebp"), ("push", "esi"),
+                 ("push", "edi"), ("xor", "edi, edi"), ("imul", "eax, eax, 0x102")],
+    0x00745D51: [("lea", "esi, [eax + ecx + 0x2134]")],
+    0x00745D8B: [("inc", "edi"), ("add", "esi, 6"), ("cmp", "edi, 8"), ("jl", "0x745d58")],
+    # ... and for the one pressed, its text looked up and NetGame::AddChatMessageToQue called
+    # with (false, the local index, 0, 0, the code, the text, the mask); the caller pops all
+    # seven and keeps nothing in a register past the call.
+    0x00745D9B: [("mov", "eax, dword ptr [0xadc760]"), ("mov", "ecx, dword ptr [esp + edi*4 + 0xc]"),
+                 ("push", "eax"), ("push", "0"), ("push", "ecx"), ("call", "0x7f3720"), ("add", "esp, 8"),
+                 ("push", "eax"), ("push", "edi"), ("push", "0"), ("push", "0"), ("push", "0"),
+                 ("call", "0x413395"), ("add", "esp, 4"), ("push", "eax"), ("push", "0"), ("call", "0x410690"),
+                 ("add", "esp, 0x1c"), ("pop", "edi"), ("pop", "esi"), ("pop", "ebp"), ("add", "esp, 0x20"),
+                 ("ret", "")],
+    0x00410690: [("jmp", "0x70c260")],
+    0x0070C260: [("push", "ebp"), ("mov", "ebp, esp"), ("sub", "esp, 0x20"), ("movzx", "eax, byte ptr [ebp + 8]")],
+    # ---- Landing with the player ----------------------------------------------------------
+    # EntityFlyer::Land, thiscall() on the entity: flying, taking off or landing (2, 1, 3)
+    # becomes landing (3); it ends in a tail call through its vtable (no arguments) ...
+    0x004F1380: [("push", "esi"), ("mov", "esi, ecx"), ("mov", "eax, dword ptr [esi + 0x5a4]"), ("cmp", "eax, 2"),
+                 ("push", "edi"), ("je", "0x4f1399"), ("cmp", "eax, 1"), ("je", "0x4f1399"), ("cmp", "eax, 3"),
+                 ("jne", "0x4f13a3"), ("mov", "dword ptr [esi + 0x5a4], 3")],
+    0x004F13EE: [("pop", "edi"), ("mov", "dword ptr [esi + 0x6d0], 0"), ("pop", "esi"),
+                 ("jmp", "dword ptr [eax + 4]")],
+    # ... and EntityFlyer::TakeOff, thiscall() on the entity, plain RET: from landed or landing
+    # (0, 3) to taking off (1), its free-flight (+0x1CDC) and trick times zeroed. Lua's
+    # EntityFlyerLand and EntityFlyerTakeOff call them on the entity.
+    0x004F8B70: [("push", "ecx"), ("push", "esi"), ("mov", "esi, ecx"), ("mov", "eax, dword ptr [esi + 0x5a4]"),
+                 ("test", "eax, eax"), ("push", "edi")],
+    0x004F8B84: [("mov", "eax, dword ptr [esi + 0x5a4]"), ("test", "eax, eax"), ("je", "0x4f8b97"), ("cmp", "eax, 3"),
+                 ("jne", "0x4f8c34")],
+    0x004F8C00: [("mov", "eax, 1"), ("test", "al, cl"), ("mov", "dword ptr [esi + 0x5a4], eax"), ("jne", "0x4f8c23"),
+                 ("mov", "dword ptr [esi + 0x1cdc], 0"), ("mov", "dword ptr [esi + 0x1ce0], 0")],
+    0x004F8C82: [("pop", "edi"), ("pop", "esi"), ("pop", "ecx"), ("ret", "")],
+    0x00472A42: [("mov", "ecx, esi"), ("call", "0x41306b")],
+    0x0041306B: [("jmp", "0x4f1380")],
+    0x004729D2: [("mov", "ecx, esi"), ("call", "0x408602")],
+    0x00408602: [("jmp", "0x4f8b70")],
+    # The flyer's own landing ray: RayHit (through 0x00407581) straight down 1024 m from it,
+    # itself ignored, types 0x190, not ordnance only.
+    0x004FEA8C: [("push", "edi"), ("push", "0x190")],
+    0x004FEAD7: [("push", "0x44800000"), ("lea", "edx, [esp + 0x50]"), ("push", "edx"), ("push", "eax"),
+                 ("call", "0x407581")],
+    0x00407581: [("jmp", "0x42e230")],
+    0x0042E230: [("fld", "dword ptr [0xa2a290]"), ("mov", "edx, dword ptr [esp + 0x10]"),
+                 ("fld", "dword ptr [0xa2a06c]"), ("mov", "dword ptr [edx], 0")],
 }
 # The stand-ins are naked and keep EDX and the XMM registers.
 for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
@@ -368,4 +523,19 @@ assert "(uint32_t)(uintptr_t)(list + kList_Next)" in source
 # no formation, none counted.
 assert [int.from_bytes(image[0x00AD33C0 - base + 4 * k:0x00AD33C0 - base + 4 * k + 4], "little") for k in range(5)] == \
     [0x00AD33C0, 0x00AD33C0, 0x00AD33C0, 0, 0]
+# Orders: the message line's events by name, the trooper commands' colour, and the
+# localisation keys hashed as the game hashes its own.
+def cstring(va):
+    raw = image[va - base:va - base + 64]
+    return raw[:raw.index(0)].decode("ascii")
+assert cstring(0x00A5F258) == "player%d.message" and cstring(0x00A5F23C) == "player%d.message.color"
+assert image[0x00AE2170 - base:0x00AE2170 - base + 4] == bytes.fromhex("dfdf20ff")
+def pbl_hash(text):
+    h = 0x811C9DC5
+    for b in text.encode("ascii"):
+        h = ((h ^ ((b if b < 0x80 else b - 0x100) & 0xFFFFFFFF | 0x20)) * 0x01000193) & 0xFFFFFFFF
+    return h
+assert pbl_hash("game.squadcommand.follow") == 0x731FD493
+for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost"):
+    assert f'pbl_hash("game.wingmen.{key}")' in source, key
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")

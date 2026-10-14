@@ -2,6 +2,7 @@
 // slot is, the point it is steered at, the speed it is asked for and who may
 // fly as one - the logic in flyer_wingmen_core.hpp, fed what flyer_wingmen.cpp
 // reads.
+#include "../PatcherDLL/src/ai/flyer_orders_core.hpp"
 #include "../PatcherDLL/src/ai/flyer_wingmen_core.hpp"
 #include <cassert>
 #include <cmath>
@@ -626,6 +627,164 @@ void stats()
 
 } // namespace
 
+// The orders: the squad key's turns, what an attack goes back to, how long a
+// far recruit has, who takes on whom.
+void orders()
+{
+   using namespace flyer_orders;
+   assert(after_squad_key(Order::FormUp) == Order::Engage);
+   assert(after_squad_key(Order::Engage) == Order::FormUp);
+   assert(after_squad_key(Order::Attack) == Order::FormUp && after_squad_key(Order::Cover) == Order::FormUp);
+   assert(resume_after_attack(Order::Cover, Order::FormUp) == Order::Cover);
+   assert(resume_after_attack(Order::Engage, Order::Cover) == Order::Engage);
+   assert(resume_after_attack(Order::Attack, Order::Cover) == Order::Cover);   // a second attack keeps the first's
+
+   // A recruit has longer the further it starts, never past the cap.
+   assert(join_seconds(0.0f) == kJoinBase);
+   assert(join_seconds(1000.0f) > join_seconds(500.0f) && join_seconds(500.0f) > kJoinBase);
+   assert(near((float)join_seconds(1000.0f), (float)(kJoinBase + 1000.0 / kJoinClosing)));
+   assert(join_seconds(100000.0f) == kJoinMax && join_seconds(kNan) == kJoinMax && join_seconds(-5.0f) == kJoinMax);
+   // A fighter 300 m/s fast over the leader's... one at 30 m/s over its leader
+   // (the stretch) closes 2 km in 67 s, inside the 120 s it is given.
+   assert(join_seconds(2000.0f) > 2000.0 / 30.0);
+
+   // The nearest foe; in the air before the ground; spread before doubling up.
+   Foe foes[3] = {{{0, 0, 300}, false, 0}, {{0, 0, 50}, true, 0}, {{0, 0, 500}, false, 0}};
+   assert(pick_foe(V3{}, foes, 3) == 0);       // the ground one is nearer but costs kGroundCost more
+   foes[0].taken = 1;
+   assert(pick_foe(V3{}, foes, 3) == 2);       // 300 + 400 against 500
+   foes[2].taken = 1;
+   assert(pick_foe(V3{}, foes, 3) == 1);       // 50 + 600 against 700 and 900
+   assert(pick_foe(V3{}, foes, 0) == -1 && pick_foe(V3{}, nullptr, 3) == -1);
+   Foe bad[2] = {{{kNan, 0, 0}, false, 0}, {{0, 0, 900}, false, 0}};
+   assert(pick_foe(V3{}, bad, 2) == 1);        // a foe with no position is passed over
+   assert(near(foe_cost(V3{0, 0, 50}, Foe{{0, 0, 100}, true, 2}), 50.0f + kGroundCost + 2.0f * kSpreadCost));
+}
+
+// Passes at a target on the ground: in, out at kRunBreak, on and up, back in.
+void ground_runs()
+{
+   using namespace flyer_orders;
+   Run r;
+   update_run(r, 1000.0f, 1.0f, 0.0);
+   assert(!r.extending);
+   update_run(r, 140.0f, 1.0f, 1.0);
+   assert(r.extending && r.since == 1.0);
+   update_run(r, 400.0f, -1.0f, 2.0);
+   assert(r.extending);                          // still pulling out
+   update_run(r, 710.0f, -1.0f, 3.0);
+   assert(!r.extending && r.since == 3.0);       // far enough: back in
+   update_run(r, 250.0f, -0.5f, 4.0);
+   assert(r.extending);                          // went past it without coming within the break
+   update_run(r, 300.0f, 1.0f, 4.0 + kRunExtendMax + 0.1);
+   assert(!r.extending);                         // pulled out long enough
+   update_run(r, kNan, 1.0f, 20.0);
+   assert(!r.extending);
+   // No distance changes nothing, even with the time out.
+   Run out{true, 0.0};
+   update_run(out, kNan, 1.0f, 100.0);
+   assert(out.extending && out.since == 0.0);
+   // Pulling out: level along its heading and up, whatever its pitch.
+   const V3 e = extend_point(V3{0, 50, 0}, V3{0, -0.8f, 0.6f});
+   assert(near(e, V3{0, 50 + kRunClimb, kRunOut}, 1e-3f));
+   assert(near(extend_point(V3{}, V3{0, -1, 0}), V3{0, kRunClimb, kRunOut}));   // straight down: ahead is +z
+
+   // A fighter (60 m/s, 90 degrees a second) making passes at a target on the
+   // ground: it keeps coming back, and never runs off.
+   V3 me{0, 300, -1500}, nose{0, 0, 1};
+   const V3 target{};
+   const float dt = 0.05f, speed = 60.0f, turn = 1.5708f * dt;
+   Run run;
+   int passes = 0;
+   float furthest = 0.0f, closest = 1e9f;
+   bool was = false;
+   for (int step = 0; step < 2400; ++step) {   // 120 s
+      V3 to = target - me;
+      const float d = length(to);
+      normalise(to);
+      update_run(run, d, dot(nose, to), step * (double)dt);
+      if (run.extending && !was) ++passes;
+      was = run.extending;
+      V3 want = (run.extending ? extend_point(me, nose) : target) - me;
+      normalise(want);
+      // Turn the nose toward `want` by at most `turn`.
+      const float c = clampf(dot(nose, want), -1.0f, 1.0f);
+      const float angle = std::acos(c);
+      if (angle > 1e-4f) {
+         V3 side = want - nose * c;
+         normalise(side);
+         const float a = angle < turn ? angle : turn;
+         nose = nose * std::cos(a) + side * std::sin(a);
+         normalise(nose);
+      }
+      me = me + nose * (speed * dt);
+      if (step > 400 && d > furthest) furthest = d;
+      if (d < closest) closest = d;
+   }
+   // Measured: 8 passes in the 2 minutes, never nearer than 42 m, never further
+   // than 379 m.
+   assert(passes >= 6);
+   assert(closest > 25.0f);
+   assert(furthest < kRunExtend);
+}
+
+// Landing beside the leader: a slot's place on the ground, whether the ground
+// there suits, when to come down, and the circle overhead.
+void landing()
+{
+   using namespace flyer_orders;
+   // Spread out, height left out, never nearer than the gap.
+   assert(near(land_offset(V3{20, 5, -20}), V3{30, 0, -30}));
+   assert(near(length(land_offset(V3{3, 0, -4})), kLandMinGap, 1e-3f));
+   assert(near(land_offset(V3{}), V3{kLandMinGap, 0, 0}) && near(land_offset(V3{0, 9, 0}), V3{kLandMinGap, 0, 0}));
+   assert(near(land_offset(V3{kNan, 0, 0}), V3{kLandMinGap, 0, 0}));
+   // Level with the leader's ground and flat, or not.
+   assert(level_spot(101.0f, 1.0f, 100.0f) && level_spot(96.0f, 0.9f, 100.0f));
+   assert(!level_spot(105.0f, 1.0f, 100.0f) && !level_spot(100.0f, 0.5f, 100.0f) && !level_spot(kNan, 1.0f, 100.0f));
+   assert(!level_spot(90.0f, 1.0f, 100.0f));   // a hollow is no better than a rise
+   // Down once near across and not far up.
+   assert(may_land(V3{30, 130, 0}, V3{0, 100, 0}) && !may_land(V3{50, 110, 0}, V3{0, 100, 0}));
+   assert(!may_land(V3{0, 150, 0}, V3{0, 100, 0}) && !may_land(V3{0, 50, 0}, V3{0, 100, 0}));
+   assert(!may_land(V3{kNan, 100, 0}, V3{0, 100, 0}));
+   assert(near(across(V3{3, 50, 4}, V3{}), 5.0f));
+   // The circle: on it, at the centre's height, ahead of where it is round it.
+   const V3 c{100, 300, -50};
+   for (const V3 me : {V3{300, 250, -50}, V3{100, 280, 400}, V3{-20, 310, -60}, V3{100, 300, -50}}) {
+      const V3 p = loiter_point(c, me);
+      assert(near(p.y, c.y) && near(across(p, c), kLoiterRadius, 1e-2f));
+   }
+   const V3 a = loiter_point(c, V3{c.x + kLoiterRadius, 0, c.z});   // at angle 0: the point at kLoiterLead
+   assert(near(a.x, c.x + kLoiterRadius * std::cos(kLoiterLead), 1e-2f) &&
+          near(a.z, c.z + kLoiterRadius * std::sin(kLoiterLead), 1e-2f));
+   // A flyer following the point goes round and round, near the circle.
+   V3 me{c.x + 400, c.y, c.z}, nose{0, 0, 1};
+   const float dt = 0.05f, speed = 50.0f, turn = 1.5708f * dt;
+   float angle = 0.0f, last = std::atan2(me.z - c.z, me.x - c.x), worst = 0.0f;
+   for (int step = 0; step < 2400; ++step) {
+      V3 want = loiter_point(c, me) - me;
+      normalise(want);
+      const float co = clampf(dot(nose, want), -1.0f, 1.0f);
+      const float ang = std::acos(co);
+      if (ang > 1e-4f) {
+         V3 side = want - nose * co;
+         normalise(side);
+         const float t = ang < turn ? ang : turn;
+         nose = nose * std::cos(t) + side * std::sin(t);
+         normalise(nose);
+      }
+      me = me + nose * (speed * dt);
+      const float now = std::atan2(me.z - c.z, me.x - c.x);
+      float d = now - last;
+      if (d > 3.14159f) d -= 6.28318f;
+      if (d < -3.14159f) d += 6.28318f;
+      angle += d;
+      last = now;
+      if (step > 600) worst = std::fmax(worst, std::fabs(across(me, c) - kLoiterRadius));
+   }
+   assert(angle > 3.0f * 6.28318f);   // round at least three times in the 2 minutes, one way
+   assert(worst < 60.0f);
+}
+
 int main()
 {
    the_vee();
@@ -647,8 +806,12 @@ int main()
    drawn_shapes();
    formation_keys();
    stats();
+   orders();
+   ground_runs();
+   landing();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
-               "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats).\n");
+               "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
+               "orders, passes at the ground, landing).\n");
    return 0;
 }

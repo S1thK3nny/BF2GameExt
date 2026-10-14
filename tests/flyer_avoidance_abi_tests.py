@@ -50,7 +50,7 @@ assert constant(source, "kDest_PosY") == constant(wingmen, "kDest_Pos") + 4
 # The CalculateDest stand-in asks it after the original and after its own steering is put back.
 calc = re.search(r"bool __fastcall calc_dest_mt\(.*?\n\}", wingmen, re.S).group(0)
 assert calc.index("s_calcDest)(flyer, dt, dest, point, speed, myPos)") < calc.index("flyer_avoidance::adjust(flyer")
-assert calc.index("steer_after(flyer, st, r, speed)") < calc.index("flyer_avoidance::adjust(flyer")
+assert calc.index("steer_after(flyer, st, r, point, speed)") < calc.index("flyer_avoidance::adjust(flyer")
 assert "if (r && flyer_avoidance::active())" in calc
 assert "flyer_avoidance::install(base)" in wingmen and "flyer_avoidance::uninstall()" in wingmen
 
