@@ -612,6 +612,15 @@ void formation_keys()
    ClassKeys none;
    add_formation(none, 0);   // WingmanFormation = "": set, but naming none
    assert(none.hasFormations && none.formationCount == 0);
+
+   // WingmanExitOnLand is about flying as a wingman: it gives a class no wingmen
+   // of its own, and with no key (or 0) the pilot waits aboard.
+   ClassKeys follower;
+   assert(!exits_on_land(&follower) && !exits_on_land(nullptr));
+   assert(set_exit_on_land(follower, " 1 ") && exits_on_land(&follower) && !sets_any(&follower));
+   assert(inherited(follower).exitOnLand);
+   assert(set_exit_on_land(follower, "0") && follower.hasExitOnLand && !exits_on_land(&follower));
+   assert(!set_exit_on_land(follower, "yes") && !exits_on_land(&follower));
 }
 
 // The log's numbers.
@@ -661,49 +670,29 @@ void orders()
    assert(near(foe_cost(V3{0, 0, 50}, Foe{{0, 0, 100}, true, 2}), 50.0f + kGroundCost + 2.0f * kSpreadCost));
 }
 
-// Passes at a target on the ground: in, out at kRunBreak, on and up, back in.
-void ground_runs()
+// A flyer making passes at a target on the ground (turning at most 90 degrees a
+// second at a steady speed): how many it makes in two minutes, how near it comes
+// and how far it goes.
+struct Passes {
+   int   passes = 0;
+   float closest = 1e9f, furthest = 0.0f;
+};
+
+Passes fly_passes(const flyer_orders::RunShape& shape, float speed, V3 start)
 {
    using namespace flyer_orders;
-   Run r;
-   update_run(r, 1000.0f, 1.0f, 0.0);
-   assert(!r.extending);
-   update_run(r, 140.0f, 1.0f, 1.0);
-   assert(r.extending && r.since == 1.0);
-   update_run(r, 400.0f, -1.0f, 2.0);
-   assert(r.extending);                          // still pulling out
-   update_run(r, 710.0f, -1.0f, 3.0);
-   assert(!r.extending && r.since == 3.0);       // far enough: back in
-   update_run(r, 250.0f, -0.5f, 4.0);
-   assert(r.extending);                          // went past it without coming within the break
-   update_run(r, 300.0f, 1.0f, 4.0 + kRunExtendMax + 0.1);
-   assert(!r.extending);                         // pulled out long enough
-   update_run(r, kNan, 1.0f, 20.0);
-   assert(!r.extending);
-   // No distance changes nothing, even with the time out.
-   Run out{true, 0.0};
-   update_run(out, kNan, 1.0f, 100.0);
-   assert(out.extending && out.since == 0.0);
-   // Pulling out: level along its heading and up, whatever its pitch.
-   const V3 e = extend_point(V3{0, 50, 0}, V3{0, -0.8f, 0.6f});
-   assert(near(e, V3{0, 50 + kRunClimb, kRunOut}, 1e-3f));
-   assert(near(extend_point(V3{}, V3{0, -1, 0}), V3{0, kRunClimb, kRunOut}));   // straight down: ahead is +z
-
-   // A fighter (60 m/s, 90 degrees a second) making passes at a target on the
-   // ground: it keeps coming back, and never runs off.
-   V3 me{0, 300, -1500}, nose{0, 0, 1};
+   Passes out;
+   V3 me = start, nose{0, 0, 1};
    const V3 target{};
-   const float dt = 0.05f, speed = 60.0f, turn = 1.5708f * dt;
+   const float dt = 0.05f, turn = 1.5708f * dt;
    Run run;
-   int passes = 0;
-   float furthest = 0.0f, closest = 1e9f;
    bool was = false;
    for (int step = 0; step < 2400; ++step) {   // 120 s
       V3 to = target - me;
       const float d = length(to);
       normalise(to);
-      update_run(run, d, dot(nose, to), step * (double)dt);
-      if (run.extending && !was) ++passes;
+      update_run(run, shape, d, dot(nose, to), step * (double)dt);
+      if (run.extending && !was) ++out.passes;
       was = run.extending;
       V3 want = (run.extending ? extend_point(me, nose) : target) - me;
       normalise(want);
@@ -718,14 +707,72 @@ void ground_runs()
          normalise(nose);
       }
       me = me + nose * (speed * dt);
-      if (step > 400 && d > furthest) furthest = d;
-      if (d < closest) closest = d;
+      if (step > 400 && d > out.furthest) out.furthest = d;
+      if (d < out.closest) out.closest = d;
    }
-   // Measured: 8 passes in the 2 minutes, never nearer than 42 m, never further
-   // than 379 m.
-   assert(passes >= 6);
-   assert(closest > 25.0f);
-   assert(furthest < kRunExtend);
+   return out;
+}
+
+// Passes at a target on the ground, shaped by the wingman's own weapon: in, out
+// short of it, on and up, back in; and the gap it keeps behind a flyer.
+void ground_runs()
+{
+   using namespace flyer_orders;
+   // The shape, from the weapon's ranges and the speed, on one scale.
+   const RunShape laser = run_shape(0.0f, 800.0f, 1600.0f, 60.0f);    // stock fighters' multilasers
+   assert(near(laser.breakAt, 200.0f) && near(laser.extendTo, 800.0f) && near(laser.gap, 120.0f));
+   assert(near((float)laser.extendFor, 600.0f / 60.0f + (float)kTurnBack, 1e-3f));
+   const RunShape recoil = run_shape(0.0f, 300.0f, 600.0f, 40.0f);    // a gunship's recoilless cannon
+   assert(near(recoil.breakAt, 100.0f) && near(recoil.extendTo, 300.0f) && near(recoil.gap, kMinGap));
+   const RunShape chain = run_shape(0.0f, 200.0f, 400.0f, 80.0f);     // a chaingun on a fast ship: room to pull out
+   assert(near(chain.breakAt, 200.0f) && near(chain.extendTo, 360.0f));
+   const RunShape torpedo = run_shape(250.0f, 800.0f, 1600.0f, 60.0f); // never inside its MinRange
+   assert(near(torpedo.breakAt, 250.0f) && near(torpedo.extendTo, 800.0f));
+   // No optimal range: half the max; no ranges at all: the default; a crawl counts
+   // as kSlowestRun; a long-range weapon keeps its gap at kMaxGap.
+   assert(near(run_shape(0.0f, 0.0f, 1000.0f, 60.0f).extendTo, 500.0f));
+   assert(near(run_shape(0.0f, kNan, kNan, 60.0f).extendTo, kDefaultOptimal));
+   assert(near(run_shape(0.0f, 40.0f, 80.0f, 1.0f).breakAt, kSlowestRun * kPullOutSeconds));
+   assert(near(run_shape(0.0f, 40.0f, 80.0f, kNan).breakAt, kSlowestRun * kPullOutSeconds));
+   assert(near(run_shape(-50.0f, 800.0f, 1600.0f, 60.0f).breakAt, 200.0f));
+   assert(near(run_shape(0.0f, 4000.0f, 8000.0f, 60.0f).gap, kMaxGap));
+
+   Run r;
+   update_run(r, laser, 1000.0f, 1.0f, 0.0);
+   assert(!r.extending);
+   update_run(r, laser, 500.0f, 1.0f, 0.5);
+   assert(!r.extending);                                  // diving in, inside where it turns back: in
+   update_run(r, laser, 190.0f, 1.0f, 1.0);
+   assert(r.extending && r.since == 1.0);
+   update_run(r, laser, 600.0f, -1.0f, 2.0);
+   assert(r.extending);                                   // still pulling out
+   update_run(r, laser, 810.0f, -1.0f, 3.0);
+   assert(!r.extending && r.since == 3.0);                // far enough: back in
+   update_run(r, laser, 700.0f, -0.5f, 4.0);
+   assert(r.extending);                                   // past it, inside where it turns back
+   update_run(r, laser, 300.0f, 1.0f, 4.0 + laser.extendFor + 0.1);
+   assert(!r.extending);                                  // pulled out long enough
+   update_run(r, laser, 900.0f, -0.5f, 30.0);
+   assert(!r.extending);                                  // behind it, but further than it turns back
+   update_run(r, laser, kNan, 1.0f, 40.0);
+   assert(!r.extending);
+   // No distance changes nothing, even with the time out.
+   Run out{true, 0.0};
+   update_run(out, laser, kNan, 1.0f, 100.0);
+   assert(out.extending && out.since == 0.0);
+   // Pulling out: level along its heading and up, whatever its pitch.
+   const V3 e = extend_point(V3{0, 50, 0}, V3{0, -0.8f, 0.6f});
+   assert(near(e, V3{0, 50 + kRunClimb, kRunOut}, 1e-3f));
+   assert(near(extend_point(V3{}, V3{0, -1, 0}), V3{0, kRunClimb, kRunOut}));   // straight down: ahead is +z
+
+   // Flown: a fighter and a gunship keep coming back, pull out about where their
+   // weapons say, and never run off. Measured: the fighter 7 passes in the 2
+   // minutes, 73 to 836 m from the target; the gunship 13, 31 to 324 m (its
+   // passes go over the target).
+   const Passes fighter = fly_passes(laser, 60.0f, V3{0, 300, -1500});
+   assert(fighter.passes >= 5 && fighter.closest > 50.0f && fighter.furthest < laser.extendTo + 100.0f);
+   const Passes gunship = fly_passes(recoil, 40.0f, V3{0, 150, -600});
+   assert(gunship.passes >= 8 && gunship.closest > 20.0f && gunship.furthest < recoil.extendTo + 100.0f);
 }
 
 // Landing beside the leader: a slot's place on the ground, whether the ground

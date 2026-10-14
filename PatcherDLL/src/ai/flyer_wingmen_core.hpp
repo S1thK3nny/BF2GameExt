@@ -305,6 +305,11 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //                  Without any, the first of the class's SquadronFormation
 //                  shapes that holds all its wingmen (else the largest), as
 //                  the AI's squadrons take theirs from the same list.
+// And one on the class that flies AS a wingman (it does not give a class
+// wingmen of its own):
+//   WingmanExitOnLand  1: landed beside its leader, its pilot gets out (and it
+//                  is let go); 0 (or none): it waits aboard and takes off with
+//                  its leader.
 constexpr int kMaxClasses         = 16;
 constexpr int kMaxSlotClasses     = 4;
 constexpr int kMaxClassFormations = 10;   // as many as a class's SquadronFormation lines (EntitySquadronClass)
@@ -328,6 +333,8 @@ struct ClassKeys {
    int      formationCount = 0;
    bool     hasFormations = false;
    bool     ownFormations = false;   // its own lines have begun replacing the inherited list
+   bool     hasExitOnLand = false;   // WingmanExitOnLand: as a wingman, not a leader
+   bool     exitOnLand = false;
 };
 
 // A value as an ODF writes it: spaces and quotes round it ignored.
@@ -467,6 +474,18 @@ inline bool set_auto(ClassKeys& k, const char* value)
    k.autoForm = v != 0.0;
    return true;
 }
+
+inline bool set_exit_on_land(ClassKeys& k, const char* value)
+{
+   double v;
+   if (!read_number(value, v)) return false;
+   k.hasExitOnLand = true;
+   k.exitOnLand = v != 0.0;
+   return true;
+}
+
+// Whether a wingman of this class gets out once landed beside its leader.
+inline bool exits_on_land(const ClassKeys* k) { return k && k->hasExitOnLand && k->exitOnLand; }
 
 // A child class starts as its parent; its own WingmanClass, WingmanSlot and
 // WingmanFormation lines replace the lists.

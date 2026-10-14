@@ -1399,6 +1399,17 @@ namespace modtools {
    // to taking off (state 1), its free-flight and trick times zeroed (Lua's
    // EntityFlyerTakeOff, 0x004729D4, and the player's own, 0x004FE7F6, call it).
    constexpr uintptr_t entity_flyer_take_off        = 0x004F8B70;
+   // Wingmen waiting aboard. UnitFlyAgent::UpdateStatePostVision's FLY state
+   // CALLs IsNearLandingPt (thiscall() on the agent, bool in AL; near a map land
+   // hint it lands there, then its DROPOFF state gets the pilot out through
+   // AILowLevel::SetExitVehicle, thiscall(CommandPost*) on UnitController
+   // +0x2C4, RET 4); UnitFlyAgent::EnterState's TAKEOFF and FLY states CALL
+   // EntityFlyer::TakeOff on a landed flyer.
+   constexpr uintptr_t fly_agent_land_hint_call     = 0x005AFDD3;
+   constexpr uintptr_t fly_agent_land_hint          = 0x005AED00;
+   constexpr uintptr_t fly_agent_take_off_call      = 0x005AF154;
+   constexpr uintptr_t fly_agent_take_off_call2     = 0x005AF323;
+   constexpr uintptr_t ai_set_exit_vehicle          = 0x005A2170;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

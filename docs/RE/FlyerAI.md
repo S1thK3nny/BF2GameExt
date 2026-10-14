@@ -922,12 +922,19 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   within 1200 m; chased until 1500 m. Attack my target: the lock, else an enemy under the reticule, as the key
   is pressed; with neither, "no target" and nothing changes; all wingmen on it until it is down or 3000 m from
   the leader, then back to the order it interrupted. A chasing wingman 2500 m from its leader comes back.
-- **Chasing:** a flyer in the air as real flight's chase (lead pursuit, flat out to close, at its speed 120 m
-  behind); anything else in passes: a dive at it (`SH_TAPER`), out 150 m short or once past it within 300 m,
-  on and 60 m up for 300 m, back in from 700 m or after 8 s (a simulated 60 m/s fighter: 8 passes in 2
-  minutes, never nearer than 42 m, never further than 379 m). Its AI's attack is aimed at its target, at most
-  every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing wingman flies at its own speeds,
-  copies no tricks and may pull its own.
+- **Chasing:** a flyer in the air as real flight's chase (lead pursuit, flat out to close, then at its speed);
+  anything else in passes: a dive at it (`SH_TAPER`), out short of it or once past it, on and 60 m up, back
+  in. The distances are each wingman's own (the user: "primary weapon values should be taken into account vs
+  a blanket 150m pull out"), from its primary weapon's ranges (channel 0's weapon: `MinRange`,
+  `OptimalRange`, `MaxRange`, the ranges its AI fights at) and its cruising speed: it pulls out a quarter of
+  the optimal range short (never inside `MinRange`, never nearer than 2.5 s of its speed: a flyer turning 90
+  degrees a second carries on 1.4 to 2.1 s of its speed toward the target as it pulls out), comes back in
+  from the optimal range, and sits 15% of the optimal range behind a flyer (50 to 200 m). Stock fighters'
+  lasers (0/800/1600 m) at 60 m/s: out at 200 m, back from 800 m, 120 m behind (simulated: 7 passes in 2
+  minutes, 73 to 836 m from the target). A gunship's recoilless cannon (0/300/600 m) at 40 m/s: out at 100 m,
+  back from 300 m, 50 m behind (13 passes, 31 to 324 m, its passes going over the target). Its AI's attack
+  is aimed at its target, at most every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing
+  wingman flies at its own speeds, copies no tricks and may pull its own.
 - **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from
   an attack or cover, form up). The comm keys' attack and defend order attack my target and cover me; their
   team chat still goes out. In the air only.
@@ -938,19 +945,31 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   wingman is given its slot's place on the ground, 1.5 times out and at least 15 m from the leader, where a ray
   down from 40 m up finds ground within 4 m of the leader's and flat (its up at least 0.85); it comes down
   toward 15 m over it, at its slowest from 300 m in (its stretch lets it fly at 10 m/s), and lands once within
-  40 m across and 40 m up. With no such ground, or if its AI takes it up again first, it circles 200 m round a
-  point 150 m over the leader. When the player takes off, those landed take off too and form up again.
-- **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes, landing and the circle overhead, simulated);
-  `tests/flyer_wingmen_abi_tests.py` (130 modtools checks, every guard's bytes); the mutation suite's
-  `orders` (34 caught).
+  40 m across and 40 m up. With no such ground, or if it is up again first, it circles 200 m round a point
+  150 m over the leader. When the player takes off, those landed take off too and form up again.
+- **Waiting aboard:** an AI pilot gets out only through its fly agent's own landing: `UnitFlyAgent`'s FLY
+  state (4) lands at a map land hint within 80 m (`IsNearLandingPt`, P `0x00790AC0`, M `0x005AED00`, every 3 s,
+  `RequestLandHints`), its LAND state (5) waits for the flyer to be down, then DROPOFF (6) calls
+  `SetExitVehicle` (`AILowLevel::SetExitVehicle`, M `0x005A2170`: the exit flag 8 at +0x74, the post at +0x78).
+  `UnitController::UpdateHighLevel` also gets AI out at the end of a game; `UnitFlyAgent` swallows damage, so no
+  pilot bails out. For a wingman the agent's one CALL to `IsNearLandingPt` (M `0x005AFDD3`) answers no, and its
+  two CALLs to `TakeOff` (TAKEOFF and FLY states, M `0x005AF154`, `0x005AF323`) do nothing while it waits
+  landed beside its leader. `WingmanExitOnLand = 1` on the class that flies as a wingman gets its pilot out
+  once landed instead (`SetExitVehicle` with no post, as the end-of-game exit does, M `0x005A079E`); it is
+  then let go.
+- **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes' shapes and the passes flown, landing and
+  the circle overhead, simulated); `tests/flyer_wingmen_abi_tests.py` (149 modtools checks, every guard's
+  bytes); the mutation suite's `orders` (all caught).
 
 ### What to watch in play
 
 The log names each step: `[Wingmen] slot N: #a called up X m off, Y s to reach its slot`, `in its slot after
 N s`, `order: engage, 3 wingmen`, `comm key: attack my target, #t (locked, in the air), X m off`, `slot N (#a)
 takes on #t`, `back to its slot after N s: why`, `the attack's target is down: back to ...`, and every 5 s
-`[Wingmen] engage: 3 wingmen, 1 in their slots, 0 flying in, 2 chasing`; landing: `the leader comes down: N
-land beside it, M circle overhead`, `slot N (#a) lands X m from its spot`, `the leader takes off: N of its
-wingmen take off with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own combat
+`[Wingmen] engage: 3 wingmen, 1 in their slots, 0 flying in, 2 chasing`; each chase names the weapon ranges
+it was shaped from (`its weapon's ranges 0/800/1600 m: pulls out at 200 m, back in from 800 m, 120 m behind a
+flyer`); landing: `the leader comes down: N land beside it, M circle overhead`, `slot N (#a) lands X m from
+its spot`, `landed: its pilot gets out (WingmanExitOnLand)`, `the leader takes off: N of its wingmen take off
+with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own combat
 may take it back between settings), how the passes fare against terrain, and how an AI flyer lands when told
 to at speed.

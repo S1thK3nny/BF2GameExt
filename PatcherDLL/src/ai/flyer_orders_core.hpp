@@ -99,34 +99,81 @@ inline int pick_foe(V3 me, const Foe* foes, int n)
    return best;
 }
 
-// ---- Passes at a target on the ground ------------------------------------------------------
-// A flyer cannot hang behind a tank as it does behind a fighter: it dives at
-// it, pulls out kRunBreak short (or once past it, within kRunPassed), flies on
-// and up for kRunOut (climbing kRunClimb) until kRunExtend away or
-// kRunExtendMax has passed, then turns back for the next pass.
-constexpr float  kRunBreak     = 150.0f;   // m
-constexpr float  kRunPassed    = 300.0f;   // m
-constexpr float  kRunExtend    = 700.0f;   // m
-constexpr double kRunExtendMax = 8.0;      // s
-constexpr float  kRunOut       = 300.0f;   // m ahead it steers while pulling out ...
-constexpr float  kRunClimb     = 60.0f;    // ... and this much higher
+// ---- Passes at a target on the ground, and the gap behind a flyer -------------------------
+// A flyer cannot hang behind a tank as it does behind a fighter: it dives at it,
+// pulls out short of it (or once past it), flies on and up, then turns back for
+// the next pass. How far is each wingman's own, from its primary weapon (its
+// ODF's MinRange, OptimalRange and MaxRange, the ranges its AI fights at) and
+// its cruising speed, on one scale:
+//   - it pulls out kBreakShare of its optimal range short, never inside its
+//     MinRange and never nearer than kPullOutSeconds of its speed (the room it
+//     needs to pull out: a flyer turning 90 degrees a second carries on 1.4 to
+//     2.1 s of its speed toward the target as it pulls out);
+//   - it turns back in from its optimal range, and at least kTurnSeconds of
+//     flight past the pull-out each way, so every pass flies through the range
+//     its weapon is best at; it gives up pulling out after the time that takes,
+//     plus kTurnBack to come round;
+//   - behind a flyer in the air it settles kGapShare of its optimal range back,
+//     kMinGap to kMaxGap.
+// A weapon with no optimal range counts half its MaxRange, else kDefaultOptimal.
+// Stock fighters' lasers (0/800/1600 m) pull out at 200 m and come back from 800
+// (at 60 m/s); a gunship's recoilless cannon (0/300/600) at 100 m from 300 (at
+// 40 m/s).
+constexpr float  kBreakShare     = 0.25f;
+constexpr float  kPullOutSeconds = 2.5f;    // s
+constexpr float  kTurnSeconds    = 1.0f;    // s
+constexpr double kTurnBack       = 3.0;     // s
+constexpr float  kGapShare       = 0.15f;
+constexpr float  kMinGap         = 50.0f;   // m
+constexpr float  kMaxGap         = 200.0f;  // m
+constexpr float  kDefaultOptimal = 300.0f;  // m
+constexpr float  kSlowestRun     = 20.0f;   // m/s: the speed the shape counts at the least
+constexpr float  kRunOut         = 300.0f;  // m ahead it steers while pulling out ...
+constexpr float  kRunClimb       = 60.0f;   // ... and this much higher
+
+struct RunShape {
+   float  breakAt = 150.0f;   // m: pulls out this close ...
+   float  extendTo = 700.0f;  // ... turns back in this far out ...
+   double extendFor = 8.0;    // ... or after this long
+   float  gap = 120.0f;       // m behind a flyer in the air
+};
+
+inline RunShape run_shape(float minRange, float optimal, float maxRange, float speed)
+{
+   const float opt = std::isfinite(optimal) && optimal > 0.0f    ? optimal
+                     : std::isfinite(maxRange) && maxRange > 0.0f ? maxRange * 0.5f
+                                                                  : kDefaultOptimal;
+   const float v = std::isfinite(speed) && speed > kSlowestRun ? speed : kSlowestRun;
+   const float pull = v * kPullOutSeconds;
+   const float least = std::isfinite(minRange) && minRange > 0.0f ? minRange : 0.0f;
+   RunShape s;
+   s.breakAt = opt * kBreakShare;
+   if (s.breakAt < least) s.breakAt = least;
+   if (s.breakAt < pull) s.breakAt = pull;
+   s.extendTo = s.breakAt + 2.0f * v * kTurnSeconds;
+   if (s.extendTo < opt) s.extendTo = opt;
+   s.extendFor = (double)((s.extendTo - s.breakAt) / v) + kTurnBack;
+   s.gap = clampf(opt * kGapShare, kMinGap, kMaxGap);
+   return s;
+}
 
 struct Run {
    bool   extending = false;
    double since = 0.0;
 };
 
-// `aheadCos`: the cosine between its nose and the line to the target.
-inline void update_run(Run& r, float distance, float aheadCos, double now)
+// `aheadCos`: the cosine between its nose and the line to the target. Past it
+// (behind it, inside where it would turn back) it pulls out as well.
+inline void update_run(Run& r, const RunShape& s, float distance, float aheadCos, double now)
 {
    if (!std::isfinite(distance)) return;
    if (!r.extending) {
-      const bool passed = std::isfinite(aheadCos) && aheadCos < 0.0f && distance < kRunPassed;
-      if (distance < kRunBreak || passed) {
+      const bool passed = std::isfinite(aheadCos) && aheadCos < 0.0f && distance < s.extendTo;
+      if (distance < s.breakAt || passed) {
          r.extending = true;
          r.since = now;
       }
-   } else if (distance > kRunExtend || now - r.since > kRunExtendMax) {
+   } else if (distance > s.extendTo || now - r.since > s.extendFor) {
       r.extending = false;
       r.since = now;
    }

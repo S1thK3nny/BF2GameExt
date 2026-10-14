@@ -118,15 +118,17 @@ inline V3 pursuit_point(V3 me, float mySpeed, V3 target, V3 targetVel)
 
 // The speed it asks for: flat out to close or to turn onto the target; with the
 // target within kPursuitAheadCos of its nose, the target's speed plus
-// kPursuitGain for every metre past kPursuitGap (less inside it), within what
-// it can fly.
-inline float pursuit_speed(float distance, float aheadCos, float targetSpeed, float minSpeed, float maxSpeed)
+// kPursuitGain for every metre past the gap (kPursuitGap, or a wingman's own
+// from its weapon; less inside it), within what it can fly.
+inline float pursuit_speed(float distance, float aheadCos, float targetSpeed, float minSpeed, float maxSpeed,
+                           float gap = kPursuitGap)
 {
    if (!(maxSpeed > 0.0f) || !std::isfinite(maxSpeed)) return 0.0f;
    if (!std::isfinite(distance) || !std::isfinite(aheadCos) || !std::isfinite(targetSpeed)) return maxSpeed;
    if (aheadCos < kPursuitAheadCos) return maxSpeed;
    const float lo = minSpeed > 0.0f && minSpeed < maxSpeed ? minSpeed : 0.0f;
-   return clampf(targetSpeed + kPursuitGain * (distance - kPursuitGap), lo, maxSpeed);
+   const float g = std::isfinite(gap) && gap > 0.0f ? gap : kPursuitGap;
+   return clampf(targetSpeed + kPursuitGain * (distance - g), lo, maxSpeed);
 }
 
 // A chase's clock: it starts when the attacker provokes it, runs kPursuitSeconds

@@ -74,6 +74,16 @@ constexpr uint32_t kAgent_AttackHandle = 0x14;   // ... and that one's handle
 constexpr int      kCommAttack         = 6;      // the comm keys' codes (Code::AttackPosition ...
 constexpr int      kCommDefend         = 7;      // ... and Code::DefendPosition)
 constexpr int      kSafeHeightTaper    = 1;      // SH_TAPER: a dive at the ground lets the safe height go
+// A flyer's primary weapon and the ranges its AI fights at (its weapon ODF's).
+constexpr uint32_t kFly_Weapons        = 0x6B8;  // EntityFlyer::mWeapon[4] ...
+constexpr int      kFlyWeapons         = 4;
+constexpr uint32_t kFly_WeaponIndex    = 0x6C8;  // ... and mWeaponIndex[channel], channel 0 first
+constexpr uint32_t kWeapon_Class       = 0x64;   // Weapon::mClass
+constexpr uint32_t kWClass_MinRange    = 0x100;  // WeaponClass: MinRange ...
+constexpr uint32_t kWClass_OptimalRange = 0x104; // ... OptimalRange ...
+constexpr uint32_t kWClass_MaxRange    = 0x108;  // ... MaxRange
+// The fly agent (UnitFlyAgent) that flies an AI flyer: its controller.
+constexpr uint32_t kAgent_Ctrl         = 0x0C;   // UnitAgent::mCtrl, the UnitController
 
 constexpr uint32_t kUC_LowLevel   = 0x2C4;
 constexpr uint32_t kLL_Dest       = 0x1C;
@@ -139,6 +149,7 @@ constexpr uint32_t kHashCount = pbl_hash("WingmanCount");
 constexpr uint32_t kHashAuto  = pbl_hash("WingmanAuto");
 constexpr uint32_t kHashSlot  = pbl_hash("WingmanSlot");
 constexpr uint32_t kHashFormation = pbl_hash("WingmanFormation");
+constexpr uint32_t kHashExitOnLand = pbl_hash("WingmanExitOnLand");
 
 constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
@@ -170,6 +181,8 @@ using fn_add_chat_t   = uint32_t(__cdecl*)(uint32_t teamOnly, uint32_t localInde
 using fn_ray_hit_t    = float(__cdecl*)(const float* start, const float* dir, float length, void** hit, float* normal,
                                         uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly);
 using fn_flyer_t      = void(__thiscall*)(void* flyer);
+using fn_land_hint_t  = bool(__thiscall*)(void* agent);
+using fn_exit_t       = void(__thiscall*)(void* lowLevel, void* commandPost);
 
 // Detoured: after the install each holds the original's trampoline.
 fn_update_t s_update   = nullptr;
@@ -201,6 +214,8 @@ double           s_pendingAt    = 0.0;       // ... when
 fn_ray_hit_t     s_rayHit  = nullptr;        // CollisionManager::RayHit
 fn_flyer_t       s_land    = nullptr;        // EntityFlyer::Land
 fn_flyer_t       s_takeOff = nullptr;        // EntityFlyer::TakeOff
+fn_land_hint_t   s_landHint = nullptr;       // UnitFlyAgent::IsNearLandingPt (waiting aboard)
+fn_exit_t        s_exitVehicle = nullptr;    // AILowLevel::SetExitVehicle
 
 struct Site {
    uint8_t* at = nullptr;
@@ -208,6 +223,8 @@ struct Site {
 };
 Site s_callSite;
 Site s_chatSite;
+Site s_landHintSite;     // the fly agent's CALL to IsNearLandingPt ...
+Site s_takeOffSites[2];  // ... and its two CALLs to EntityFlyer::TakeOff
 
 // ---- The ODF keys, per class ----------------------------------------------------------
 std::unordered_map<const void*, ClassKeys> s_classes;
@@ -232,6 +249,10 @@ bool on_property(void* cls, uint32_t hash, const char* value)
    }
    if (hash == kHashAuto) {
       if (cls) flyer_wingmen::set_auto(s_classes[cls], value);
+      return true;
+   }
+   if (hash == kHashExitOnLand) {
+      if (cls) flyer_wingmen::set_exit_on_land(s_classes[cls], value);
       return true;
    }
    if (hash == kHashSlot) {
@@ -282,6 +303,7 @@ struct Wingman {
    uint32_t targetHandle = 0;
    bool     ground = false;    // the target is not in the air: passes at it
    flyer_orders::Run run;
+   flyer_orders::RunShape shape;   // its passes and its gap behind a flyer, from its own weapon
    double   chasedFrom = 0.0;
    double   forcedAt = -1e9;   // when its AI's attack target was last set to its own
    bool     joining = false;   // flying in from afar (called up, or back from a chase)
@@ -299,6 +321,7 @@ enum : int {
    kLandCircle  = 2,   // circling overhead: no level ground beside its leader
    kLandDown    = 3,   // landing or landed
    kLandLeaving = 4,   // taking off with its leader
+   kLandOut     = 5,   // landed, its pilot getting out (WingmanExitOnLand)
 };
 
 // The leader's DoTrick, seen before it runs; it went ahead if the leader is in a
@@ -943,6 +966,22 @@ void clear_target(Wingman& w, uint8_t* leader, double now, const char* why)
    }
 }
 
+// A flyer's primary weapon's ranges, as its weapon ODF gives them to the AI
+// (MinRange, OptimalRange, MaxRange): channel 0's weapon (GetWeaponIndex(0),
+// GetWeaponPtr), its class. False for none.
+bool primary_ranges(const uint8_t* flyer, float& minRange, float& optimal, float& maxRange)
+{
+   const int index = *(const int*)(flyer + kFly_WeaponIndex);
+   if (index < 0 || index >= kFlyWeapons) return false;
+   const uint8_t* const weapon = *(const uint8_t* const*)(flyer + kFly_Weapons + index * 4);
+   const uint8_t* const cls = weapon ? *(const uint8_t* const*)(weapon + kWeapon_Class) : nullptr;
+   if (!cls) return false;
+   minRange = *(const float*)(cls + kWClass_MinRange);
+   optimal = *(const float*)(cls + kWClass_OptimalRange);
+   maxRange = *(const float*)(cls + kWClass_MaxRange);
+   return true;
+}
+
 void chase(Wingman& w, uint8_t* t, double now)
 {
    if (w.target == t && w.targetHandle == handle_of(t)) return;
@@ -952,10 +991,17 @@ void chase(Wingman& w, uint8_t* t, double now)
    w.run = flyer_orders::Run{false, now};
    w.chasedFrom = now;
    w.forcedAt = -1e9;
+   // Its passes and its gap, from its own weapon at its cruising speed.
+   float minRange = 0.0f, optimal = 0.0f, maxRange = 0.0f;
+   const bool armed = primary_ranges(w.obj, minRange, optimal, maxRange);
+   w.shape = flyer_orders::run_shape(minRange, optimal, maxRange, s_midSpeed(w.obj, nullptr));
    if (order_log())
-      install_log("[Wingmen] slot %d (#%u) takes on #%u (%s), %.0f m off", w.slot + 1, w.handle, w.targetHandle,
-                  w.ground ? "not in the air: passes at it" : "in the air",
-                  (double)flyer_wingmen::length(position_of(t) - position_of(w.obj)));
+      install_log("[Wingmen] slot %d (#%u) takes on #%u (%s), %.0f m off; %s %.0f/%.0f/%.0f m: pulls out at %.0f m, "
+                  "back in from %.0f m, %.0f m behind a flyer",
+                  w.slot + 1, w.handle, w.targetHandle, w.ground ? "not in the air: passes at it" : "in the air",
+                  (double)flyer_wingmen::length(position_of(t) - position_of(w.obj)),
+                  armed ? "its weapon's ranges" : "no weapon read, ranges", (double)minRange, (double)optimal,
+                  (double)maxRange, (double)w.shape.breakAt, (double)w.shape.extendTo, (double)w.shape.gap);
 }
 
 // Who each wingman takes on, by the order (flyer_orders_core.hpp): once a
@@ -1398,8 +1444,17 @@ void update_landing(Formation& f, uint8_t* leader)
    for (int i = 0; i < f.count; ++i) {
       Wingman& w = f.wing[i];
       if (w.land == kLandLeaving && flying(w.obj)) w.land = kLandNone;   // up again: to its slot
-      // Its AI took it up again before its leader: it tries again, or circles.
+      // Up again before its leader (it should wait aboard): it circles.
       if (w.land == kLandDown && flying(w.obj) && f.landing) w.land = kLandCircle;
+      // Down, one whose class says so gets out (AILowLevel::SetExitVehicle, with
+      // no command post, as the AI's own end-of-game exit asks); the rest wait.
+      if (w.land == kLandDown && state_of(w.obj) == kStateLanded && s_exitVehicle &&
+          flyer_wingmen::exits_on_land(keys_of(w.obj))) {
+         s_exitVehicle(w.uc + kUC_LowLevel, nullptr);
+         w.land = kLandOut;
+         if (order_log()) install_log("[Wingmen] slot %d (#%u) landed: its pilot gets out (WingmanExitOnLand)",
+                                      w.slot + 1, w.handle);
+      }
    }
 }
 
@@ -1880,9 +1935,9 @@ void write_dest(uint8_t* flyer, Steer& st, V3 heading, int safeHeight)
 
 // After its target: behind a flyer in the air, at where it will be (as real
 // flight's chase, flyer_real_flight_core.hpp), flat out to close and at its
-// speed once behind it; at anything else, passes (flyer_orders_core.hpp): a
-// dive at it with the safe height let go near it, then out and up, at its own
-// speeds.
+// speed once its own gap behind it; at anything else, passes
+// (flyer_orders_core.hpp): a dive at it with the safe height let go near it,
+// then out and up, as far as its own weapon makes them; at its own speeds.
 bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
 {
    uint8_t* const t = w.target;
@@ -1906,9 +1961,9 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
    float speed;
    if (!w.ground) {
       st.point = flyer_real_flight::pursuit_point(me, mySpeed, target, targetVel);
-      speed = flyer_real_flight::pursuit_speed(d, aheadCos, flyer_wingmen::length(targetVel), lo, hi);
+      speed = flyer_real_flight::pursuit_speed(d, aheadCos, flyer_wingmen::length(targetVel), lo, hi, w.shape.gap);
    } else {
-      flyer_orders::update_run(w.run, d, aheadCos, now);
+      flyer_orders::update_run(w.run, w.shape, d, aheadCos, now);
       if (w.run.extending) {
          st.point = flyer_orders::extend_point(me, nose);
          speed = hi;
@@ -2201,6 +2256,82 @@ bool install_landing(uintptr_t base)
    return true;
 }
 
+// ---- Waiting aboard ---------------------------------------------------------------------
+// The fly agent's FLY state asks IsNearLandingPt: near one of the map's land hints
+// it lands there, and once down its DROPOFF state gets the pilot out
+// (AILowLevel::SetExitVehicle). A wingman lands only with its leader, so for one
+// the answer is no (and no hint is reserved). thiscall() on the agent, the answer
+// in AL; the caller keeps only ESI past the call.
+bool __fastcall land_hint_mt(uint8_t* agent, void*)
+{
+   bool wingman = false;
+   __try {
+      uint8_t* const uc = *(uint8_t**)(agent + kAgent_Ctrl);
+      uint8_t* const owner = uc ? *(uint8_t**)(uc + kCtrl_Owner) : nullptr;
+      uint8_t* const obj = owner ? object_of(owner) : nullptr;
+      wingman = obj && held(obj);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      wingman = false;
+   }
+   return wingman ? false : s_landHint(agent);
+}
+
+// The fly agent's TAKEOFF and FLY states take a landed flyer up
+// (EntityFlyer::TakeOff, thiscall() on the flyer). A wingman landed beside its
+// leader waits for it instead: they take off together (end_landing calls
+// TakeOff itself). Each caller returns straight after the call.
+void __fastcall agent_take_off_mt(uint8_t* flyer, void*)
+{
+   bool wait = false;
+   __try {
+      Formation* f = nullptr;
+      const Wingman* w = find(flyer, &f);
+      wait = w && f->landing && w->land == kLandDown;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      wait = false;
+   }
+   if (!wait) s_takeOff(flyer);
+}
+
+// Waiting aboard: the agent's CALL to IsNearLandingPt (MOV ECX, ESI before it,
+// TEST AL, AL then the LAND state after it) and its two CALLs to TakeOff (the
+// flyer in ECX, its state tested for flying first, the agent's return after);
+// AILowLevel::SetExitVehicle for WingmanExitOnLand.
+bool install_waiting(uintptr_t base)
+{
+   const auto* a = g_addr;
+   if (!s_takeOff || !a->fly_agent_land_hint_call || !a->fly_agent_land_hint || !a->fly_agent_take_off_call ||
+       !a->fly_agent_take_off_call2 || !a->ai_set_exit_vehicle)
+      return false;
+   uint8_t* const hint = (uint8_t*)resolve(base, a->fly_agent_land_hint_call);
+   uint8_t* const up1 = (uint8_t*)resolve(base, a->fly_agent_take_off_call);
+   uint8_t* const up2 = (uint8_t*)resolve(base, a->fly_agent_take_off_call2);
+   const uintptr_t takeOff = (uintptr_t)resolve(base, a->entity_flyer_take_off);
+   const bool ok =
+      std::memcmp(hint - 2, "\x8B\xCE", 2) == 0 && hint[0] == 0xE8 &&
+      call_destination(hint) == (uintptr_t)resolve(base, a->fly_agent_land_hint) &&
+      std::memcmp(hint + 5, "\x84\xC0\x74\x10\x8B\x16\x6A\x05", 8) == 0 &&
+      starts_with(base, a->fly_agent_land_hint, "\x51\x56\x8B\xF1\xE8", 5) &&
+      std::memcmp(up1 - 0xF, "\x83\xB8\xA4\x05\x00\x00\x02", 7) == 0 && std::memcmp(up1 - 2, "\x8B\xC8", 2) == 0 &&
+      up1[0] == 0xE8 && call_destination(up1) == takeOff && std::memcmp(up1 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7) == 0 &&
+      std::memcmp(up2 - 0x16, "\x83\xB8\xA4\x05\x00\x00\x02", 7) == 0 && std::memcmp(up2 - 2, "\x8B\xC8", 2) == 0 &&
+      up2[0] == 0xE8 && call_destination(up2) == takeOff && std::memcmp(up2 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7) == 0 &&
+      starts_with(base, a->ai_set_exit_vehicle, "\x80\x49\x74\x08\x8B\x44\x24\x04\x89\x41\x78\xC2\x04\x00", 14);
+   if (!ok) return false;
+   s_landHint = (fn_land_hint_t)resolve(base, a->fly_agent_land_hint);
+   s_exitVehicle = (fn_exit_t)resolve(base, a->ai_set_exit_vehicle);
+   // The calls, during the installers' writable window.
+   auto redirect = [](Site& site, uint8_t* at, const void* to) {
+      site.at = at;
+      std::memcpy(site.orig, at, 5);
+      *(int32_t*)(at + 1) = (int32_t)((intptr_t)to - (intptr_t)(at + 5));
+   };
+   redirect(s_landHintSite, hint, (const void*)&land_hint_mt);
+   redirect(s_takeOffSites[0], up1, (const void*)&agent_take_off_mt);
+   redirect(s_takeOffSites[1], up2, (const void*)&agent_take_off_mt);
+   return true;
+}
+
 } // namespace
 
 void flyer_wingmen_install(uintptr_t base)
@@ -2286,7 +2417,10 @@ void flyer_wingmen_install(uintptr_t base)
       install_log("[Wingmen] landing with you off ([AI] FlyerWingmenLand=0): wingmen are let go when you land");
    else if (install_landing(base))
       install_log("[Wingmen] landing with you installed: wingmen land beside you, or circle overhead, and take off "
-                  "with you");
+                  "with you; %s",
+                  install_waiting(base) ? "they wait aboard (WingmanExitOnLand = 1 on a class gets its pilots out)"
+                                        : "NOT kept aboard (the fly agent's calls differ): near a land hint their "
+                                          "AI may land and get out");
    else
       install_log("[Wingmen] landing with you NOT installed: EntityFlyer's Land or TakeOff differ; wingmen are let go "
                   "when you land");
@@ -2324,6 +2458,12 @@ void flyer_wingmen_uninstall()
    s_callSite = Site{};
    if (s_chatSite.at) protected_write(s_chatSite.at, s_chatSite.orig, 5);
    s_chatSite = Site{};
+   for (Site* s : {&s_landHintSite, &s_takeOffSites[0], &s_takeOffSites[1]}) {
+      if (s->at) protected_write(s->at, s->orig, 5);
+      *s = Site{};
+   }
+   s_landHint = nullptr;
+   s_exitVehicle = nullptr;
    s_lockedTarget = nullptr;
    s_forceTarget = nullptr;
    s_affiliation = nullptr;

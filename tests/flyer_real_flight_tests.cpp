@@ -224,6 +224,11 @@ void pursuit_speeds()
    assert(near(pursuit_speed(kPursuitGap, 0.5f, 70.0f, 50.0f, 100.0f), 100.0f));  // turning onto it
    assert(near(pursuit_speed(kNan, 1.0f, 70.0f, 50.0f, 100.0f), 100.0f) && near(pursuit_speed(100.0f, 1.0f, 70.0f, 50.0f, 0.0f), 0.0f));
    assert(near(pursuit_speed(100.0f, 1.0f, 70.0f, 50.0f, kNan), 0.0f));   // no top speed to read
+   // A wingman's own gap (from its weapon): at its speed there, faster further back.
+   assert(near(pursuit_speed(60.0f, 1.0f, 70.0f, 50.0f, 100.0f, 60.0f), 70.0f));
+   assert(near(pursuit_speed(80.0f, 1.0f, 70.0f, 50.0f, 100.0f, 60.0f), 80.0f));
+   assert(near(pursuit_speed(kPursuitGap, 1.0f, 70.0f, 50.0f, 100.0f, kNan), 70.0f));   // no gap: the default
+   assert(near(pursuit_speed(kPursuitGap, 1.0f, 70.0f, 50.0f, 100.0f, -5.0f), 70.0f));
 }
 
 // The chase's clock: kPursuitSeconds from each provocation, at most kPursuitMaxSeconds.

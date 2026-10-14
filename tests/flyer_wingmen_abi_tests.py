@@ -97,6 +97,15 @@ for name, value in {
     "kStateTakeoff": 1,
     "kStateLanding": 3,
     "kGroundMask": 0x190,
+    # The primary weapon's ranges, and the fly agent's controller.
+    "kFly_Weapons": 0x6B8,
+    "kFlyWeapons": 4,
+    "kFly_WeaponIndex": 0x6C8,
+    "kWeapon_Class": 0x64,
+    "kWClass_MinRange": 0x100,
+    "kWClass_OptimalRange": 0x104,
+    "kWClass_MaxRange": 0x108,
+    "kAgent_Ctrl": 0x0C,
 }.items():
     assert constant(source, name) == value, name
 assert 'pbl_hash("EntitySoldier")' in source
@@ -113,7 +122,13 @@ for text in (r'"\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10', r'"\x8B\x86\x38\
              # Landing's: Land (or a detour's JMP), TakeOff, RayHit.
              r'"\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00", 9',
              r'"\x51\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00\x85\xC0\x57", 13',
-             r'"\xD9\x05\x90\xA2\xA2\x00\x8B\x54\x24\x10", 10'):
+             r'"\xD9\x05\x90\xA2\xA2\x00\x8B\x54\x24\x10", 10',
+             # Waiting aboard: the fly agent's CALLs and SetExitVehicle.
+             r'hint - 2, "\x8B\xCE", 2', r'hint + 5, "\x84\xC0\x74\x10\x8B\x16\x6A\x05", 8',
+             r'"\x51\x56\x8B\xF1\xE8", 5', r'up1 - 0xF, "\x83\xB8\xA4\x05\x00\x00\x02", 7',
+             r'up1 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7', r'up2 - 0x16, "\x83\xB8\xA4\x05\x00\x00\x02", 7',
+             r'up2 + 5, "\x5F\x5E\x5B\x8B\xE5\x5D\xC3", 7',
+             r'"\x80\x49\x74\x08\x8B\x44\x24\x04\x89\x41\x78\xC2\x04\x00", 14'):
     assert text in source, text
 core = (SRC / "ai/flyer_wingmen_core.hpp").read_text()
 assert constant(core, "kMaxClassFormations") == 10 and constant(core, "kMaxShapePoints") == 16
@@ -136,10 +151,13 @@ NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "fl
          "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower",
          "entity_formation_list", "controllable_locked_target", "uc_force_attack_target", "object_affiliation",
          "hud_message", "hud_message_color", "localize_find", "team_order_input", "team_order_chat_call",
-         "add_chat_message", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit")
+         "add_chat_message", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
+         "fly_agent_land_hint_call", "fly_agent_land_hint", "fly_agent_take_off_call", "fly_agent_take_off_call2",
+         "ai_set_exit_vehicle")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
           0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x00745D00, 0x00745DC3,
-          0x0070C260, 0x004F8B70, 0x004F1380, 0x0042E230)
+          0x0070C260, 0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
+          0x005A2170)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -468,6 +486,55 @@ checks = {
     0x00407581: [("jmp", "0x42e230")],
     0x0042E230: [("fld", "dword ptr [0xa2a290]"), ("mov", "edx, dword ptr [esp + 0x10]"),
                  ("fld", "dword ptr [0xa2a06c]"), ("mov", "dword ptr [edx], 0")],
+    # ---- The primary weapon's ranges ------------------------------------------------------
+    # EntityFlyer::GetWeaponIndex(channel) and GetWeaponPtr(index), thiscall on its
+    # Controllable (entity +0x240): mWeaponIndex at the entity's +0x6C8, mWeapon[] at +0x6B8.
+    0x004D7880: [("mov", "eax, dword ptr [esp + 4]"), ("mov", "eax, dword ptr [ecx + eax*4 + 0x488]"), ("ret", "4")],
+    0x004D78A0: [("mov", "eax, dword ptr [esp + 4]"), ("mov", "eax, dword ptr [ecx + eax*4 + 0x478]"), ("ret", "4")],
+    # CombatUtil::GetWeaponOptimalRange and GetWeaponMinRange: the current weapon's class
+    # (Weapon +0x64), its OptimalRange (+0x104) and MinRange (+0x100) ...
+    0x005947B0: [("mov", "ecx, dword ptr [esp + 4]"), ("call", "0x416081"), ("test", "eax, eax"),
+                 ("je", "0x5947c7"), ("mov", "eax, dword ptr [eax + 0x64]"), ("fld", "dword ptr [eax + 0x104]"),
+                 ("ret", "")],
+    0x00594810: [("mov", "ecx, dword ptr [esp + 4]"), ("call", "0x416081"), ("test", "eax, eax"),
+                 ("je", "0x594827"), ("mov", "eax, dword ptr [eax + 0x64]"), ("fld", "dword ptr [eax + 0x100]"),
+                 ("ret", "")],
+    # ... as WeaponClass::SetProperty reads them from the ODF: MinRange at +0x100, MaxRange at
+    # +0x108, OptimalRange at +0x104.
+    0x0061EAD3: [("cmp", "edi, 0x1ef25b6c"), ("je", "0x61eb16")],
+    0x0061EB16: [("add", "esi, 0x100")],
+    0x0061EE54: [("cmp", "edi, 0x43bcebe6"), ("je", "0x61ef36")],
+    0x0061EF36: [("mov", "edx, dword ptr [esp + 0x160]"), ("lea", "ecx, [esi + 0x108]")],
+    0x0061F498: [("cmp", "edi, 0x778f9aae"), ("jne", "0x620594"), ("mov", "edx, dword ptr [esp + 0x160]"),
+                 ("add", "esi, 0x104")],
+    # ---- Waiting aboard -------------------------------------------------------------------
+    # UnitFlyAgent::UpdateStatePostVision's FLY state: near a land hint (IsNearLandingPt,
+    # thiscall() on the agent, AL) it goes to LAND (5) ...
+    0x005AFDD1: [("mov", "ecx, esi"), ("call", "0x40e74b"), ("test", "al, al"), ("je", "0x5afdec"),
+                 ("mov", "edx, dword ptr [esi]"), ("push", "5"), ("mov", "ecx, esi"), ("call", "dword ptr [edx + 0x1c]")],
+    0x0040E74B: [("jmp", "0x5aed00")],
+    0x005AED00: [("push", "ecx"), ("push", "esi"), ("mov", "esi, ecx"), ("call", "0x40dcd3"),
+                 ("fcomp", "dword ptr [esi + 0x50]")],
+    # ... (the agent's controller at +0xC) ...
+    0x005AED1E: [("mov", "eax, dword ptr [esi + 0xc]")],
+    # ... and LAND, once its flyer is down (state 0), to DROPOFF (6), which gets the pilot out.
+    0x005AFE46: [("call", "0x40d0fd"), ("mov", "ecx, dword ptr [eax + 0x5a4]"), ("test", "ecx, ecx"),
+                 ("jne", "0x5afe5e"), ("mov", "eax, dword ptr [esi]"), ("push", "6"), ("mov", "ecx, esi"),
+                 ("call", "dword ptr [eax + 0x1c]")],
+    # UnitFlyAgent::EnterState's TAKEOFF and FLY states take a flyer not flying up: TakeOff,
+    # the flyer in ECX, the agent returning straight after.
+    0x005AF145: [("cmp", "dword ptr [eax + 0x5a4], 2"), ("je", "0x5af512"), ("mov", "ecx, eax"),
+                 ("call", "0x408602"), ("pop", "edi"), ("pop", "esi"), ("pop", "ebx"), ("mov", "esp, ebp"),
+                 ("pop", "ebp"), ("ret", "")],
+    0x005AF30D: [("cmp", "dword ptr [eax + 0x5a4], 2"), ("je", "0x5af512"), ("mov", "ecx, esi"),
+                 ("call", "0x40d0fd"), ("mov", "ecx, eax"), ("call", "0x408602"), ("pop", "edi"), ("pop", "esi"),
+                 ("pop", "ebx"), ("mov", "esp, ebp"), ("pop", "ebp"), ("ret", "")],
+    # AILowLevel::SetExitVehicle, thiscall(CommandPost*), RET 4: the exit flag (8) and the post;
+    # UnitController::UpdateHighLevel's end-of-game exit passes no post, on UnitController +0x2C4.
+    0x005A2170: [("or", "byte ptr [ecx + 0x74], 8"), ("mov", "eax, dword ptr [esp + 4]"),
+                 ("mov", "dword ptr [ecx + 0x78], eax"), ("ret", "4")],
+    0x005A079E: [("push", "0"), ("lea", "ecx, [esi + 0x2c4]"), ("call", "0x40c342")],
+    0x0040C342: [("jmp", "0x5a2170")],
 }
 # The stand-ins are naked and keep EDX and the XMM registers.
 for name in ("max_speed_mt", "min_speed_mt", "do_trick_mt"):
@@ -538,4 +605,5 @@ def pbl_hash(text):
 assert pbl_hash("game.squadcommand.follow") == 0x731FD493
 for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost"):
     assert f'pbl_hash("game.wingmen.{key}")' in source, key
+assert 'pbl_hash("WingmanExitOnLand")' in source
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")
