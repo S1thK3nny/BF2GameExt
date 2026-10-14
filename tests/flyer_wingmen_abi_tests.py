@@ -74,14 +74,20 @@ for name, value in {
     "kRed_Radius": 0x94,
     "kPath_MaxSquad": 0x84,
     "kFly_SquadronTime": 0x1CE8,
+    "kForm_Name": 0x14,
     "kForm_Nodes": 0x18,
     "kForm_NodeCount": 0x1C,
     "kForm_Root": 0x28,
     "kForm_Flags": 0x2C,
     "kNodeSize": 0x1C,
-    "kMaxClassFormations": 10,
+    "kNode_Rotation": 0x0C,
+    "kList_Next": 0x04,
+    "kList_Payload": 0x0C,
 }.items():
     assert constant(source, name) == value, name
+core = (SRC / "ai/flyer_wingmen_core.hpp").read_text()
+assert constant(core, "kMaxClassFormations") == 10 and constant(core, "kMaxShapePoints") == 16
+assert 'pbl_hash("WingmanFormation")' in source
 # The reads it shares with AI squads (tests/ai_squads_abi_tests.py audits those).
 for name in ("kVt_IsRtti", "kGO_Flags", "kGO_HandleId", "kGO_Team", "kCtrl_Owner", "kOwner_Trackable",
              "kVt_GetTrackable", "kNodeNext", "kNodePayload"):
@@ -97,8 +103,10 @@ assert 'pbl_hash("WingmanAuto")' in source and 'pbl_hash("WingmanSlot")' in sour
 
 mt = re.search(r"namespace modtools\s*\{(.*?)\n\s*\}\s*//\s*namespace modtools", addrs, re.S).group(1)
 NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "flyer_max_speed", "flyer_min_speed",
-         "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower")
-EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0)
+         "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower",
+         "entity_formation_list")
+EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
+          0x00AD33C0)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
@@ -280,6 +288,27 @@ checks = {
                  ("fstp", "dword ptr [eax + 4]"), ("fld", "dword ptr [eax + 8]"), ("fsub", "dword ptr [esp + 0x18]"),
                  ("fstp", "dword ptr [eax + 8]"), ("lea", "eax, [esp + 0x60]"), ("push", "eax"), ("call", "0x803f20"),
                  ("inc", "esi"), ("cmp", "esi, ebx")],
+    # Which way a shape faces. EntityFormation::Read reads its nodes through
+    # RedPath::ReadScope, whose Nodes reader (0x00820690) reads each node (0x00820470):
+    # Position x, y and z NEGATED; Rotation's first number to +0x18 (s), the rest to
+    # +0xC, +0x10, +0x14 (x, y, z).
+    0x005E2C5B: [("mov", "ecx, esi"), ("call", "0x820840")],
+    0x008209F7: [("call", "0x820690")],
+    0x0082069E: [("cmp", "dword ptr [esi], 0x514e905a")],
+    0x008207C7: [("call", "0x820470")],
+    0x0082048E: [("cmp", "eax, 0x21ac415f"), ("je", "0x8204db"), ("cmp", "eax, 0x934f4e0a"), ("je", "0x8204a9")],
+    0x008204A9: [("push", "0"), ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi]"), ("push", "1"),
+                 ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi + 4]"), ("push", "2"),
+                 ("mov", "ecx, esi"), ("call", "0x401b72"), ("fchs", ""), ("fstp", "dword ptr [edi + 8]")],
+    0x008204DB: [("push", "0"), ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi + 0x18]"),
+                 ("push", "1"), ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi + 0xc]"),
+                 ("push", "2"), ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi + 0x10]"),
+                 ("push", "3"), ("mov", "ecx, esi"), ("call", "0x401b72"), ("fstp", "dword ptr [edi + 0x14]")],
+    # Read then takes the root node (+0x28) and its rotation's conjugate (x, y, z negated,
+    # s kept) for the turn it drops.
+    0x005E2C88: [("mov", "eax, dword ptr [esi + 0x28]"), ("lea", "edi, [esi + 0x18]"), ("push", "eax"),
+                 ("mov", "ecx, edi"), ("call", "0x820160"), ("fld", "dword ptr [eax + 0x14]"), ("fchs", "")],
+    0x005E2CB7: [("mov", "edx, dword ptr [eax + 0x18]")],
     # EntityFlyerClass's constructor: the squadron angle and distance 0 by default (EBX, the
     # 0 it also gives mBoostFlyerSpeed, +0x898, which Phantom's constructor sets to 0.0).
     0x004F9BB6: [("mov", "dword ptr [esi + 0x898], ebx")],
@@ -330,7 +359,13 @@ for offset, text in ((0x134, r"\xD9\x86\xE8\x1C\x00\x00"),
     want = bytes(int(b, 16) for b in text.split(r"\x")[1:])
     assert image[upf + offset - base:upf + offset - base + len(want)] == want, hex(offset)
     assert f'upf + 0x{offset:X}, "{text}"' in source, hex(offset)
-find_guard = r"\x56\x8B\x35\xC4\x33\xAD\x00\x8B\x4E\x0C\x85\xC9"
-assert image[0x005E2EB0 - base:0x005E2EB0 - base + 12] == bytes(int(b, 16) for b in find_guard.split(r"\x")[1:])
-assert f'"{find_guard}", 12' in source
+# EntityFormation::Find's guard, built from the list's head: PUSH ESI; MOV ESI, [head + 4]; ...
+find_guard = bytes([0x56, 0x8B, 0x35]) + (0x00AD33C0 + 4).to_bytes(4, "little") + bytes([0x8B, 0x4E, 0x0C, 0x85, 0xC9])
+assert image[0x005E2EB0 - base:0x005E2EB0 - base + 12] == find_guard
+assert "uint8_t find[12] = {0x56, 0x8B, 0x35, 0, 0, 0, 0, 0x8B, 0x4E, 0x0C, 0x85, 0xC9};" in source
+assert "(uint32_t)(uintptr_t)(list + kList_Next)" in source
+# The formations' list head as the exe starts: empty, its next and back its own address,
+# no formation, none counted.
+assert [int.from_bytes(image[0x00AD33C0 - base + 4 * k:0x00AD33C0 - base + 4 * k + 4], "little") for k in range(5)] == \
+    [0x00AD33C0, 0x00AD33C0, 0x00AD33C0, 0, 0]
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")

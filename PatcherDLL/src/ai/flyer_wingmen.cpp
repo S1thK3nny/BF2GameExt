@@ -81,13 +81,16 @@ constexpr uint32_t kModel_Red           = 0x20;     // ... its RedModel ...
 constexpr uint32_t kRed_Radius          = 0x94;     // ... and that one's bounding radius
 constexpr uint32_t kPath_MaxSquad       = 0x84;     // EntityPath::mMaxSquadronSize (~0: no limit)
 constexpr uint32_t kFly_SquadronTime    = 0x1CE8;   // mSquadronFormationTime, counted down to a try
-constexpr uint32_t kForm_Nodes          = 0x18;     // EntityFormation: its nodes (0x1C bytes, the position first) ...
+constexpr uint32_t kForm_Name           = 0x14;     // EntityFormation: its name's PblHash (RedPath::GetName) ...
+constexpr uint32_t kForm_Nodes          = 0x18;     // ... its nodes (0x1C bytes, the position first) ...
 constexpr uint32_t kForm_NodeCount      = 0x1C;     // ... how many ...
 constexpr uint32_t kForm_Root           = 0x28;     // ... the root's ...
 constexpr uint32_t kForm_Flags          = 0x2C;     // ... bit 0: the root is a slot
 constexpr uint32_t kNodeSize            = 0x1C;
-constexpr int      kMaxClassFormations  = 10;
-constexpr int      kMaxShapePoints      = 16;
+constexpr uint32_t kNode_Rotation       = 0x0C;     // a node's rotation: x, y, z, s
+constexpr uint32_t kList_Next           = 0x04;     // the formations' list: a node's next ...
+constexpr uint32_t kList_Payload        = 0x0C;     // ... and its formation (the head's null)
+constexpr int      kMaxMapShapes        = 64;
 
 // ---- Any build ------------------------------------------------------------------
 constexpr uint32_t kVt_IsRtti       = 0x00;   // a GameObject's or a Controller's
@@ -111,6 +114,7 @@ constexpr uint32_t kHashClass = pbl_hash("WingmanClass");
 constexpr uint32_t kHashCount = pbl_hash("WingmanCount");
 constexpr uint32_t kHashAuto  = pbl_hash("WingmanAuto");
 constexpr uint32_t kHashSlot  = pbl_hash("WingmanSlot");
+constexpr uint32_t kHashFormation = pbl_hash("WingmanFormation");
 
 constexpr double kTickSeconds   = 1.0;
 constexpr double kReportSeconds = 5.0;
@@ -140,6 +144,7 @@ uintptr_t   s_calcDest = 0;
 fn_local_t  s_local    = nullptr;
 uint8_t**   s_list     = nullptr;   // the global holding sAICtrls
 fn_find_shape_t s_findShape = nullptr;   // EntityFormation::Find
+uint8_t*    s_shapeList = nullptr;  // the map's formation shapes: the list's head node
 bool        s_squadrons = false;    // the squadron rule's reads checked
 bool        s_detoured = false;
 bool        s_odf      = false;
@@ -179,6 +184,18 @@ bool on_property(void* cls, uint32_t hash, const char* value)
    if (hash == kHashSlot) {
       if (cls)
          flyer_wingmen::add_slot(s_classes[cls], value, [](const char* b, unsigned n) { return pbl_hash(b, n); });
+      return true;
+   }
+   if (hash == kHashFormation) {
+      if (cls) {
+         ClassKeys& k = s_classes[cls];
+         bool any = false;
+         flyer_wingmen::for_each_name(value, [&](const char* b, unsigned len) {
+            flyer_wingmen::add_formation(k, pbl_hash(b, len));
+            any = true;
+         });
+         if (!any) flyer_wingmen::add_formation(k, 0);   // an empty list: no map shape, the vee
+      }
       return true;
    }
    return flyer_real_flight::on_property(cls, hash, value);   // shares this listener slot
@@ -455,12 +472,13 @@ bool slot_taken(const Formation& f, int slot)
    return false;
 }
 
-// Slot `slot` of a formation, from its leader, mirrored after its leader's flips.
+// Slot `slot` of a formation, from its leader, mirrored after its leader's flips:
+// its map shape's where it flies one, else its leader class's WingmanSlot lines,
+// else the vee.
 V3 slot_of(const Formation& f, int slot)
 {
-   const V3 s = f.ai && slot >= 0 && slot < f.shapeCount
-                   ? f.shape[slot]
-                   : flyer_wingmen::slot_for(keys_of(f.leader), slot, g_flyerWingmenSpacing);
+   const V3 s = slot >= 0 && slot < f.shapeCount ? f.shape[slot]
+                                                 : flyer_wingmen::slot_for(keys_of(f.leader), slot, g_flyerWingmenSpacing);
    return flyer_wingmen::mirrored(s, f.mirror);
 }
 
@@ -488,7 +506,152 @@ void leave_squadron(const uint8_t* obj)
    if (!f->count) dissolve(*f, "its last wingman was called up by the player");
 }
 
+// ---- The map's formation shapes ------------------------------------------------------
+// The map's EntityFormation paths, flown as their authors drew them, whoever leads
+// (flyer_wingmen_core.hpp, "Which way a map's formation shape faces"): their points
+// with the game's z flip taken back out, and, on a map whose formations were placed
+// turned (the BF3 maps'), turned back by their own rotation.
+const char* shape_name(uint32_t name)
+{
+   static const char* const kStock[] = {"Tri-form",  "Line-Form", "Box-Form",    "five-form",  "eschleft-form",
+                                        "eschrgt-form", "wall-form", "escort-form", "bomber-Form"};
+   for (const char* n : kStock)
+      if (pbl_hash(n) == name) return n;
+   return nullptr;
+}
+
+struct Shape {
+   uint32_t name = 0;
+   V3       points[flyer_wingmen::kMaxShapePoints];   // as the game holds them: from the root, z negated
+   int      count = 0;
+   int      root = 0;
+   bool     rootIsSlot = true;
+   float    yaw = 0.0f;   // the root node's turn, in the editor's frame
+   int      size = 0;     // flyers it holds, its leader among them
+};
+
+bool read_shape_at(const uint8_t* f, Shape& s)
+{
+   const uint8_t* const nodes = *(const uint8_t* const*)(f + kForm_Nodes);
+   const int count = *(const int*)(f + kForm_NodeCount);
+   const int root = *(const int*)(f + kForm_Root);
+   if (!nodes || count < 2 || count > flyer_wingmen::kMaxShapePoints || root < 0 || root >= count) return false;
+   for (int i = 0; i < count; ++i) std::memcpy(&s.points[i], nodes + i * kNodeSize, sizeof(V3));
+   const float* q = (const float*)(nodes + root * kNodeSize + kNode_Rotation);
+   s.name = *(const uint32_t*)(f + kForm_Name);
+   s.count = count;
+   s.root = root;
+   s.rootIsSlot = (f[kForm_Flags] & 1) != 0;
+   s.yaw = flyer_wingmen::drawn_yaw(q[0], q[1], q[2], q[3]);
+   s.size = flyer_wingmen::shape_size(count, s.rootIsSlot);
+   return true;
+}
+
+bool read_shape(uint32_t name, Shape& s)
+{
+   const uint8_t* const f = s_findShape && name ? s_findShape(name) : nullptr;
+   return f && read_shape_at(f, s);
+}
+
+// Whether this map's formations are turned back by their rotation: when more of
+// them are then led from the front (flyer_wingmen::unturn_shapes). Read afresh
+// each time (a map has a dozen at most); logged when the answer's inputs change.
+struct MapShapes {
+   bool unturn = false;
+   int  count = 0, asDrawn = 0, unturned = 0;
+};
+MapShapes s_lastMapShapes;
+bool      s_mapShapesLogged = false;
+
+MapShapes map_shapes()
+{
+   static Shape shapes[kMaxMapShapes];
+   flyer_wingmen::ShapeView views[kMaxMapShapes];
+   MapShapes m;
+   if (!s_shapeList) return m;
+   uint8_t* node = *(uint8_t**)(s_shapeList + kList_Next);
+   for (int i = 0; i < 1024 && node && node != s_shapeList && m.count < kMaxMapShapes; ++i) {
+      const uint8_t* const f = *(const uint8_t* const*)(node + kList_Payload);
+      if (!f) break;   // the head: the list's end
+      node = *(uint8_t**)(node + kList_Next);
+      Shape& s = shapes[m.count];
+      if (!read_shape_at(f, s)) continue;
+      views[m.count] = {s.points, s.count, s.root, s.rootIsSlot, s.yaw};
+      ++m.count;
+   }
+   m.unturn = flyer_wingmen::unturn_shapes(views, m.count, &m.asDrawn, &m.unturned);
+   if (!s_mapShapesLogged || m.count != s_lastMapShapes.count || m.unturn != s_lastMapShapes.unturn ||
+       m.asDrawn != s_lastMapShapes.asDrawn) {
+      s_mapShapesLogged = true;
+      install_log("[Wingmen] the map's %d formation shapes fly %s: %d led from the front as drawn, %d turned back by "
+                  "their rotation",
+                  m.count, m.unturn ? "turned back by their rotation" : "as drawn", m.asDrawn, m.unturned);
+   }
+   s_lastMapShapes = m;
+   return m;
+}
+
+// The first `members` slots of a map shape, as drawn.
+int shape_slots_for(const Shape& s, bool unturn, int members, V3* out)
+{
+   return flyer_wingmen::drawn_slots(s.points, s.count, s.root, s.rootIsSlot, s.yaw, unturn, members, out);
+}
+
 // ---- The player's wingmen ---------------------------------------------------------
+// A player's flight flies its class's WingmanSlot lines where it has them; else
+// one of the map's formation shapes: the first its WingmanFormation names that the
+// map has, else the first of its SquadronFormation shapes that holds all its
+// wingmen (else the largest); else the vee. Chosen when it starts leading.
+void choose_player_shape(uint8_t* leader)
+{
+   Formation& f = s_player;
+   f.shapeCount = 0;
+   f.shapeName = 0;
+   const ClassKeys* keys = keys_of(leader);
+   if ((keys && keys->hasSlots) || !s_findShape) return;
+   const int want = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   if (want <= 0) return;
+   uint32_t names[flyer_wingmen::kMaxClassFormations];
+   int named = 0;
+   bool firstFound = false;   // WingmanFormation: the first the map has, whatever its size
+   if (keys && keys->hasFormations) {
+      for (int i = 0; i < keys->formationCount; ++i) names[named++] = keys->formations[i];
+      firstFound = true;
+   } else if (const uint8_t* cls = *(const uint8_t* const*)(leader + kFly_Class)) {
+      const uint8_t* const pathClass = cls + kClass_PathClass;
+      const uint32_t n = *(const uint32_t*)(pathClass + kSquad_FormationCount);
+      for (uint32_t i = 0; i < n && named < flyer_wingmen::kMaxClassFormations; ++i)
+         names[named++] = ((const uint32_t*)pathClass)[i];
+   }
+   Shape pick, s;
+   bool have = false;
+   for (int i = 0; i < named; ++i) {
+      if (!read_shape(names[i], s)) continue;
+      if (firstFound) {
+         pick = s;
+         have = true;
+         break;
+      }
+      if (!have || (pick.size - 1 < want && s.size > pick.size)) {
+         pick = s;
+         have = true;
+      }
+      if (pick.size - 1 >= want) break;
+   }
+   if (!have) return;
+   const MapShapes m = map_shapes();
+   const int members = pick.size - 1 < want ? pick.size - 1 : want;
+   f.shapeCount = shape_slots_for(pick, m.unturn, members, f.shape);
+   f.shapeName = pick.name;
+   const char* const nm = shape_name(pick.name);
+   if (nm)
+      install_log("[Wingmen] your flight flies the map's %s, %d slots%s", nm, f.shapeCount,
+                  m.unturn ? ", turned back by its rotation" : "");
+   else
+      install_log("[Wingmen] your flight flies the map's formation 0x%08X, %d slots%s", pick.name, f.shapeCount,
+                  m.unturn ? ", turned back by its rotation" : "");
+}
+
 // The leader's free slots, in order, each to the nearest friendly AI flyer its
 // class lets follow and the slot lets in (a WingmanSlot line may keep it for some
 // classes). An AI squadron's wingmen may be called away from it; its leaders not.
@@ -496,7 +659,8 @@ void fill(uint8_t* leader)
 {
    Formation& f = s_player;
    const ClassKeys* keys = keys_of(leader);
-   const int total = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   int total = flyer_wingmen::count_for(keys, g_flyerWingmenCount);
+   if (f.shapeCount > 0 && total > f.shapeCount) total = f.shapeCount;   // a map shape holds no more
    if (f.count >= total) return;
    const float* lm = matrix_of(leader);
    if (!lm) return;
@@ -559,41 +723,7 @@ void report(double now)
 // player's wingmen are: every 5.5 to 8.5 s a leader not in one takes the nearest
 // same-side flyers on real flight heading its way, within its class's reach, up
 // to its path's MaxSquadSize, in one of its class's SquadronFormation shapes
-// (the map's EntityFormation paths), or its WingmanSlot lines.
-const char* shape_name(uint32_t name)
-{
-   static const char* const kStock[] = {"Tri-form",  "Line-Form", "Box-Form",    "five-form",  "eschleft-form",
-                                        "eschrgt-form", "wall-form", "escort-form", "bomber-Form"};
-   for (const char* n : kStock)
-      if (pbl_hash(n) == name) return n;
-   return nullptr;
-}
-
-struct Shape {
-   uint32_t name = 0;
-   V3       points[kMaxShapePoints];
-   int      count = 0;
-   int      root = 0;
-   bool     rootIsSlot = true;
-   int      size = 0;   // flyers it holds, its leader among them
-};
-
-bool read_shape(uint32_t name, Shape& s)
-{
-   const uint8_t* const f = s_findShape ? s_findShape(name) : nullptr;
-   if (!f) return false;
-   const uint8_t* const nodes = *(const uint8_t* const*)(f + kForm_Nodes);
-   const int count = *(const int*)(f + kForm_NodeCount);
-   if (!nodes || count < 2 || count > kMaxShapePoints) return false;
-   for (int i = 0; i < count; ++i) std::memcpy(&s.points[i], nodes + i * kNodeSize, sizeof(V3));
-   s.name = name;
-   s.count = count;
-   s.root = *(const int*)(f + kForm_Root);
-   s.rootIsSlot = (f[kForm_Flags] & 1) != 0;
-   s.size = flyer_wingmen::shape_size(count, s.rootIsSlot);
-   return s.root >= 0 && s.root < count;
-}
-
+// (the map's EntityFormation paths, as drawn), or its WingmanSlot lines.
 float model_radius(uint8_t* cls)
 {
    uint8_t* const model = ((fn_get_obj_t)(*(void***)cls)[kVt_ClassModel / 4])(cls);
@@ -615,10 +745,10 @@ void try_squadron(uint8_t* leader, const uint8_t* path)
    const uint8_t* const pathClass = cls + kClass_PathClass;
    if (!pathClass[kPathClass_VsFlyer]) return;   // the game gathers FlyerVsFlyer classes only
    const ClassKeys* keys = keys_of(leader);
-   Shape shapes[kMaxClassFormations];
+   Shape shapes[flyer_wingmen::kMaxClassFormations];
    int nShapes = 0;
    const uint32_t named = *(const uint32_t*)(pathClass + kSquad_FormationCount);
-   for (uint32_t k = 0; k < named && k < (uint32_t)kMaxClassFormations; ++k)
+   for (uint32_t k = 0; k < named && k < (uint32_t)flyer_wingmen::kMaxClassFormations; ++k)
       if (read_shape(((const uint32_t*)pathClass)[k], shapes[nShapes])) ++nShapes;
    const bool ownSlots = keys && keys->hasSlots && keys->slotCount > 0;
    if (!nShapes && !ownSlots) return;   // no shape to fly: none, as the game
@@ -685,8 +815,7 @@ void try_squadron(uint8_t* leader, const uint8_t* path)
    f->leaderHandle = handle_of(leader);
    f->leaderUc = *(uint8_t**)(leader + kFly_Ctrl);
    if (shape) {
-      f->shapeCount = flyer_wingmen::shape_slots(shape->points, shape->count, shape->root, shape->rootIsSlot, members,
-                                                 f->shape);
+      f->shapeCount = shape_slots_for(*shape, map_shapes().unturn, members, f->shape);
       f->shapeName = shape->name;
       if (f->shapeCount < members) members = f->shapeCount;
    }
@@ -804,12 +933,15 @@ void tick(double now)
       release_all(s_player, leader ? "the player's flyer leads none" : "the player is not flying");
       s_player.leader = nullptr;
       s_player.leaderHandle = 0;
+      s_player.shapeCount = 0;
+      s_player.shapeName = 0;
    } else {
       if (leader != s_player.leader || handle_of(leader) != s_player.leaderHandle) {
          release_all(s_player, "a new leader");
          s_player.leader = leader;
          s_player.leaderHandle = handle_of(leader);
          s_player.formUp = true;
+         choose_player_shape(leader);
       }
       for (int i = s_player.count - 1; i >= 0; --i)
          if (const char* why = lost(s_player.wing[i], s_player)) drop(s_player, i, why);
@@ -1297,16 +1429,27 @@ uintptr_t call_destination(const uint8_t* call)
 bool install_squadrons(uintptr_t base)
 {
    const auto* a = g_addr;
-   if (!a->entity_formation_find || !a->flyer_update_path_follower) return false;
+   if (!s_findShape || !a->flyer_update_path_follower) return false;
    const uint8_t* const upf = (const uint8_t*)resolve(base, a->flyer_update_path_follower);
-   const bool ok =
-      starts_with(base, a->entity_formation_find, "\x56\x8B\x35\xC4\x33\xAD\x00\x8B\x4E\x0C\x85\xC9", 12) &&
-      std::memcmp(upf + 0x134, "\xD9\x86\xE8\x1C\x00\x00", 6) == 0 &&
-      std::memcmp(upf + 0x153, "\x8B\x8E\x6C\x06\x00\x00\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\x08\x11\x00\x00", 18) == 0 &&
-      std::memcmp(upf + 0x17A, "\x8B\x11\xFF\x52\x20\x8B\x40\x20\xD9\x80\x94\x00\x00\x00\xD8\x0D\x18\x7E\xA3\x00", 20) == 0 &&
-      std::memcmp(upf + 0x1E6, "\x8B\x91\x04\x11\x00\x00", 6) == 0;
-   if (!ok) return false;
+   return std::memcmp(upf + 0x134, "\xD9\x86\xE8\x1C\x00\x00", 6) == 0 &&
+          std::memcmp(upf + 0x153, "\x8B\x8E\x6C\x06\x00\x00\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\x08\x11\x00\x00", 18) == 0 &&
+          std::memcmp(upf + 0x17A, "\x8B\x11\xFF\x52\x20\x8B\x40\x20\xD9\x80\x94\x00\x00\x00\xD8\x0D\x18\x7E\xA3\x00", 20) == 0 &&
+          std::memcmp(upf + 0x1E6, "\x8B\x91\x04\x11\x00\x00", 6) == 0;
+}
+
+// The map's formation shapes: EntityFormation::Find, which walks their list from
+// its head's next (PUSH ESI; MOV ESI, [head + 4]; MOV ECX, [ESI + 0xC]; TEST ECX, ECX).
+bool install_shapes(uintptr_t base)
+{
+   const auto* a = g_addr;
+   if (!a->entity_formation_find || !a->entity_formation_list) return false;
+   uint8_t* const list = (uint8_t*)resolve(base, a->entity_formation_list);
+   uint8_t find[12] = {0x56, 0x8B, 0x35, 0, 0, 0, 0, 0x8B, 0x4E, 0x0C, 0x85, 0xC9};
+   const uint32_t first = (uint32_t)(uintptr_t)(list + kList_Next);
+   std::memcpy(find + 3, &first, 4);
+   if (std::memcmp(resolve(base, a->entity_formation_find), find, sizeof find) != 0) return false;
    s_findShape = (fn_find_shape_t)resolve(base, a->entity_formation_find);
+   s_shapeList = list;
    return true;
 }
 
@@ -1395,6 +1538,10 @@ void flyer_wingmen_install(uintptr_t base)
    const bool realFlight = flyer_real_flight::install(base, borrowed);
 
    // AI squadrons need real flight (they gather flyers on it).
+   // The map's formation shapes, for the player's flight and the AI squadrons.
+   if (!install_shapes(base)) install_log("[Wingmen] the map's formation shapes unavailable: EntityFormation::Find differs");
+
+   // AI squadrons need real flight (they gather flyers on it).
    s_squadrons = realFlight && install_squadrons(base);
    if (realFlight)
       install_log("[Squadrons] %s", !s_squadrons ? "NOT installed: the squadron rule's reads differ"
@@ -1426,5 +1573,7 @@ void flyer_wingmen_uninstall()
    for (Formation& f : s_forms) f = Formation{};
    s_squadrons = false;
    s_findShape = nullptr;
+   s_shapeList = nullptr;
+   s_mapShapesLogged = false;
    s_classes.clear();
 }

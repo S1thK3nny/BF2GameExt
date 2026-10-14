@@ -1363,10 +1363,13 @@ namespace modtools {
    // flyer_follower_link): the list's head node (+4 the first node; a node's +4
    // the next, +0xC its follower; the head's own +0xC is null), its count at
    // +0x10. EntityFormation::Find, cdecl(uint32_t nameHash): the map's formation
-   // shape of that name (an EntityFormation path), or null.
+   // shape of that name (an EntityFormation path), or null; it walks the list of
+   // them from entity_formation_list's head node (+4 the first node; a node's +4
+   // the next, +0xC its formation; the head's +0xC null).
    constexpr uintptr_t flyer_follower_list          = 0x00AD3524;
    constexpr uintptr_t flyer_follower_link          = 0x005E8AE3;
    constexpr uintptr_t entity_formation_find        = 0x005E2EB0;
+   constexpr uintptr_t entity_formation_list        = 0x00AD33C0;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

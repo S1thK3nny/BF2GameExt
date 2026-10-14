@@ -295,9 +295,18 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //                  open to any class that may follow. Its lines set how many
 //                  wingmen it takes, unless WingmanCount asks for fewer; a
 //                  child's own lines replace the slots it inherits. Without
-//                  any, the vee (slot_offset).
-constexpr int kMaxClasses     = 16;
-constexpr int kMaxSlotClasses = 4;
+//                  any, the map's formation shapes below, then the vee
+//                  (slot_offset).
+//   WingmanFormation  the map's formation shapes (EntityFormation paths) a
+//                  player's flight in this class flies, by name: the first of
+//                  them the map has. Several lines, or several names on one,
+//                  add up; a child's own lines replace the list it inherits.
+//                  Without any, the first of the class's SquadronFormation
+//                  shapes that holds all its wingmen (else the largest), as
+//                  the AI's squadrons take theirs from the same list.
+constexpr int kMaxClasses         = 16;
+constexpr int kMaxSlotClasses     = 4;
+constexpr int kMaxClassFormations = 10;   // as many as a class's SquadronFormation lines (EntitySquadronClass)
 
 struct ClassKeys {
    uint32_t classes[kMaxClasses] = {};   // PblHash of each ODF name, as EntityClass::mId holds it
@@ -314,6 +323,10 @@ struct ClassKeys {
    int      slotCount = 0;
    bool     hasSlots = false;
    bool     ownSlots = false;     // its own lines have begun replacing the inherited slots
+   uint32_t formations[kMaxClassFormations] = {};   // WingmanFormation names (PblHash), in order
+   int      formationCount = 0;
+   bool     hasFormations = false;
+   bool     ownFormations = false;   // its own lines have begun replacing the inherited list
 };
 
 // A value as an ODF writes it: spaces and quotes round it ignored.
@@ -350,6 +363,20 @@ inline void add_class(ClassKeys& k, uint32_t id)
    for (int i = 0; i < k.classCount; ++i)
       if (k.classes[i] == id) return;
    if (k.classCount < kMaxClasses) k.classes[k.classCount++] = id;
+}
+
+// One WingmanFormation name, by its hash, as add_class.
+inline void add_formation(ClassKeys& k, uint32_t name)
+{
+   if (!k.ownFormations) {
+      k.formationCount = 0;
+      k.ownFormations = true;
+   }
+   k.hasFormations = true;
+   if (!name) return;
+   for (int i = 0; i < k.formationCount; ++i)
+      if (k.formations[i] == name) return;
+   if (k.formationCount < kMaxClassFormations) k.formations[k.formationCount++] = name;
 }
 
 inline bool read_number(const char* value, double& out)
@@ -440,17 +467,21 @@ inline bool set_auto(ClassKeys& k, const char* value)
    return true;
 }
 
-// A child class starts as its parent; its own WingmanClass and WingmanSlot
-// lines replace the lists.
+// A child class starts as its parent; its own WingmanClass, WingmanSlot and
+// WingmanFormation lines replace the lists.
 inline ClassKeys inherited(const ClassKeys& parent)
 {
    ClassKeys k = parent;
    k.ownClasses = false;
    k.ownSlots = false;
+   k.ownFormations = false;
    return k;
 }
 
-inline bool sets_any(const ClassKeys* k) { return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots); }
+inline bool sets_any(const ClassKeys* k)
+{
+   return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots || k->hasFormations);
+}
 
 // Whether a flyer of class `followerId`, one that may follow this leader, may
 // take slot `slot`: the classes its WingmanSlot line names, those of them on
@@ -559,13 +590,15 @@ inline int squadron_members(int candidates, Has has)
 
 // A map's formation shape (an EntityFormation path): its points, made relative
 // to its root node when the map loads (EntityFormation::Read; the root's
-// rotation is meant to be taken out too, but the game drops the result, so the
-// offsets are in the path's axes). The game puts the leader at the root when the
-// root is a slot, else at the first other point, and its members at the rest, in
-// order, each offset turned by the leader's heading (x right, y up, z ahead).
-// Placed flyers sit closer than flown ones may: the shape is scaled up until no
-// two of its flyers are nearer than kMinShapeGap.
-constexpr float kMinShapeGap = 22.0f;   // m
+// rotation is meant to be taken out too, but the game drops the result). The
+// game puts the leader at the root when the root is a slot, else at the first
+// other point, and its members at the rest, in order, each offset turned by the
+// leader's heading (x right, y up, z ahead). How the shape is meant to face is
+// below (as_drawn, drawn_slots). Placed flyers sit closer than flown ones may:
+// the shape is scaled up until no two of its flyers are nearer than
+// kMinShapeGap.
+constexpr float kMinShapeGap    = 22.0f;   // m
+constexpr int   kMaxShapePoints = 16;
 
 inline int shape_size(int points, bool rootIsSlot) { return points <= 0 ? 0 : rootIsSlot ? points : points - 1; }
 
@@ -597,6 +630,105 @@ inline int shape_slots(const V3* points, int count, int root, bool rootIsSlot, i
       for (int i = 0; i < n; ++i) out[i] = out[i] * scale;
    }
    return n;
+}
+
+// ---- Which way a map's formation shape faces --------------------------------------------
+// The game reads a path's points with z negated (RedPath's node reader: the
+// editor's +z is the game's -z) and a node's rotation as x, y, z, s from the
+// .pth's w x y z, then flies a formation's offsets as x right, z ahead. A
+// formation drawn with its leader in front so flies with its leader at the back,
+// mirrored front to back: from outside no one can tell which ship leads, but the
+// leader's wingmen sit ahead of it, in its way when it turns or chases. The stock
+// shapes read as drawn with z negated back: spa2's eschleft-form an echelon to
+// the left and behind, eschrgt-form to the right, spa1's Tri-form a vee behind
+// its point. Its points as drawn, from the game's:
+inline V3 as_drawn(V3 game) { return {game.x, game.y, -game.z}; }
+
+// A formation placed turned in the editor keeps the turn in its nodes' rotation
+// (the BF3 maps' formations are the stock shapes turned 105 degrees), which
+// EntityFormation::Read means to take out but drops. The turn about y, in the
+// editor's frame, of the root node's rotation as the game holds it (x, y, z, s),
+// and a point turned about y by an angle in that frame:
+inline float drawn_yaw(float qx, float qy, float qz, float qs)
+{
+   const float n = qx * qx + qy * qy + qz * qz + qs * qs;
+   const float fx = 2.0f * (qx * qz + qs * qy) / n;   // where it turns +z (ahead)
+   const float fz = 1.0f - 2.0f * (qx * qx + qy * qy) / n;
+   const float yaw = std::atan2(fx, fz);
+   return std::isfinite(yaw) ? yaw : 0.0f;   // no rotation (0 / 0) or a bad one
+}
+
+inline V3 turned(V3 v, float angle)
+{
+   const float c = std::cos(angle), s = std::sin(angle);
+   return {v.x * c + v.z * s, v.y, -v.x * s + v.z * c};
+}
+
+// The points as drawn, turned back by the shape's own yaw when `unturn`.
+inline void drawn_points(const V3* game, int count, float yaw, bool unturn, V3* out)
+{
+   for (int i = 0; i < count; ++i) {
+      out[i] = as_drawn(game[i]);
+      if (unturn) out[i] = turned(out[i], -yaw);
+   }
+}
+
+// A shape is led from the front when none of its members sits more than
+// kAheadTolerance ahead of its leader.
+constexpr float kAheadTolerance = 3.0f;   // m
+
+inline bool led_from_front(const V3* drawn, int count, int root, bool rootIsSlot)
+{
+   if (!drawn || count <= 1 || root < 0 || root >= count) return false;
+   const int leader = rootIsSlot ? root : (root == 0 ? 1 : 0);
+   for (int i = 0; i < count; ++i) {
+      if (i == leader || (!rootIsSlot && i == root)) continue;
+      if (!(drawn[i].z - drawn[leader].z <= kAheadTolerance)) return false;
+   }
+   return true;
+}
+
+// One of a map's formations, as the game holds it: its points (from its root),
+// how many, its root, whether the root is a slot, its yaw (drawn_yaw).
+struct ShapeView {
+   const V3* game = nullptr;
+   int       count = 0;
+   int       root = 0;
+   bool      rootIsSlot = true;
+   float     yaw = 0.0f;
+};
+
+// Whether a map's formations are turned back by their yaws: when more of them
+// are then led from the front than as drawn. One author places all of a map's
+// formations alike: the BF3 maps' read right only turned back, the stock maps'
+// only as drawn (their nodes' turns mean nothing: spa1's Tri-form turned back is
+// no longer a vee). A tie keeps them as drawn.
+inline bool unturn_shapes(const ShapeView* shapes, int n, int* asDrawnOut = nullptr, int* unturnedOut = nullptr)
+{
+   int asDrawn = 0, unturned = 0;
+   for (int s = 0; shapes && s < n; ++s) {
+      const ShapeView& v = shapes[s];
+      if (!v.game || v.count <= 1 || v.count > kMaxShapePoints) continue;
+      V3 pts[kMaxShapePoints];
+      drawn_points(v.game, v.count, v.yaw, false, pts);
+      asDrawn += led_from_front(pts, v.count, v.root, v.rootIsSlot);
+      drawn_points(v.game, v.count, v.yaw, true, pts);
+      unturned += led_from_front(pts, v.count, v.root, v.rootIsSlot);
+   }
+   if (asDrawnOut) *asDrawnOut = asDrawn;
+   if (unturnedOut) *unturnedOut = unturned;
+   return unturned > asDrawn;
+}
+
+// A map shape's first `members` slots from its leader, as drawn (turned back
+// when `unturn`), scaled as shape_slots does; how many.
+inline int drawn_slots(const V3* game, int count, int root, bool rootIsSlot, float yaw, bool unturn, int members,
+                       V3* out)
+{
+   if (!game || count <= 1 || count > kMaxShapePoints) return 0;
+   V3 pts[kMaxShapePoints];
+   drawn_points(game, count, yaw, unturn, pts);
+   return shape_slots(pts, count, root, rootIsSlot, members, out);
 }
 
 // ---- How well it holds its slot, for the log ----------------------------------------

@@ -75,9 +75,12 @@
 //     its path's MaxSquadSize (+0x84), as many as one of its shapes holds.
 //   - The shape is the map's EntityFormation of that name
 //     (EntityFormation::Find): its points from its root node, the leader at the
-//     root (or the first other point when the root is no slot), scaled until
-//     no two flyers are nearer than 22 m. A class with WingmanSlot lines and no
-//     SquadronFormation flies those.
+//     root (or the first other point when the root is no slot), flown as drawn
+//     (the game negates a path point's z on load, so it flies every formation
+//     with its leader at the back), turned back by its own rotation on a map whose
+//     formations were placed turned (decided per map: whichever way more of them
+//     are led from the front), scaled until no two flyers are nearer than 22 m.
+//     A class with WingmanSlot lines and no SquadronFormation flies those.
 //   - A wingman turned on by an attacker hands it to its leader, which chases it
 //     with the squadron behind it. The player may call wingmen away from an AI
 //     squadron, never its leader.
@@ -129,11 +132,14 @@
 //                                   +0x17A, the angle at +0x1E6),
 //                                   CreateSquadronFromClosestEntities 0x005E8F70,
 //                                   SelectFormation 0x005EDC20
-//   EntityFormation                 Find 0x005E2EB0 (cdecl(name)); its nodes +0x18
-//                                   (0x1C bytes each, the position first), their
+//   EntityFormation                 Find 0x005E2EB0 (cdecl(name)), walking the
+//                                   list from 0x00AD33C0; its name +0x14, its
+//                                   nodes +0x18 (0x1C bytes each: the position,
+//                                   then the rotation x, y, z, s at +0xC), their
 //                                   count +0x1C, the root's +0x28, +0x2C bit 0
 //                                   the root is a slot; Read leaves the points
-//                                   relative to the root (0x005E2CD4)
+//                                   relative to the root (0x005E2CD4); every
+//                                   node's z negated on load (0x00820470)
 //
 // AI flies on the host and in single player only; the leader is the host's
 // own player.
@@ -143,8 +149,11 @@
 // WingmanClass, WingmanCount, WingmanAuto, and WingmanSlot "x y z [class ...]"
 // lines, written as a command vehicle's SpawnPointLocation lines are, for its
 // own formation in place of the vee; a slot naming classes is kept for those
-// of them that may follow. The free slots fill in order, each with the nearest
-// flyer that may take it.
+// of them that may follow. Without WingmanSlot lines the flight flies one of the
+// map's formation shapes, as drawn: the first the class's WingmanFormation key
+// names that the map has, else the first of its SquadronFormation shapes that
+// holds all its wingmen (else the largest); else the vee. The free slots fill
+// in order, each with the nearest flyer that may take it.
 //
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to

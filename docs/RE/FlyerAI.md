@@ -775,7 +775,18 @@ default). Not played yet.
   `PblQuaternion::RotateVector` returns by value and the result is dropped (P `0x00536510`, M `0x005E2CD4`),
   so the offsets stay in the path's axes, which the game reads as x right, y up, z ahead. The leader takes
   the root when it is a slot, else the first other point; members take the rest in order.
-  `EntityFormation::Find(name)` (M `0x005E2EB0`, cdecl) walks the map's formations.
+  `EntityFormation::Find(name)` (M `0x005E2EB0`, cdecl) walks the map's formations (list head M
+  `0x00AD33C0`).
+- **Which way they face (2026-10-14, the user: "do whatever math to make it work properly"):** every path
+  node is read by `RedPath::ReadScope`'s node reader (M `0x00820470`), which negates the position's z (the
+  editor's +z is the game's −z) and stores `Rotation`'s numbers as s, x, y, z (the `.pth` writes w x y z).
+  So a formation drawn with its leader in front flies with its leader at the back, mirrored front to back:
+  from outside it still looks like a formation (no one can tell which ship leads), which is why the stock
+  squadrons look fine, but the leader's wingmen sit ahead of it. Drawn, the stock shapes are what their names
+  say: spa2's eschleft-form an echelon left and behind, eschrgt-form right, spa1's Tri-form a vee behind its
+  point, Line-Form a line astern. The BF3 maps' nine formations are the stock shapes turned 105° in the
+  editor (every node's rotation says so; turned back, Cato's five-form is spa2's to 0.1 m), while the stock
+  maps' node rotations mean nothing (spa1's Tri-form turned back by its −88° is no longer a vee).
 - **Stock use:** the space maps author Tri-form, Line-Form, Box-Form, five-form, eschleft-form,
   eschrgt-form and wall-form, every path `maxsquadsize(3)`; the BF3 mod's Cato Neimoidia adds escort-form
   and bomber-Form and sets no `maxsquadsize`. Formations of 3 or 4.
@@ -786,10 +797,14 @@ AI squadrons, each with its leader, slots, trims, trick copying and flip mirrori
   down as the game would (the game's `UpdatePathFollower` no longer runs for it), and tries by the game's rule
   above, with flyers on real flight as the candidates. The leader class's `WingmanClass` list, where set,
   limits who may join; else a flyer must keep up (top speed at least 90% of the leader's).
-- **Shape:** one of the class's `SquadronFormation` shapes the map has, chosen as the game chooses;
-  scaled up until no two flyers are nearer than 22 m (five-form puts its first member 12.6 m off the
-  leader: fine for placed flyers, not for flown ones). A class with no `SquadronFormation` but its own
-  `WingmanSlot` lines flies those; with neither, no squadron, as the game.
+- **Shape:** one of the class's `SquadronFormation` shapes the map has, chosen as the game chooses, flown
+  as drawn: the z flip taken back out and, on a map whose formations are placed turned, turned back by
+  their own rotation. Which of the two a map needs is decided per map: turned back when more of its
+  formations are then led from the front (no member more than 3 m ahead of its leader) than as drawn (the
+  BF3 maps 9 of 9 against 6; the stock maps keep theirs). Scaled up until no two flyers are nearer than
+  22 m (five-form puts its first member 12.6 m off the leader: fine for placed flyers, not for flown ones).
+  A class with no `SquadronFormation` but its own `WingmanSlot` lines flies those; with neither, no
+  squadron, as the game.
 - **Flying:** each wingman is steered to its slot as the player's wingmen are (the leader's speeds
   stretched round its own, its tricks copied, flips mirrored).
 - **Fighting:** a leader turned on its attacker chases it (above) with its squadron in formation behind it. A
@@ -799,10 +814,16 @@ AI squadrons, each with its leader, slots, trims, trick copying and flip mirrori
   sides, more than 800 m off); the squadron breaks up when its leader dies, lands, leaves real flight or
   joins another formation, or when its last wingman goes. Its wingmen go back to real flight at once.
 - **The player:** may call an AI squadron's wingmen away into their own formation, never its leaders.
+  The player's flight flies the map's shapes too (the user's idea), worked out the same way: the class's
+  `WingmanSlot` lines where it has them; else the first map shape its new `WingmanFormation` key names
+  (`WingmanFormation = "Box-Form"`, several allowed, the first the map has wins); else the first of its
+  `SquadronFormation` shapes that holds all its wingmen (else the largest); else the vee. A shape holds
+  no more wingmen than its slots.
 - **Checks:** `tests/flyer_wingmen_tests.cpp` adds the rule (timer, reach, candidates and their order, how
-  many) and the shapes (Tri-form, five-form, Box-Form from the stock maps, the scaling);
-  `tests/flyer_wingmen_abi_tests.py` the rule's reads, `SelectFormation`, `Find`, `GetNumSlots`, `Read` and the
-  class defaults (74 modtools checks). The log reports each squadron formed (leader, shape, members and
+  many) and the shapes (Tri-form, five-form, Box-Form from the stock maps, the scaling; spa1, spa2 and Cato's
+  shapes as drawn, Cato's turned back to spa2's, the per-map choice); `tests/flyer_wingmen_abi_tests.py` the
+  rule's reads, `SelectFormation`, `Find`, `GetNumSlots`, `Read`, the node reader's z flip and rotation
+  order, and the class defaults (83 modtools checks). The log reports each squadron formed (leader, shape, members and
   their distances), each break-up and why, and every 5 s how far off their slots the wingmen fly.
 
 ---

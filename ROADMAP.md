@@ -463,7 +463,8 @@ steer them to formation slots each frame, and give Rogue Leader's orders (form u
 my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m in level flight in the
 first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
 `WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
-formation. Next: the orders (who is called up, what each mode does), researched in
+formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
+squadrons do. Next: the orders (who is called up, what each mode does), researched in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-what-the-game-offers-researched-2026-10-14-not-built)
 and waiting on the user's answers. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).

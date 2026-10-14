@@ -479,6 +479,140 @@ void formation_shapes()
    assert(shape_slots(nullptr, 3, 0, true, 1, slots) == 0 && shape_size(0, true) == 0);
 }
 
+// A formation's points as the game holds them after EntityFormation::Read: from
+// the root, z negated (RedPath's node reader), from the .pth's text.
+void from_text(const V3* text, int count, int root, V3* game)
+{
+   for (int i = 0; i < count; ++i) game[i] = {text[i].x - text[root].x, text[i].y - text[root].y, -(text[i].z - text[root].z)};
+}
+
+// Which way the maps' shapes face: as drawn (z negated back), and the BF3 maps'
+// copies turned back by their nodes' 105 degrees, decided per map.
+void drawn_shapes()
+{
+   // The turn of a node's rotation, the game's (x, y, z, s) from the .pth's w x y z.
+   assert(near(drawn_yaw(0, 0, 0, 1), 0.0f) && near(drawn_yaw(0, 0, 0, 0), 0.0f) && near(drawn_yaw(kNan, 0, 0, 1), 0.0f));
+   assert(near(drawn_yaw(-0.0f, 0.793353f, -0.0f, 0.608761f) * 57.29578f, 105.0f, 0.05f));    // Cato's formations
+   assert(near(drawn_yaw(0.0f, -0.697227f, 0.0f, 0.716856f) * 57.29578f, -88.40f, 0.05f));    // spa1's Tri-form
+   assert(near(drawn_yaw(0.0f, 0.793353f * 2, 0.0f, 0.608761f * 2) * 57.29578f, 105.0f, 0.05f));   // unnormalised
+   assert(near(turned({1, 2, 0}, 1.5707963f), {0, 2, -1}, 1e-5f) && near(turned({0, 0, 1}, 1.5707963f), {1, 0, 0}, 1e-5f));
+   assert(near(as_drawn({1, 2, 3}), {1, 2, -3}));
+
+   V3 slots[kMaxWingmen], other[kMaxWingmen];
+   // spa1 (stock): as drawn, its Tri-form is a vee behind its point (the root, the leader);
+   // as the game flies it the vee is reversed, its wingmen ahead.
+   const V3 triText[3] = {{-2341.548340f, -256.0f, 2047.477295f}, {-2319.903564f, -256.0f, 2061.713135f},
+                          {-2298.883057f, -256.0f, 2048.499023f}};
+   const V3 lineText[4] = {{-2285.419922f, -256.0f, 2017.704590f}, {-2285.100586f, -248.550903f, 1997.295898f},
+                           {-2285.253418f, -256.0f, 1977.072510f}, {-2284.074951f, -256.0f, 1953.823120f}};
+   const V3 boxText[5] = {{-2408.126953f, -256.0f, 2012.925049f}, {-2407.313232f, -256.0f, 1954.514526f},
+                          {-2338.574463f, -256.0f, 1957.552124f}, {-2338.720703f, -256.0f, 2012.261597f},
+                          {-2371.845215f, -256.0f, 1986.511597f}};
+   V3 tri[3], line[4], box[5];
+   from_text(triText, 3, 1, tri);
+   from_text(lineText, 4, 0, line);
+   from_text(boxText, 5, 4, box);
+   const float triYaw = drawn_yaw(0.0f, -0.697227f, 0.0f, 0.716856f), lineYaw = drawn_yaw(0.0f, -0.702369f, 0.0f, 0.711856f);
+   assert(tri[0].z > 0.0f && tri[2].z > 0.0f);                                          // the game's: wingmen ahead
+   assert(drawn_slots(tri, 3, 1, true, triYaw, false, 2, slots) == 2);
+   assert(near(slots[0], {-21.644776f, 0.0f, -14.235840f}, 1e-3f) && near(slots[1], {21.020507f, 0.0f, -13.214112f}, 1e-3f));
+   V3 pts[kMaxShapePoints];
+   drawn_points(tri, 3, triYaw, false, pts);
+   assert(led_from_front(pts, 3, 1, true));
+   drawn_points(tri, 3, triYaw, true, pts);
+   assert(!led_from_front(pts, 3, 1, true));                                            // its node turn means nothing
+   const ShapeView spa1[] = {{tri, 3, 1, true, triYaw}, {line, 4, 0, true, lineYaw}, {box, 5, 4, false, 0.0f}};
+   assert(!unturn_shapes(spa1, 3));
+   // ... its Line-Form a line astern, its Box-Form a box with the leader at a front corner.
+   assert(drawn_slots(line, 4, 0, true, lineYaw, false, 3, slots) == 3 && slots[0].z < -20.0f && slots[2].z < -60.0f);
+   assert(drawn_slots(box, 5, 4, false, 0.0f, false, 3, slots) == 3);
+   for (int i = 0; i < 3; ++i) assert(slots[i].z <= kAheadTolerance && slots[i].x > -1.0f);
+   drawn_points(box, 5, 0.0f, false, pts);
+   assert(led_from_front(pts, 5, 4, false));                                            // led from its front corner, not its middle
+   drawn_points(tri, 3, triYaw, false, pts);
+   pts[2].z = pts[1].z + 3.5f;                                                          // a wingman just ahead of the leader
+   assert(!led_from_front(pts, 3, 1, true));
+   pts[2].z = pts[1].z + 2.5f;                                                          // within the tolerance
+   assert(led_from_front(pts, 3, 1, true));
+   // A root that is no slot is no member either, wherever it lies.
+   const V3 ahead[3] = {{0, 0, 0}, {0, 0, -20}, {10, 0, -30}};
+   assert(led_from_front(ahead, 3, 0, false) && !led_from_front(ahead, 3, 1, true));
+
+   // spa2 (stock, no turns): its echelons as named, behind the leader.
+   const V3 fiveText[3] = {{-1902.432373f, 0.0f, -2945.223145f}, {-1893.092651f, 0.0f, -2953.621582f},
+                           {-1883.008667f, 0.0f, -2944.732178f}};
+   const V3 leftText[4] = {{-1759.084229f, 0.0f, -3039.962891f}, {-1771.064209f, 0.0f, -3051.339844f},
+                           {-1780.917358f, 0.0f, -3060.177734f}, {-1791.252197f, 0.0f, -3069.149902f}};
+   const V3 rightText[4] = {{-1661.393677f, 0.0f, -2944.405762f}, {-1651.297119f, 0.0f, -2954.517334f},
+                            {-1640.706787f, 0.0f, -2966.205566f}, {-1632.218994f, 0.0f, -2974.588135f}};
+   V3 five[3], left[4], right[4];
+   from_text(fiveText, 3, 0, five);
+   from_text(leftText, 4, 0, left);
+   from_text(rightText, 4, 0, right);
+   const ShapeView spa2[] = {{five, 3, 0, true, 0.0f}, {left, 4, 0, true, 0.0f}, {right, 4, 0, true, 0.0f}};
+   assert(!unturn_shapes(spa2, 3));                                                     // a tie: as drawn
+   assert(drawn_slots(left, 4, 0, true, 0.0f, false, 3, slots) == 3);
+   for (int i = 0; i < 3; ++i) assert(slots[i].x < 0.0f && slots[i].z < 0.0f);         // left and behind
+   assert(drawn_slots(right, 4, 0, true, 0.0f, false, 3, slots) == 3);
+   for (int i = 0; i < 3; ++i) assert(slots[i].x > 0.0f && slots[i].z < 0.0f);         // right and behind
+
+   // Cato Neimoidia (BF3): the same shapes turned 105 degrees. Turned back they are spa2's.
+   const V3 catoFiveText[3] = {{-2074.438965f, 21.208265f, -1045.012817f}, {-2084.968262f, 21.208265f, -1051.860596f},
+                               {-2078.992188f, 21.208265f, -1063.901733f}};
+   const V3 catoLeftText[4] = {{-2104.013672f, 21.208265f, -1136.364258f}, {-2111.902344f, 21.208265f, -1121.847900f},
+                               {-2117.888672f, 21.208265f, -1110.043091f}, {-2123.880371f, 21.208265f, -1097.738281f}};
+   const V3 catoRightText[4] = {{-2129.026855f, 21.208265f, -1230.798706f}, {-2141.406738f, 21.208265f, -1237.934204f},
+                                {-2155.437500f, 21.208265f, -1245.138550f}, {-2165.731445f, 21.208265f, -1251.167603f}};
+   const V3 catoWallText[3] = {{-2139.280273f, 21.208265f, -1307.570312f}, {-2147.571289f, 32.149750f, -1302.051025f},
+                               {-2157.229004f, 21.208265f, -1314.002197f}};
+   const V3 catoBoxText[4] = {{-1947.796021f, -18.109297f, -1132.585083f}, {-1970.805908f, -18.109297f, -1127.366821f},
+                              {-1977.229126f, -18.109297f, -1155.021362f}, {-1954.839722f, -18.109297f, -1159.071655f}};
+   V3 cFive[3], cLeft[4], cRight[4], cWall[3], cBox[4];
+   from_text(catoFiveText, 3, 0, cFive);
+   from_text(catoLeftText, 4, 0, cLeft);
+   from_text(catoRightText, 4, 0, cRight);
+   from_text(catoWallText, 3, 0, cWall);
+   from_text(catoBoxText, 4, 0, cBox);
+   const float y105 = drawn_yaw(-0.0f, 0.793353f, -0.0f, 0.608761f);
+   const ShapeView cato[] = {{cFive, 3, 0, true, y105}, {cLeft, 4, 0, true, y105}, {cRight, 4, 0, true, y105},
+                             {cWall, 3, 0, true, y105}, {cBox, 4, 0, true, y105}};
+   assert(unturn_shapes(cato, 5));
+   const struct { const V3* cato; const V3* stock; int count; } same[] = {{cFive, five, 3}, {cLeft, left, 4}, {cRight, right, 4}};
+   for (const auto& s : same) {
+      const int n = drawn_slots(s.cato, s.count, 0, true, y105, true, s.count - 1, slots);
+      assert(n == s.count - 1 && drawn_slots(s.stock, s.count, 0, true, 0.0f, false, s.count - 1, other) == n);
+      for (int i = 0; i < n; ++i) assert(near(slots[i], other[i], 0.3f));
+   }
+   // As drawn but not turned back, Cato's echelon left would sit ahead of its leader.
+   drawn_points(cLeft, 4, y105, false, pts);
+   assert(!led_from_front(pts, 4, 0, true));
+   // Bad input.
+   assert(drawn_slots(nullptr, 3, 0, true, 0.0f, false, 2, slots) == 0 && drawn_slots(tri, 17, 0, true, 0.0f, false, 2, slots) == 0);
+   assert(!led_from_front(pts, 1, 0, true) && !led_from_front(nullptr, 3, 0, true) && !led_from_front(pts, 3, 5, true));
+   assert(!unturn_shapes(nullptr, 0));
+}
+
+// WingmanFormation names: in order, each once, a child's own replacing its parent's.
+void formation_keys()
+{
+   ClassKeys k;
+   assert(!sets_any(&k));
+   add_formation(k, test_hash("Box-Form", 8));
+   add_formation(k, test_hash("Tri-form", 8));
+   add_formation(k, test_hash("Box-Form", 8));
+   assert(k.hasFormations && k.formationCount == 2 && k.formations[0] == test_hash("box-form", 8) && sets_any(&k));
+   ClassKeys child = inherited(k);
+   assert(child.formationCount == 2);
+   add_formation(child, test_hash("five-form", 9));
+   assert(child.formationCount == 1 && child.formations[0] == test_hash("five-form", 9));
+   ClassKeys many;
+   for (uint32_t i = 1; i <= kMaxClassFormations + 3; ++i) add_formation(many, i);
+   assert(many.formationCount == kMaxClassFormations);
+   ClassKeys none;
+   add_formation(none, 0);   // WingmanFormation = "": set, but naming none
+   assert(none.hasFormations && none.formationCount == 0);
+}
+
 // The log's numbers.
 void stats()
 {
@@ -510,9 +644,11 @@ int main()
    ripples();
    squadron_rule();
    formation_shapes();
+   drawn_shapes();
+   formation_keys();
    stats();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
-               "slot classes, ripples, the squadron rule, formation shapes, stats).\n");
+               "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats).\n");
    return 0;
 }
