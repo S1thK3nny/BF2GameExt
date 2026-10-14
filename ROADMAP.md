@@ -464,9 +464,11 @@ my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m 
 first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
 `WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
 formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
-squadrons do. Next: the orders (who is called up, what each mode does), researched in
-[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-what-the-game-offers-researched-2026-10-14-not-built)
-and waiting on the user's answers. Details in
+squadrons do. Orders are built, unplayed: wingmen called up from anywhere, losses made up, form up and
+engage on the squad key, attack my target and cover me on the comm keys' attack and defend, a line on the
+HUD for each, and a try at landing beside the player
+([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play
+them; cycling formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
 **Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on

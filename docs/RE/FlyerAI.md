@@ -867,22 +867,90 @@ index × 16 + 0x4C), else its own radius (+0x24). States (`EntityFlyer::Land`): 
 
 ---
 
-## Wingmen orders: what the game offers (researched 2026-10-14, not built)
+## Wingmen orders (prototype, 2026-10-14, modtools only)
 
-The user's ask: settle who is called up and what each mode does. Read in P; nothing is patched. The
-questions put to the user are in the session; the answers decide the build.
+The user's answers to the questions: call up the nearest suitable flyers, from anywhere (with a
+`WingmanClass` gate only those classes, however far); make up losses at any time; form up, engage, attack my
+target and cover me as proposed, attack my target only with a locked target or an enemy under the reticule
+as the order is given; try having the wingmen land with the player; reuse the trooper command keys; show
+the orders as the trooper commands show theirs; formation cycling later. Built in `ai/flyer_wingmen.cpp`
+and `ai/flyer_orders_core.hpp`. None of it played yet.
+
+### What the game offers (read in P, then M)
 
 - **The squad key in flight:** the flyer's Controllable trigger (+0x60), whose low two bits are both set on
-  the update it is pressed (`EntityFlyer::Update` tests for 3). Which bit says held is not traced; once it
-  is, a hold and a double tap can be told apart from a tap.
-- **The player's target:** `Controllable::GetTargetLockedObj` (P `0x004EE4F0`) answers the flyer's locked
-  target, refreshed from the player's `LockOnManager` (`sLockOnManagers[joystick]`, `mLockedObj` P +0x928). The
-  same manager tracks who attacks the player (`mNewAttacker` P +0x910, the attacker targets the HUD shows).
-  Modtools offsets not read yet.
-- **Making an AI attack something:** `UnitController::ForceSetAttackHelperTarget` (P `0x0078B170`) sets its
-  `AttackHelper` target, as `UnitFlyAgent::IsNearATAT` does with `AddThreat`; steering it there is the chase
-  above.
-- **Feedback:** the stock squad command HUD (`StatusDisplay`, `SquadCommandGroup::Create` P `0x007724E0`)
-  shows `game.squadcommand.<context>.<order>` strings, contexts field, driver, passenger and gunner, orders
-  up, down, right and left (the consoles' d-pad), with "Follow me", "Move out", "Hold position", "At ease",
-  "All clear", "Get in" and "Get out" among the stock English texts.
+  the update it is pressed (`EntityFlyer::Update` tests for 3). Which bit says held is not traced. Landed, the
+  game uses it itself (`SquadCommands::VehicleCommand`, seats).
+- **The trooper commands' keys:** on PC there is one squad key, read by `EntitySoldier::Update` (M from
+  `0x00549851`): on a friendly under the reticule it is "follow", else hold or move out. The eight comm keys
+  (`RawControllerInputs::TeamOrderInputProcess`, P `0x00454440`, M `0x00745D00`, keyboard rows 0x14 to 0x1B)
+  send team chat with a code: `Spotted`, `NeedMedic`, `NeedRepair`, `NeedAmmo`, `NeedPickup`, `NeedBackup`,
+  `AttackPosition` (6), `DefendPosition` (7). Each press ends in one CALL to `NetGame::AddChatMessageToQue`
+  (M `0x00745DC3` to `0x0070C260`, cdecl, seven dwords, the code the fifth, the caller pops them).
+- **The trooper commands' text:** `EntitySoldier::Update` looks up `game.squadcommand.follow` (hash
+  `0x731FD493`, the localisation lookup M `0x007F3720`, cdecl(hash, bool nullIfMissing)), copies the colour
+  at M `0x00AE2170` (`DF DF 20 FF`) and hands both to the player's HUD object (M `0x0067EBB0`), which calls
+  the message line, M `0x006AECD0`, cdecl(player, text, color*): it sends `player%d.message.color` (type 7, M
+  `0x00BA3D08`) and `player%d.message` (type 8, M `0x00BA3D04`), registered by `HUD::GameEvents::Open`. The
+  four-way squad command menu (`StatusDisplay::SetSquadCommand`, `game.squadcommand.<context>.<up|down|right|
+  left>`) is shown by `SquadCommands::ShoutOrder` (M `0x005C7450`; empty in P).
+- **The player's target:** `Controllable::GetTargetLockedObj` (P `0x004EE4F0`, M `0x005E0C70`, thiscall(), EAX)
+  refreshes the lock from the player's `LockOnManager` into +0x138 (handle +0x13C). The reticule's target is
+  `mReticuleTarget` (M +0x164, handle +0x168, a second channel 8 bytes on), as the trooper command reads it
+  (M `0x0054985F`); M's Controllable fields from `mCharacter` on are P's plus 0x3C.
+- **Enemies:** `GameObject::GetAffiliationToMe` (M `0x0055F840`, thiscall(other), RET 4): below 0 an enemy
+  (the trooper command will not recruit one, M `0x00549896`).
+- **Making an AI attack something:** `UnitController::ForceSetAttackHelperTarget` (P `0x0078B170`, M
+  `0x0059EC20`, thiscall(target), RET 4) calls `AttackHelper::SetVisibleTarget` (M `0x005B43D0`) on its agent's
+  (+0x2C0) AttackHelper (+0x10): the target at +0, its handle at +4. The AI's own combat sets the same.
+- **Landing:** `EntityFlyer::Update`'s state switch (M `0x004FE7B2`, on the Controllable's +0x364): the player's
+  use key lands a flying flyer (3) and takes a landed one off (1); landing, a ray straight down (RayHit, types
+  0x190, 1024 m) measures the height until it is down (0). `EntityFlyer::Land` (M `0x004F1380`) and
+  `EntityFlyer::TakeOff` (M `0x004F8B70`), both thiscall() on the entity, set those states for anyone (Lua's
+  `EntityFlyerLand` and `EntityFlyerTakeOff`); `CalculateDest` lands an AI flyer at a destination flagged
+  for it. `UnitFlyAgent::TakeoffNow` only shortens its wait.
+
+### What was built
+
+- **Calling up:** the nearest friendly AI flyers that may follow, from anywhere on the map. One further than
+  150 m flies in at its stretched speeds and has 20 s plus 1 s per 20 m it started off (3 minutes at most) to
+  reach its slot; meanwhile it is not let go for its distance. Losses are made up every second once the player
+  has called wingmen (or from takeoff with `WingmanAuto`), whatever the order.
+- **Orders:** form up holds the slots. Engage: each wingman takes the cheapest enemy within 800 m of the leader:
+  its distance, plus 600 m for one on the ground, plus 400 m for each wingman already on it (troops on foot
+  are left out); chased until 1000 m from the leader. Cover me: whoever's AttackHelper target is the leader,
+  within 1200 m; chased until 1500 m. Attack my target: the lock, else an enemy under the reticule, as the key
+  is pressed; with neither, "no target" and nothing changes; all wingmen on it until it is down or 3000 m from
+  the leader, then back to the order it interrupted. A chasing wingman 2500 m from its leader comes back.
+- **Chasing:** a flyer in the air as real flight's chase (lead pursuit, flat out to close, at its speed 120 m
+  behind); anything else in passes: a dive at it (`SH_TAPER`), out 150 m short or once past it within 300 m,
+  on and 60 m up for 300 m, back in from 700 m or after 8 s (a simulated 60 m/s fighter: 8 passes in 2
+  minutes, never nearer than 42 m, never further than 379 m). Its AI's attack is aimed at its target, at most
+  every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing wingman flies at its own speeds,
+  copies no tricks and may pull its own.
+- **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from
+  an attack or cover, form up). The comm keys' attack and defend order attack my target and cover me; their
+  team chat still goes out. In the air only.
+- **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
+  "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
+  under `game.wingmen.formup` ... `.targetlost`.
+- **Landing with the player** (`FlyerWingmenLand`, on by default; a try): when the player's flyer lands, each
+  wingman is given its slot's place on the ground, 1.5 times out and at least 15 m from the leader, where a ray
+  down from 40 m up finds ground within 4 m of the leader's and flat (its up at least 0.85); it comes down
+  toward 15 m over it, at its slowest from 300 m in (its stretch lets it fly at 10 m/s), and lands once within
+  40 m across and 40 m up. With no such ground, or if its AI takes it up again first, it circles 200 m round a
+  point 150 m over the leader. When the player takes off, those landed take off too and form up again.
+- **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes, landing and the circle overhead, simulated);
+  `tests/flyer_wingmen_abi_tests.py` (130 modtools checks, every guard's bytes); the mutation suite's
+  `orders` (34 caught).
+
+### What to watch in play
+
+The log names each step: `[Wingmen] slot N: #a called up X m off, Y s to reach its slot`, `in its slot after
+N s`, `order: engage, 3 wingmen`, `comm key: attack my target, #t (locked, in the air), X m off`, `slot N (#a)
+takes on #t`, `back to its slot after N s: why`, `the attack's target is down: back to ...`, and every 5 s
+`[Wingmen] engage: 3 wingmen, 1 in their slots, 0 flying in, 2 chasing`; landing: `the leader comes down: N
+land beside it, M circle overhead`, `slot N (#a) lands X m from its spot`, `the leader takes off: N of its
+wingmen take off with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own combat
+may take it back between settings), how the passes fare against terrain, and how an AI flyer lands when told
+to at speed.
