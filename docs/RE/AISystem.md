@@ -569,7 +569,7 @@ rolls `AIUtil::GetRandomInt(0, 2)` until `mask & (1 << roll)` is set, so the mas
 
 `LoadUtil::ProcessHintInfo` handles only the `INFO` chunk (`NAME`, `TYPE`, `XFRM`) and constructs
 the hint. The stances arrive separately: `LoadUtil::ProcessHint` (Phantom 0x638310, modtools
-0x451AE0) walks the sibling `PROP` chunks and calls `BaseHint::SetProperty(hash, valueString)`
+0x451F00) walks the sibling `PROP` chunks and calls `BaseHint::SetProperty(hash, valueString)`
 (Phantom 0x5EC750, modtools 0x5C45B0, Steam 0x543670, GOG 0x5443C0) for each. The property hashes:
 
 | PblHash | Property | Parsed as |

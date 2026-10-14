@@ -490,8 +490,10 @@ moved, every loop over it patched, on each build.
 following. Send each one to the nearest free friendly flyer (`EVT_SC_GetIntoVehicle`), call it into your
 flight first once it flies, and after you land have it get out and follow you on foot again.
 
-**AI hint nodes** - What each hint node type does is not written down, and land hints reportedly never
-worked. Research them all and why land hints fail (an agent's report: docs/RE/HintNodes.md).
+**AI land hints** - Land hints never work: the game stubbed out a hint's command post
+(`BaseHint::GetCommandPost` always returns none, the loader drops the `CommandPost` line) and an AI flyer
+lands only at a hint with one; patrol hints die the same way. Keep each land hint's post from its
+`CommandPost` line and answer `GetCommandPost` with it (docs/RE/HintNodes.md).
 
 **Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
 rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or

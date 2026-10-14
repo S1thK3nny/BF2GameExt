@@ -955,11 +955,14 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   the default"), unless its own class says `WingmanExitOnLand = 0`: then it waits aboard, and when the player
   takes off it takes off too and forms up again. With no such ground, or if it is up again first, it circles
   200 m round a point 150 m over the leader.
-- **Getting out:** stock, an AI pilot gets out only through its fly agent's own landing: `UnitFlyAgent`'s
-  FLY state (4) lands at an AI "land" hint node within 80 m (`IsNearLandingPt`, P `0x00790AC0`, M `0x005AED00`,
-  every 3 s; `HintManager::RequestLandHints`, P `0x005EC510`: hint type 0x20, each tied to a command post its
-  team may spawn at; not the players' landing regions), its LAND state (5) waits for the flyer to be down,
-  then DROPOFF (6) calls `SetExitVehicle` with that post (`AILowLevel::SetExitVehicle`, M `0x005A2170`: the
+- **Getting out:** stock, an AI pilot would get out only through its fly agent's own landing:
+  `UnitFlyAgent`'s FLY state (4) lands at an AI "land" hint node within 80 m (`IsNearLandingPt`, P
+  `0x00790AC0`, M `0x005AED00`, every 3 s; `HintManager::RequestLandHints`, P `0x005EC510`: hint type 0x20,
+  each tied to a command post, one its team cannot spawn at while the agent's `mGotoNonOwnedCP` is set, as it
+  starts, else one it can; not the players' landing regions), its LAND state (5) waits for the flyer to be
+  down, then DROPOFF (6) calls `SetExitVehicle` with that post. None of it ever runs: a hint's command post
+  is stubbed out (`BaseHint::GetCommandPost` always returns none), so no land hint qualifies
+  (docs/RE/HintNodes.md) (`AILowLevel::SetExitVehicle`, M `0x005A2170`: the
   exit flag 8 at +0x74, the post at +0x78). `UnitController::UpdateHighLevel` also gets AI out at the end of
   a game; `UnitFlyAgent` swallows damage, so no pilot bails out. For a wingman the agent's one CALL to
   `IsNearLandingPt` (M `0x005AFDD3`) answers no (it lands only with its leader), and its two CALLs to

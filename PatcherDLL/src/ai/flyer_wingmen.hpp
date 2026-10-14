@@ -67,15 +67,17 @@
 // the leader. While landed the squad key is the game's (seats), and the comm
 // keys order nothing.
 //
-// Getting out: stock, an AI pilot gets out only through its fly agent's own
-// landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within 80 m,
-// one at a command post its team may spawn at, IsNearLandingPt and
+// Getting out: stock, an AI pilot would get out only through its fly agent's
+// own landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within
+// 80 m tied to a command post, IsNearLandingPt and
 // HintManager::RequestLandHints; landed, its DROPOFF state calls SetExitVehicle
-// with that post). For a wingman the agent's CALL to IsNearLandingPt answers no
-// (it lands only with its leader), and its two CALLs to TakeOff (its TAKEOFF
-// and FLY states) do nothing while it is down beside its leader. Landed there
-// its pilot is got out with AILowLevel::SetExitVehicle and no command post, as
-// the AI's own end-of-game exit does.
+// with that post), and that never happens: BaseHint::GetCommandPost always
+// answers none, so no hint qualifies (docs/RE/HintNodes.md). Should a fix give
+// hints their posts back, a wingman's agent's CALL to IsNearLandingPt still
+// answers no (it lands only with its leader). Its two CALLs to TakeOff (its
+// TAKEOFF and FLY states) do nothing while it is down beside its leader.
+// Landed there its pilot is got out with AILowLevel::SetExitVehicle and no
+// command post, as the AI's own end-of-game exit does.
 //
 // An AI flyer that is not placed on a path flies by physics:
 // EntityFlyer::UpdateIndirect runs its navigator (AILowLevel::UpdateIndirect),

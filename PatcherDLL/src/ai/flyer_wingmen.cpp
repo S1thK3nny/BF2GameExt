@@ -2266,8 +2266,9 @@ bool install_landing(uintptr_t base)
 // ---- Waiting aboard ---------------------------------------------------------------------
 // The fly agent's FLY state asks IsNearLandingPt: near one of the map's land hints
 // it lands there, and once down its DROPOFF state gets the pilot out
-// (AILowLevel::SetExitVehicle). A wingman lands only with its leader, so for one
-// the answer is no (and no hint is reserved). thiscall() on the agent, the answer
+// (AILowLevel::SetExitVehicle). Stock, no hint ever qualifies (a hint's command
+// post is stubbed out, docs/RE/HintNodes.md); should they work, a wingman lands
+// only with its leader, so for one the answer is no (and no hint is reserved). thiscall() on the agent, the answer
 // in AL; the caller keeps only ESI past the call.
 bool __fastcall land_hint_mt(uint8_t* agent, void*)
 {
