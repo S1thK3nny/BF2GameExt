@@ -2073,12 +2073,16 @@ void update_landing(Formation& f, uint8_t* leader)
          const flyer_orders::Interrupt why =
             flyer_orders::landing_interrupted(st == kStateLanding, st == kStateLanded, now - w.landAt, below, onto);
          if (why == flyer_orders::Interrupt::None) continue;
-         if (order_log())
-            install_log("[Wingmen] slot %d (#%u) %s: it looks for a clear place (%d of %d)", w.slot + 1, w.handle,
-                        why == flyer_orders::Interrupt::Onto    ? "was coming down onto a flyer or vehicle"
-                        : why == flyer_orders::Interrupt::Stuck ? "has not touched down"
-                                                                : "landed on top of a flyer or vehicle",
-                        w.landTries + 1, flyer_orders::kLandRetries);
+         if (order_log()) {
+            const char* what = why == flyer_orders::Interrupt::Onto    ? "was coming down onto a flyer or vehicle"
+                               : why == flyer_orders::Interrupt::Stuck ? "has not touched down"
+                                                                       : "landed on top of a flyer or vehicle";
+            if (w.landTries < flyer_orders::kLandRetries)
+               install_log("[Wingmen] slot %d (#%u) %s: it looks for a clear place (try %d of %d)", w.slot + 1,
+                           w.handle, what, w.landTries + 1, flyer_orders::kLandRetries);
+            else
+               install_log("[Wingmen] slot %d (#%u) %s, its last try: it lands no more", w.slot + 1, w.handle, what);
+         }
          w.landTries++;
          s_takeOff(w.obj);
          w.land = kLandSeek;
