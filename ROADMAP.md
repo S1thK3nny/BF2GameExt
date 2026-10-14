@@ -464,10 +464,11 @@ my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m 
 first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
 `WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
 formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
-squadrons do. Orders are built, unplayed: wingmen called up from anywhere, losses made up, form up and
-engage on the squad key, attack my target and cover me on the comm keys' attack and defend, a line on the
-HUD for each, and landing beside the player (pilots get out unless `WingmanExitOnLand = 0`; `WingmanLand = 0`
-lets the flight go instead), the keys `Wingman = 0`, `WingmanRole`, `WingmanStartOrder` and
+squadrons do. Orders are built (the squad key's played; the comm keys and landing fixed after the first
+play, unplayed since): wingmen called up from anywhere, losses made up, form up and engage on the squad
+key, attack my target and cover me on the comm keys Attack and Defend (F11, F12), a line on the HUD for
+each, and landing beside the player, under a roof too (pilots get out unless `WingmanExitOnLand = 0`;
+`WingmanLand = 0` lets the flight go instead), the keys `Wingman = 0`, `WingmanRole`, `WingmanStartOrder` and
 `WingmanEngageRange`, and Lua calls and events for missions (`CallWingmen`, `AddWingman`, `SetWingmenOrder`,
 `SetWingmenLocked`, `OnWingmanLost` ...; docs/user/LUA_API.md)
 ([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play

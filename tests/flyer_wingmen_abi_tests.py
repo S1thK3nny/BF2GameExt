@@ -90,8 +90,10 @@ for name, value in {
     "kUC_Agent": 0x2C0,
     "kAgent_AttackTarget": 0x10,
     "kAgent_AttackHandle": 0x14,
-    "kCommAttack": 6,
-    "kCommDefend": 7,
+    "kPC_Inputs": 0x88,
+    "kInputs_Bits": 0x10,
+    "kInputCommAttack": 26,
+    "kInputCommDefend": 27,
     "kSafeHeightTaper": 1,
     "kStateLanded": 0,
     "kStateTakeoff": 1,
@@ -116,10 +118,11 @@ for text in (r'"\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10', r'"\x8B\x86\x38\
              r'"\x53\x55\x56\x8B\xF1\x8B\x86\x34\x02\x00\x00", 11',
              r'"\x8B\x44\x24\x0C\x83\xEC\x10\x56\x8B\x74\x24\x18\x69\xF6\x28\x03\x00\x00", 18',
              r'"\x8B\x44\x24\x04\x50\x68\x00\x80\x00\x00", 10',
-             r'"\x83\xEC\x20\x8B\x41\x08\x55\x56\x57\x33\xFF\x69\xC0\x02\x01\x00\x00"',
-             r'call - 0x13, "\x50\x57\x6A\x00\x6A\x00\x6A\x00", 8', r'call - 3, "\x50\x6A\x00", 3',
-             r'call + 5, "\x83\xC4\x1C", 3', r'"\x55\x8B\xEC\x83\xEC\x20\x0F\xB6\x45\x08", 10',
-             # Landing's: Land (or a detour's JMP), TakeOff, RayHit.
+             # The comm keys' reads, as install_comm_keys checks them.
+             r'player_controller_update + 0xD, "\x8B\xD9", 2',
+             r'player_controller_update + 0x242, "\x8B\x83\x88\x00\x00\x00\x8B\x08", 8',
+             r'"\x8B\xD1\x8B\x4C\x24\x04\x83\xF9\x1E\x7D\x18\xB8\x01\x00\x00\x00\xD3\xE0\x23\x42\x10\x25\xFF\xFF"',
+             # Landing's: Land and TakeOff (or a detour's JMP at either), RayHit.
              r'"\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00", 9',
              r'"\x51\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00\x85\xC0\x57", 13',
              r'"\xD9\x05\x90\xA2\xA2\x00\x8B\x54\x24\x10", 10',
@@ -139,6 +142,7 @@ for name in ("kVt_IsRtti", "kGO_Flags", "kGO_HandleId", "kGO_Team", "kCtrl_Owner
     assert constant(source, name) == constant(squads, name), name
 assert constant(character, "kVehicle") == 0x14C
 assert 'pbl_hash("EntityFlyer")' in source and 'pbl_hash("UnitController")' in source
+assert 'pbl_hash("PlayerController")' in source
 assert r'"\x81\xEC\x84\x00\x00\x00\x53\x55\x56\x8B\xF1", 11' in source                          # UpdateIndirect
 assert r'"\x83\xEC\x28\x53\x55\x56\x8B\xE9\x8B\x85\x08\x03\x00\x00", 14' in source              # CalculateDest
 assert source.count(r'"\xD9\x05\x6C\xA0\xA2\x00\xD9\x81\xFC\x05\x00\x00", 12') == 3             # the getters
@@ -150,13 +154,13 @@ mt = re.search(r"namespace modtools\s*\{(.*?)\n\s*\}\s*//\s*namespace modtools",
 NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "flyer_max_speed", "flyer_min_speed",
          "flyer_do_trick", "flyer_mid_speed", "entity_formation_find", "flyer_update_path_follower",
          "entity_formation_list", "controllable_locked_target", "uc_force_attack_target", "object_affiliation",
-         "hud_message", "hud_message_color", "localize_find", "team_order_input", "team_order_chat_call",
-         "add_chat_message", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
+         "hud_message", "hud_message_color", "localize_find", "player_controller_update",
+         "processed_inputs_get_digital", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
          "fly_agent_land_hint_call", "fly_agent_land_hint", "fly_agent_take_off_call", "fly_agent_take_off_call2",
          "ai_set_exit_vehicle")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
-          0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x00745D00, 0x00745DC3,
-          0x0070C260, 0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
+          0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x0059B460, 0x00743A30,
+          0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
           0x005A2170)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
@@ -439,23 +443,28 @@ checks = {
                  ("call", "0x40a394"), ("add", "esp, 0x48"), ("push", "1"), ("push", "0xa5f23c"), ("push", "7"),
                  ("mov", "dword ptr [0xba3d04], eax"), ("call", "0x40a394"), ("push", "1"), ("push", "0xa5f21c"),
                  ("push", "1"), ("mov", "dword ptr [0xba3d08], eax")],
-    # RawControllerInputs::TeamOrderInputProcess (thiscall, RET): the comm keys (rows 0x14 on,
-    # 6 bytes each, in the control mode's 0x102 bytes) ...
-    0x00745D00: [("sub", "esp, 0x20"), ("mov", "eax, dword ptr [ecx + 8]"), ("push", "ebp"), ("push", "esi"),
-                 ("push", "edi"), ("xor", "edi, edi"), ("imul", "eax, eax, 0x102")],
-    0x00745D51: [("lea", "esi, [eax + ecx + 0x2134]")],
-    0x00745D8B: [("inc", "edi"), ("add", "esi, 6"), ("cmp", "edi, 8"), ("jl", "0x745d58")],
-    # ... and for the one pressed, its text looked up and NetGame::AddChatMessageToQue called
-    # with (false, the local index, 0, 0, the code, the text, the mask); the caller pops all
-    # seven and keeps nothing in a register past the call.
-    0x00745D9B: [("mov", "eax, dword ptr [0xadc760]"), ("mov", "ecx, dword ptr [esp + edi*4 + 0xc]"),
-                 ("push", "eax"), ("push", "0"), ("push", "ecx"), ("call", "0x7f3720"), ("add", "esp, 8"),
-                 ("push", "eax"), ("push", "edi"), ("push", "0"), ("push", "0"), ("push", "0"),
-                 ("call", "0x413395"), ("add", "esp, 4"), ("push", "eax"), ("push", "0"), ("call", "0x410690"),
-                 ("add", "esp, 0x1c"), ("pop", "edi"), ("pop", "esi"), ("pop", "ebp"), ("add", "esp, 0x20"),
-                 ("ret", "")],
-    0x00410690: [("jmp", "0x70c260")],
-    0x0070C260: [("push", "ebp"), ("mov", "ebp, esp"), ("sub", "esp, 0x20"), ("movzx", "eax, byte ptr [ebp + 8]")],
+    # The comm keys. RawControllerInputs::ReadLatest runs ChatInputProcess (and with it
+    # TeamOrderInputProcess, the game's own comm keys) only when networked (netEnabled, or
+    # netEnabledNext in the shell); in single player StandardInputProcess alone ...
+    0x0074695D: [("mov", "al, byte ptr [0xadabc2]"), ("test", "al, al"), ("mov", "al, byte ptr [0xbe14f1]"),
+                 ("jne", "0x746970"), ("mov", "al, byte ptr [0xbe14f0]"), ("test", "al, al"), ("mov", "ecx, ebp"),
+                 ("je", "0x74697d"), ("call", "0x403788"), ("jmp", "0x746982"), ("call", "0x40d922")],
+    0x00403788: [("jmp", "0x745ea0")],
+    # ... which turns every binding, the comm keys' (26, 27) among them, into the player's
+    # processed inputs, which its PlayerController loads from its +0x88 (EBX the controller) ...
+    0x0059B46D: [("mov", "ebx, ecx")],
+    0x0059B6A2: [("mov", "eax, dword ptr [ebx + 0x88]"), ("mov", "ecx, dword ptr [eax]")],
+    # A key held down is Set as pressed with nothing last frame (last 0, now 1.0), so its
+    # bit is set every frame it is held: ProcessedInputs::Set sets the bit of input 8 or
+    # 13 to 28 (the comm keys among them) only when now is pressed and last was not, which
+    # for a pad's button is the frame it goes down only.
+    0x007459A9: [("mov", "ecx, dword ptr [esi + 0x25d0]"), ("push", "0x3f800000"), ("push", "0"),
+                 ("lea", "eax, [esp + 0x1b]"), ("push", "eax"), ("push", "ebp"), ("call", "0x40fdc1")],
+    0x0040FDC1: [("jmp", "0x743710")],
+    # ... where ProcessedInputs::GetDigital(n) tests bit n of +0x10 for n below 0x1E.
+    0x00743A30: [("mov", "edx, ecx"), ("mov", "ecx, dword ptr [esp + 4]"), ("cmp", "ecx, 0x1e"), ("jge", "0x743a53"),
+                 ("mov", "eax, 1"), ("shl", "eax, cl"), ("and", "eax, dword ptr [edx + 0x10]"),
+                 ("and", "eax, 0x3fffffff")],
     # ---- Landing with the player ----------------------------------------------------------
     # EntityFlyer::Land, thiscall() on the entity: flying, taking off or landing (2, 1, 3)
     # becomes landing (3); it ends in a tail call through its vtable (no arguments) ...
@@ -627,4 +636,55 @@ assert 'pbl_hash("GameObject")' in source
 events = (SRC / "lua/lua_events.cpp").read_text()
 for name in ("WingmanJoin", "WingmanLost", "WingmenOrder", "WingmanLanded"):
     assert re.search(r'\{ "' + name + r'",\s+LuaEventFamily::CharacterGameObject \}', events), name
-print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")
+
+# Other GameExt features detour some of the functions whose first bytes the wingmen
+# check, and install before them (lua_hooks_install, then flyer_wingmen_install, in
+# dllmain.cpp): by then such a function begins with Detours' JMP, so its guard must
+# take one. Every function another feature's DetourAttach takes, from where its
+# original pointer is resolved (through a local, or attach() helpers, in between;
+# a per-build table's field counts as every modtools address its file names) ...
+values = {}
+for name, value in re.findall(r"constexpr\s+uintptr_t\s+(\w+)\s*=\s*(0x[0-9a-fA-F]+)", mt):
+    values.setdefault(name, int(value, 16))
+RESOLVE = re.compile(r"resolve\(\s*\w+\s*,\s*([\w:>\-\.]+)\s*\)")
+
+
+def refs_of(text, var, depth=0):
+    out = []
+    for m in re.finditer(r"\b" + re.escape(var) + r"\s*=\s*([^;=][^;]*);", text):
+        found = RESOLVE.findall(m.group(1))
+        if found:
+            out += found
+        elif depth < 2:
+            ids = re.findall(r"\b([A-Za-z_]\w*)\b", m.group(1))
+            if ids and ids[-1] not in ("nullptr", "NULL", var):
+                out += refs_of(text, ids[-1], depth + 1)
+    return out
+
+
+detoured = {}
+for path in sorted(SRC.rglob("*.cpp")):
+    if path.name == "flyer_wingmen.cpp":
+        continue
+    text = path.read_text(errors="replace")
+    pairs = [(var, ref) for var in set(re.findall(r"DetourAttach\(\s*&\s*\(PVOID\s*&\)\s*(\w+)", text))
+             for ref in refs_of(text, var)]
+    pairs += re.findall(r"\battach\(\s*(\w+)\s*,\s*([\w:>\-\.]+)\s*,", text)
+    for var, ref in pairs:
+        name = re.sub(r"^(g_addr->|a->|addr->|game_addrs::modtools::)", "", ref)
+        if name in values:
+            detoured.setdefault(values[name], set()).add(f"{path.name} ({var})")
+        elif "->" in ref or "." in ref:
+            for other in set(re.findall(r"game_addrs::modtools::(\w+)", text)):
+                if other in values:
+                    detoured.setdefault(values[other], set()).add(f"{path.name} ({var}, perhaps)")
+# ... and each the wingmen check by its first bytes takes a JMP there.
+conflicts = {}
+for name in sorted(set(re.findall(r"starts_with\(base,\s*a->(\w+),\s*\"", source))):
+    if values.get(name) in detoured:
+        conflicts[name] = sorted(detoured[values[name]])
+        accepts = r"*(const uint8_t*)resolve(base, a->" + name + ") == 0xE9"
+        assert accepts in source, f"{name} is detoured by {conflicts[name]}: its guard must take a JMP"
+assert {"entity_flyer_land", "entity_flyer_take_off", "flyer_do_trick"} <= set(conflicts), conflicts
+print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed; "
+      f"{len(conflicts)} functions other features detour take their JMP")

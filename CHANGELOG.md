@@ -128,7 +128,8 @@ Scripts can check the running version through `GameExt.version`.
   wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
   flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with
   `OnWingmanJoin`, `OnWingmanLost`, `OnWingmenOrder` and `OnWingmanLanded` events. A prototype,
-  modtools only, `[AI] FlyerWingmen=0`; orders, landing and the Lua side not yet tested in play.
+  modtools only, `[AI] FlyerWingmen=0`; the squad key's orders work in play, the comm keys,
+  landing and the Lua side are not yet tested.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#flyer-wingmen) and
   [Lua API](docs/user/LUA_API.md#flyer-wingmen).
 - **AI goal limit and units' own goals** - Up to 64 AI goals at once instead of 20

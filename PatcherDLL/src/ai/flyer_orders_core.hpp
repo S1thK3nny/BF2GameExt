@@ -280,22 +280,36 @@ inline V3 extend_point(V3 me, V3 nose)
 }
 
 // ---- Landing with the leader ------------------------------------------------------------
-// When the player lands, each wingman lands beside it: at its slot's place spread
-// out on the ground (kLandSpread times the slot, never nearer than kLandMinGap to
-// the leader), where the ground there is level with the leader's (within
-// kLandLevel, and nothing over it from kLandProbe up). Where it is not, the
-// wingman circles overhead (kLoiterHeight up, kLoiterRadius round) instead. It
-// comes down toward a point kLandHover over its spot and lands (EntityFlyer::Land,
-// as a node's LandOnArrival does) once within kLandStart of it across and
-// kLandHigh up. When the player takes off, so do they.
+// When the player lands, each wingman lands beside it, on ground level with the
+// leader's (within kLandLevel) and flat. The places it tries, in order
+// (land_tries): its slot's place spread out on the ground (kLandSpread times the
+// slot, never nearer than kLandMinGap to the leader), the same way nearer, the
+// other side, then behind the leader; each kLandSpacing from those already taken.
+// The ground is probed straight down from kLandProbe over the leader's, or from
+// kLandRoom under a roof over the leader (a hangar's: probing from over it found
+// the roof). Under a roof a place must also be in a clear line from the leader,
+// kLandClear over its ground, and the wingman's own way to it clear.
+// It comes down toward a point kLandHover over its spot (lower under a low
+// roof, hover_height) and lands (EntityFlyer::Land, as a node's LandOnArrival
+// does) once within kLandStart of it across and kLandHigh up. With nowhere to land
+// it circles overhead (kLoiterHeight up, kLoiterRadius round), or, under a roof,
+// where circling would take it into the roof, it is let go. When the player
+// takes off, so do they.
 constexpr float kLandSpread   = 1.5f;
 constexpr float kLandMinGap   = 15.0f;   // m
-constexpr float kLandLevel    = 4.0f;    // m
-constexpr float kLandFlat     = 0.85f;   // the ground's up at least this (a cosine: ~32 degrees)
+constexpr float kLandNearest  = 10.0f;   // m: the nearest a place nearer in may be
+constexpr float kLandSpacing  = 12.0f;   // m between two wingmen's places
+constexpr float kLandLevel    = 8.0f;    // m
+constexpr float kLandFlat     = 0.8f;    // the ground's up at least this (a cosine: ~37 degrees)
 constexpr float kLandProbe    = 40.0f;   // m
+constexpr float kLandRoom     = 2.0f;    // m under a roof the ground is probed from
+constexpr float kLandClear    = 3.0f;    // m over the leader's ground a place's line is checked at
 constexpr float kLandHover    = 15.0f;   // m
-constexpr float kLandStart    = 40.0f;   // m
+constexpr float kLandHoverMin = 4.0f;    // m
+constexpr float kLandStart    = 25.0f;   // m
 constexpr float kLandHigh     = 40.0f;   // m
+constexpr int   kLandTries    = 5;
+constexpr float kNoRoof       = 1e9f;    // no roof over the leader
 constexpr float kLandSlowFrom = 300.0f;  // m across: from here in, at its slowest
 constexpr float kLoiterHeight = 150.0f;  // m
 constexpr float kLoiterRadius = 200.0f;  // m
@@ -310,6 +324,46 @@ inline V3 land_offset(V3 slot)
    return d < kLandMinGap ? g * (kLandMinGap / d) : g;
 }
 
+// The places a wingman in slot `slot` tries, in order, as offsets on the ground
+// from the leader (x right, z ahead): its slot's place (land_offset); the same
+// way at the slot's own distance, then at 0.6 of it, never nearer than
+// kLandNearest; the other side (x mirrored); and behind the leader, further for
+// each later `rank` (its turn among the flight). How many (kLandTries).
+inline int land_tries(V3 slot, int rank, V3* out)
+{
+   int n = 0;
+   const V3 spot = land_offset(slot);
+   out[n++] = spot;
+   const V3 flat{slot.x, 0.0f, slot.z};
+   const float d = flyer_wingmen::length(flat);
+   const V3 dir = std::isfinite(d) && d > 1e-3f ? flat * (1.0f / d) : V3{1.0f, 0.0f, 0.0f};
+   const float atSlot = d > kLandNearest ? d : kLandNearest;
+   const float nearer = 0.6f * d > kLandNearest ? 0.6f * d : kLandNearest;
+   out[n++] = dir * atSlot;
+   out[n++] = dir * nearer;
+   out[n++] = V3{-spot.x, 0.0f, spot.z};
+   out[n++] = V3{0.0f, 0.0f, -(kLandMinGap + kLandSpacing * (float)(rank > 0 ? rank : 0))};
+   return n;
+}
+
+// Where the ground is probed down from, over the leader's ground: kLandProbe, or
+// kLandRoom under a roof `roof` metres over it, never under kLandClear.
+inline float probe_height(float roof)
+{
+   const float under = std::isfinite(roof) ? roof - kLandRoom : kLandProbe;
+   const float h = under < kLandProbe ? under : kLandProbe;
+   return h > kLandClear ? h : kLandClear;
+}
+
+// How far over its spot it comes down to before landing: kLandHover, lower under
+// a low roof (twice kLandRoom under it), never under kLandHoverMin.
+inline float hover_height(float roof)
+{
+   const float under = std::isfinite(roof) ? roof - 2.0f * kLandRoom : kLandHover;
+   const float h = under < kLandHover ? under : kLandHover;
+   return h > kLandHoverMin ? h : kLandHoverMin;
+}
+
 // Whether the ground probed at a spot (its height, and how far up its surface
 // faces) suits: level with the leader's ground and flat.
 inline bool level_spot(float hitY, float normalY, float groundY)
@@ -322,6 +376,14 @@ inline float across(V3 a, V3 b)
 {
    const float dx = a.x - b.x, dz = a.z - b.z;
    return std::sqrt(dx * dx + dz * dz);
+}
+
+// Whether a place is kLandSpacing from each of the `n` already taken.
+inline bool spaced(V3 spot, const V3* taken, int n)
+{
+   for (int i = 0; taken && i < n; ++i)
+      if (!(across(spot, taken[i]) >= kLandSpacing)) return false;
+   return true;
 }
 
 // Whether it may come down now: near its spot across, and not far over it.

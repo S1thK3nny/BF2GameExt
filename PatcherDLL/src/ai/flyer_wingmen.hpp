@@ -35,8 +35,12 @@
 //     1200 m (its agent's AttackHelper target), chased until 1500 m off.
 //   - Keys: the squad key calls wingmen up when there are none, else switches
 //     between form up and engage (from an attack or cover, form up); the comm
-//     keys' attack and defend (TeamOrderInputProcess codes 6 and 7) order
-//     attack my target and cover me, and still send their team chat.
+//     keys Attack and Defend (F11 and F12 by default) order attack my target
+//     and cover me as they go down. They are read from the player's processed
+//     inputs (Comm_Chat_6 and _7): the game makes team chat of the comm keys
+//     only online (RawControllerInputs::ReadLatest runs its comm-key processing
+//     only in a networked game), but turns their bindings into those inputs
+//     always. Online their team chat still goes out.
 //   - A chasing wingman flies at its own speeds: behind a flyer in the air as
 //     real flight's chase does (flyer_real_flight_core.hpp); at anything else in
 //     passes, a dive at it with the safe height let go near it (SH_TAPER), out
@@ -53,19 +57,26 @@
 // Landing with the player (a try; the leader class's WingmanLand, else the INI's
 // FlyerWingmenLand; with 0 the wingmen break off as the player lands): when the
 // player's flyer lands (state 3 landing, 0 landed; a player can land only in a
-// landing region, Lua AddLandingRegion), each wingman is given its slot's place on
-// the ground beside it, 1.5 times out and never nearer than 15 m, where a ray
-// down from 40 m up (CollisionManager::RayHit, the flyer's own landing ray's
-// types 0x190) finds ground within 4 m of the leader's and flat; it comes down
-// toward 15 m over it, at its slowest (the stretch lets it go to 10 m/s) from
-// 300 m in, and lands (EntityFlyer::Land) once within 40 m of it across and
-// 40 m up (EntityFlyer::Land needs no landing region). Once down its pilot gets
-// out (and it is let go), unless its own class says WingmanExitOnLand = 0: then
-// it waits aboard, and when the player takes off (state 1) it takes off too
-// (EntityFlyer::TakeOff) and forms up again. Where there is no such ground, or
-// it is up again before its leader, it circles 200 m round a point 150 m over
-// the leader. While landed the squad key is the game's (seats), and the comm
-// keys order nothing.
+// landing region, Lua AddLandingRegion), each wingman, in slot order, is given
+// a place on the ground beside it (flyer_orders_core.hpp, land_tries): its
+// slot's place 1.5 times out and never nearer than 15 m, else nearer, the other
+// side or behind the leader, 12 m from the others' places, where a ray down
+// (CollisionManager::RayHit, the flyer's own landing ray's types 0x190) finds
+// ground within 8 m of the leader's and flat. The ray starts 40 m up, or 2 m
+// under a roof over the leader (a ray up from the leader's ground finds one
+// within 40 m: a hangar's, which a ray from 40 m up would hit before the ground);
+// under a roof the place must also be in a clear line from the leader 3 m up, and
+// the wingman's way to it clear. It comes down toward 15 m over it (lower under
+// a low roof), at its slowest (the stretch lets it go to 10 m/s) from 300 m in,
+// and lands (EntityFlyer::Land) once within 25 m of it across and 40 m up
+// (EntityFlyer::Land needs no landing region). Once down its pilot gets out (and
+// it is let go), unless its own class says WingmanExitOnLand = 0: then it waits
+// aboard, and when the player takes off (state 1) it takes off too
+// (EntityFlyer::TakeOff) and forms up again. One with no place, or up again
+// before its leader, circles 200 m round a point 150 m over the leader, or, with
+// the leader under a roof, where that would take it into the roof (or the ship
+// or mountain the hangar is in), is let go instead. While landed the squad key is
+// the game's (seats), and the comm keys order nothing.
 //
 // Getting out: stock, an AI pilot would get out only through its fly agent's
 // own landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within
@@ -217,12 +228,22 @@
 //                                   colour at 0x00AE2170 (EntitySoldier
 //                                   0x00549A35); localisation 0x007F3720,
 //                                   cdecl(hash, nullIfMissing)
-//   the comm keys                   TeamOrderInputProcess 0x00745D00, its CALL
-//                                   to NetGame::AddChatMessageToQue (0x0070C260,
-//                                   cdecl, 7 dwords, the code the fifth) at
-//                                   0x00745DC3
+//   the comm keys                   the player's ProcessedInputs, at its
+//                                   PlayerController +0x88 (PlayerController::
+//                                   Update 0x0059B6A2); bit n of +0x10 for
+//                                   digital input n (ProcessedInputs::GetDigital
+//                                   0x00743A30), Comm_Chat_6 26 and _7 27,
+//                                   set every frame a key is held (Set with
+//                                   last 0, 0x007459A9), a pad's button the
+//                                   frame it goes down only; ReadLatest
+//                                   (0x0074695D) runs ChatInputProcess, and with
+//                                   it TeamOrderInputProcess 0x00745D00, only
+//                                   networked
 //   landing                         EntityFlyer::Land 0x004F1380 and TakeOff
-//                                   0x004F8B70, thiscall() on the entity;
+//                                   0x004F8B70, thiscall() on the entity, each
+//                                   perhaps detoured first (Land by the
+//                                   LandOnArrival fix, TakeOff by the carrier
+//                                   fixes: a JMP at either is theirs);
 //                                   CollisionManager::RayHit 0x0042E230 (as
 //                                   real flight's raise_ray_mt calls it)
 //   the primary weapon              EntityFlyer mWeaponIndex[channel] +0x6C8,
@@ -317,7 +338,7 @@ void flyer_wingmen_mission_end();
 //     own choice again. SetWingmenLand over WingmanLand and the INI.
 //   - Events (lua/lua_events.hpp; each fn(charIndex, object)): OnWingmanJoin
 //     and OnWingmanLost (the pilot, its flyer; GetWingmanLostReason says why:
-//     killed, pilot, landed, team, far, late, removed, dismissed, formation,
+//     killed, pilot, landed, noroom, team, far, late, removed, dismissed, formation,
 //     leader), OnWingmenOrder (the player, an attack's target), OnWingmanLanded
 //     (the pilot, its flyer, down beside the player). Queued and fired once the
 //     flyer's own update is done, so a callback may change the flight.

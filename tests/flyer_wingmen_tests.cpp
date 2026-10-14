@@ -802,12 +802,12 @@ void landing()
    assert(near(length(land_offset(V3{3, 0, -4})), kLandMinGap, 1e-3f));
    assert(near(land_offset(V3{}), V3{kLandMinGap, 0, 0}) && near(land_offset(V3{0, 9, 0}), V3{kLandMinGap, 0, 0}));
    assert(near(land_offset(V3{kNan, 0, 0}), V3{kLandMinGap, 0, 0}));
-   // Level with the leader's ground and flat, or not.
-   assert(level_spot(101.0f, 1.0f, 100.0f) && level_spot(96.0f, 0.9f, 100.0f));
-   assert(!level_spot(105.0f, 1.0f, 100.0f) && !level_spot(100.0f, 0.5f, 100.0f) && !level_spot(kNan, 1.0f, 100.0f));
-   assert(!level_spot(90.0f, 1.0f, 100.0f));   // a hollow is no better than a rise
-   // Down once near across and not far up.
-   assert(may_land(V3{30, 130, 0}, V3{0, 100, 0}) && !may_land(V3{50, 110, 0}, V3{0, 100, 0}));
+   // Level with the leader's ground (within 8 m) and flat (up 0.8 or more), or not.
+   assert(level_spot(101.0f, 1.0f, 100.0f) && level_spot(93.0f, 0.82f, 100.0f) && level_spot(107.5f, 1.0f, 100.0f));
+   assert(!level_spot(109.0f, 1.0f, 100.0f) && !level_spot(100.0f, 0.7f, 100.0f) && !level_spot(kNan, 1.0f, 100.0f));
+   assert(!level_spot(91.0f, 1.0f, 100.0f));   // a hollow is no better than a rise
+   // Down once near across (25 m) and not far up.
+   assert(may_land(V3{20, 130, 0}, V3{0, 100, 0}) && !may_land(V3{30, 110, 0}, V3{0, 100, 0}));
    assert(!may_land(V3{0, 150, 0}, V3{0, 100, 0}) && !may_land(V3{0, 50, 0}, V3{0, 100, 0}));
    assert(!may_land(V3{kNan, 100, 0}, V3{0, 100, 0}));
    assert(near(across(V3{3, 50, 4}, V3{}), 5.0f));
@@ -847,6 +847,45 @@ void landing()
    }
    assert(angle > 3.0f * 6.28318f);   // round at least three times in the 2 minutes, one way
    assert(worst < 60.0f);
+}
+
+// Where a wingman tries to land, in order, and how high it comes down to under a
+// roof: probed from 40 m up, a hangar's ground lies under its roof.
+void landing_places()
+{
+   using namespace flyer_orders;
+   V3 tries[kLandTries];
+   // A vee slot back on the right: spread out, the slot's own distance, 0.6 of
+   // it, the other side, then behind.
+   const V3 slot{17.7f, 3.0f, -17.7f};
+   assert(land_tries(slot, 0, tries) == kLandTries);
+   assert(near(tries[0], land_offset(slot)));
+   const float d = length(V3{slot.x, 0, slot.z});
+   assert(near(length(tries[1]), d, 1e-3f) && near(length(tries[2]), 0.6f * d, 1e-3f));
+   assert(near(tries[1].y, 0.0f) && near(tries[2].y, 0.0f));
+   assert(tries[1].x > 0.0f && tries[1].z < 0.0f);                       // the same way ...
+   assert(near(tries[1].x / tries[1].z, slot.x / slot.z, 1e-3f));
+   assert(near(tries[3], V3{-tries[0].x, 0.0f, tries[0].z}));             // ... the other side ...
+   assert(near(tries[4], V3{0.0f, 0.0f, -15.0f}));                        // ... then behind, 15 m ...
+   assert(land_tries(slot, 2, tries) == kLandTries && near(tries[4], V3{0.0f, 0.0f, -39.0f}));   // ... 12 m more each
+   assert(land_tries(slot, -3, tries) == kLandTries && near(tries[4], V3{0.0f, 0.0f, -15.0f}));
+   // Nearer in, never nearer than 10 m; a slot on the leader goes to its right.
+   assert(land_tries(V3{6, 0, -6}, 0, tries) == kLandTries);
+   assert(near(length(tries[1]), 10.0f, 1e-3f) && near(length(tries[2]), 10.0f, 1e-3f));
+   assert(land_tries(V3{}, 0, tries) == kLandTries && near(tries[1], V3{10.0f, 0, 0}));
+   assert(land_tries(V3{kNan, 0, 0}, 0, tries) == kLandTries && near(tries[2], V3{10.0f, 0, 0}));
+   // Spaced 12 m across from the places taken.
+   const V3 taken[2] = {V3{0, 100, 0}, V3{30, 100, 0}};
+   assert(spaced(V3{15, 90, 0}, taken, 2) && !spaced(V3{5, 100, 0}, taken, 2) && !spaced(V3{25, 100, 5}, taken, 2));
+   assert(!spaced(V3{10, 100, 0}, taken, 2) && spaced(V3{0, 60, 12.5f}, taken, 2));
+   assert(spaced(V3{0, 100, 0}, taken, 0) && spaced(V3{0, 100, 0}, nullptr, 2) && !spaced(V3{kNan, 0, 0}, taken, 1));
+   // Probed from 40 m up, or 2 m under a roof, never under 3 m; hovering 15 m up,
+   // or 4 m under a low roof, never under 4 m.
+   assert(near(probe_height(kNoRoof), 40.0f) && near(probe_height(100.0f), 40.0f));
+   assert(near(probe_height(40.0f), 38.0f));   // a roof 40 m up still counts
+   assert(near(probe_height(12.0f), 10.0f) && near(probe_height(4.0f), 3.0f) && near(probe_height(kNan), 40.0f));
+   assert(near(hover_height(kNoRoof), 15.0f) && near(hover_height(12.0f), 8.0f));
+   assert(near(hover_height(6.0f), 4.0f) && near(hover_height(kNan), 15.0f));
 }
 
 // The keys and words a mission sets: orders by name, the order a flight starts
@@ -951,10 +990,11 @@ int main()
    orders();
    ground_runs();
    landing();
+   landing_places();
    mission_keys();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
-               "orders, passes at the ground, landing, mission keys).\n");
+               "orders, passes at the ground, landing, landing places, mission keys).\n");
    return 0;
 }

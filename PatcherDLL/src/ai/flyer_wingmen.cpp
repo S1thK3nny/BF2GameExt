@@ -53,7 +53,8 @@ constexpr int      kStateLanded      = 0;       // EntityFlyer::State: landed ..
 constexpr int      kStateTakeoff     = 1;       // ... taking off ...
 constexpr int      kStateFlying      = 2;       // ... flying ...
 constexpr int      kStateLanding     = 3;       // ... landing
-constexpr int      kGroundMask       = 0x190;   // what the flyer's own landing ray hits (EntityFlyer::Update 0x004FEA8D)
+constexpr int      kGroundMask       = 0x190;   // what the flyer's own landing ray hits (EntityFlyer::Update 0x004FEA8D):
+                                                 // COLL_STATIC, COLL_TERRAIN, COLL_WATER; no vehicles (COLL_RIGID) or soldiers
 constexpr float    kGroundRay        = 200.0f;  // m down from the leader for its ground
 constexpr uint8_t  kFlagPaths        = 0x08;    // flies its paths when it may
 constexpr uint8_t  kFlagSliding      = 0x10;    // sliding round a barrier
@@ -73,8 +74,14 @@ constexpr int      kReticuleChannels   = 2;
 constexpr uint32_t kUC_Agent           = 0x2C0;  // UnitController::mAgent ...
 constexpr uint32_t kAgent_AttackTarget = 0x10;   // ... its AttackHelper's target ...
 constexpr uint32_t kAgent_AttackHandle = 0x14;   // ... and that one's handle
-constexpr int      kCommAttack         = 6;      // the comm keys' codes (Code::AttackPosition ...
-constexpr int      kCommDefend         = 7;      // ... and Code::DefendPosition)
+// The comm keys, read where the player's controller reads its other inputs:
+// PlayerController::mJoystick, its ProcessedInputs, whose +0x10 has bit n set
+// while a key bound to digital input n is held, for a pad's button the frame it
+// goes down (ProcessedInputs::GetDigital).
+constexpr uint32_t kPC_Inputs          = 0x88;
+constexpr uint32_t kInputs_Bits        = 0x10;
+constexpr int      kInputCommAttack    = 26;     // ePROCESSEDINPUT_Comm_Chat_6: the comm key Attack (F11 by default) ...
+constexpr int      kInputCommDefend    = 27;     // ... Comm_Chat_7, Defend (F12)
 constexpr int      kSafeHeightTaper    = 1;      // SH_TAPER: a dive at the ground lets the safe height go
 // A flyer's primary weapon and the ranges its AI fights at (its weapon ODF's).
 constexpr uint32_t kFly_Weapons        = 0x6B8;  // EntityFlyer::mWeapon[4] ...
@@ -143,6 +150,7 @@ constexpr int      kMaxNodes        = 4096;
 constexpr uint32_t kRttiFlyer          = pbl_hash("EntityFlyer");
 constexpr uint32_t kRttiSoldier        = pbl_hash("EntitySoldier");
 constexpr uint32_t kRttiUnitController = pbl_hash("UnitController");
+constexpr uint32_t kRttiPlayerController = pbl_hash("PlayerController");
 // The localisation keys hash as the game's own squad command keys do (its
 // EntitySoldier::Update looks this one up as 0x731FD493).
 static_assert(pbl_hash("game.squadcommand.follow") == 0x731FD493u, "localisation keys are PblHashes");
@@ -185,8 +193,6 @@ using fn_force_t      = void(__thiscall*)(void* uc, void* target);
 using fn_affiliation_t = int(__thiscall*)(void* me, void* other);
 using fn_message_t    = void(__cdecl*)(int player, const wchar_t* text, const uint8_t* color);
 using fn_localize_t   = const wchar_t*(__cdecl*)(uint32_t hash, bool nullIfMissing);
-using fn_add_chat_t   = uint32_t(__cdecl*)(uint32_t teamOnly, uint32_t localIndex, uint32_t lo, uint32_t hi, int code,
-                                           const wchar_t* text, uint32_t mask);
 using fn_ray_hit_t    = float(__cdecl*)(const float* start, const float* dir, float length, void** hit, float* normal,
                                         uint8_t** ignore, int ignoreCount, int typeMask, int ordnanceOnly);
 using fn_flyer_t      = void(__thiscall*)(void* flyer);
@@ -217,9 +223,8 @@ fn_affiliation_t s_affiliation  = nullptr;   // GameObject::GetAffiliationToMe
 fn_message_t     s_message      = nullptr;   // the HUD's message line
 const uint8_t*   s_messageColor = nullptr;   // the trooper squad commands' colour
 fn_localize_t    s_localize     = nullptr;
-fn_add_chat_t    s_addChat      = nullptr;   // NetGame::AddChatMessageToQue
-int              s_pendingComm  = -1;        // a comm key pressed, for the next update ...
-double           s_pendingAt    = 0.0;       // ... when
+bool             s_commKeys     = false;     // the comm keys' reads checked
+uint32_t         s_commHeld     = 0;         // the comm keys' bits held at the last look
 // Landing with the player (null until their reads are checked).
 fn_ray_hit_t     s_rayHit  = nullptr;        // CollisionManager::RayHit
 fn_flyer_t       s_land    = nullptr;        // EntityFlyer::Land
@@ -235,7 +240,6 @@ struct Site {
    uint8_t  orig[5] = {};
 };
 Site s_callSite;
-Site s_chatSite;
 Site s_landHintSite;     // the fly agent's CALL to IsNearLandingPt ...
 Site s_takeOffSites[2];  // ... and its two CALLs to EntityFlyer::TakeOff
 
@@ -384,7 +388,8 @@ struct Formation {
    bool        landing = false;       // the player's flyer is landing or landed: its wingmen land too ...
    V3          pad;                   // ... beside where it came down ...
    Frame       padFrame;              // ... facing as it was ...
-   float       padGround = 0.0f;      // ... the ground's height there
+   float       padGround = 0.0f;      // ... the ground's height there ...
+   float       padRoof = flyer_orders::kNoRoof;   // ... and a roof's over it (a hangar's), else kNoRoof
    bool        mirror = false;        // left for right, after an odd number of the leader's flips
    float       leaderSpeed = 0.0f;    // as last seen by a wingman's steering: how fast it flies ...
    float       leaderTarget = 0.0f;   // ... and the speed its throttle asks for
@@ -1706,8 +1711,69 @@ bool ground_at(V3 from, float length, uint8_t* ignoreA, uint8_t* ignoreB, float&
    return true;
 }
 
-// The leader comes down: each wingman gets a spot beside it on level ground,
-// else the sky over it (flyer_orders_core.hpp).
+// Whether anything is in the way from one point to another (the same ray, the
+// same types); how far along the first thing is.
+bool blocked(V3 from, V3 to, uint8_t* ignoreA, uint8_t* ignoreB, float* along = nullptr)
+{
+   if (!s_rayHit) return false;
+   V3 dir = to - from;
+   const float length = flyer_wingmen::length(dir);
+   if (!(length > 0.01f) || !flyer_wingmen::normalise(dir)) return false;
+   const float start[3] = {from.x, from.y, from.z};
+   const float d[3] = {dir.x, dir.y, dir.z};
+   void* hit = nullptr;
+   float normal[3] = {0.0f, 1.0f, 0.0f};
+   uint8_t* ignore[2] = {ignoreA, ignoreB};
+   const float fraction = s_rayHit(start, d, length, &hit, normal, ignore, ignoreB ? 2 : 1, kGroundMask, 0);
+   if (!(fraction >= 0.0f && fraction < 1.0f)) return false;
+   if (along) *along = fraction * length;
+   return true;
+}
+
+// Whether something is over a point within kLandProbe: a roof (a hangar's).
+bool roofed(V3 at, uint8_t* ignoreA, uint8_t* ignoreB, float* height = nullptr)
+{
+   float along = 0.0f;
+   if (!blocked(at, at + V3{0.0f, flyer_orders::kLandProbe, 0.0f}, ignoreA, ignoreB, &along)) return false;
+   if (height) *height = along;
+   return true;
+}
+
+// A wingman's place beside the landing leader (flyer_orders_core.hpp,
+// land_tries): the first that is spaced from the places already `taken`, on
+// ground level with the leader's and flat, probed from under any roof over the
+// leader, and, under one, in a clear line from the leader and on a clear way from
+// the wingman. Which try it was, or -1 for none.
+int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, const V3* taken, int nTaken, V3& out)
+{
+   V3 tries[flyer_orders::kLandTries];
+   const int n = flyer_orders::land_tries(slot_of(f, w.slot), rank, tries);
+   const bool roof = f.padRoof < flyer_orders::kNoRoof;
+   const float top = f.padGround + flyer_orders::probe_height(f.padRoof);
+   const V3 low{f.pad.x, f.padGround + flyer_orders::kLandClear, f.pad.z};
+   for (int k = 0; k < n; ++k) {
+      V3 spot = f.padFrame.valid ? flyer_wingmen::to_world(f.padFrame, f.pad, tries[k]) : f.pad + tries[k];
+      spot.y = f.padGround;
+      if (!flyer_orders::spaced(spot, taken, nTaken)) continue;
+      if (roof && blocked(low, V3{spot.x, low.y, spot.z}, leader, w.obj)) continue;   // a wall between
+      float hy = 0.0f, hup = 0.0f;
+      if (!ground_at(V3{spot.x, top, spot.z}, top - f.padGround + 2.0f * flyer_orders::kLandLevel, leader, w.obj, hy,
+                     hup) ||
+          !flyer_orders::level_spot(hy, hup, f.padGround))
+         continue;
+      spot.y = hy;
+      if (roof && blocked(position_of(w.obj), spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f}, leader,
+                          w.obj))
+         continue;   // no clear way to it
+      out = spot;
+      return k;
+   }
+   return -1;
+}
+
+// The leader comes down: each wingman, in slot order, gets a place beside it
+// (land_place). One with none circles overhead; under a roof, where circling would
+// take it into the roof, it is let go.
 void start_landing(Formation& f, uint8_t* leader, double now)
 {
    f.landing = true;
@@ -1717,28 +1783,50 @@ void start_landing(Formation& f, uint8_t* leader, double now)
    f.padFrame = flyer_wingmen::level_frame(row(lm, 2), row(lm, 0));
    float y = f.pad.y, up = 1.0f;
    f.padGround = ground_at(f.pad + V3{0.0f, 5.0f, 0.0f}, kGroundRay, leader, nullptr, y, up) ? y : f.pad.y;
-   int beside = 0, over = 0;
-   for (int i = 0; i < f.count; ++i) {
+   float roof = flyer_orders::kLandProbe;
+   f.padRoof = roofed(V3{f.pad.x, f.padGround + 1.0f, f.pad.z}, leader, nullptr, &roof) ? roof + 1.0f
+                                                                                       : flyer_orders::kNoRoof;
+   int beside = 0, over = 0, gone = 0;
+   V3 taken[flyer_wingmen::kMaxWingmen];
+   int nTaken = 0;
+   bool letGo[flyer_wingmen::kMaxWingmen] = {};
+   bool placed[flyer_wingmen::kMaxWingmen] = {};
+   for (int rank = 0; rank < f.count; ++rank) {
+      // The next in slot order.
+      int i = -1;
+      for (int j = 0; j < f.count; ++j)
+         if (!placed[j] && (i < 0 || f.wing[j].slot < f.wing[i].slot)) i = j;
+      placed[i] = true;
       Wingman& w = f.wing[i];
       clear_target(w, leader, now, nullptr);
       w.joining = false;
       w.holding = false;
       w.trick = -1;
-      const V3 offset = flyer_orders::land_offset(slot_of(f, w.slot));
-      V3 spot = f.padFrame.valid ? flyer_wingmen::to_world(f.padFrame, f.pad, offset) : f.pad + offset;
-      float hy = 0.0f, hup = 0.0f;
-      const bool level =
-         ground_at(V3{spot.x, f.padGround + flyer_orders::kLandProbe, spot.z}, 2.0f * flyer_orders::kLandProbe, leader,
-                   w.obj, hy, hup) &&
-         flyer_orders::level_spot(hy, hup, f.padGround);
-      spot.y = level ? hy : f.padGround;
-      w.spot = spot;
-      w.land = level ? kLandComing : kLandCircle;
-      ++(level ? beside : over);
+      V3 spot = f.pad;
+      const int k = land_place(f, leader, w, rank, taken, nTaken, spot);
+      if (k >= 0) {
+         w.spot = spot;
+         w.land = kLandComing;
+         taken[nTaken++] = spot;
+         ++beside;
+         if (order_log())
+            install_log("[Wingmen] slot %d (#%u) lands beside you %.0f m off (place %d of %d)", w.slot + 1, w.handle,
+                        (double)flyer_orders::across(spot, f.pad), k + 1, flyer_orders::kLandTries);
+      } else if (f.padRoof < flyer_orders::kNoRoof) {   // circling over a roof would take it into it
+         letGo[i] = true;
+         ++gone;
+      } else {
+         w.spot = f.pad;
+         w.land = kLandCircle;
+         ++over;
+      }
    }
+   for (int i = f.count - 1; i >= 0; --i)
+      if (letGo[i]) drop(f, i, "nowhere to land beside you, under a roof", "noroom");
    if (order_log())
-      install_log("[Wingmen] the leader comes down: %d land beside it, %d circle overhead (no level ground beside it)",
-                  beside, over);
+      install_log("[Wingmen] the leader comes down%s: %d land beside it, %d circle overhead, %d let go (nowhere to land "
+                  "under the roof)",
+                  f.padRoof < flyer_orders::kNoRoof ? " under a roof" : "", beside, over, gone);
 }
 
 // The leader takes off again (or did not land after all): so do they.
@@ -1908,22 +1996,43 @@ void squad_key(double now)
    install_log("[Wingmen] squad key: %s", order_name(s_player.order));
 }
 
-// The comm keys' attack and defend, in the air with wingmen: attack my target
-// (the player's lock, else an enemy under its reticule, as the key is pressed),
-// and cover me. Their team chat goes out as ever.
+// The comm keys Attack and Defend, as held now: their bits of the player's
+// processed inputs, which its own controller (PlayerController::mJoystick) is
+// fed. The game makes team chat of the comm keys only online:
+// RawControllerInputs::ReadLatest runs the chat and comm-key processing
+// (ChatInputProcess, TeamOrderInputProcess) only in a networked game, and in
+// single player StandardInputProcess alone, which still turns every binding,
+// the comm keys' included, into these bits.
+uint32_t comm_bits(uint8_t* leader)
+{
+   uint8_t* const ctrl = *(uint8_t**)(leader + kFly_Ctrl);
+   if (!ctrl || !is_rtti(ctrl, kRttiPlayerController)) return 0;
+   const uint8_t* const inputs = *(const uint8_t* const*)(ctrl + kPC_Inputs);
+   if (!inputs) return 0;
+   return *(const uint32_t*)(inputs + kInputs_Bits) & ((1u << kInputCommAttack) | (1u << kInputCommDefend));
+}
+
+// The comm keys' Attack and Defend (F11 and F12 by default), in the air with
+// wingmen, as each goes down: attack my target (the player's lock, else an enemy
+// under its reticule, as the key is pressed), and cover me. Online their team
+// chat goes out as ever.
 void comm_key(double now)
 {
-   const int code = s_pendingComm;
-   s_pendingComm = -1;
-   if (code != kCommAttack && code != kCommDefend) return;
-   if (now - s_pendingAt > kKeyRepeat) return;   // pressed before any flyer was there to hear it
-   if (!player_leads_now()) return;
-   if (!s_player.count) {
-      say(kSayNone);
-      install_log("[Wingmen] comm key %d: no wingmen to order", code);
+   if (!s_commKeys || !player_leads_now()) {
+      s_commHeld = 0;
       return;
    }
-   if (code == kCommDefend) {
+   const uint32_t held = comm_bits(s_player.leader);
+   const uint32_t pressed = held & ~s_commHeld;
+   s_commHeld = held;
+   if (!pressed) return;
+   const bool defend = (pressed & (1u << kInputCommAttack)) == 0;   // both at once: the attack
+   if (!s_player.count) {
+      say(kSayNone);
+      install_log("[Wingmen] comm key %s: no wingmen to order", defend ? "Defend" : "Attack");
+      return;
+   }
+   if (defend) {
       set_order(s_player, Order::Cover, now);
       say(kSayCover);
       install_log("[Wingmen] comm key: cover me");
@@ -2359,7 +2468,7 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
    int safe = kSafeHeightFull;
    float speed = mid;
    if (w.land == kLandComing) {
-      st.point = w.spot + V3{0.0f, flyer_orders::kLandHover, 0.0f};
+      st.point = w.spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f};
       if (flyer_orders::across(me, w.spot) < flyer_orders::kLandSlowFrom) speed = lo;
       safe = kSafeHeightTaper;
    } else {
@@ -2541,16 +2650,20 @@ bool install_shapes(uintptr_t base)
 }
 
 // ---- The comm keys --------------------------------------------------------------------
-// TeamOrderInputProcess's CALL to NetGame::AddChatMessageToQue, made once for a
-// comm key pressed, its code (0-7) the fifth argument: passed on as it was, and
-// the code kept for the next flyer update (comm_key). The caller pops the
-// arguments and keeps nothing in a register across the call.
-uint32_t __cdecl team_order_mt(uint32_t teamOnly, uint32_t localIndex, uint32_t lo, uint32_t hi, int code,
-                               const wchar_t* text, uint32_t mask)
+// Read from the player's processed inputs (comm_bits), as its controller reads
+// the rest: PlayerController::Update loads them from its +0x88 (MOV EAX, [EBX +
+// 0x88], EBX the controller, then their four floats); ProcessedInputs::GetDigital
+// tests bit n of their +0x10 for digital input n below 0x1E.
+bool install_comm_keys(uintptr_t base)
 {
-   s_pendingComm = code;
-   s_pendingAt = seconds();
-   return s_addChat(teamOnly, localIndex, lo, hi, code, text, mask);
+   const auto* a = g_addr;
+   if (!a->player_controller_update || !a->processed_inputs_get_digital) return false;
+   return starts_with(base, a->player_controller_update + 0xD, "\x8B\xD9", 2) &&
+          starts_with(base, a->player_controller_update + 0x242, "\x8B\x83\x88\x00\x00\x00\x8B\x08", 8) &&
+          starts_with(base, a->processed_inputs_get_digital,
+                      "\x8B\xD1\x8B\x4C\x24\x04\x83\xF9\x1E\x7D\x18\xB8\x01\x00\x00\x00\xD3\xE0\x23\x42\x10\x25\xFF\xFF"
+                      "\xFF\x3F",
+                      26);
 }
 
 // The orders' reads and calls, as the game's own code makes them.
@@ -2558,10 +2671,8 @@ bool install_orders(uintptr_t base)
 {
    const auto* a = g_addr;
    if (!a->controllable_locked_target || !a->uc_force_attack_target || !a->object_affiliation || !a->hud_message ||
-       !a->hud_message_color || !a->localize_find || !a->team_order_input || !a->team_order_chat_call ||
-       !a->add_chat_message)
+       !a->hud_message_color || !a->localize_find)
       return false;
-   uint8_t* const call = (uint8_t*)resolve(base, a->team_order_chat_call);
    const bool ok =
       // GetTargetLockedObj: the player id (+0xD4) first, the lock kept at +0x138.
       starts_with(base, a->controllable_locked_target, "\x56\x8B\xF1\x57\x8B\xBE\xD4\x00\x00\x00", 10) &&
@@ -2572,17 +2683,7 @@ bool install_orders(uintptr_t base)
       starts_with(base, a->object_affiliation, "\x53\x55\x56\x8B\xF1\x8B\x86\x34\x02\x00\x00", 11) &&
       // The message line: the player's events, 0x328 apart.
       starts_with(base, a->hud_message, "\x8B\x44\x24\x0C\x83\xEC\x10\x56\x8B\x74\x24\x18\x69\xF6\x28\x03\x00\x00", 18) &&
-      starts_with(base, a->localize_find, "\x8B\x44\x24\x04\x50\x68\x00\x80\x00\x00", 10) &&
-      // TeamOrderInputProcess: the control mode's row (0x102 bytes), then, for the
-      // key pressed, the text, the code, the 64-bit zero, the local index and false
-      // pushed, the CALL, and the caller popping all seven.
-      starts_with(base, a->team_order_input, "\x83\xEC\x20\x8B\x41\x08\x55\x56\x57\x33\xFF\x69\xC0\x02\x01\x00\x00",
-                  17) &&
-      std::memcmp(call - 0x13, "\x50\x57\x6A\x00\x6A\x00\x6A\x00", 8) == 0 &&
-      std::memcmp(call - 3, "\x50\x6A\x00", 3) == 0 && call[0] == 0xE8 &&
-      call_destination(call) == (uintptr_t)resolve(base, a->add_chat_message) &&
-      std::memcmp(call + 5, "\x83\xC4\x1C", 3) == 0 &&
-      starts_with(base, a->add_chat_message, "\x55\x8B\xEC\x83\xEC\x20\x0F\xB6\x45\x08", 10);
+      starts_with(base, a->localize_find, "\x8B\x44\x24\x04\x50\x68\x00\x80\x00\x00", 10);
    if (!ok) return false;
    s_lockedTarget = (fn_locked_t)resolve(base, a->controllable_locked_target);
    s_forceTarget = (fn_force_t)resolve(base, a->uc_force_attack_target);
@@ -2590,17 +2691,15 @@ bool install_orders(uintptr_t base)
    s_message = (fn_message_t)resolve(base, a->hud_message);
    s_messageColor = (const uint8_t*)resolve(base, a->hud_message_color);
    s_localize = (fn_localize_t)resolve(base, a->localize_find);
-   s_addChat = (fn_add_chat_t)resolve(base, a->add_chat_message);
-   // The call, during the installers' writable window.
-   s_chatSite.at = call;
-   std::memcpy(s_chatSite.orig, call, 5);
-   *(int32_t*)(call + 1) = (int32_t)((intptr_t)&team_order_mt - (intptr_t)(call + 5));
+   s_commKeys = install_comm_keys(base);
    return true;
 }
 
 // Landing with the player: EntityFlyer::Land and TakeOff, thiscall() on the
-// entity (Land perhaps detoured by the LandOnArrival fix already, which only
-// adds to it), and CollisionManager::RayHit for the ground beside the leader.
+// entity, and CollisionManager::RayHit for the ground beside the leader. Both
+// may be detoured already, Land by the LandOnArrival fix and TakeOff by the
+// carrier fixes, each of which only adds to it (both install before the
+// wingmen, so a JMP at either is theirs).
 bool install_landing(uintptr_t base)
 {
    const auto* a = g_addr;
@@ -2608,7 +2707,8 @@ bool install_landing(uintptr_t base)
    const bool ok =
       (starts_with(base, a->entity_flyer_land, "\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00", 9) ||
        *(const uint8_t*)resolve(base, a->entity_flyer_land) == 0xE9) &&
-      starts_with(base, a->entity_flyer_take_off, "\x51\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00\x85\xC0\x57", 13) &&
+      (starts_with(base, a->entity_flyer_take_off, "\x51\x56\x8B\xF1\x8B\x86\xA4\x05\x00\x00\x85\xC0\x57", 13) ||
+       *(const uint8_t*)resolve(base, a->entity_flyer_take_off) == 0xE9) &&
       starts_with(base, a->collision_ray_hit, "\xD9\x05\x90\xA2\xA2\x00\x8B\x54\x24\x10", 10);
    if (!ok) return false;
    s_land = (fn_flyer_t)resolve(base, a->entity_flyer_land);
@@ -3073,7 +3173,7 @@ void flyer_wingmen_mission_end()
    s_scriptShape = 0;
    s_eventCount = 0;
    s_lostReason = nullptr;
-   s_pendingComm = -1;
+   s_commHeld = 0;
    s_mapShapesLogged = false;
 }
 
@@ -3151,8 +3251,10 @@ void flyer_wingmen_install(uintptr_t base)
                g_flyerWingmenCount, (double)g_flyerWingmenSpacing,
                g_flyerWingmenAuto ? "called up at takeoff" : "called up on the squad key");
    if (install_orders(base))
-      install_log("[Wingmen] orders installed: the squad key forms up or engages, the comm keys' attack and defend "
-                  "order attack my target and cover me");
+      install_log("[Wingmen] orders installed: the squad key forms up or engages; %s",
+                  s_commKeys ? "the comm keys Attack and Defend (F11 and F12 by default) order attack my target and "
+                               "cover me"
+                             : "the comm keys' orders NOT installed (the player's inputs are read differently)");
    else
       install_log("[Wingmen] orders NOT installed: their reads differ; the squad key forms up or engages, with no "
                   "message");
@@ -3206,8 +3308,6 @@ void flyer_wingmen_uninstall()
    flyer_real_flight::uninstall();
    if (s_callSite.at) protected_write(s_callSite.at, s_callSite.orig, 5);
    s_callSite = Site{};
-   if (s_chatSite.at) protected_write(s_chatSite.at, s_chatSite.orig, 5);
-   s_chatSite = Site{};
    for (Site* s : {&s_landHintSite, &s_takeOffSites[0], &s_takeOffSites[1]}) {
       if (s->at) protected_write(s->at, s->orig, 5);
       *s = Site{};
@@ -3220,8 +3320,8 @@ void flyer_wingmen_uninstall()
    s_message = nullptr;
    s_messageColor = nullptr;
    s_localize = nullptr;
-   s_addChat = nullptr;
-   s_pendingComm = -1;
+   s_commKeys = false;
+   s_commHeld = 0;
    s_land = nullptr;
    s_takeOff = nullptr;
    s_rayHit = nullptr;

@@ -149,7 +149,7 @@ A **unit** is a flyer or other world object, given the way the game's own functi
 | `GetWingman(i)` | The `i`th wingman, 1 first, in slot order: its pilot's character index and its flyer. nil past the last. | 1.2.0 |
 | `IsWingman(unit)` | Whether it flies in the player's flight. | 1.2.0 |
 | `GetWingmanLeader(unit)` | The character index of whoever it flies as a wingman of: the player, or an AI squadron leader's pilot. nil if it flies as no one's. | 1.2.0 |
-| `GetWingmanLostReason()` | Inside `OnWingmanLost`, why: `"killed"`, `"pilot"` (someone else flies it), `"landed"`, `"team"`, `"far"`, `"late"`, `"removed"`, `"dismissed"`, `"formation"` (the new formation holds fewer) or `"leader"` (the player stopped leading). nil anywhere else. | 1.2.0 |
+| `GetWingmanLostReason()` | Inside `OnWingmanLost`, why: `"killed"`, `"pilot"` (someone else flies it), `"landed"`, `"noroom"` (nowhere to land beside the player under a roof), `"team"`, `"far"`, `"late"`, `"removed"`, `"dismissed"`, `"formation"` (the new formation holds fewer) or `"leader"` (the player stopped leading). nil anywhere else. | 1.2.0 |
 
 The events are engine events like `OnCharacterExitVehicle`, with the same `Name`, `Team` and `Class` filters on the character and a `Release` function each:
 

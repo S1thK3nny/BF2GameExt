@@ -886,7 +886,21 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   (`RawControllerInputs::TeamOrderInputProcess`, P `0x00454440`, M `0x00745D00`, keyboard rows 0x14 to 0x1B)
   send team chat with a code: `Spotted`, `NeedMedic`, `NeedRepair`, `NeedAmmo`, `NeedPickup`, `NeedBackup`,
   `AttackPosition` (6), `DefendPosition` (7). Each press ends in one CALL to `NetGame::AddChatMessageToQue`
-  (M `0x00745DC3` to `0x0070C260`, cdecl, seven dwords, the code the fifth, the caller pops them).
+  (M `0x00745DC3` to `0x0070C260`, cdecl, seven dwords, the code the fifth, the caller pops them). Only
+  online: `RawControllerInputs::ReadLatest` (P `0x004539C0`, M gate `0x0074695D`) runs `ChatInputProcess`,
+  and with it `TeamOrderInputProcess`, only when `netEnabled` (`netEnabledNext` in the shell); in single
+  player `StandardInputProcess` alone (P `0x00454170`, M `0x007455F0`), so the comm keys send nothing there.
+- **The comm keys as inputs:** `StandardInputProcess` still turns every binding into the player's
+  `ProcessedInputs`, the comm keys among them (`ePROCESSEDINPUT_Comm_Chat_0` to `_7`, digital inputs 20 to 27,
+  F5 to F12 by default; Attack 26, Defend 27): bit n of +0x10 (`ProcessedInputs::GetDigital`, M `0x00743A30`,
+  n below 0x1E). `ReadLatest` clears them each frame (`ProcessedInputs::Clear` keeps the top two bits), then
+  `ProcessedInputs::Set` (M `0x00743710`) sets the bit of input 8 or 13 to 28 only when now is pressed and
+  last was not. A key held down is Set with last 0 and now 1 (M `0x007459A9`), so its bit is set every frame
+  it is held; a pad's button, Set with its last frame, the frame it goes down only. In single player
+  `NetGame::IsTurnReady` copies player 0's inputs whole into `hostJoysticks[0]`, which the player's
+  `PlayerController` reads as `mJoystick` (+0x88, from `NetGame::GetJoystick` as it is built; M
+  `PlayerController::Update` loads it at `0x0059B6A2`). The pad bindings' hook on `StandardInputProcess`
+  runs the stock pass first and adds its own, so a key's bits stand.
 - **The trooper commands' text:** `EntitySoldier::Update` looks up `game.squadcommand.follow` (hash
   `0x731FD493`, the localisation lookup M `0x007F3720`, cdecl(hash, bool nullIfMissing)), copies the colour
   at M `0x00AE2170` (`DF DF 20 FF`) and hands both to the player's HUD object (M `0x0067EBB0`), which calls
@@ -939,8 +953,11 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   is aimed at its target, at most every 0.5 s and only while aimed elsewhere, so it fires at it. A chasing
   wingman flies at its own speeds, copies no tricks and may pull its own.
 - **Keys:** the squad key calls wingmen up when there are none, else switches between form up and engage (from
-  an attack or cover, form up). The comm keys' attack and defend order attack my target and cover me; their
-  team chat still goes out. In the air only.
+  an attack or cover, form up). The comm keys Attack and Defend (F11 and F12 by default) order attack my target
+  and cover me as each goes down, read from the player's processed inputs (its controller's +0x88, bits 26 and
+  27); online their team chat still goes out. In the air only. The first build caught the comm keys' chat
+  call instead, which single player never makes, so they did nothing offline (the user, 2026-10-14: "I've been
+  pressing F11 and F12 with a wingman at my side, nothing").
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
@@ -948,13 +965,35 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   default; with 0 the wingmen break off as the player lands): a player can land only inside a landing region
   (Lua `AddLandingRegion`, `TriggerRegionManager` TRIGGER_LANDING; the flyer's land key and speeds check
   `mInLandingRegionFactor`, M +0x5FC), but `EntityFlyer::Land` needs none. When the player's flyer lands, each
-  wingman is given its slot's place on the ground, 1.5 times out and at least 15 m from the leader, where a ray
-  down from 40 m up finds ground within 4 m of the leader's and flat (its up at least 0.85); it comes down
-  toward 15 m over it, at its slowest from 300 m in (its stretch lets it fly at 10 m/s), and lands once within
-  40 m across and 40 m up. Once down its pilot gets out and it is let go (the user: "Make getting out on land
-  the default"), unless its own class says `WingmanExitOnLand = 0`: then it waits aboard, and when the player
-  takes off it takes off too and forms up again. With no such ground, or if it is up again first, it circles
-  200 m round a point 150 m over the leader.
+  wingman, in slot order, is given a place on the ground beside it: of its slot's place (1.5 times out and at
+  least 15 m from the leader), the same way at the slot's own distance and at 0.6 of it (never nearer than
+  10 m), the other side, and behind the leader (15 m, 12 m more for each later wingman), the first 12 m from
+  the places already taken where a ray down finds ground within 8 m of the leader's and flat (its up at least
+  0.8). The ray starts 40 m up, or 2 m under a roof: a ray up from the leader's ground that meets something
+  within 40 m finds one (a hangar's, which a ray from 40 m up would meet before the ground). Both rays take
+  the flyer's own landing ray's types, 0x190: `COLL_STATIC` (0x10), `COLL_TERRAIN` (0x80) and `COLL_WATER`
+  (0x100) of `CollisionObjectType` (P), each object's own type its `TreeGridObject::mData` (from the
+  `GameObject` constructor: `EntityBuilding` and `EntityProp` pass `COLL_STATIC`, `EntityFlyer` `COLL_RIGID`
+  8, `EntitySoldier` `COLL_SOFT` 2; P `0x0050262D`, `0x0055FB9D`, `0x00520F8E`, `0x00565FB0`), so buildings
+  and props count and the wingmen overhead do not; `RayHit` with no types takes 0xBE. Under a roof a
+  place must also be in a clear line from the leader 3 m over its ground, and the wingman's way to it clear.
+  It comes down toward 15 m over its place (under a low roof 4 m under it, never under 4 m), at its slowest
+  from 300 m in (its stretch lets it fly at 10 m/s), and lands once within 25 m across and 40 m up. Once down
+  its pilot gets out and it is let go (the user: "Make getting out on land the default"), unless its own class
+  says `WingmanExitOnLand = 0`: then it waits aboard, and when the player takes off it takes off too and forms
+  up again. One with no place, or up again first, circles 200 m round a point 150 m over the leader; with the
+  leader under a roof, where that would take it into the roof (or the ship or the mountain round the hangar),
+  it is let go instead (`GetWingmanLostReason` "noroom").
+- **Installing alongside other fixes:** `EntityFlyer::Land` may be detoured first by the LandOnArrival fix and
+  `EntityFlyer::TakeOff` by the carrier fixes (`flyer_carrier_fixes.cpp`, from `lua_hooks_install`, before
+  `flyer_wingmen_install`), each only adding to it, so a JMP at either is taken as theirs. The first build
+  took the carrier fixes' JMP at `TakeOff` for a different exe and left landing off (the log: "landing with you
+  NOT installed: EntityFlyer's Land or TakeOff differ"): the user's wingmen followed them into a hangar and
+  were let go as they landed ("3 let go: the player is not flying"), and the game's own AI flew them round it
+  and into a wall ("They circled then crashed into a wall, even though the ground was clear beneath them").
+  `tests/flyer_wingmen_abi_tests.py` now finds every function another feature's `DetourAttach` takes and
+  fails if a guard on its first bytes would not take the JMP (`Land`, `TakeOff`, `DoTrick`, the camera
+  shake's).
 - **Getting out:** stock, an AI pilot would get out only through its fly agent's own landing:
   `UnitFlyAgent`'s FLY state (4) lands at an AI "land" hint node within 80 m (`IsNearLandingPt`, P
   `0x00790AC0`, M `0x005AED00`, every 3 s; `HintManager::RequestLandHints`, P `0x005EC510`: hint type 0x20,
@@ -972,8 +1011,9 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   command queue, and keep it out of vehicles for 20 s (`UnitAgent::HandleSquadCommandEvent`, P
   `0x007844D0`).
 - **Checks:** `tests/flyer_wingmen_tests.cpp` (orders, the passes' shapes and the passes flown, landing and
-  the circle overhead, simulated); `tests/flyer_wingmen_abi_tests.py` (149 modtools checks, every guard's
-  bytes); the mutation suite's `orders` (all caught).
+  the places tried, the heights under a roof and the circle overhead, simulated);
+  `tests/flyer_wingmen_abi_tests.py` (150 modtools checks, every guard's bytes, the guards on functions other
+  features detour); the mutation suite's `orders` (all caught).
 
 ### What to watch in play
 
@@ -982,11 +1022,13 @@ N s`, `order: engage, 3 wingmen`, `comm key: attack my target, #t (locked, in th
 takes on #t`, `back to its slot after N s: why`, `the attack's target is down: back to ...`, and every 5 s
 `[Wingmen] engage: 3 wingmen, 1 in their slots, 0 flying in, 2 chasing`; each chase names the weapon ranges
 it was shaped from (`its weapon's ranges 0/800/1600 m: pulls out at 200 m, back in from 800 m, 120 m behind a
-flyer`); landing: `the leader comes down: N land beside it, M circle overhead`, `slot N (#a) lands X m from
-its spot`, `landed: its pilot gets out (WingmanExitOnLand)`, `the leader takes off: N of its wingmen take off
-with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own combat
-may take it back between settings), how the passes fare against terrain, and how an AI flyer lands when told
-to at speed.
+flyer`); landing: `landing with you installed` at start-up, then `the leader comes down [under a roof]: N land
+beside it, M circle overhead, K let go (nowhere to land under the roof)`, `slot N (#a) lands beside you X m off
+(place k of 5)`, `slot N (#a) lands X m from its spot`, `landed: its pilot gets out`, `the leader takes off: N
+of its wingmen take off with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own
+combat may take it back between settings), how the passes fare against terrain, how an AI flyer lands when
+told to at speed, and whether a hangar's roof stops the ray from 40 m up (a roof is looked for whatever it is
+made of; the ray may pass through the back of a face).
 
 ## Wingmen from a mission script, and more ODF keys (prototype, 2026-10-14, modtools only)
 
