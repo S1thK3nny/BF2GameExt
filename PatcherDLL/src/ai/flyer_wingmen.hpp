@@ -39,8 +39,11 @@
 // of the player's wingmen on the map (HUD::ElementMap::UpdateMarkerIcons) and,
 // as a "common" HUD target (LockOnManager::AddTargetCommon, display only, not
 // a lock), a bracket on screen in the same colour (HUD::ElementTarget), for the
-// player's team, from joining to leaving. The game holds 32 markers between
-// them all and adds none past that, silently.
+// player's team, from joining to leaving; and a red one on the flight's attack
+// target while it attacks one. The game holds 32 markers between them all and
+// adds none past that, silently. A .hud may draw its own instead: while it binds
+// a wingman's events (render/hud_wingmen.hpp), the wingmen have none of these,
+// and while it binds the attack target's, the target has none.
 //
 // Orders (flyer_orders_core.hpp), with a line on the HUD's message line as the
 // trooper squad commands show theirs:
@@ -374,6 +377,11 @@ void flyer_wingmen_uninstall();
 // The mission is over (EventManager::Cleanup): its flights and whatever its
 // script said go, and nothing more is fired.
 void flyer_wingmen_mission_end();
+
+// For the HUD (render/hud_wingmen.hpp): the player's wingmen, alive, in slot
+// order (at most `max`), and the flight's attack target while it attacks one.
+int      flyer_wingmen_hud_list(uint8_t** out, int max);
+uint8_t* flyer_wingmen_hud_target();
 
 // =============================================================================
 // The player's flight from a mission script (lua/lua_wingmen.cpp turns these

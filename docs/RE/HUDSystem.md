@@ -952,6 +952,25 @@ pointer and every `EventColor` handler dereferences it (modtools `0x00692B80`, S
 Every read site is listed in `game/Battlefront2/Source/CommandPost.h` and checked on all three
 executables by `tests/hud_command_posts_abi_tests.py`.
 
+### Wingmen markers (built 2026-10-14, `render/hud_wingmen.cpp`)
+
+The same pattern for the flyer wingmen (`ai/flyer_wingmen.cpp`, modtools only):
+`player1.wingmanN.{position, onScreen, offScreen, direction, distance, health,
+disable}` for N = 1..8, `player1.wingmen.count`, and `player1.wingmen.target.*` for an
+attack my target order's target, made at `HUD::Manager::Open` and pumped beside the
+command posts, placed by `hud_world_markers::place` from the same anchor. Health is
+`Damageable::mCurHealth / mMaxHealth`, GameObject `+0x144` / `+0x148`, as camera shake
+reads it. The wingmen come from `flyer_wingmen_hud_list` (alive, in slot order) and the
+target from `flyer_wingmen_hud_target`.
+
+What the HUD binds decides the wingmen's own markers. Each AI tick
+`hud_wingmen_bound()` (a listener on any wingman event or the count) takes the
+`TargetManager` markers off the wingmen, or puts them back while nothing binds;
+`hud_wingmen_target_bound()` does the same for the target's red one. The event
+classes only exist while a HUD is up (`EventClass::sList` not empty), so before then
+both are false. `tests/flyer_wingmen_abi_tests.py` holds the health offsets to camera
+shake's and the names to TrueWidescreen's tracked list.
+
 ---
 
 ## The floating weapon icon bug (community `extraweapons.hud` fixes)
@@ -2292,8 +2311,9 @@ as written.
 7. **The world.** The `EventPosition` handler (`ElementGroupBase`'s, cdecl(`Event*`,
    element)) gets, for an opted-in element, a copy of the event whose x is
    (v·W − slide)/WL, which lands on the real point v·W, for
-   `player1.weaponN.reticule.position`, `.lockOnPosition`, `.target.position` and
-   `player1.commandPostN.position`. A reticule's y has `ReticleCorrection` taken back
+   `player1.weaponN.reticule.position`, `.lockOnPosition`, `.target.position`,
+   `player1.commandPostN.position`, `player1.wingmanN.position` and
+   `player1.wingmen.target.position`. A reticule's y has `ReticleCorrection` taken back
    off (`hud_widescreen_reticle_uncorrect`, which is exact, and the identity on a screen
    no wider than 4:3).
 

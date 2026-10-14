@@ -533,6 +533,59 @@ Group("player1cpmarker1")
   that comes to rest between two pixels looks slightly softer, so a player who prefers
   crisp still text can set it to 0, and the markers then step again.
 
+## Wingmen markers
+
+Markers over your flyer's [wingmen](FEATURES.md), and over the target of an attack my
+target order, drawn your own way. `N` is the wingman, 1 to 8, in slot order.
+
+| Event | Type | Carries |
+|-------|------|---------|
+| `player1.wingmen.count` | Uint | How many wingmen fly with you |
+| `player1.wingmanN.position` | Vector3 | Where the wingman is on screen, for `EventPosition`. Off screen or behind you, it stays on the screen's edge |
+| `player1.wingmanN.onScreen` | Bool | Sent as the wingman comes into view |
+| `player1.wingmanN.offScreen` | Bool | Sent as it leaves the view, and when the slot empties |
+| `player1.wingmanN.direction` | Vector3 | `(0, 0, angle)` for `EventRotation`: turns an arrow drawn pointing up toward the wingman |
+| `player1.wingmanN.distance` | Float | How far away the wingman is, in metres |
+| `player1.wingmanN.health` | Float | Its health, 0 to 1 |
+| `player1.wingmanN.disable` | Bool | The slot is empty |
+| `player1.wingmen.target.*` | | The attack target's `position`, `onScreen`, `offScreen`, `direction`, `distance` and `disable`, as a wingman's; `offScreen` and `disable` are sent as the attack ends |
+
+A marker is built as a command post's is ([Markers in the world](#markers-in-the-world)),
+with the wingman's events in place of the post's:
+
+```
+Group("player1wingmarker1")
+{
+    EventPosition("player1.wingman1.position")
+    EventEnable("player1.wingman1.onScreen")
+    EventDisable("player1.wingman1.offScreen")
+    Bitmap("player1wingmarker1_icon")
+    {
+        Bitmap("hud_objective_icon_circle")
+        BitmapRect(0.020, 0.020, "Center", "Center", "Viewport")
+        EventEnable("initialize")
+    }
+    BarBitmap("player1wingmarker1_health")
+    {
+        Bitmap("hud_cp_capture_bar")
+        BitmapRect(0.030, 0.004, "Left", "Center", "Viewport")
+        Position(-0.015, 0.018, 0.000, "Viewport")
+        EventValue("player1.wingman1.health")
+        EventEnable("initialize")
+    }
+}
+```
+
+- While a `.hud` binds none of the wingman events, each wingman gets the game's own
+  marker instead, a cyan circle on the minimap with a bracket on screen
+  (`[AI] FlyerWingmenMarkers`), and the attack target a red one; binding the target's
+  events takes only its marker away. The game's markers come back with a `.hud` that
+  binds none.
+- The marker sits 1.3 m above the middle of the flyer, as a command post's does, and the
+  distance runs from what you control.
+- Wingmen are a modtools prototype for the host and single player, so these events only
+  carry anything there.
+
 ## FillFrom
 
 A `BarBitmap` normally keeps its left end and moves its right edge. `FillFrom` picks

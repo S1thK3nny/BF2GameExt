@@ -1009,7 +1009,15 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   by name from the table at M `0x00ACA978` (black, red, green, blue, cyan, magenta, yellow, orange; filled at
   start-up). Each of the player's wingmen gets a steady cyan `hud_objective_icon_circle` (scale 3, the
   comm keys' requests' icon) with its bracket, from joining to leaving. A marker whose object's handle moves
-  on before it is removed is drawn no more but keeps its slot until the mission ends.
+  on before it is removed is drawn no more but keeps its slot until the mission ends. The flight's attack
+  target gets the same circle in red while the attack lasts (the user: "Maybe an icon for their current
+  target when ordered to attack my target as well").
+- **HUD markers** (the user: "If the hud entry isn't found, resort to the current implementation"):
+  `render/hud_wingmen.cpp` publishes `player1.wingmanN.*` (N 1..8, slot order: position, onScreen,
+  offScreen, direction, distance, health, disable), `player1.wingmen.count` and `player1.wingmen.target.*`,
+  placed as the command post markers are ([HUDSystem.md](HUDSystem.md), "Wingmen markers"). Each tick the
+  wingmen's `TargetManager` markers go while a `.hud` binds any wingman event and come back while none does;
+  the target's red one likewise with its own events.
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.

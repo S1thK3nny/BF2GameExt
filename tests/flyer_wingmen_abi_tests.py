@@ -728,6 +728,16 @@ for name in sorted(set(re.findall(r"starts_with\(base,\s*a->(\w+),\s*\"", source
         accepts = r"*(const uint8_t*)resolve(base, a->" + name + ") == 0xE9"
         assert accepts in source, f"{name} is detoured by {conflicts[name]}: its guard must take a JMP"
 assert {"entity_flyer_land", "entity_flyer_take_off", "flyer_do_trick"} <= set(conflicts), conflicts
+# The HUD's wingmen (render/hud_wingmen.cpp): health as camera shake reads it, and
+# their positions among the world-tracking ones TrueWidescreen retargets.
+hud = (SRC / "render/hud_wingmen.cpp").read_text()
+shake = (SRC / "render/camera_shake.cpp").read_text()
+assert constant(hud, "kGO_Health") == constant(shake, "kObj_Health") == 0x144
+assert constant(hud, "kGO_MaxHealth") == constant(shake, "kObj_MaxHealth") == 0x148
+wide = (SRC / "render/hud_true_widescreen.cpp").read_text()
+assert '"player1.wingman%d.position"' in wide and 'pbl_hash("player1.wingmen.target.position")' in wide
+assert "uint32_t s_tracked[2 * 3 + 16 + 8 + 1];" in wide
+assert '"player1.wingman%d.%s"' in hud and '"player1.wingmen.target.%s"' in hud
 # The trooper squad key's hold time, which the wingmen's matches.
 assert struct.unpack("<f", image[0x00A2A290 - base:0x00A2A294 - base])[0] == 1.0
 orders_core = (SRC / "ai/flyer_orders_core.hpp").read_text()

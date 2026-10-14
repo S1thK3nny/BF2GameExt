@@ -7,8 +7,8 @@ the detail behind it, every parameter and edge case, in five parts:
 - **How events are wired**: file structure, names, load order and which element
   property takes which type of event.
 - **GameExt events**: class, stance, vehicle and weapon icons, unit and weapon
-  states, floating target bar positions, a horizon-levelled reticule angle and the
-  command post strip.
+  states, floating target bar positions, a horizon-levelled reticule angle, the
+  command post strip and wingmen markers.
 - **Bar fill direction**: `FillFrom` on a `BarBitmap`.
 - **TrueWidescreen files**: `AuthoredRatio(w, h)` or `TrueWidescreen(1)` in a
   `FileInfo`, a whole file laid out at the screen shape it was written for and drawn
@@ -33,6 +33,7 @@ supplied by GameExt.
   - [Floating target bars](#floating-target-bars)
   - [Reticule horizon levelling](#reticule-horizon-levelling)
   - [Command post strip](#command-post-strip)
+  - [Wingmen markers](#wingmen-markers)
 - [Bar fill direction](#bar-fill-direction)
 - [TrueWidescreen files](#truewidescreen-files)
 - [Transforms](#transforms)
@@ -594,6 +595,41 @@ its player, as the game itself does, so there the bar moves as normal. Elsewhere
 client sees each post at rest, full for its owner or empty when neutral, and the
 change in owner when it happens. On the host and in single player every post's
 progress is live.
+
+### Wingmen markers
+
+Markers over the player's flyer wingmen (`[AI] FlyerWingmen`) and over the target of
+an attack my target order, for a `.hud` to draw its own. N runs 1 to 8: the wingmen
+flying, in their formation's slot order, so the ones after a wingman lost move up:
+
+| Event | Type | Carries |
+|---|---|---|
+| `player1.wingmen.count` | Uint | How many wingmen fly with the player |
+| `player1.wingmanN.position` | Vector3 | Screen fractions of the wingman's marker |
+| `player1.wingmanN.onScreen` | Bool | Sent as it comes into view |
+| `player1.wingmanN.offScreen` | Bool | Sent as it leaves the view, and as the slot empties |
+| `player1.wingmanN.direction` | Vector3 | `(0, 0, degrees)` toward it, for `EventRotation` |
+| `player1.wingmanN.distance` | Float | Metres from what the player controls |
+| `player1.wingmanN.health` | Float | `mCurHealth / mMaxHealth`, 0 to 1 |
+| `player1.wingmanN.disable` | Bool | The slot is empty |
+| `player1.wingmen.target.position`, `.onScreen`, `.offScreen`, `.direction`, `.distance`, `.disable` | | The attack target's, as a wingman's, without health; `offScreen` and `disable` as the attack ends |
+
+- **Placement, anchor, direction, distance and visibility:** as the command post
+  markers' ([Markers in the world](#markers-in-the-world)): the collision sphere's
+  centre lifted 1.3 m along the object's up axis, the stock `Target` element's rule,
+  and no slide to the side edges, since the player is in a flyer.
+- **Only when bound:** nothing is worked out until a `.hud` binds one of them. The
+  wingmen's and the target's are looked at apart.
+- **The fallback:** while a `.hud` binds no wingman event (nor `wingmen.count`), each
+  wingman gets the game's own marker from `TargetManager::AddMarker`: a cyan
+  `hud_objective_icon_circle` on the minimap and a common-target bracket on screen
+  (`[AI] FlyerWingmenMarkers=0` for none). While it binds none of the target's, the
+  target gets the same marker in red. The check runs every tick, so the game's markers
+  come and go with the HUD's binding.
+- **Where:** the wingmen are a modtools prototype for the host and single player, so
+  the events only carry anything there. Each binding still loads everywhere.
+- **TrueWidescreen:** `wingmanN.position` and `wingmen.target.position` are among the
+  world-tracking positions an opted-in file retargets, as the command posts' are.
 
 ## Bar fill direction
 

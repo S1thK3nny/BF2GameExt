@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "flyer_wingmen.hpp"
+#include "render/hud_wingmen.hpp"
 #include "flyer_avoidance.hpp"
 #include "flyer_orders_core.hpp"
 #include "flyer_real_flight.hpp"
@@ -782,14 +783,15 @@ void lost_event(const Formation& f, const Wingman& w, const char* code)
 // over each wingman on the map, and, as a "common" HUD target, its bracket on
 // screen in the same colour; for the player's team, from the moment a wingman
 // joins until it leaves. There are 32 between all markers (AddMarker takes no
-// more and says nothing).
+// more and says nothing). Not where a .hud draws its own (hud_wingmen.hpp: the
+// user, "If the hud entry isn't found, resort to the current implementation").
 constexpr uint32_t kMarkerIcon  = pbl_hash("hud_objective_icon_circle");
 constexpr uint32_t kMarkerColor = pbl_hash("cyan");
 constexpr float    kMarkerScale = 3.0f;
 
 void mark(Wingman& w, const uint8_t* leader)
 {
-   if (!s_addMarker || !g_flyerWingmenMarkers || w.markTeams || !leader) return;
+   if (!s_addMarker || !g_flyerWingmenMarkers || w.markTeams || !leader || hud_wingmen_bound()) return;
    const int team = team_of(leader);
    if (team < 0) return;
    const uint32_t teams = 1u << team;
@@ -805,6 +807,23 @@ void unmark(Wingman& w)
    if (!w.markTeams) return;
    if (s_removeMarker && handle_of(w.obj) == w.handle) s_removeMarker(w.obj, nullptr, w.markTeams);
    w.markTeams = 0;
+}
+
+// The flight's attack target's marker, while it attacks one and no .hud draws its
+// own: the same circle, red, on the map and bracketed on screen.
+constexpr uint32_t kTargetMarkColor = pbl_hash("red");
+struct TargetMark {
+   uint8_t* obj = nullptr;
+   uint32_t handle = 0;
+   uint32_t teams = 0;
+};
+TargetMark s_targetMark;
+
+void unmark_target()
+{
+   if (s_targetMark.obj && s_removeMarker && handle_of(s_targetMark.obj) == s_targetMark.handle)
+      s_removeMarker(s_targetMark.obj, nullptr, s_targetMark.teams);
+   s_targetMark = TargetMark{};
 }
 
 void drop(Formation& f, int i, const char* why, const char* code = nullptr)
@@ -2210,6 +2229,38 @@ const Line& line_for(Order o)
    return o == Order::Engage ? kSayEngage : o == Order::Cover ? kSayCover : o == Order::Attack ? kSayAttack : kSayFormUp;
 }
 
+// The wingmen's markers, each tick: off while a .hud draws its own, on while
+// none does (a wingman that joined before the HUD was up included).
+void update_marks()
+{
+   if (!s_player.leader) return;
+   const bool drawn = hud_wingmen_bound();
+   for (int i = 0; i < s_player.count; ++i) {
+      Wingman& w = s_player.wing[i];
+      if (drawn) unmark(w);
+      else if (handle_of(w.obj) == w.handle && alive(w.obj)) mark(w, s_player.leader);
+   }
+}
+
+// The attack target's marker (unmark_target), each tick: on the target the
+// flight attacks, off as the attack ends.
+void update_target_mark()
+{
+   uint8_t* want = nullptr;
+   if (s_addMarker && g_flyerWingmenMarkers && s_player.leader && s_player.order == Order::Attack &&
+       !hud_wingmen_target_bound()) {
+      uint8_t* const t = s_player.attackTarget;
+      if (t && handle_of(t) == s_player.attackHandle && alive(t)) want = t;
+   }
+   if (want == s_targetMark.obj && (!want || handle_of(want) == s_targetMark.handle)) return;
+   unmark_target();
+   if (!want) return;
+   const int team = team_of(s_player.leader);
+   if (team < 0) return;
+   s_targetMark = TargetMark{want, handle_of(want), 1u << team};
+   s_addMarker(want, nullptr, kMarkerIcon, kMarkerScale, s_targetMark.teams, kTargetMarkColor, 1, 0, 0, 0.0f);
+}
+
 void tick(double now)
 {
    update_settling(now);
@@ -2255,6 +2306,8 @@ void tick(double now)
       }
       report(now);
    }
+   update_marks();
+   update_target_mark();
    tick_squadrons(now);
 }
 
@@ -3729,6 +3782,29 @@ const char* lost_reason() { return s_lostReason; }
 
 } // namespace flyer_wingmen_lua
 
+int flyer_wingmen_hud_list(uint8_t** out, int max)
+{
+   if (!s_detoured || !out || max <= 0) return 0;
+   int n = 0;
+   bool taken[flyer_wingmen::kMaxWingmen] = {};
+   for (int k = 0; k < s_player.count && n < max; ++k) {
+      int i = -1;   // the next in slot order
+      for (int j = 0; j < s_player.count; ++j)
+         if (!taken[j] && (i < 0 || s_player.wing[j].slot < s_player.wing[i].slot)) i = j;
+      taken[i] = true;
+      const Wingman& w = s_player.wing[i];
+      if (handle_of(w.obj) == w.handle && alive(w.obj)) out[n++] = w.obj;
+   }
+   return n;
+}
+
+uint8_t* flyer_wingmen_hud_target()
+{
+   if (!s_detoured || !s_player.leader || s_player.order != Order::Attack) return nullptr;
+   uint8_t* const t = s_player.attackTarget;
+   return t && handle_of(t) == s_player.attackHandle && alive(t) ? t : nullptr;
+}
+
 // The mission is over: its flights and what its script said go with it, and
 // nothing is fired (its Lua state is going).
 void flyer_wingmen_mission_end()
@@ -3752,6 +3828,7 @@ void flyer_wingmen_mission_end()
    s_squadHold = flyer_orders::SquadHold{};
    for (Settling& e : s_settling) e = Settling{};
    s_settlingCount = 0;
+   s_targetMark = TargetMark{};
    s_mapShapesLogged = false;
 }
 
