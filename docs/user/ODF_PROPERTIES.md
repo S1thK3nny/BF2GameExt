@@ -568,6 +568,40 @@ SquadSize      = "3"
 
 Set them on a side's common base class and every unit that inherits from it drills the same way. The squad faces the way it travels: turning to look round does not swing it. CTF escorts round a flag carrier and vehicle convoys keep the game's own slots. Squads are run on the host and in single player; clients see the result.
 
+## Flyer Wingmen
+
+*A prototype: modtools only for now, in single player and on the host.*
+
+The player's [flyer wingmen](FEATURES.md#ai-systems) go by properties on two classes: the flyer the player flies (the leader) and the flyers that fly with it. A property the leader's class sets, itself or through `ClassParent`, decides that setting whatever `BF2GameExt.ini` says, and a class setting any of them has wingmen even where the INI turns them off (`[AI] FlyerWingmen`). A mission script can say more still: see [Lua](LUA_API.md#flyer-wingmen).
+
+```
+[Properties]
+WingmanClass      = "rep_fly_arc170fighter rep_fly_vwing"
+WingmanCount      = "3"
+WingmanStartOrder = "engage"
+```
+
+On the leader's class:
+
+| Property | Value | Description | Since |
+|----------|-------|-------------|-------|
+| `WingmanClass` | ODF names | The classes that may fly as its wingmen. Several lines, or several names on one, add up; a child's own lines replace its parent's. Without any, every friendly AI flyer that can keep up (a top speed at least 90% of the leader's) may. | 1.2.0 |
+| `WingmanCount` | `0` to `8` | How many it calls up on its own. `0` leads none. | 1.2.0 |
+| `WingmanAuto` | `1` or `0` | `1`: wingmen are called up at takeoff; `0`: only on the squad key. Losses are made up either way once they have been. | 1.2.0 |
+| `WingmanSlot` | `"x y z [class ...]"` | One slot per line, in metres from the leader (x right, y up, z ahead), written as a command vehicle's `SpawnPointLocation` lines are. Classes named after the numbers keep that slot for themselves, if they are on the `WingmanClass` list. The lines set how many it takes unless `WingmanCount` asks fewer. | 1.2.0 |
+| `WingmanFormation` | names | The map's formation shapes (its formation paths) the flight flies, by name: the first the map has. Without any, the first of its `SquadronFormation` shapes that holds the whole flight (else the largest), else a vee. | 1.2.0 |
+| `WingmanLand` | `1` or `0` | `1`: its wingmen land beside it when it lands, where the ground is level with it, else they circle overhead; `0`: they break off. Over `[AI] FlyerWingmenLand`. | 1.2.0 |
+| `WingmanStartOrder` | `formup`, `engage` or `cover` | The order its flight starts with when called up. Form up by default. | 1.2.0 |
+| `WingmanEngageRange` | metres | How far from the leader engaging wingmen take enemies on, 100 to 5000; 800 by default. They chase one a quarter further before giving it up. | 1.2.0 |
+
+On the class that flies as a wingman:
+
+| Property | Value | Description | Since |
+|----------|-------|-------------|-------|
+| `Wingman` | `0` | Never called up as anyone's wingman, the player's or an AI squadron's: a hero's ship, say. A mission script may still name it. | 1.2.0 |
+| `WingmanRole` | `fighter` or `bomber` | What it goes for first when engaging: enemy flyers (`fighter`, the default) or targets on the ground (`bomber`). | 1.2.0 |
+| `WingmanExitOnLand` | `1` or `0` | `1`, the default: landed beside its leader, its pilot gets out. `0`: it waits aboard and takes off when the leader does. | 1.2.0 |
+
 ## Building Classes
 
 | Property | Value | Description | Since |

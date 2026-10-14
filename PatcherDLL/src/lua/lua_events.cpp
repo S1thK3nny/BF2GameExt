@@ -4,6 +4,7 @@
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "ai/flyer_wingmen.hpp"
 #include "game/Battlefront2/Source/Character.h"
 
 #include <detours.h>
@@ -46,6 +47,12 @@ static const LuaEventDef kEvents[] = {
    // The engine fires CharacterEnterVehicle but never wired up the exit side,
    // so this is the one genuinely missing half of a stock pair.
    { "CharacterExitVehicle", LuaEventFamily::CharacterGameObject },
+   // The player's flyer wingmen (ai/flyer_wingmen.hpp), fired once the flyer's
+   // own update is done.
+   { "WingmanJoin",          LuaEventFamily::CharacterGameObject },
+   { "WingmanLost",          LuaEventFamily::CharacterGameObject },
+   { "WingmenOrder",         LuaEventFamily::CharacterGameObject },
+   { "WingmanLanded",        LuaEventFamily::CharacterGameObject },
 };
 static_assert(_countof(kEvents) == (size_t)LuaEventId::Count,
               "kEvents[] and LuaEventId must stay in step");
@@ -210,6 +217,9 @@ static void __cdecl hooked_event_manager_init()
 
 static void __cdecl hooked_event_manager_cleanup()
 {
+   // The mission is over: the flyer wingmen forget its flights and what its
+   // script said, before anything could fire into the Lua state going away.
+   flyer_wingmen_mission_end();
    cleanup_all();
    s_origCleanup();
 }

@@ -2,6 +2,7 @@
 #include "util/content_census.hpp"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
+#include "lua_wingmen.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -1724,6 +1725,21 @@ static const lua_func_entry custom_functions[] = {
    { "SetInstanceProperty",      lua_SetInstanceProperty },
    { "SetFogRange",              lua_SetFogRange },
    { "SetFogEnable",             lua_SetFogEnable },
+   // The player's flyer wingmen (lua_wingmen.cpp; modtools only for now).
+   { "CallWingmen",              lua_CallWingmen },
+   { "DismissWingmen",           lua_DismissWingmen },
+   { "AddWingman",               lua_AddWingman },
+   { "RemoveWingman",            lua_RemoveWingman },
+   { "SetWingmenOrder",          lua_SetWingmenOrder },
+   { "GetWingmenOrder",          lua_GetWingmenOrder },
+   { "SetWingmenLocked",         lua_SetWingmenLocked },
+   { "SetWingmenFormation",      lua_SetWingmenFormation },
+   { "SetWingmenLand",           lua_SetWingmenLand },
+   { "GetWingmenCount",          lua_GetWingmenCount },
+   { "GetWingman",               lua_GetWingman },
+   { "IsWingman",                lua_IsWingman },
+   { "GetWingmanLeader",         lua_GetWingmanLeader },
+   { "GetWingmanLostReason",     lua_GetWingmanLostReason },
    { nullptr, nullptr }
 };
 

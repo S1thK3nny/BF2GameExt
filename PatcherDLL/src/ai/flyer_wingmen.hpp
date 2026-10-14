@@ -252,10 +252,17 @@
 // map's formation shapes, as drawn: the first the class's WingmanFormation key
 // names that the map has, else the first of its SquadronFormation shapes that
 // holds all its wingmen (else the largest); else the vee. The free slots fill
-// in order, each with the nearest flyer that may take it. On the class that
-// flies as a wingman: WingmanExitOnLand = 0 keeps its pilot aboard when it lands
-// beside its leader, to take off with it (else it gets out). On the leader's:
-// WingmanLand = 0 lets its wingmen go as it lands (else they land with it).
+// in order, each with the nearest flyer that may take it. On the leader's
+// class too: WingmanLand = 0 lets its wingmen go as it lands (else they land
+// with it); WingmanStartOrder (formup, engage or cover) is the order its flight
+// starts with when called up; WingmanEngageRange (metres, 100 to 5000) stands
+// for the 800 m engaging wingmen reach out to, a foe chased a quarter further.
+// On the class that flies as a wingman: WingmanExitOnLand = 0 keeps its pilot
+// aboard when it lands beside its leader, to take off with it (else it gets
+// out); Wingman = 0 keeps it out of every flight, the player's and the AI
+// squadrons' (a script may still name it); WingmanRole = bomber sends it at
+// targets on the ground before flyers in the air (fighter, the default: the
+// other way round).
 //
 // A map or mod may word the messages its own way under the localisation keys
 // game.wingmen.formup, .engage, .attack, .cover, .notarget, .none, .targetdown
@@ -277,3 +284,71 @@ extern bool  g_flyerRealFlightSquadrons;
 
 void flyer_wingmen_install(uintptr_t exe_base);
 void flyer_wingmen_uninstall();
+
+// The mission is over (EventManager::Cleanup): its flights and whatever its
+// script said go, and nothing more is fired.
+void flyer_wingmen_mission_end();
+
+// =============================================================================
+// The player's flight from a mission script (lua/lua_wingmen.cpp turns these
+// into Lua functions; docs/user/LUA_API.md). What a script says holds for the
+// rest of the mission. Modtools only, like the rest: elsewhere each does
+// nothing and says so (0, false, null).
+//
+//   - The roster: flyers a script names (AddWingman) join the player's flight
+//     before any called up on their own, whatever their classes' keys say, each
+//     once it is a friendly AI flyer in the air, from anywhere. Named by a world
+//     object's name, it is whatever carries that name, so the flyer a named
+//     spawner sends out next joins in turn; named as a flyer, that flyer, until
+//     it is gone. RemoveWingman takes one off and lets it go, and it is never
+//     called up on its own again.
+//   - CallWingmen: wingmen are called up at every takeoff from now on, and at
+//     once where the player flies; a number sets how many are called up on their
+//     own (named ones come on top, as the formation has slots).
+//     DismissWingmen: the flight is let go, its names forgotten, and none is
+//     called up on its own until CallWingmen or the squad key.
+//   - SetWingmenLocked: none called up on their own (nor by the squad key), and
+//     none let go for its distance or for not reaching its slot in time.
+//   - SetWingmenOrder: formup, engage or cover is the flight's order now and
+//     the one flights start with from now on; attack takes a target (else the
+//     player's own, as the comm key does) for the flight in the air. A script's
+//     orders put no line on the HUD.
+//   - SetWingmenFormation: a map shape by name, or "vee"; nothing: the class's
+//     own choice again. SetWingmenLand over WingmanLand and the INI.
+//   - Events (lua/lua_events.hpp; each fn(charIndex, object)): OnWingmanJoin
+//     and OnWingmanLost (the pilot, its flyer; GetWingmanLostReason says why:
+//     killed, pilot, landed, team, far, late, removed, dismissed, formation,
+//     leader), OnWingmenOrder (the player, an attack's target), OnWingmanLanded
+//     (the pilot, its flyer, down beside the player). Queued and fired once the
+//     flyer's own update is done, so a callback may change the flight.
+// =============================================================================
+namespace flyer_wingmen_lua {
+
+// A unit as a script gives it: a flyer or other world object (an entity
+// pointer, or a character's vehicle), or a world object's name (PblHash), for
+// whatever carries it.
+struct WingmanRef {
+   uint8_t* obj = nullptr;
+   uint32_t name = 0;
+};
+
+bool        available();
+int         call(bool setSize, int size);   // the player's wingmen after it
+int         dismiss();                      // how many were let go
+bool        add(WingmanRef unit);
+bool        remove(WingmanRef unit);
+bool        give_order(const char* order, WingmanRef target, bool hasTarget);
+const char* order();                        // null: no flight
+void        lock(bool locked);
+bool        formation(const char* name);    // null or "": the class's own
+void        land(int land);                 // -1: the class's and the INI's again
+int         count();
+uint8_t*    wingman(int i);                 // the i-th (0 first) in slot order, or null
+bool        is_wingman(const uint8_t* flyer);
+uint8_t*    leader_of(const uint8_t* flyer);   // the player's or an AI squadron's leader
+int         pilot(const uint8_t* flyer);       // the character flying it, or -1
+uint8_t*    character_object(int index, bool vehicleOnly);   // its vehicle, else its soldier
+uint8_t*    object(WingmanRef unit);           // the world object it names now, or null
+const char* lost_reason();                     // during OnWingmanLost, else null
+
+} // namespace flyer_wingmen_lua

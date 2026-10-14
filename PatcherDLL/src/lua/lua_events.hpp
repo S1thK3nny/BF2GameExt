@@ -33,6 +33,10 @@ enum class LuaEventFamily {
 // Stable ids for the events in kEvents[]. Features fire by id.
 enum class LuaEventId {
    CharacterExitVehicle,
+   WingmanJoin,      // ai/flyer_wingmen.cpp: the pilot, its flyer
+   WingmanLost,      // the pilot, its flyer (nil once gone); GetWingmanLostReason
+   WingmenOrder,     // the player, an attack's target (nil for the other orders)
+   WingmanLanded,    // the pilot, its flyer, down beside the player
    Count
 };
 

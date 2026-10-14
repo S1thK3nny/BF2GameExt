@@ -122,6 +122,15 @@ Scripts can check the running version through `GameExt.version`.
   barriers, as soldiers going anywhere else do, then falls back into formation. Stock followers
   walk straight along their place's trail and get caught on scenery. `[AI] SquadPathfinding=1`;
   not yet tested in play.
+- **Flyer wingmen** - Friendly AI flyers fly in formation on the player's flyer, take orders
+  from the squad and comm keys (form up, engage, attack my target, cover me) and land with it.
+  Flyer classes set who flies with whom, the formation, the first order, the engage range and a
+  wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
+  flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with
+  `OnWingmanJoin`, `OnWingmanLost`, `OnWingmenOrder` and `OnWingmanLanded` events. A prototype,
+  modtools only, `[AI] FlyerWingmen=0`; orders, landing and the Lua side not yet tested in play.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#flyer-wingmen) and
+  [Lua API](docs/user/LUA_API.md#flyer-wingmen).
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

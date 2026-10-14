@@ -36,6 +36,61 @@ inline Order resume_after_attack(Order current, Order resume)
    return current == Order::Attack ? resume : current;
 }
 
+// A word as an ODF or a mission script writes it: case, quotes, spaces, '_' and
+// '-' ignored, so "Form Up", "form_up" and "FORMUP" are all `formup` (`word`
+// in lower case, nothing between its letters).
+inline bool word_is(const char* value, const char* word)
+{
+   if (!value || !word) return false;
+   const char* p = value;
+   for (const char* w = word;; ++p, ++w) {
+      while (*p == ' ' || *p == '\t' || *p == '"' || *p == '_' || *p == '-' || *p == '\r' || *p == '\n') ++p;
+      if (!*w) return !*p;
+      const char c = *p >= 'A' && *p <= 'Z' ? (char)(*p - 'A' + 'a') : *p;
+      if (c != *w) return false;
+   }
+}
+
+// An order by its name: formup, engage, cover (or coverme), and attack (or
+// attackmytarget) where `attack` allows it.
+inline bool order_from(const char* value, Order& out, bool attack = false)
+{
+   if (word_is(value, "formup")) out = Order::FormUp;
+   else if (word_is(value, "engage")) out = Order::Engage;
+   else if (word_is(value, "cover") || word_is(value, "coverme")) out = Order::Cover;
+   else if (attack && (word_is(value, "attack") || word_is(value, "attackmytarget"))) out = Order::Attack;
+   else return false;
+   return true;
+}
+
+// The name a script reads back (GetWingmenOrder).
+inline const char* order_word(Order o)
+{
+   switch (o) {
+   case Order::FormUp: return "formup";
+   case Order::Engage: return "engage";
+   case Order::Attack: return "attack";
+   case Order::Cover: return "cover";
+   }
+   return "formup";
+}
+
+// A leader class's WingmanStartOrder: the order its flight starts with when
+// called up; attack needs a target, so it is not one.
+inline bool set_start_order(flyer_wingmen::ClassKeys& k, const char* value)
+{
+   Order o;
+   if (!order_from(value, o)) return false;
+   k.hasStartOrder = true;
+   k.startOrder = (uint8_t)o;
+   return true;
+}
+
+inline Order start_order(const flyer_wingmen::ClassKeys* k)
+{
+   return k && k->hasStartOrder ? (Order)k->startOrder : Order::FormUp;
+}
+
 // ---- Joining from afar ----------------------------------------------------------------
 // Recruits come from anywhere on the map and fly in at their stretched speeds
 // (the leader's plus 30 m/s). One counts as joined once within kJoinedRange of
@@ -66,11 +121,46 @@ constexpr float kCoverKeep   = 1500.0f;
 constexpr float kAttackKeep  = 3000.0f;
 constexpr float kChaseLeash  = 2500.0f;
 
+// A leader class's WingmanEngageRange stands for kEngageRange (kMinEngageRange
+// to kMaxEngageRange), and a foe is chased as much further as kEngageKeep is
+// past kEngageRange (a quarter).
+constexpr float kMinEngageRange = 100.0f;    // m
+constexpr float kMaxEngageRange = 5000.0f;   // m
+
+inline bool set_engage_range(flyer_wingmen::ClassKeys& k, const char* value)
+{
+   double v;
+   if (!flyer_wingmen::read_number(value, v)) return false;
+   k.hasEngageRange = true;
+   k.engageRange = clampf((float)v, kMinEngageRange, kMaxEngageRange);
+   return true;
+}
+
+inline float engage_range(const flyer_wingmen::ClassKeys* k) { return k && k->hasEngageRange ? k->engageRange : kEngageRange; }
+inline float engage_keep(float range) { return range * (kEngageKeep / kEngageRange); }
+
 // Each wingman takes the foe that costs it least: its distance, plus
-// kGroundCost for one on the ground (the air comes first) and kSpreadCost for
-// every wingman already on it (they spread out before they double up).
+// kGroundCost for one its role comes to second (a fighter's: on the ground,
+// the air coming first; a bomber's: in the air) and kSpreadCost for every
+// wingman already on it (they spread out before they double up).
 constexpr float kGroundCost = 600.0f;   // m
 constexpr float kSpreadCost = 400.0f;   // m
+
+// A wingman class's WingmanRole.
+enum class Role : uint8_t { Fighter, Bomber };
+
+inline bool set_role(flyer_wingmen::ClassKeys& k, const char* value)
+{
+   Role r;
+   if (word_is(value, "fighter")) r = Role::Fighter;
+   else if (word_is(value, "bomber")) r = Role::Bomber;
+   else return false;
+   k.hasRole = true;
+   k.role = (uint8_t)r;
+   return true;
+}
+
+inline Role role_of(const flyer_wingmen::ClassKeys* k) { return k && k->hasRole ? (Role)k->role : Role::Fighter; }
 
 struct Foe {
    V3   pos;
@@ -78,18 +168,19 @@ struct Foe {
    int  taken = 0;   // wingmen on it so far
 };
 
-inline float foe_cost(V3 me, const Foe& f)
+inline float foe_cost(V3 me, const Foe& f, Role role = Role::Fighter)
 {
-   return flyer_wingmen::length(f.pos - me) + (f.ground ? kGroundCost : 0.0f) + kSpreadCost * (float)f.taken;
+   const bool second = role == Role::Bomber ? !f.ground : f.ground;
+   return flyer_wingmen::length(f.pos - me) + (second ? kGroundCost : 0.0f) + kSpreadCost * (float)f.taken;
 }
 
 // The cheapest foe for a wingman at `me`: its index, or -1 for none.
-inline int pick_foe(V3 me, const Foe* foes, int n)
+inline int pick_foe(V3 me, const Foe* foes, int n, Role role = Role::Fighter)
 {
    int best = -1;
    float bestCost = 0.0f;
    for (int i = 0; foes && i < n; ++i) {
-      const float c = foe_cost(me, foes[i]);
+      const float c = foe_cost(me, foes[i], role);
       if (!std::isfinite(c)) continue;
       if (best < 0 || c < bestCost) {
          best = i;

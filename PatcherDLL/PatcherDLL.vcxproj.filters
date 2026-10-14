@@ -139,6 +139,9 @@
     <ClInclude Include="src\lua\lua_events.hpp">
       <Filter>lua</Filter>
     </ClInclude>
+    <ClInclude Include="src\lua\lua_wingmen.hpp">
+      <Filter>lua</Filter>
+    </ClInclude>
     <ClInclude Include="src\debug_commands\command_registry.hpp">
       <Filter>debug_commands</Filter>
     </ClInclude>
@@ -688,6 +691,9 @@
       <Filter>lua</Filter>
     </ClCompile>
     <ClCompile Include="src\lua\lua_events.cpp">
+      <Filter>lua</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lua\lua_wingmen.cpp">
       <Filter>lua</Filter>
     </ClCompile>
     <ClCompile Include="src\debug_commands\debug_command.cpp">

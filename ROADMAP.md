@@ -467,15 +467,16 @@ formation; the flight now flies the map's formation shapes as drawn (`WingmanFor
 squadrons do. Orders are built, unplayed: wingmen called up from anywhere, losses made up, form up and
 engage on the squad key, attack my target and cover me on the comm keys' attack and defend, a line on the
 HUD for each, and landing beside the player (pilots get out unless `WingmanExitOnLand = 0`; `WingmanLand = 0`
-lets the flight go instead)
+lets the flight go instead), the keys `Wingman = 0`, `WingmanRole`, `WingmanStartOrder` and
+`WingmanEngageRange`, and Lua calls and events for missions (`CallWingmen`, `AddWingman`, `SetWingmenOrder`,
+`SetWingmenLocked`, `OnWingmanLost` ...; docs/user/LUA_API.md)
 ([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play
-them; more ODF keys (`Wingman = 0`, `WingmanRole`, `WingmanStartOrder`, `WingmanEngageRange`); cycling
-formations; Steam and GOG. Details in
+them; cycling formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
-**Wingmen from Lua** - Missions cannot script a flight. Add Lua calls to call up and dismiss wingmen, add
-or remove named units, give orders (with a target), lock the flight, pick its formation and call signs, and
-events for a wingman joining, being lost, scoring a kill, an order given and the flight landing.
+**Wingmen call signs and AI flights from Lua** - Missions can script the player's flight but not name its
+wingmen or the AI's. Give wingmen call signs for the HUD's lines and radio chatter ("Red Two: copy"), and
+let a script make or break an AI squadron (`SetSquadron(leader, {members}, formation)`, `BreakSquadron`).
 
 **AI goals of their own** - AI goals are a team's; each unit just sits in one until it respawns
 (docs/RE/AISystem.md, "Team goals, joined per unit"). Give a unit its own: keep it in a chosen goal across

@@ -606,4 +606,25 @@ assert pbl_hash("game.squadcommand.follow") == 0x731FD493
 for key in ("formup", "engage", "attack", "cover", "notarget", "none", "targetdown", "targetlost"):
     assert f'pbl_hash("game.wingmen.{key}")' in source, key
 assert 'pbl_hash("WingmanExitOnLand")' in source and 'pbl_hash("WingmanLand")' in source
+# The keys a mission sets, as no stock ODF key hashes: none of their hashes is in
+# the exe at all.
+for key in ("Wingman", "WingmanRole", "WingmanStartOrder", "WingmanEngageRange"):
+    assert f'pbl_hash("{key}")' in source, key
+    assert struct.pack("<I", pbl_hash(key)) not in image, key
+# A mission script's names: _GetEntity<GameObject> (0x00470FF0) searches
+# EntityEx::mIdMap (0x00B7AD3C, 0x800 slots) with PblHashTableCode::_Find
+# (0x007E1A40), as install_names calls it; _Find's prologue is install_names' guard.
+assert constant(addrs, "entityex_id_map") == 0x00B7AD3C and constant(addrs, "pbl_hash_table_find") == 0x007E1A40
+get_entity = [(i.mnemonic, i.op_str) for i in decoder.disasm(image[0x00471040 - base:0x00471040 - base + 16], 0x00471040, count=4)]
+assert get_entity == [("push", "eax"), ("push", "0x800"), ("push", "0xb7ad3c"), ("call", "0x7e1a40")], get_entity
+assert constant(source, "kIdMapSlots") == 0x800
+find_guard = r"\x8B\x54\x24\x08\xD1\xFA\x56\x8B\x74\x24\x10"
+assert image[0x007E1A40 - base:0x007E1A40 - base + 11] == bytes(int(b, 16) for b in find_guard.split(r"\x")[1:])
+assert f'a->pbl_hash_table_find, "{find_guard}", 11' in source
+# GameObject's RTTI name, which the game's own lookup checks the same way.
+assert 'pbl_hash("GameObject")' in source
+# The script's events are engine events of the character family.
+events = (SRC / "lua/lua_events.cpp").read_text()
+for name in ("WingmanJoin", "WingmanLost", "WingmenOrder", "WingmanLanded"):
+    assert re.search(r'\{ "' + name + r'",\s+LuaEventFamily::CharacterGameObject \}', events), name
 print(f"modtools: {len(checks)} instruction checks, the guards and the constants passed")

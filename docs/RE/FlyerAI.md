@@ -987,3 +987,53 @@ its spot`, `landed: its pilot gets out (WingmanExitOnLand)`, `the leader takes o
 with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own combat
 may take it back between settings), how the passes fare against terrain, and how an AI flyer lands when told
 to at speed.
+
+## Wingmen from a mission script, and more ODF keys (prototype, 2026-10-14, modtools only)
+
+Asked for in the brainstorm the user agreed to start on ("Sounds good to me"): the keys `Wingman = 0`,
+`WingmanRole`, `WingmanStartOrder` and `WingmanEngageRange`, and Lua to call up, name, order and lock the
+flight, with events. The user-facing tables are in docs/user/ODF_PROPERTIES.md and docs/user/LUA_API.md
+("Flyer Wingmen"); the code is `ai/flyer_wingmen.cpp` (the flight) and `lua/lua_wingmen.cpp` (the Lua side).
+
+- **The keys.** `Wingman = 0` (on the wingman's class) keeps a class out of every call-up, the player's and
+  GameExt's AI squadrons' (not the game's own spline squadrons, which GameExt does not touch); a script
+  naming it overrides it. `WingmanRole = bomber` turns the foe cost round: kGroundCost goes on flyers in the
+  air instead of targets on the ground. `WingmanStartOrder` (formup, engage, cover; never attack, which
+  needs a target) is the order a flight starts with at takeoff and on the squad key's call-up.
+  `WingmanEngageRange` replaces the 800 m (100 to 5000), the chase keeping the same quarter on top (1000 m
+  for 800). None of the four hashes appears anywhere in the modtools or Steam exe, so no stock key is
+  shadowed. Words are matched with case, quotes, spaces, `_` and `-` ignored (`flyer_orders::word_is`).
+- **Names.** A world object's name goes through the game's own table: `_GetEntity<GameObject>` (P
+  `0x006568E0`, M `0x00470FF0`, an LTCG-style register call on modtools) takes a light userdata as the
+  object itself, else `PblHashTableCode::_Find(EntityEx::mIdMap, 0x800, PblHash(name))` (M `0x007E1A40`,
+  table M `0x00B7AD3C`; instance_props.cpp already uses both), then checks `IsRtti(GameObject)`. A light
+  userdata from `GetCharacterVehicle` is the vehicle's `Trackable` (its Controllable +0x18, vptr +0x20), the
+  same object `object_of` gives, so pointers from either side match. A vehicle spawner's flyer carries the
+  spawner's name, so a name keeps naming the flyer that spawner sends out next: that is the roster's point.
+- **The roster.** Up to 8 entries, by name (resolved each tick) or by flyer and handle (dropped once the handle
+  no longer matches). Entries join before any call-up on their own, into the first free slot that takes their
+  class (else any), from anywhere, whatever the class keys say; one leading an AI squadron dissolves it. A
+  removed flyer's handle is kept out of later call-ups (32 kept). The flight's capacity is its map shape's
+  slots (now all of them, not just as many as are called up), its WingmanSlot lines, or 8.
+- **What a script sets** holds for the mission: `CallWingmen` turns call-ups at takeoff on (over
+  WingmanAuto) and can set how many come on their own; `DismissWingmen` turns them off and empties the
+  roster; `SetWingmenLocked` stops call-ups on their own (the squad key's too) and every let-go for distance or
+  lateness; `SetWingmenOrder` sets the standing order (over WingmanStartOrder) or attacks a target (anything
+  not friendly by `GetAffiliationToMe`); `SetWingmenFormation` takes a map shape or the vee over everything
+  else and re-slots the flight; `SetWingmenLand` overrides WingmanLand and the INI. A script's orders put no
+  line on the HUD (`Formation::quiet`, also for its attack's end).
+- **Events** are four rows in lua_events.cpp's table, of the `Character, GameObject` family, so the engine
+  makes `On...`, `On...Name/Team/Class` and `Release...` and stubs them on network clients. The pilot is the
+  character whose `mVehicle` is the flyer's own Controllable (+0x240), found when it joins and kept, so a lost
+  wingman still names its pilot. They are queued and fired after the original `EntityFlyer::UpdateIndirect`
+  returns, or at the end of the script's call, never halfway through changing a flight; a callback calling
+  back in only queues (the flush loop takes it). `GetWingmanLostReason` reads the reason of the event being
+  fired.
+- **Mission end.** `EventManager::Cleanup` (the GameLoop's, per mission) now also calls
+  `flyer_wingmen_mission_end`: the flights, the roster and everything a script set are dropped there, and
+  nothing more fires into the Lua state on its way out. Before, formations kept pointers into the old level
+  until the next tick found them gone.
+- **Checks:** `tests/flyer_wingmen_tests.cpp` (`mission_keys`: words, orders by name, the start order, the
+  engage range and its clamp, the roles' foe choice, Wingman = 0, the script's flight size);
+  `tests/flyer_wingmen_abi_tests.py` (the name lookup's push sequence and `_Find`'s guard, the keys' hashes
+  absent from the exe, the event rows); the mutation suites `orders` and `wingmen`. Nothing of it played.

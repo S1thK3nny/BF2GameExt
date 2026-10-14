@@ -849,6 +849,84 @@ void landing()
    assert(worst < 60.0f);
 }
 
+// The keys and words a mission sets: orders by name, the order a flight starts
+// with, a wingman's role, how far engaging reaches, who may fly as a wingman,
+// and how many are called up on their own.
+void mission_keys()
+{
+   using namespace flyer_orders;
+   // Names: case, quotes, spaces, '_' and '-' ignored; nothing more, nothing less.
+   assert(word_is("Form Up", "formup") && word_is("form_up", "formup") && word_is("FORMUP", "formup"));
+   assert(word_is("\"engage\"", "engage") && word_is(" cover-me ", "coverme"));
+   assert(!word_is("engaged", "engage") && !word_is("engag", "engage") && !word_is("", "formup"));
+   assert(!word_is(nullptr, "formup") && !word_is("formup", nullptr));
+   Order o = Order::Engage;
+   assert(order_from("formup", o) && o == Order::FormUp);
+   assert(order_from("Engage", o) && o == Order::Engage);
+   assert(order_from("cover", o) && o == Order::Cover);
+   o = Order::FormUp;
+   assert(order_from("Cover Me", o) && o == Order::Cover);
+   assert(!order_from("attack", o) && o == Order::Cover);   // only where an attack is allowed; o kept
+   assert(order_from("attack", o, true) && o == Order::Attack);
+   assert(order_from("attack my target", o, true) && o == Order::Attack);
+   assert(!order_from("retreat", o, true) && !order_from(nullptr, o, true));
+   for (Order each : {Order::FormUp, Order::Engage, Order::Attack, Order::Cover}) {
+      Order back = Order::FormUp;
+      assert(order_from(order_word(each), back, true) && back == each);
+   }
+   assert(std::string(order_word(Order::Cover)) == "cover" && std::string(order_word(Order::FormUp)) == "formup");
+
+   // WingmanStartOrder: form up, engage or cover, never attack; a leader key.
+   ClassKeys leader;
+   assert(start_order(&leader) == Order::FormUp && start_order(nullptr) == Order::FormUp);
+   assert(set_start_order(leader, "engage") && start_order(&leader) == Order::Engage && sets_any(&leader));
+   assert(!set_start_order(leader, "attack") && start_order(&leader) == Order::Engage);
+   assert(set_start_order(leader, "Cover Me") && start_order(&leader) == Order::Cover);
+   const ClassKeys child = flyer_wingmen::inherited(leader);
+   assert(start_order(&child) == Order::Cover);
+
+   // WingmanEngageRange: in place of the 800 m, clamped, the chase a quarter further.
+   ClassKeys ranged;
+   assert(engage_range(&ranged) == kEngageRange && engage_range(nullptr) == kEngageRange);
+   assert(near(engage_keep(kEngageRange), kEngageKeep));
+   assert(set_engage_range(ranged, "1500") && near(engage_range(&ranged), 1500.0f) && sets_any(&ranged));
+   assert(near(engage_keep(engage_range(&ranged)), 1875.0f));
+   assert(set_engage_range(ranged, "20") && near(engage_range(&ranged), 100.0f));
+   assert(set_engage_range(ranged, "99999") && near(engage_range(&ranged), 5000.0f));
+   assert(!set_engage_range(ranged, "far") && near(engage_range(&ranged), 5000.0f));
+
+   // WingmanRole: a wingman key; a bomber goes for the ground first.
+   ClassKeys bomber;
+   assert(role_of(&bomber) == Role::Fighter && role_of(nullptr) == Role::Fighter);
+   assert(set_role(bomber, "Bomber") && role_of(&bomber) == Role::Bomber && !sets_any(&bomber));
+   assert(!set_role(bomber, "tank") && role_of(&bomber) == Role::Bomber);
+   assert(set_role(bomber, "fighter") && role_of(&bomber) == Role::Fighter);
+   Foe foes[2] = {{{0, 0, 300}, false, 0}, {{0, 0, 700}, true, 0}};
+   assert(pick_foe(V3{}, foes, 2, Role::Fighter) == 0);   // 300 against 700 + 600
+   assert(pick_foe(V3{}, foes, 2, Role::Bomber) == 1);    // 300 + 600 against 700
+   assert(pick_foe(V3{}, foes, 2) == 0);                  // a fighter's, unless it says
+   assert(near(foe_cost(V3{}, foes[0], Role::Bomber), 300.0f + kGroundCost));
+   assert(near(foe_cost(V3{}, foes[1], Role::Bomber), 700.0f));
+   foes[1].taken = 1;
+   assert(pick_foe(V3{}, foes, 2, Role::Bomber) == 0);    // 900 against 1100: spread first
+
+   // Wingman = 0: never called up; a wingman key.
+   ClassKeys hero;
+   assert(may_follow(&hero) && may_follow(nullptr));
+   assert(set_wingman(hero, "0") && !may_follow(&hero) && !sets_any(&hero));
+   assert(!flyer_wingmen::inherited(hero).mayFollow);
+   assert(set_wingman(hero, "1") && may_follow(&hero));
+   assert(!set_wingman(hero, "never") && may_follow(&hero));
+
+   // How many are called up on their own: a script's number where it gave one
+   // (0 to 8), else the class's.
+   ClassKeys four;
+   assert(set_count(four, "4"));
+   assert(flight_size(-1, &four, 3) == 4 && flight_size(-1, nullptr, 3) == 3);
+   assert(flight_size(2, &four, 3) == 2 && flight_size(0, &four, 3) == 0);
+   assert(flight_size(20, &four, 3) == kMaxWingmen);
+}
+
 int main()
 {
    the_vee();
@@ -873,9 +951,10 @@ int main()
    orders();
    ground_runs();
    landing();
+   mission_keys();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
-               "orders, passes at the ground, landing).\n");
+               "orders, passes at the ground, landing, mission keys).\n");
    return 0;
 }

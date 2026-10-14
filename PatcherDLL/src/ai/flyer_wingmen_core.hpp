@@ -308,11 +308,21 @@ inline bool can_keep_up(float wingmanMax, float leaderMax)
 //   WingmanLand    1: when its pilot lands, its wingmen land beside it; 0:
 //                  they are let go (break off) instead. Without it, the INI's
 //                  FlyerWingmenLand.
-// And one on the class that flies AS a wingman (it does not give a class
-// wingmen of its own):
+//   WingmanStartOrder  formup, engage or cover: the order its flight starts
+//                  with when called up (flyer_orders_core.hpp); else form up.
+//   WingmanEngageRange  metres from the leader within which its engaging
+//                  wingmen take on enemies (else 800), chased a quarter further
+//                  (flyer_orders_core.hpp).
+// And on the class that flies AS a wingman (they do not give a class wingmen
+// of its own):
 //   WingmanExitOnLand  1 (or none): landed beside its leader, its pilot gets out
 //                  (and it is let go); 0: it waits aboard and takes off with its
 //                  leader.
+//   Wingman        0: never called up as anyone's wingman, the player's or an
+//                  AI squadron's (a hero's ship); a mission script may still
+//                  name it (AddWingman). 1 (or none): it may be.
+//   WingmanRole    fighter (or none): flyers in the air first; bomber: targets
+//                  on the ground first (flyer_orders_core.hpp, foe_cost).
 constexpr int kMaxClasses         = 16;
 constexpr int kMaxSlotClasses     = 4;
 constexpr int kMaxClassFormations = 10;   // as many as a class's SquadronFormation lines (EntitySquadronClass)
@@ -338,8 +348,16 @@ struct ClassKeys {
    bool     ownFormations = false;   // its own lines have begun replacing the inherited list
    bool     hasLand = false;         // WingmanLand
    bool     landWith = true;
+   bool     hasStartOrder = false;   // WingmanStartOrder (flyer_orders::Order's value)
+   uint8_t  startOrder = 0;
+   bool     hasEngageRange = false;  // WingmanEngageRange, m
+   float    engageRange = 0.0f;
    bool     hasExitOnLand = false;   // WingmanExitOnLand: as a wingman, not a leader
    bool     exitOnLand = true;
+   bool     hasWingman = false;      // Wingman: as a wingman, not a leader
+   bool     mayFollow = true;
+   bool     hasRole = false;         // WingmanRole (flyer_orders::Role's value): as a wingman
+   uint8_t  role = 0;
 };
 
 // A value as an ODF writes it: spaces and quotes round it ignored.
@@ -505,6 +523,19 @@ inline bool set_land(ClassKeys& k, const char* value)
 // Whether this leader's wingmen land with it: its class's WingmanLand, else the INI.
 inline bool lands_with(const ClassKeys* leader, bool ini) { return leader && leader->hasLand ? leader->landWith : ini; }
 
+inline bool set_wingman(ClassKeys& k, const char* value)
+{
+   double v;
+   if (!read_number(value, v)) return false;
+   k.hasWingman = true;
+   k.mayFollow = v != 0.0;
+   return true;
+}
+
+// Whether a flyer of this class may be called up as a wingman: yes unless its
+// class says Wingman = 0.
+inline bool may_follow(const ClassKeys* k) { return !k || !k->hasWingman || k->mayFollow; }
+
 // A child class starts as its parent; its own WingmanClass, WingmanSlot and
 // WingmanFormation lines replace the lists.
 inline ClassKeys inherited(const ClassKeys& parent)
@@ -518,7 +549,8 @@ inline ClassKeys inherited(const ClassKeys& parent)
 
 inline bool sets_any(const ClassKeys* k)
 {
-   return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots || k->hasFormations || k->hasLand);
+   return k && (k->hasClasses || k->hasCount || k->hasAuto || k->hasSlots || k->hasFormations || k->hasLand ||
+                k->hasStartOrder || k->hasEngageRange);
 }
 
 // Whether a flyer of class `followerId`, one that may follow this leader, may
@@ -571,6 +603,15 @@ inline int count_for(const ClassKeys* leader, int ini)
 }
 
 inline bool auto_for(const ClassKeys* leader, bool ini) { return leader && leader->hasAuto ? leader->autoForm : ini; }
+
+// Wingmen called up on their own (at takeoff, by the squad key, to make up
+// losses): a mission script's CallWingmen(n) where it gave one (`scripted` 0 or
+// more), else count_for.
+inline int flight_size(int scripted, const ClassKeys* leader, int ini)
+{
+   if (scripted >= 0) return scripted > kMaxWingmen ? kMaxWingmen : scripted;
+   return count_for(leader, ini);
+}
 
 // ---- AI squadrons: the game's own rule, flown -----------------------------------------
 // The game's squadrons ride splines, so a flyer on real flight never joins one
