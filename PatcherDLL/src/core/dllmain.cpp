@@ -69,6 +69,7 @@
 #include "render/hud_editor_properties.hpp"
 #include "render/camera_shake.hpp"
 #include "render/hud_editor_disable.hpp"
+#include "render/hud_team_texture.hpp"
 #include "render/red_light_stale_node_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
 #include "util/snd_engine_open_fix.hpp"
@@ -322,6 +323,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_spawnVehicleListEnabled = cfg.get_bool("Features", "SpawnVehicleList", true);
       g_targetBarLatchSeconds = cfg.get_float("Features", "TargetBarLatchSeconds", 0.5f);
       g_hudSubPixel = cfg.get_bool("Features", "HudSubPixel", true);
+      g_hudTeamTextureAlways = cfg.get_bool("Features", "HudTeamTextureAlways", true);
       g_controllerEnabled = cfg.get_bool("Controller", "Enabled", true);
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
@@ -384,6 +386,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hud_true_widescreen_install(exe_base);  // Detours .text, rewrites CALL rel32s - needs the RW window
    hud_editor_properties_install(exe_base); // Detours .text (modtools only)
    hud_editor_disable_install(exe_base);   // byte-patches .text — needs the RW window
+   hud_team_texture_install(exe_base);     // byte-patches .text — needs the RW window
    anim_textures_install(exe_base);
    land_on_arrival_install(exe_base);  // byte-patches .text — needs the RW window
    hover_pilot_null_fix_install(exe_base); // byte-patches .text — needs the RW window

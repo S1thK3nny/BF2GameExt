@@ -436,6 +436,9 @@ Bool    reinforcementsDisable
 Texture texture                 Bool  textureDisable     Float  bleedRate
 ```
 
+Stock sends `texture` only in 1-flag and 2-flag CTF; see
+[Team icons in every mode](#team-icons-in-every-mode-built-2026-10-15).
+
 Per statistic (5 iterations, `%s` filled from a name table):
 
 ```
@@ -2448,6 +2451,66 @@ reader of each of the 16 element types a file can make reaches `Element::ReadDat
 `tests/hud_true_widescreen_tests.cpp` tests the placement maths on five screen shapes.
 Played on modtools at 16:9; Steam and GOG are audited, not played. `ScreenAnchor` and
 `AuthoredRatio` are not played yet anywhere.
+
+## Team icons in every mode (built 2026-10-15)
+
+`player1.team1.texture` (the player's side) and `player1.team2.texture` (the other)
+have one sender: the HUD's per-player team update, M `006B1870`, S `00562690`,
+G `00563410`, whose one caller is the HUD events' `Update` (M `006B50A0`). It takes the
+`Character` (`+0x134` its team number), the `PlayerEvents` (`TeamEvents[2]` at `+0x1D0`
+on modtools) and the player's HUD state: `+0x98` the side last seen, then 0x10 bytes
+per team from `+0x50`, holding the points, reinforcements and bleed rate last sent and,
+at `+0x58`, a byte that says the side shows points instead of reinforcements.
+
+When the side changes, for each of the two teams:
+
+- **Space Assault** (the singleton at M `00B9A36C`, enabled byte `+0x621`): it calls
+  `ShowTeamPoints`' setter for the team (M `006AEDF0`, cdecl(team number, bool);
+  S `00563880`, G `00564600`, team in ECX and the bool in DL) and sends no icon.
+- **Otherwise**, only if `FlagItem::sFlagGameplayType` (M `00B93CB0`, S `01E55F1C`,
+  G `01E573BC`) is 2 or 3: it looks up the team's points icon (`+0x24`) if the side
+  shows points, else its reinforcements icon (`+0x20`), in the texture table (M
+  `00D4F994`, S `008EED8C`, G `008F022C`, 0x2000 slots), falls back to its icon
+  (`+0x1C`), and sends the event if either is loaded.
+- Either way it resets the last-sent values, so the score events go out again.
+
+`SetFlagGameplayType` (M `0046D090`, S `0058D2F0`, G `0058E290`) stores 2 for
+`"1flag"`, 3 for `"2flag"`, 1 for `"campaign"` and 0 for anything else, so campaign,
+conquest and hunt never get the icons. `SetTeamIcon(team, icon, reinforcementsIcon,
+pointsIcon)` (M `00470270`, S `0058B7F0`, G `0058C7A0`) stores the PblHashes: `+0x1C`
+the icon, and `+0x20` and `+0x24` the optional two, which take the icon while still 0.
+`ShowTeamPoints(team, bool)` (M `0046C140`, S `0058C440`, G `0058D3F0`) sets the
+shows-points byte for that team in every local player's state (M `00BA3EF8` + player ×
+0xDC + slot × 0x10).
+
+The stock `PC/1playerhud.hud` already binds both: `player1teams_team1icon` and
+`team2icon` take `EventBitmap` and `EventEnable` from `texture` and `EventDisable` from
+`textureDisable`, under each side's count. The stock `setup_teams.lua` calls
+`SetTeamIcon(team, name .. "_icon", "hud_reinforcement_icon", "flag_icon")`, so with
+the test gone conquest shows the `hud_reinforcement_icon` trooper there, in the team
+colour.
+
+### `HudTeamTextureAlways`
+
+The test, after `MOV EAX,[sFlagGameplayType]`:
+
+```
+                     modtools                Steam / GOG
+CMP EAX,2            006B190F  83 F8 02      00562717 / 00563497  83 F8 02
+JE  send             74 09                   74 05
+CMP EAX,3            83 F8 03                83 F8 03
+JNE skip             0F 85 7D 00 00 00       75 51
+send                 006B191D                00562721 / 005634A1
+```
+
+With `[Features] HudTeamTextureAlways` on, the default, `render/hud_team_texture.cpp`
+writes `EB` and the JE's displacement plus 3 over the `CMP EAX,2` (`EB 0C` on modtools,
+`EB 08` on retail): a jump to the send, 2 bytes at the CMP, where the JE ended 5 bytes
+on. Neither byte is relocated on retail; the flag type's address in the `MOV` is, so
+the guard checks only the `A1` before it, then the test, the JNE's opcode and the send's
+first instruction. Space Assault is left alone. `tests/hud_team_texture_abi_tests.py`
+audits the site, both branch targets, the flag type writer, the Space Assault branch and
+its setter, the icon lookups and the relocations on all three builds. Not played yet.
 
 ## Colour gradients (researched 2026-09-30)
 

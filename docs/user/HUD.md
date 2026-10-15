@@ -394,6 +394,28 @@ IconTexture = "hud_icon_rep_dc15a"
   vehicle skin is often named after its class and would clash with its icon.
 - The stock vehicle seating mesh still draws over the vehicle icon.
 
+### Team icons
+
+The stock `player1.team1.texture` (your side) and `player1.team2.texture` (the other
+side) are sent each time you join a side. The game sent them only in 1-flag and 2-flag
+CTF; with `[Features] HudTeamTextureAlways` on, the default, they come in every mode
+but Space Assault. Which texture a side gets is the mission's choice, through
+`SetTeamIcon`:
+
+```lua
+SetTeamIcon(team, icon, reinforcementsIcon, pointsIcon)
+```
+
+- A side whose score is its reinforcements gets `reinforcementsIcon`; one switched to
+  points with `ShowTeamPoints(team, true)` gets `pointsIcon`. Both default to `icon`.
+- If that texture is not loaded, `icon` is sent instead, and if neither is, nothing.
+- The stock `setup_teams.lua` passes `"hud_reinforcement_icon"` and `"flag_icon"`, so
+  the stock HUD shows a trooper under each reinforcement count. For the side's own
+  emblem in every mode, a mission can call `SetTeamIcon(REP, "rep_icon", "rep_icon",
+  "rep_icon")` once its teams are set up.
+- The icons go out when you join a side, so set them in the mission script before
+  then, in `ScriptPostLoad` at the latest.
+
 ## Command post strip
 
 A row of command post icons, each showing who owns the post and how far a capture

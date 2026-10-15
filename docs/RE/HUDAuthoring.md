@@ -1540,6 +1540,7 @@ may stop updating when their gameplay/UI context is inactive.
 | `player1.weapon1.totalClipFraction` | Float | Clip fraction, already useful directly with a bar |
 | `player1.team1.reinforcements` | Int | Team 1 count; corresponding team2 event also exists |
 | `player1.team1.reinforcementsFraction` | Float | Existing team's depletion bar value, not relative share against the other team |
+| `player1.team1.texture` | Texture | The side's icon as the mission's `SetTeamIcon` set it, sent when you join a side. Stock sends it in 1-flag and 2-flag CTF only; `[Features] HudTeamTextureAlways` sends it in every mode but Space Assault ([Team icons](../user/HUD.md#team-icons)) |
 | `player1.lockOnDistance` | Float | Existing distance text uses `FloatFormat("%.0f")` |
 | `objectivetimer` | Float | Existing objective timer; keep its mode/disable handling |
 | `time` | Float | Existing clock input for continuously driven mappings |
@@ -1781,6 +1782,7 @@ state mapping, landings and shots, and `tests/hud_number_math_tests.cpp` the ler
 | A comparison flickers on and off | The value is sitting on the line: give it a `Hysteresis` |
 | A lerp fades the wrong way | `RiseTime` and `FallTime` follow the input, not the output: with A = 1 and B = 0 the output falls over `RiseTime` |
 | A lerp never sends | Its input has not sent a valid value yet, or an event end has not arrived; nothing is sent before both |
+| A team icon never shows | `[HudTeamTextureAlways] installed` in `BF2GameExt.log`, or the mode is 1-flag or 2-flag CTF; not Space Assault, which never sends one; the mission's `SetTeamIcon` names a texture a loaded level has; and it was set before you joined a side |
 | A state event stays at 0 | The unit states are for soldiers on foot only; a droideka, vehicle, turret or remote reads 0 |
 | A moving marker or bar steps a pixel at a time | The game draws every element on a whole pixel. `[Features] HudSubPixel` in `BF2GameExt.ini` draws them at their exact positions; it is on by default, but each player's own setting, so check it is not 0 |
 

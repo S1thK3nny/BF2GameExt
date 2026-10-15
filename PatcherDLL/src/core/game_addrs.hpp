@@ -1077,6 +1077,19 @@ namespace modtools {
    // Listed for reference only — the modtools editor works and is NOT patched.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00690E70;
 
+   // ---- Team icon events in every mode (hud_team_texture.cpp) -----------------
+   // The CMP EAX,2 of the flag type test in the HUD's per-player team update
+   // FUN_006B1870 (one caller, the HUD events' Update 0x006B50A0), which sends
+   // player%d.team%d.texture each time the player's side changes:
+   //   006B190A  A1 B0 3C B9 00     MOV EAX,[0x00B93CB0]  FlagItem::sFlagGameplayType
+   //   006B190F  83 F8 02           CMP EAX,2             1flag
+   //   006B1912  74 09              JE  0x006B191D        send
+   //   006B1914  83 F8 03           CMP EAX,3             2flag
+   //   006B1917  0F 85 7D 00 00 00  JNE 0x006B199A        skip
+   // The type is written by the Lua SetFlagGameplayType 0x0046D090. Full
+   // write-up: docs/RE/HUDSystem.md.
+   constexpr uintptr_t hud_team_texture_flag_test   = 0x006B190F;
+
    // ---- Spawn-screen vehicle list (render/spawn_vehicle_list.cpp) --------------
    // Restores BF1's "vehicles at this command post" line.  Everything except the
    // string producer survives in BF2; see docs/RE/CommandPostVehicleList.md.
@@ -2615,6 +2628,12 @@ namespace steam {
    // the modtools one; single vtable xref, so it is not a COMDAT-folded shared thunk.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00546E20;
 
+   // ---- Team icon events in every mode (see modtools for docs) ----------------
+   // In FUN_00562690: MOV EAX,[0x01E55F1C] at 0x00562712, then CMP EAX,2 /
+   // JE 0x00562721 (74 05) / CMP EAX,3 / JNE 0x00562772 (75 51). The type is
+   // written by SetFlagGameplayType 0x0058D2F0.
+   constexpr uintptr_t hud_team_texture_flag_test   = 0x00562717;
+
    // ---- Spawn-screen vehicle list (see modtools for docs) ----------------------
    // SpawnDisplay::Update, vtable 0x0079663C slot 1.  Epilogue at 0x0042AC89 is
    // `pop edi / mov al,1 / pop esi / mov esp,ebp / pop ebp / RET 4`.
@@ -3329,6 +3348,12 @@ namespace gog {
    // Same route as Steam: ctor 0x005459E0 writes vtable 0x007A13D4, slot 2 =
    // 0x007A13DC.  First 24 bytes identical to Steam, so the guard is shared.
    constexpr uintptr_t hud_editor_keyboard_event    = 0x00547B70;
+
+   // ---- Team icon events in every mode (see modtools for docs) ----------------
+   // In FUN_00563410: MOV EAX,[0x01E573BC] at 0x00563492, then the same test as
+   // Steam, JE 0x005634A1 / JNE 0x005634F2. The type is written by
+   // SetFlagGameplayType 0x0058E290.
+   constexpr uintptr_t hud_team_texture_flag_test   = 0x00563497;
 
    // ---- Spawn-screen vehicle list (see modtools for docs) ----------------------
    // Derived in the GOG program (BattlefrontII_MemExt.exe), NOT shifted from Steam:

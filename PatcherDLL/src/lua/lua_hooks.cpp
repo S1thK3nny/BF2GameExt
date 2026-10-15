@@ -57,6 +57,7 @@
 #include "entity/foleyfx_region_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
+#include "render/hud_team_texture.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/menu_navigation.hpp"
@@ -371,6 +372,7 @@ void lua_hooks_uninstall()
    water_texture_count_fix_uninstall();
    light_projected_texture_fix_uninstall();
    red_light_stale_node_fix_uninstall();
+   hud_team_texture_uninstall();
    // Last of the Snd::EngineBase::Update hooks to come off: it went on
    // before the saber lights did, so it is the inner detour of the two and
    // detaching it first would unpick the chain from the middle.

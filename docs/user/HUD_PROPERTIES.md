@@ -273,5 +273,6 @@ Not `.hud` properties, but these change how a `.hud` behaves. The full list is i
 |---------|---------|--------|
 | `[Features] TargetBarLatchSeconds` | `0.5` | How long `player1.weaponN.target.position` stays on the last target after the selection is lost. `0` never times out. |
 | `[Features] HudSubPixel` | `1` | `1` draws every element at its exact position instead of the nearest whole pixel, so floating markers and target bars glide. Covers stock elements and the menus too, and an element that comes to rest between two pixels looks slightly softer. `0` keeps the stock rounding. |
+| `[Features] HudTeamTextureAlways` | `1` | `1` sends the stock `player1.team1.texture` and `player1.team2.texture` in every mode but Space Assault, not only in 1-flag and 2-flag CTF; the texture is the mission's `SetTeamIcon` choice. `0` keeps the stock behaviour. See [Team icons](HUD.md#team-icons). |
 | `[Fixes] ReticleCorrection` | `-1` | Moves the reticle back onto the aim point on widescreen displays. `-1` scales it with the aspect ratio, `0` turns it off, and a value up to `1` sets the strength by hand. |
 | `[Fixes] WeaponIconFix` | `1` | Lets several mods' weapon icon `TransformNameMesh` tables load together without a stray second icon beside the right one. |

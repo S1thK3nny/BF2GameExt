@@ -76,6 +76,13 @@ Scripts can check the running version through `GameExt.version`.
   while it is on. An element that comes to rest between two pixels looks slightly
   softer; `HudSubPixel=0` keeps the stock rounding. See
   [Configuration](docs/user/CONFIGURATION.md).
+- **Team icons in every mode** - `[Features] HudTeamTextureAlways`, on by default,
+  sends `player1.team1.texture` and `player1.team2.texture` in every mode but Space
+  Assault. The game sent them only in 1-flag and 2-flag CTF, so the icon under each
+  side's score never showed in conquest or hunt. The icon is the mission's
+  `SetTeamIcon` choice; with the stock scripts the stock HUD now shows a trooper
+  under each reinforcement count. `HudTeamTextureAlways=0` keeps the stock
+  behaviour. See [HUD authoring](docs/user/HUD.md#team-icons).
 - **Unit and weapon state events** - HUD Floats that are 1 while the local player is
   in a state and 0 otherwise: `player1.unit.state.sprint`, `.jump`, `.fall`, `.roll`,
   `.jet`, `.hover` and `.tumble`, plus `.land` for one update on touching down; and
