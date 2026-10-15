@@ -146,6 +146,25 @@ Markers for your flyer's wingmen ([Flyer Wingmen](FEATURES.md)), so a `.hud` can
 | `player1.wingmen.target.distance` | Float | How far away the target is, in metres. | 1.2.0 |
 | `player1.wingmen.target.disable` | Bool | No attack is under way. | 1.2.0 |
 
+### Comm key orders
+
+Markers for what the comm keys send the AI after on foot ([Comm key orders](FEATURES.md)): `attack` is the Attack key's target, `defend` the Defend key's, each over the unit or object, or over the place aimed at. While a `.hud` binds none of a target's events, an object target gets the game's own marker instead (red for Attack, green for Defend, `[AI] CommKeyOrders`); a place has none. Modtools only, as the comm key orders are.
+
+| Event | Type | Description | Since |
+|-------|------|-------------|-------|
+| `player1.orders.attack.position` | Vector3 | Where the Attack key's target is on screen, for `EventPosition` on a marker group, placed as a wingman is. | 1.2.0 |
+| `player1.orders.attack.onScreen` | Bool | Sent as it comes into view. | 1.2.0 |
+| `player1.orders.attack.offScreen` | Bool | Sent as it leaves the view, and when the order ends. | 1.2.0 |
+| `player1.orders.attack.direction` | Vector3 | `(0, 0, angle)` toward it. | 1.2.0 |
+| `player1.orders.attack.distance` | Float | How far away it is, in metres. | 1.2.0 |
+| `player1.orders.attack.disable` | Bool | No Attack order is under way. | 1.2.0 |
+| `player1.orders.defend.position` | Vector3 | Where the Defend key's target is on screen. | 1.2.0 |
+| `player1.orders.defend.onScreen` | Bool | Sent as it comes into view. | 1.2.0 |
+| `player1.orders.defend.offScreen` | Bool | Sent as it leaves the view, and when the order ends. | 1.2.0 |
+| `player1.orders.defend.direction` | Vector3 | `(0, 0, angle)` toward it. | 1.2.0 |
+| `player1.orders.defend.distance` | Float | How far away it is, in metres. | 1.2.0 |
+| `player1.orders.defend.disable` | Bool | No Defend order is under way. | 1.2.0 |
+
 ## Element Properties
 
 | Property | Element | Value | Description | Since |

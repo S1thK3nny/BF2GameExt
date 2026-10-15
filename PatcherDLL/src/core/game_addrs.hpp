@@ -1440,6 +1440,29 @@ namespace modtools {
    constexpr uintptr_t ai_goal_print                = 0x005CDA70;
    constexpr uintptr_t ai_goal_find                 = 0x005CDD00;
    constexpr uintptr_t ai_goal_update               = 0x005CDE20;
+   // AIGoal::UnAssignAll, thiscall() on a goal, plain RET: CMD_WAIT to each member
+   // (its controllable's mCtrl +0xC8, ForceCommand), then its list cleared. The
+   // game's DeleteAIGoal and ClearAllGoals call it before deleting: DeleteGoal
+   // changes no member's order (the comm keys' orders, ai/comm_orders.cpp).
+   constexpr uintptr_t ai_goal_unassign_all         = 0x005CCD00;
+   // The comm keys' stock request (ai/comm_orders.cpp). NetGame::DisplayMessage,
+   // cdecl(NG_ChatMsg*), plain RET: what each machine does with a chat line online
+   // (the sender's mName, ": ", common.chat.<code>, in yellow on the message line,
+   // then TeamAssistManager::AddRequest(code, sender)); the sender is found by its
+   // id (+0) and handed on unchecked. M's NG_ChatMsg is 0x128 bytes (AddChatMessage
+   // ToQue's new): id +0, team flag +4, code +0x10. AddRequest, cdecl(code,
+   // Character*): a TeamAssist from a pool of 64 (no growth: past it the pool's
+   // free list overruns the heap), 5 s each, its marker and shout. Its manager,
+   // TeamAssistManager::sInstance, made by GameLoop::PostLoad (offline too): the
+   // list of live requests at +0x18, each's next at +0.
+   constexpr uintptr_t net_display_message          = 0x0070C490;
+   constexpr uintptr_t team_assist_add_request      = 0x00687440;
+   constexpr uintptr_t team_assist_instance         = 0x00BA37F4;
+   // RepairHelper::CalcMyAidTypes, thiscall(uint* healthMask, uint* ammoMask), RET 8:
+   // the aid a unit's weapons give, a bit per recipient health type (GameObject
+   // +0x1FC & 7); it reads only its +4, a UnitAgent (whose mCtrl +0xC, whose owner
+   // +4, the Controllable with the weapons).
+   constexpr uintptr_t repair_calc_aid_types        = 0x005BBD20;
    // ControllerManager::Update, cdecl(float dt), and the global holding
    // sAICtrls, its ordered list of every UnitController (+4 the first node; a
    // node's +4 the next, +0xC the controller; a null controller ends it), the

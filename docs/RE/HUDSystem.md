@@ -961,7 +961,10 @@ attack my target order's target, made at `HUD::Manager::Open` and pumped beside 
 command posts, placed by `hud_world_markers::place` from the same anchor. Health is
 `Damageable::mCurHealth / mMaxHealth`, GameObject `+0x144` / `+0x148`, as camera shake
 reads it. The wingmen come from `flyer_wingmen_hud_list` (alive, in slot order) and the
-target from `flyer_wingmen_hud_target`.
+target from `flyer_wingmen_hud_target`. Two more rows carry the comm keys' Attack and
+Defend targets (`player1.orders.attack.*`, `.defend.*`, from `comm_orders_hud_target`: an
+object, or a place anchored 1.3 m over it), with `hud_orders_target_bound(which)` deciding
+their fallback markers the same way.
 
 What the HUD binds decides the wingmen's own markers. Each AI tick
 `hud_wingmen_bound()` (a listener on any wingman event or the count) takes the
@@ -2312,8 +2315,9 @@ as written.
    element)) gets, for an opted-in element, a copy of the event whose x is
    (v·W − slide)/WL, which lands on the real point v·W, for
    `player1.weaponN.reticule.position`, `.lockOnPosition`, `.target.position`,
-   `player1.commandPostN.position`, `player1.wingmanN.position` and
-   `player1.wingmen.target.position`. A reticule's y has `ReticleCorrection` taken back
+   `player1.commandPostN.position`, `player1.wingmanN.position`,
+   `player1.wingmen.target.position`, `player1.orders.attack.position` and
+   `player1.orders.defend.position`. A reticule's y has `ReticleCorrection` taken back
    off (`hud_widescreen_reticle_uncorrect`, which is exact, and the identity on a screen
    no wider than 4:3).
 

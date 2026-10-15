@@ -586,6 +586,29 @@ Group("player1wingmarker1")
 - Wingmen are a modtools prototype for the host and single player, so these events only
   carry anything there.
 
+## Comm key order markers
+
+Markers over what the comm keys sent the AI after ([Comm key orders](FEATURES.md)):
+`attack` for the Attack key's target, `defend` for the Defend key's. Each is over the unit or
+object aimed at, or over the place aimed at.
+
+| Event | Type | Carries |
+|-------|------|---------|
+| `player1.orders.attack.position` | Vector3 | Where the target is on screen, for `EventPosition`. Off screen or behind you, it stays on the screen's edge |
+| `player1.orders.attack.onScreen` | Bool | Sent as it comes into view |
+| `player1.orders.attack.offScreen` | Bool | Sent as it leaves the view, and as the order ends |
+| `player1.orders.attack.direction` | Vector3 | `(0, 0, angle)` for `EventRotation` |
+| `player1.orders.attack.distance` | Float | How far away it is, in metres |
+| `player1.orders.attack.disable` | Bool | No Attack order is under way |
+| `player1.orders.defend.*` | | The same for the Defend key's target |
+
+Build each marker as a wingman's is ([Wingmen markers](#wingmen-markers)).
+
+- While a `.hud` binds none of a target's events, a unit or object target gets the game's own
+  marker instead: red for Attack, green for Defend. A place has none of the game's.
+- The comm key orders are a modtools prototype for single player, so these events only carry
+  anything there.
+
 ## FillFrom
 
 A `BarBitmap` normally keeps its left end and moves its right edge. `FillFrom` picks

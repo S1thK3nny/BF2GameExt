@@ -140,6 +140,13 @@ Scripts can check the running version through `GameExt.version`.
   landing and the Lua side are not yet tested.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#flyer-wingmen) and
   [Lua API](docs/user/LUA_API.md#flyer-wingmen).
+- **Comm key orders** - In single player the comm keys ask the AI for help: Spotted points those who
+  can see your target at it; Medic, Repair and Ammo bring the nearest who can give it; Pickup brings
+  the nearest AI-driven hover; Backup sends three to fight round you for a minute; Attack sends four
+  after your target or to the place you aim at; Defend has three guard the friendly or the place you
+  aim at. Each key also gets the game's marker and shout, and the Attack and Defend targets markers a
+  `.hud` can draw from `player1.orders.attack.*` and `.defend.*`. A prototype, modtools only,
+  `[AI] CommKeyOrders=1`; not yet tested in play.
 - **AI goal limit and units' own goals** - Up to 64 AI goals at once instead of 20
   (`[LimitIncreases] AIGoalLimit=64`), and `SetUnitGoal`, `ClearUnitGoal` and `GetUnitGoal`
   give an AI unit a goal of its own that it keeps across respawns and no one else joins.

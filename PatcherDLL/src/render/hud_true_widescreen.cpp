@@ -55,8 +55,8 @@
 //     opted-in top-level piece under a 1:1 parent of its own, slid, instead of
 //     its screen group's squashed one; its children inherit it;
 //   - EventPosition turns world-tracking positions (fractions of the real
-//     screen: reticule, lock-on, GameExt's target bar, command posts and
-//     wingmen) into
+//     screen: reticule, lock-on, GameExt's target bar, command posts, wingmen
+//     and the comm keys' targets) into
 //     the layout fraction that lands on the real point, and takes
 //     ReticleCorrection back off the reticule's y;
 //   - GetContainerViewWidth keeps the layout width for the file's elements
@@ -296,7 +296,7 @@ int  s_drawDepth    = 0;       // draw nesting under the screen groups
 bool s_inViewGroup  = false;   // drawing under one of the HUD screen groups
 const Placed* s_drawContainer = nullptr;   // drawing under an opted-in plain container
 
-uint32_t s_tracked[2 * 3 + 16 + 8 + 1];    // world-tracking position events, by name hash
+uint32_t s_tracked[2 * 3 + 16 + 8 + 1 + 2];   // world-tracking position events, by name hash
 uint32_t s_reticule[2];
 
 // ---- screen ----------------------------------------------------------------
@@ -1681,6 +1681,8 @@ void name_hashes()
       s_tracked[n++] = pbl_hash(name);
    }
    s_tracked[n++] = pbl_hash("player1.wingmen.target.position");
+   s_tracked[n++] = pbl_hash("player1.orders.attack.position");
+   s_tracked[n++] = pbl_hash("player1.orders.defend.position");
 }
 
 // Every piece as modtools has it, the editor's included.

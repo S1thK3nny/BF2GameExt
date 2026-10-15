@@ -490,6 +490,12 @@
     <ClInclude Include="src\ai\flyer_wingmen.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\comm_orders.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ai\comm_orders_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\flyer_wingmen_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
@@ -952,6 +958,9 @@
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\flyer_real_flight.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ai\comm_orders.cpp">
       <Filter>ai</Filter>
     </ClCompile>
     <ClCompile Include="src\ai\flyer_wingmen.cpp">

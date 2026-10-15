@@ -414,10 +414,12 @@ void ai_squads_install(uintptr_t base)
    s_range = s_range < kMinRange ? kMinRange : s_range > kMaxRange ? kMaxRange : s_range;
 
    const uint8_t* code = (const uint8_t*)resolve(base, a->controller_manager_update);
-   const bool ok = s_rt
-      ? guard(code, "\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C",
-              "xxxxxxxxxxxxx????xxxxxxx")
-      : guard(code, "\x51\xA1\x00\x00\x00\x00\x53\x55\x56\x8B\x70\x04", "xx????xxxxxx");
+   // Another feature's detour there (the comm keys', ai/comm_orders.cpp) is
+   // chained: its JMP is taken as the start.
+   const bool ok = code[0] == 0xE9 ||
+      (s_rt ? guard(code, "\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C",
+                    "xxxxxxxxxxxxx????xxxxxxx")
+            : guard(code, "\x51\xA1\x00\x00\x00\x00\x53\x55\x56\x8B\x70\x04", "xx????xxxxxx"));
    if (!ok) {
       install_log("[AISquads] NOT installed: prologue mismatch at ControllerManager::Update 0x%08X",
                   (unsigned)a->controller_manager_update);

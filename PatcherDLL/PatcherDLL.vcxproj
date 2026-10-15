@@ -257,6 +257,8 @@
     <ClInclude Include="src\ai\flyer_real_flight_core.hpp" />
     <ClInclude Include="src\ai\flyer_wingmen.hpp" />
     <ClInclude Include="src\ai\flyer_wingmen_core.hpp" />
+    <ClInclude Include="src\ai\comm_orders.hpp" />
+    <ClInclude Include="src\ai\comm_orders_core.hpp" />
     <ClInclude Include="src\ai\squad_formation.hpp" />
     <ClInclude Include="src\ai\squad_formation_core.hpp" />
     <ClInclude Include="src\ai\ai_squads.hpp" />
@@ -326,6 +328,7 @@
     <ClCompile Include="src\ai\flyer_avoidance.cpp" />
     <ClCompile Include="src\ai\flyer_real_flight.cpp" />
     <ClCompile Include="src\ai\flyer_wingmen.cpp" />
+    <ClCompile Include="src\ai\comm_orders.cpp" />
     <ClCompile Include="src\ai\squad_formation.cpp" />
     <ClCompile Include="src\ai\ai_squads.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />

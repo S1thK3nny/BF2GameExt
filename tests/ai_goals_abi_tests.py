@@ -135,4 +135,15 @@ assert at(delete + 0x47, 3) == b"\xC2\x04\x00"
 assert at(clear + 0x3F, 3) == b"\xC2\x04\x00"
 # The pool's element is 0x3C, the largest goal (Defend, Destroy, Follow).
 assert at(pool, 2) == b"\x6A\x3C"
-print("modtools: 9 counts, Create's shape, AssignUnit's reads, the RETs and the pool passed")
+# A goal's Assign (vptr +0x1C: the order to one member, thiscall(Character*), RET 4), which
+# SetUnitGoal and ClearUnitGoal call so the unit takes its new order at once: Defend's
+# (vtable 0x00A4A76C) and Destroy's (0x00A4A7E0) through their thunks; AddUnit at +0x10.
+assert constant(source, "kVt_Assign") == 0x1C
+for vtable, assign_at, ret_at in ((0x00A4A76C, 0x005CF5C0, 0x005CF64D), (0x00A4A7E0, 0x005CF7A0, 0x005CF82D)):
+    thunk = struct.unpack("<I", at(vtable + 0x1C, 4))[0]
+    assert code(thunk, 1) == [("jmp", hex(assign_at))], hex(vtable)
+    assert code(assign_at, 1) == [("mov", "eax, dword ptr [esp + 4]")] and at(ret_at, 3) == b"\xC2\x04\x00"
+    add = struct.unpack("<I", at(vtable + 0x10, 4))[0]
+    assert code(add, 1) == [("jmp", "0x5cce70")], hex(vtable)
+assert "if (uint8_t* const placed = assign(mgr, chr)) command(placed, chr);" in source
+print("modtools: 9 counts, Create's shape, AssignUnit's reads, the RETs, the pool and the goals' Assign passed")

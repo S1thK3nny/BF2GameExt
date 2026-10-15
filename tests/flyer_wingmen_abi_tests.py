@@ -751,8 +751,9 @@ assert constant(hud, "kGO_Health") == constant(shake, "kObj_Health") == 0x144
 assert constant(hud, "kGO_MaxHealth") == constant(shake, "kObj_MaxHealth") == 0x148
 wide = (SRC / "render/hud_true_widescreen.cpp").read_text()
 assert '"player1.wingman%d.position"' in wide and 'pbl_hash("player1.wingmen.target.position")' in wide
-assert "uint32_t s_tracked[2 * 3 + 16 + 8 + 1];" in wide
-assert '"player1.wingman%d.%s"' in hud and '"player1.wingmen.target.%s"' in hud
+assert "uint32_t s_tracked[2 * 3 + 16 + 8 + 1 + 2];" in wide
+assert 'pbl_hash("player1.orders.attack.position")' in wide and 'pbl_hash("player1.orders.defend.position")' in wide
+assert '"player1.wingman%d.%s"' in hud and '"player1.wingmen.target.%s"' in hud and '"player1.orders.%s.%s"' in hud
 # The trooper squad key's hold time, which the wingmen's matches.
 assert struct.unpack("<f", image[0x00A2A290 - base:0x00A2A294 - base])[0] == 1.0
 orders_core = (SRC / "ai/flyer_orders_core.hpp").read_text()

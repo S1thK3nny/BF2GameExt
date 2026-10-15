@@ -22,10 +22,13 @@
 //
 // A unit of its own (Lua SetUnitGoal(charIndex, goal), ClearUnitGoal and
 // GetUnitGoal; the goal is what AddAIGoal returns): the unit is put in that goal
-// at once and back in it whenever the game reassigns it (each respawn), while the
-// goal is its team's; and the goal is kept for the units a script puts in it,
-// none joining it by weight. Deleting the goal (DeleteAIGoal, ClearAIGoals)
-// frees them to the weighted rule. A new mission starts with none.
+// at once, given its order at once (the goal's Assign: AIGoal::Update gives one
+// only to a member idle, waiting or done, and a Defend order never ends), and
+// put back in it whenever the game reassigns it (each respawn), while the goal
+// is its team's; and the goal is kept for the units a script puts in it, none
+// joining it by weight. ClearUnitGoal gives the unit the order of the goal the
+// weighted rule puts it in, likewise. Deleting the goal (DeleteAIGoal,
+// ClearAIGoals) frees them to the weighted rule. A new mission starts with none.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -48,7 +51,9 @@
 //   Update                           0x005CDE20, MOV EDI, 0x14 at +0xC4
 //   a goal                           its members' count +0x14, weight +0x18,
 //                                    enabled +0x1C, team +0x1D; AddUnit at its
-//                                    vptr +0x10, thiscall(Character*)
+//                                    vptr +0x10 and Assign at +0x1C (Defend's
+//                                    0x005CF5C0, Destroy's 0x005CF7A0), each
+//                                    thiscall(Character*), RET 4
 //   a character                      in a goal while +0x20 (mGoalNode._pList) is
 //                                    set; mPlayerId +0x130 (AI below 0),
 //                                    mTeamNumber +0x134
@@ -66,6 +71,7 @@ void ai_goals_uninstall();
 // or goal, or a goal of another side.
 namespace ai_goals_lua {
 bool  available();
+bool  goal_exists(const void* goal);   // the manager holds it now
 bool  set_unit_goal(int character, void* goal);
 bool  clear_unit_goal(int character);
 void* unit_goal(int character);   // the goal it is in now, or null

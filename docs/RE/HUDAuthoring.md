@@ -34,6 +34,7 @@ supplied by GameExt.
   - [Reticule horizon levelling](#reticule-horizon-levelling)
   - [Command post strip](#command-post-strip)
   - [Wingmen markers](#wingmen-markers)
+  - [Comm key order markers](#comm-key-order-markers)
 - [Bar fill direction](#bar-fill-direction)
 - [TrueWidescreen files](#truewidescreen-files)
 - [Transforms](#transforms)
@@ -630,6 +631,18 @@ flying, in their formation's slot order, so the ones after a wingman lost move u
   the events only carry anything there. Each binding still loads everywhere.
 - **TrueWidescreen:** `wingmanN.position` and `wingmen.target.position` are among the
   world-tracking positions an opted-in file retargets, as the command posts' are.
+
+### Comm key order markers
+
+The targets of the comm keys' Attack and Defend orders on foot (`[AI] CommKeyOrders`):
+`player1.orders.attack.*` and `player1.orders.defend.*`, each with `position`, `onScreen`,
+`offScreen`, `direction`, `distance` and `disable`, placed as the wingmen's are. A unit or object
+target is anchored as a wingman is; a place aimed at (an order to hold it) is anchored 1.3 m over
+the point the crosshair met. `offScreen` and `disable` go out as the order ends: its time is up,
+its target is down, or a new press of the same key replaced it. While a `.hud` binds none of a
+target's events, a unit or object gets the game's own `TargetManager` marker instead (red for
+Attack, green for Defend), looked at each frame; a place has none. Both positions are among the
+world-tracking ones TrueWidescreen retargets. Modtools and single player only.
 
 ## Bar fill direction
 

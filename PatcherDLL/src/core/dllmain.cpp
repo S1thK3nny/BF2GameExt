@@ -62,6 +62,7 @@
 #include "ai/flyer_wingmen.hpp"
 #include "ai/flyer_real_flight.hpp"
 #include "ai/flyer_avoidance.hpp"
+#include "ai/comm_orders.hpp"
 #include "ai/squad_formation_core.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
@@ -339,6 +340,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_flyerRealFlightPursuit    = cfg.get_bool("AI", "FlyerRealFlightPursuit", true);
       g_flyerRealFlightSquadrons  = cfg.get_bool("AI", "FlyerRealFlightSquadrons", true);
       g_flyerAvoidance            = cfg.get_bool("AI", "FlyerAvoidance", false);
+      g_commKeyOrders             = cfg.get_bool("AI", "CommKeyOrders", true);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
@@ -471,6 +473,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    squad_formation_install(exe_base);  // rewrites a CALL rel32, byte-patches .text - needs the RW window
    ai_squads_install(exe_base);        // off for now (logs it); after squad_formation, whose keys and events it uses
    flyer_wingmen_install(exe_base);    // Detours .text, rewrites a CALL rel32 - needs the RW window
+   comm_orders_install(exe_base);      // Detours .text; after ai_goals, whose own goals it uses
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.

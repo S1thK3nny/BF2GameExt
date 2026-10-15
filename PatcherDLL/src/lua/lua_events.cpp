@@ -4,6 +4,7 @@
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
+#include "ai/comm_orders.hpp"
 #include "ai/flyer_wingmen.hpp"
 #include "game/Battlefront2/Source/Character.h"
 
@@ -220,6 +221,7 @@ static void __cdecl hooked_event_manager_cleanup()
    // The mission is over: the flyer wingmen forget its flights and what its
    // script said, before anything could fire into the Lua state going away.
    flyer_wingmen_mission_end();
+   comm_orders_mission_end();
    cleanup_all();
    s_origCleanup();
 }

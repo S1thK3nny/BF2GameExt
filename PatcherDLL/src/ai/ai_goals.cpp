@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ai_goals.hpp"
+#include "comm_orders.hpp"
 #include "ai_goals_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -25,7 +26,8 @@ constexpr uint32_t kGoal_Members  = 0x14;   // AIGoal: mUnitList's count ...
 constexpr uint32_t kGoal_Weight   = 0x18;   // ... mWeight ...
 constexpr uint32_t kGoal_Enabled  = 0x1C;   // ... mEnabled ...
 constexpr uint32_t kGoal_Team     = 0x1D;   // ... mTeam
-constexpr uint32_t kVt_AddUnit    = 0x10;
+constexpr uint32_t kVt_AddUnit    = 0x10;   // AIGoal's vtable: AddUnit(Character*) ...
+constexpr uint32_t kVt_Assign     = 0x1C;   // ... and Assign(Character*): the goal's order to it (thiscall, RET 4)
 constexpr uint32_t kChr_GoalList  = 0x20;   // Character::mGoalNode._pList: in a goal while set
 constexpr uint32_t kChr_PlayerId  = 0x130;  // below 0: AI
 constexpr uint32_t kChr_Team      = 0x134;
@@ -116,10 +118,19 @@ void add_unit(uint8_t* goal, uint8_t* chr)
    ((fn_add_t)(*(void***)goal)[kVt_AddUnit / 4])(goal, chr);
 }
 
+// The goal's order to the unit, now: AIGoal::Update hands one only to a member
+// that is idle, waiting or done (its controller's command CMD_NONE or CMD_WAIT,
+// or its agent finished), so a unit moved out of a goal whose order never ends
+// (Defend) would go on with that one.
+void command(uint8_t* goal, uint8_t* chr)
+{
+   ((fn_add_t)(*(void***)goal)[kVt_Assign / 4])(goal, chr);
+}
+
 // A unit with no goal joins one: its own while that is an enabled goal of its
 // side, else the game's rule over the limit, the goals kept for others passed
-// over (ai_goals_core.hpp).
-void assign(uint8_t* mgr, uint8_t* chr)
+// over (ai_goals_core.hpp). The goal it joined, or null.
+uint8_t* assign(uint8_t* mgr, uint8_t* chr)
 {
    uint8_t** const goals = goals_of(mgr);
    const int team = *(const int*)(chr + kChr_Team);
@@ -127,7 +138,7 @@ void assign(uint8_t* mgr, uint8_t* chr)
    uint8_t* const own = index >= 0 ? s_own[index] : nullptr;
    if (own && holds(mgr, own) && own[kGoal_Team] == team && own[kGoal_Enabled]) {
       add_unit(own, chr);
-      return;
+      return own;
    }
    // The goals scripts keep for units of their own.
    bool kept[ai_goals::kGoalSlots] = {};
@@ -153,7 +164,9 @@ void assign(uint8_t* mgr, uint8_t* chr)
       v.reserved = kept[i];
    }
    const int k = ai_goals::pick_goal(views, s_limit, team, team_size(team));
-   if (k >= 0) add_unit(goals[k], chr);
+   if (k < 0) return nullptr;
+   add_unit(goals[k], chr);
+   return goals[k];
 }
 
 // A goal deleted: its units are free of it (the game's next update puts them in
@@ -192,11 +205,14 @@ void __fastcall assign_mt(uint8_t* mgr, void*, uint8_t* chr)
    }
 }
 
+// After either, the comm keys forget a goal gone (their orders' goals), before
+// the pool can hand its memory to a new one.
 void __fastcall delete_mt(uint8_t* mgr, void* edx, uint8_t* goal)
 {
    s_delete(mgr, edx, goal);
    __try {
       drop_gone(mgr);
+      comm_orders_goals_changed();
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
 }
@@ -206,6 +222,7 @@ void __fastcall clear_mt(uint8_t* mgr, void* edx, int team)
    s_clear(mgr, edx, team);
    __try {
       drop_gone(mgr);
+      comm_orders_goals_changed();
    } __except (EXCEPTION_EXECUTE_HANDLER) {
    }
 }
@@ -362,9 +379,20 @@ namespace ai_goals_lua {
 
 bool available() { return s_detoured; }
 
-// The unit goes in `goal` now (out of the goal it was in) and back in it whenever
-// the game reassigns it; the goal is kept for the units scripts put in it. An AI
-// unit, and a goal of its side.
+bool goal_exists(const void* goal)
+{
+   if (!s_detoured || !goal) return false;
+   __try {
+      uint8_t* const mgr = manager();
+      return mgr && holds(mgr, goal);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
+// The unit goes in `goal` now (out of the goal it was in), takes its order now
+// (command), and goes back in it whenever the game reassigns it; the goal is
+// kept for the units scripts put in it. An AI unit, and a goal of its side.
 bool set_unit_goal(int index, void* goal)
 {
    if (!s_detoured || !goal || index < 0 || index >= kMaxCharacters) return false;
@@ -377,7 +405,7 @@ bool set_unit_goal(int index, void* goal)
           g[kGoal_Team] == *(const int*)(chr + kChr_Team)) {
          s_own[index] = g;
          s_remove(chr);
-         assign(mgr, chr);
+         if (uint8_t* const placed = assign(mgr, chr)) command(placed, chr);
          ok = true;
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -398,7 +426,7 @@ bool clear_unit_goal(int index)
       uint8_t* const chr = character(index);
       if (had && mgr && chr && *(const uint8_t* const*)(chr + kChr_GoalList)) {
          s_remove(chr);
-         assign(mgr, chr);
+         if (uint8_t* const placed = assign(mgr, chr)) command(placed, chr);
       }
       ok = had;
    } __except (EXCEPTION_EXECUTE_HANDLER) {

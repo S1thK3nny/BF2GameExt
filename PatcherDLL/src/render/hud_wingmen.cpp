@@ -3,6 +3,7 @@
 #include "hud_command_posts_core.hpp"   // Sent
 #include "hud_sub_pixel.hpp"
 #include "hud_world_markers_core.hpp"
+#include "ai/comm_orders.hpp"
 #include "ai/flyer_wingmen.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -21,7 +22,8 @@
 // reads them, the anchor as the stock Target element's,
 // LockOnManager::UpdateTargetVisibility 0x00454BB1, and health as camera shake
 // reads it, Damageable::mCurHealth and mMaxHealth at GameObject +0x144 and
-// +0x148). The wingmen and their target come from flyer_wingmen.hpp.
+// +0x148). The wingmen and their target come from flyer_wingmen.hpp, the comm
+// keys' targets from comm_orders.hpp.
 // =============================================================================
 
 namespace {
@@ -53,7 +55,10 @@ const char* const kFieldNames[kFieldCount] = {"position", "onScreen", "offScreen
                                               "distance", "disable",  "health"};
 constexpr int kFieldTypes[kFieldCount] = {kTypeVector3, kTypeBool, kTypeBool, kTypeVector3,
                                           kTypeFloat,   kTypeBool, kTypeFloat};
-constexpr int kTarget = kSlots;   // the attack target's row, without health
+constexpr int kTarget = kSlots;       // the wingmen's attack target's row, without health ...
+constexpr int kAttack = kSlots + 1;   // ... the comm keys' Attack's and Defend's (comm_orders.hpp)
+constexpr int kDefend = kSlots + 2;
+constexpr int kRows   = kSlots + 3;
 constexpr char kCountName[] = "player1.wingmen.count";
 
 using Find        = void*(__cdecl*)(uint32_t hash);
@@ -89,10 +94,10 @@ struct Row {
 
 // Every pointer below dies with the mission: see hud_wingmen_open.
 void* s_countEvent = nullptr;
-void* s_events[kSlots + 1][kFieldCount];
+void* s_events[kRows][kFieldCount];
 Sent  s_sentCount;
-Row   s_rows[kSlots + 1];
-float s_vectors[kSlots + 1][2][3];   // position and direction, sent by pointer
+Row   s_rows[kRows];
+float s_vectors[kRows][2][3];   // position and direction, sent by pointer
 bool  s_announced = false;
 
 void invalidate()
@@ -202,6 +207,27 @@ void publish_vector(Field field, int row, int which, const float value[3])
    send_pointer(s_events[row][field], s_vectors[row][which]);
 }
 
+// A marker at `anchor`, its distance to `centre`.
+void publish_at(int row, const float centre[3], const float anchor[3], const View& view)
+{
+   Row& r = s_rows[row];
+   r.disabled.invalidate();
+   if (!view.valid) return;
+   hud_world_markers::Placement at;
+   if (!hud_world_markers::finite3(centre) || !hud_world_markers::finite3(anchor) ||
+       !hud_world_markers::place(view.camera, anchor, view.sideSlide, at, !g_hudSubPixel))
+      return;
+   const bool movedX = r.x.set_float(at.position[0]);
+   const bool movedY = r.y.set_float(at.position[1]);
+   if (movedX || movedY) publish_vector(kPosition, row, 0, at.position);
+   if (r.onScreen.set(at.onScreen ? 1 : 0)) send(s_events[row][at.onScreen ? kOnScreen : kOffScreen], 1);
+   if (r.direction.set_float(at.rotation[2])) publish_vector(kDirection, row, 1, at.rotation);
+   const float d = (float)hud_world_markers::distance(view.origin, centre);
+   if (r.distance.set_float(d)) send_float(s_events[row][kDistance], d);
+}
+
+// Over an object: its collision sphere's centre lifted kMarkerLift along its up
+// (the wingmen's rows with its health).
 void publish(int row, const uint8_t* obj, const View& view)
 {
    Row& r = s_rows[row];
@@ -213,24 +239,20 @@ void publish(int row, const uint8_t* obj, const View& view)
                               : 1.0f;
       if (r.health.set_float(health)) send_float(s_events[row][kHealth], health);
    }
-   if (!view.valid) return;
    const uint8_t* stack = *(const uint8_t* const*)(obj + kGO_SphereStack);
    const float* centre = stack ? (const float*)(stack + 0x40 + *(const int*)(obj + kGO_SphereIndex) * 0x10)
                                : (const float*)(obj + kGO_SphereCentre);
    const float* up = (const float*)(obj + kGO_MatrixUp);
    float anchor[3];
    for (int a = 0; a < 3; ++a) anchor[a] = centre[a] + up[a] * kMarkerLift;
-   hud_world_markers::Placement at;
-   if (!hud_world_markers::finite3(centre) ||
-       !hud_world_markers::place(view.camera, anchor, view.sideSlide, at, !g_hudSubPixel))
-      return;
-   const bool movedX = r.x.set_float(at.position[0]);
-   const bool movedY = r.y.set_float(at.position[1]);
-   if (movedX || movedY) publish_vector(kPosition, row, 0, at.position);
-   if (r.onScreen.set(at.onScreen ? 1 : 0)) send(s_events[row][at.onScreen ? kOnScreen : kOffScreen], 1);
-   if (r.direction.set_float(at.rotation[2])) publish_vector(kDirection, row, 1, at.rotation);
-   const float d = (float)hud_world_markers::distance(view.origin, centre);
-   if (r.distance.set_float(d)) send_float(s_events[row][kDistance], d);
+   publish_at(row, centre, anchor, view);
+}
+
+// Over a place: lifted kMarkerLift.
+void publish_place(int row, const float place[3], const View& view)
+{
+   const float anchor[3] = {place[0], place[1] + kMarkerLift, place[2]};
+   publish_at(row, place, anchor, view);
 }
 
 // An empty slot, or no target: one EventDisable on offScreen hides a marker either way.
@@ -263,6 +285,16 @@ bool hud_wingmen_target_bound()
    }
 }
 
+bool hud_orders_target_bound(int which)
+{
+   if (which < 0 || which > 1) return false;
+   __try {
+      return hud_up() && row_bound(kAttack + which);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+   }
+}
+
 void hud_wingmen_resolve(uintptr_t base)
 {
    if (g_build != GameBuild::Modtools) return;   // the wingmen run on modtools only
@@ -286,8 +318,8 @@ void hud_wingmen_resolve(uintptr_t base)
    s_screenWidth = (const uint32_t*)resolve(base, a->hud_screen_width);
    s_screenHeight = (const uint32_t*)resolve(base, a->hud_screen_height);
    s_active = true;
-   install_log("[HudWingmen] available: player1.wingmen.count, player1.wingman1..8.* and player1.wingmen.target.*; "
-               "while a .hud binds none, the wingmen get the game's own markers");
+   install_log("[HudWingmen] available: player1.wingmen.count, player1.wingman1..8.*, player1.wingmen.target.* and "
+               "player1.orders.attack.* / .defend.*; while a .hud binds none, the game's own markers show");
 }
 
 // As hud_command_posts_open: made at HUD::Manager::Open, before any .hud is read.
@@ -301,13 +333,16 @@ void hud_wingmen_open()
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       s_countEvent = nullptr;
    }
-   for (int row = 0; row <= kSlots; ++row)
+   for (int row = 0; row < kRows; ++row)
       for (int f = 0; f < kFieldCount; ++f) {
          s_events[row][f] = nullptr;
-         if (row == kTarget && f == kHealth) continue;
+         if (row >= kSlots && f == kHealth) continue;
          char name[64];
          if (row == kTarget)
             _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.wingmen.target.%s", kFieldNames[f]);
+         else if (row == kAttack || row == kDefend)
+            _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.orders.%s.%s", row == kAttack ? "attack" : "defend",
+                        kFieldNames[f]);
          else
             _snprintf_s(name, sizeof(name), _TRUNCATE, "player1.wingman%d.%s", row + 1, kFieldNames[f]);
          __try {
@@ -329,12 +364,12 @@ void hud_wingmen_update()
          return;
       }
       const bool wingmen = wingmen_bound(), target = row_bound(kTarget);
-      if (!wingmen && !target) return;
+      const bool orders[2] = {row_bound(kAttack), row_bound(kDefend)};
+      if (!wingmen && !target && !orders[0] && !orders[1]) return;
       if (!s_announced) {
          s_announced = true;
-         install_log("[HudWingmen] publishing: a .hud binds the %s", wingmen && target ? "wingmen and their target"
-                                                                     : wingmen         ? "wingmen"
-                                                                                       : "wingmen's target");
+         install_log("[HudWingmen] publishing: a .hud binds %s%s%s", wingmen ? "the wingmen; " : "",
+                     target ? "the wingmen's target; " : "", orders[0] || orders[1] ? "the comm keys' targets" : "");
       }
       const View view = read_view(s_localPlayer(0));
       if (wingmen) {
@@ -348,6 +383,14 @@ void hud_wingmen_update()
       if (target) {
          if (uint8_t* t = flyer_wingmen_hud_target()) publish(kTarget, t, view);
          else disable(kTarget);
+      }
+      for (int which = 0; which < 2; ++which) {
+         if (!orders[which]) continue;
+         uint8_t* obj = nullptr;
+         float place[3] = {};
+         if (!comm_orders_hud_target(which, &obj, place)) disable(kAttack + which);
+         else if (obj) publish(kAttack + which, obj, view);
+         else publish_place(kAttack + which, place, view);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // A wingman torn down mid-read must not escape into the game's HUD update.

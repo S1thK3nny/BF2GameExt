@@ -476,10 +476,9 @@ HUD for each, and landing beside the player, under a roof too (pilots get out un
 them; cycling formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
 
-**The comm keys in single player** - The eight comm keys (F5 to F12) make team chat only online, and no
-AI acts on them even there. Make each a request the AI answers offline too: Spotted, Medic, Repair, Ammo,
-Backup, Attack, Defend, then Pickup (the design agreed with the user on 2026-10-14, and the game's own
-pieces for it, in docs/RE/AISystem.md, "The comm keys' requests and the AI's own aid").
+**The comm keys online** - In single player the comm keys are requests the AI answers (Comm Key
+Orders); online they are still only team chat. Let the host's AI answer its players' requests too, from
+the chat the host passes on (docs/RE/AISystem.md, "The comm keys' requests and the AI's own aid").
 
 **Access hint nodes** - The map loader drops `access` hints (type 3) at load, so they do nothing
 (docs/RE/HintNodes.md). Keep them and give them a job: a way in that wingmen fly through to a hangar

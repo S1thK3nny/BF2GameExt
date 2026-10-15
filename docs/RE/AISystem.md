@@ -659,7 +659,7 @@ The user asked whether AI units can have goals of their own rather than their te
   and its own list of members (`mUnitList`, a `PblList<Character>`).
 - **Membership is per unit.** Every AI character sits in exactly one goal's list (its `Character::mGoalNode`).
   `AssignUnit` (P `0x0047E370`) puts a unit with none in the enabled goal of its team that is least full for
-  its weight (members ÷ (weight share × team size)). `AIGoalManager::Update` (P `0x0047EA80`, every 1 s) gives
+  its weight (members ÷ (weight share × team size)). `AIGoalManager::Update` (P `0x0047EA20`, M `0x005CDE20`, every 1 s) gives
   every AI character without a goal one, then updates each goal, which hands its members their commands. A
   unit keeps its goal until it respawns (`Character::Respawn` calls `ReassignIfNeeded`, P `0x0047E990`:
   remove, then `AssignUnit` again) or changes team.
@@ -724,17 +724,21 @@ The user asked for the comm keys in single player, with the AI doing what they s
   `Spotted` 0, `NeedMedic` 1, `NeedRepair` 2, `NeedAmmo` 3, `NeedPickup` 4, `NeedBackup` 5,
   `AttackPosition` 6, `DefendPosition` 7. The host passes it on (`ReadChatMessageFromClient`, P `0x0069BE80`)
   and each machine shows it (`ReadChatMessageFromServer`, P `0x0069BFA0`, then `DisplayMessage`, P
-  `0x0068D030`: the text, team-only lines in green, and for a code `TeamAssistManager::AddRequest`).
+  `0x0068D030`: the text, team-only lines in green, and for a code `TeamAssistManager::AddRequest`; on
+  modtools, M `0x0070C490`, the text is looked up again on each machine, `common.chat.<code>`, the line is
+  always yellow, and a hero asking for Medic or Ammo gets nothing).
 - **`TeamAssistManager`** (one, made for every mission by `PostLoad`, P `0x005CD4A7`). `AddRequest(code,
   character)` (P `0x007775A0`) makes a `TeamAssist` (pool, 0x14 bytes) for the requester (its controllable's
   trackable: its vehicle or itself), its team's mask and a timer (`sDuration`); the constructor (P
-  `0x007773F0`) puts a `hud_objective_icon_circle` marker on the requester for its team
+  `0x007773F0`) puts a marker on the requester for its team (P: `hud_objective_icon_circle`; M: the code's
+  own `PC_spotted_icon` ... `PC_defend_icon`, scale 5, from the table at M `0x00AD74F8`)
   (`TargetManager::AddMarker`, scale 3, flashing and pulsing; docs/RE/FlyerAI.md, "Markers") and plays the
   request's shout (`AI::VOHelper::Play(VOT_TA_First + code)`). `Update` (P `0x007776D0`) counts the timers
   down and deletes the expired. Nothing else reads the list: no AI acts on a request, online or not.
 - **The AI's own aid** (`RepairHelper`, one per `UnitAgent`; data: the agent, `mAidType`, `mContactTime`
   +0xC, `mPathing`, `mPathTime`, `mHealth`, `mSearchTime`, `mAidTarget` +0x20 a handle,
-  `mCheckForRecipientTime` +0x28). `CheckForRecipientAndInit` (P `0x00738EF0`), in two of its agent's states,
+  `mCheckForRecipientTime` +0x28). `CheckForRecipientAndInit` (P `0x00738EF0`), in three of the trooper
+  agent's states and three of the DefendHelper's (below),
   every 5 s: what it can give (`CalcMyAidTypes`: repair, health, ammo, from its weapons), then friendlies
   within 75 m (`TeamManager::GetObjectsInRange`, at most 50) that need it (`FindAidNeed`) and have an open
   `RT_REPAIR` reservation, the nearest (a player under extra conditions on its speed and facing); it
@@ -752,6 +756,87 @@ The user asked for the comm keys in single player, with the AI doing what they s
   reach it then the position you are aiming at") a timed Defend goal on that friendly, a command post, or
   the spot (a bare spot needs a stand-in, unread); Pickup last, hovers first (the user: "what exactly
   picks you up. Hovers, walkers, flyers?"), and as a passenger Attack and Defend direct the driver.
+
+### The comm keys in single player (built 2026-10-15, modtools only)
+
+`ai/comm_orders.cpp`, `[AI] CommKeyOrders` (on). The user: "Yep, get them done". Read in P for the names,
+then M.
+
+- **The clock.** A detour of `ControllerManager::Update` (M `0x005997A0`, cdecl(float dt); its first loop
+  hands dt to each player controller's update, vptr +0x14) reads the keys once a frame: the local
+  character's controllable's `mCtrl` (+0xC8), a `PlayerController`, its `ProcessedInputs` (+0x88) bits 20
+  to 27 (+0x10), each counted as it goes down. Only offline (`net_in_shell ? net_enabled_next :
+  net_enabled`, the game's own test before `ChatInputProcess`), and not in a flyer (the wingmen's keys).
+  The AI squads detour the same function when they are on; each guard takes the other's JMP.
+- **What the crosshair is on.** One `CollisionManager::RayHit` along the crosshair's line (as
+  `target_bar_latch.cpp`'s `aimed_unit`: `mEyePoint` +0xDC in unzoomed first person, else
+  `mTargetInfo.mAimStart` +0x148, along `mEyeDir` +0xE8), 600 m, mask 0x02|0x08|0x10|0x20|0x80. A
+  GameObject hit is an enemy or a friend by `GetAffiliationToMe` (M `0x0055F840`); anything else is a
+  place, which a soldier can be sent to if it faces up 0.7 or more and lies within 400 m.
+- **Goals.** `AIGoalManager::AddGoal` (M `0x005CD130`, thiscall(team, type, weight, GoalTarget*), RET
+  0x10; the switch's Destroy and Defend cases construct `DestroyGoal` M `0x005CF6C0` and `DefendGoal` M
+  `0x005CF4E0`, which copy the GoalTarget: type +0, position +4, character +0x10, object +0x14, handle
+  +0x18). The units sent are put in it as their own goal (`ai_goals_lua::set_unit_goal`, so no one else
+  joins it by weight); when the order's time is up, or its target is down, each goes back to the weighted
+  rule and the goal is deleted (`DeleteGoal`, M `0x005CD4D0`, through ai_goals' detour, which drops the
+  keeps first). Backup: Defend, GTT_CHARACTER the player. Attack: Destroy, GTT_GAMEOBJECT the enemy.
+  Defend: Defend, GTT_CHARACTER for a friend a character controls (wherever it goes), else
+  GTT_GAMEOBJECT. A place: Defend, GTT_POS. Pickup: Follow (`FollowGoal::Assign`, P `0x005C8650`, forces
+  the same follow command as the squad key, `UnitFollowInfo`, on the character's entity), GTT_CHARACTER
+  the player, for the nearest AI driving an `EntityHover`, until the player is aboard it.
+- **The stock request.** Each key, on foot or in a ground vehicle, calls `NetGame::DisplayMessage` (M
+  `0x0070C490`, cdecl(NG_ChatMsg*): M's message is 0x128 bytes, the sender's id +0, a team flag +4, the code
+  +0x10), as each machine does with the chat online: "<name>: Medic!" and `AddRequest`'s marker and shout.
+  It finds the sender by its id and hands it to `AddRequest` unchecked, so it is called only where the
+  player's id is its own slot in `sCharacters`; else `AddRequest` (M `0x00687440`, cdecl(code, Character*))
+  alone. The requests come from a pool of 64 (`GameLoop::Init`, M `0x00734763`) that cannot grow: past it
+  `MemoryPool::Allocate` asks for nothing and its free list then runs across the heap. Each lasts 5 s (M
+  `0x00AD74F4`), so a request goes out at most every 0.25 s and only while fewer than 48 are live (the list
+  at `TeamAssistManager::sInstance` M `0x00BA37F4` +0x18, each's next at +0).
+- **Who answers.** AI characters (`mPlayerId` +0x130 below 0) of the player's team, alive, not in a flyer;
+  for a goal also not answering another order and not following the player as its squad
+  (`EVQ_SC_IsFollowingChr`, 0x0F, through `squad_send_event`: they would follow on regardless). The nearest
+  first (`comm_orders_core.hpp`).
+- **What the crosshair is on**, for Spotted and Attack, is the enemy the game's own auto-aim marks first
+  (`mReticuleTarget`, Controllable +0x164 and its handle +0x168, a weapon channel each, as
+  `PlayerController::Update` writes it), else the line's; for Defend a friend on the line first, else one the
+  auto-aim marks, so an enemy in the lock-on cone does not keep it from holding a place.
+- **Medic, Repair, Ammo.** The nearest AI on foot within 300 m that can give it, sent to the player with a
+  Defend goal on its character (GTT_CHARACTER: it comes within 2 to 5 m and holds there); idle there, the
+  game's own check gives the aid. Can give it: its class aids at all (the object's class, vptr +0x24
+  `GetSoldierType`, 2 or 3: pilot, repair, support, special; `CheckForRecipientAndInit`'s gate, M
+  `0x005BC82B`), and its weapons give that aid to what is aided (`RepairHelper::CalcMyAidTypes`, M
+  `0x005BBD20`, thiscall(healthMask, ammoMask), RET 8, on a 0x30-byte stand-in whose +4 is the unit's agent,
+  UnitController +0x2C0: all it reads is the agent's mCtrl +0xC and that one's owner +4; a bit per recipient
+  health type, GameObject +0x1FC & 7). What is aided: for Medic the player's soldier, for Repair and Ammo what
+  it controls. Medic and Repair with nothing to mend say so and send no one, and end once it is whole.
+- **The aid itself** (read in P and M): `CheckForRecipientAndInit` runs in the trooper agent's states 2, 4
+  and 5 (CaptureCP) and in DefendHelper's states 3 (idle at what it defends), 5 and 6 (in a fortification),
+  every 5 s; not in a follower (the follow agent has no RepairHelper). Its candidates are friends within
+  75 m (an immediate, M `0x005BC8EB`); a player within 30 m standing still (under 0.5 m/s) or facing within
+  about 139 degrees of the helper is taken at once; further, a still one. It never aids an AI soldier. A
+  powerup within 15 m of the player covers the need. `RepairHelper::Update` (M `0x005BCD30`) walks into
+  reach and fires the aid weapon, and gives up 20 s after its last contact.
+- **Ending an order.** `DeleteGoal` changes no member's order (it only clears the list), and a Defend order
+  never ends, so the members are told to wait first (`AIGoal::UnAssignAll`, M `0x005CCD00`, thiscall(),
+  plain RET: CMD_WAIT to each through `ForceCommand`, then the list cleared; the game's own `DeleteAIGoal` and
+  `ClearAllGoals` do the same), then each unit's own goal is let go and the goal deleted. A goal a script
+  deletes or clears meanwhile is forgotten (ai_goals' detours call `comm_orders_goals_changed`), before the
+  pool can hand its memory to a new goal.
+- **Taking an order at once.** `AIGoal::Update` (M `0x005CCEE0`) hands a goal's order only to a member idle,
+  waiting or done, so `SetUnitGoal` and `ClearUnitGoal` (ai_goals.cpp) now call the goal's `Assign` (vptr
+  +0x1C, thiscall(Character*), RET 4; Defend's M `0x005CF5C0`, Destroy's `0x005CF7A0`) as they move a unit.
+- **Spotted** sets nothing lasting: each of the player's side within 150 m of the enemy whose eye (its
+  controllable's `mEyePoint`) has a clear line to it (mask 0x90) gets
+  `UnitController::ForceSetAttackHelperTarget` (M `0x0059EC20`) on it.
+- **Markers.** The Attack and Defend targets: `player1.orders.attack.*` and `.defend.*` (HUDSystem.md,
+  "Wingmen markers"), else the game's `TargetManager` marker, red and green, each frame by what the HUD
+  binds. A place has only the HUD's.
+- **Checks:** `tests/comm_orders_tests.cpp` (the keys, the places, what each key asks, how many answer,
+  who), the `comm` mutation suite (all caught), `tests/comm_orders_abi_tests.py` (the clock's prologue and its
+  dt, AddGoal's shape, switch and constructors, DeleteGoal, UnAssignAll, DisplayMessage's reads and its call
+  to AddRequest, the request pool, CalcMyAidTypes and the aid gate, the guards and the other features'
+  offsets it shares), `tests/ai_goals_abi_tests.py` (the goals' Assign). Not played.
 
 ---
 

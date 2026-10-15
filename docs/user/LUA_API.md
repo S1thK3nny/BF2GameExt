@@ -184,7 +184,7 @@ AI goals belong to a team: the game puts each AI unit in one of its team's goals
 
 | Function | Description | Since |
 |----------|-------------|-------|
-| `SetUnitGoal(charIndex, goal)` | Puts the AI unit in `goal`, a goal of its own team, now and again after every respawn. The goal is kept for the units scripts put in it: no one else joins it by weight, whatever its weight. Returns true if done. | 1.2.0 |
+| `SetUnitGoal(charIndex, goal)` | Puts the AI unit in `goal`, a goal of its own team, now and again after every respawn, and it takes the goal's order at once. The goal is kept for the units scripts put in it: no one else joins it by weight, whatever its weight. Returns true if done. | 1.2.0 |
 | `ClearUnitGoal(charIndex)` | Back to its team's goals by weight. Returns true if it had a goal of its own. | 1.2.0 |
 | `GetUnitGoal(charIndex)` | The goal the unit is in now, as `AddAIGoal` gave it, or nil. | 1.2.0 |
 
