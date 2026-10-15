@@ -454,9 +454,10 @@ inline V3 escape_point(V3 me, V3 target, V3 open, V3 nose)
 // kLandClear over its ground, and the wingman's own way to it clear.
 // It comes down toward a point kLandHover over its spot (lower under a low
 // roof, hover_height) and lands (EntityFlyer::Land, as a node's LandOnArrival
-// does) once within kLandStart of it across and kLandHigh up. With nowhere to land
-// it circles overhead (kLoiterHeight up, kLoiterRadius round), or, under a roof,
-// where circling would take it into the roof, it is let go. When the player
+// does) once within kLandStart of it across and kLandHigh up. With nowhere beside
+// the leader it looks on ahead, and with nowhere there either it circles until a
+// place is free: overhead in the open (kLoiterHeight up, kLoiterRadius round), low
+// under a roof (forward_tries and roof_loiter_radius, below). When the player
 // takes off, so do they.
 constexpr float kLandSpread   = 1.5f;
 constexpr float kLandMinGap   = 15.0f;   // m
@@ -602,12 +603,50 @@ inline bool may_land(V3 me, V3 spot)
 
 // The point it steers at to circle `center`, at that height: on the circle,
 // kLoiterLead ahead of where it is round it (anticlockwise from above).
-inline V3 loiter_point(V3 center, V3 me)
+inline V3 loiter_point(V3 center, V3 me, float radius = kLoiterRadius)
 {
    const float dx = me.x - center.x, dz = me.z - center.z;
    const float a = std::isfinite(dx) && std::isfinite(dz) && (dx != 0.0f || dz != 0.0f) ? std::atan2(dz, dx) : 0.0f;
    const float b = a + kLoiterLead;
-   return {center.x + kLoiterRadius * std::cos(b), center.y, center.z + kLoiterRadius * std::sin(b)};
+   return {center.x + radius * std::cos(b), center.y, center.z + radius * std::sin(b)};
+}
+
+// ---- On ahead, and circling under a roof ----------------------------------------------
+// With no place beside the leader (land_tries), one looks on ahead, the way the
+// leader faces: kLandAhead places kLandAheadSide to its own side of the leader's
+// line, from kLandMinGap ahead, every kLandSpacing (forward_tries: to 195 m); the
+// caller stops at the first wall between one and the next. The user (2026-10-15):
+// "Instead of a circle, they should move forward instead. If forward is not clear
+// (wall) then circle until a free spot appears". With none there either it
+// circles, looking for a free place again every kLandLookAgain: overhead in the
+// open; under a roof low, at its hover height, round where there is most room
+// (roof_loiter_radius; with no room to circle, it is let go).
+constexpr float  kLandAheadSide  = 12.0f;    // m to its side of the leader's line
+constexpr int    kLandAhead      = 16;       // places
+constexpr float  kRoofLoiterMin  = 15.0f;    // m round
+constexpr float  kRoofLoiterMax  = 30.0f;    // m round
+constexpr float  kRoofLoiterRoom = 5.0f;     // m kept from what is round the circle
+constexpr double kLandLookAgain  = 2.0;      // s
+
+// The places on ahead (x right, z ahead of the leader), on the side its slot is
+// (a slot on the leader's line: right for an even `rank`, left for an odd one).
+// How many (kLandAhead at most).
+inline int forward_tries(V3 slot, int rank, V3* out)
+{
+   const float side = slot.x > 0.0f ? 1.0f : slot.x < 0.0f ? -1.0f : (rank % 2 == 0 ? 1.0f : -1.0f);
+   int n = 0;
+   for (int k = 0; k < kLandAhead; ++k) out[n++] = V3{side * kLandAheadSide, 0.0f, kLandMinGap + kLandSpacing * (float)k};
+   return n;
+}
+
+// How far round it circles under a roof with `room` metres clear every way from
+// the circle's centre: that less kRoofLoiterRoom, kRoofLoiterMax at most; -1
+// with less than kRoofLoiterMin left, no room to circle.
+inline float roof_loiter_radius(float room)
+{
+   const float r = room - kRoofLoiterRoom;
+   if (!(r >= kRoofLoiterMin)) return -1.0f;   // NaN too
+   return r < kRoofLoiterMax ? r : kRoofLoiterMax;
 }
 
 } // namespace flyer_orders

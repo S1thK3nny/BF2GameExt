@@ -887,6 +887,25 @@ void landing_places()
    assert(near(probe_height(12.0f), 10.0f) && near(probe_height(4.0f), 3.0f) && near(probe_height(kNan), 40.0f));
    assert(near(hover_height(kNoRoof), 15.0f) && near(hover_height(12.0f), 8.0f));
    assert(near(hover_height(6.0f), 4.0f) && near(hover_height(kNan), 15.0f));
+
+   // On ahead: 12 m to its slot's side, from 15 m ahead every 12 m, 16 places to 195 m.
+   V3 ahead[kLandAhead];
+   assert(forward_tries(V3{-25.0f, 0.0f, -25.0f}, 0, ahead) == 16);
+   assert(near(ahead[0].x, -12.0f) && near(ahead[0].z, 15.0f) && near(ahead[1].z, 27.0f) && near(ahead[0].y, 0.0f));
+   assert(near(ahead[15].x, -12.0f) && near(ahead[15].z, 195.0f));
+   assert(forward_tries(V3{25.0f, 0.0f, -25.0f}, 1, ahead) == 16 && near(ahead[3].x, 12.0f));
+   assert(forward_tries(V3{0.0f, 0.0f, -25.0f}, 0, ahead) == 16 && near(ahead[0].x, 12.0f));    // on the line: by rank
+   assert(forward_tries(V3{0.0f, 0.0f, -25.0f}, 1, ahead) == 16 && near(ahead[0].x, -12.0f));
+   assert(forward_tries(V3{kNan, 0.0f, 0.0f}, 2, ahead) == 16 && near(ahead[0].x, 12.0f));
+   assert(kLandAheadSide == 12.0f && kLandLookAgain == 2.0);
+   // Circling under a roof: the room every way less 5 m, 15 to 30 m round; else no room.
+   assert(near(roof_loiter_radius(50.0f), 30.0f) && near(roof_loiter_radius(35.0f), 30.0f));
+   assert(near(roof_loiter_radius(30.0f), 25.0f) && near(roof_loiter_radius(20.0f), 15.0f));
+   assert(roof_loiter_radius(19.9f) < 0.0f && roof_loiter_radius(kNan) < 0.0f && roof_loiter_radius(-5.0f) < 0.0f);
+   // A circle's point at a radius of its own.
+   const V3 tight = loiter_point(V3{10.0f, 5.0f, 10.0f}, V3{40.0f, 5.0f, 10.0f}, 20.0f);
+   assert(near(across(tight, V3{10.0f, 5.0f, 10.0f}), 20.0f) && near(tight.y, 5.0f));
+   assert(near(across(loiter_point(V3{}, V3{1.0f, 0.0f, 0.0f}), V3{}), kLoiterRadius));   // the open sky's
 }
 
 // The keys and words a mission sets: orders by name, the order a flight starts
@@ -1180,6 +1199,24 @@ void trail()
    for (int i = 0; i <= 10; ++i) record(back, V3{8.0f * (float)i, 0.0f, 0.0f});
    for (int i = 9; i >= 0; --i) record(back, V3{8.0f * (float)i, 1.0f, 0.0f});
    assert(back.count == 21 && nearest(back, V3{40.0f, 0.4f, 0.0f}, -1) == 15);
+   // The way out: back along it; of points as near, the oldest (the way in);
+   // never forward past its own; kWindow back at most.
+   assert(nearest_back(back, V3{40.0f, 0.4f, 0.0f}, -1, &d) == 5 && near(d, 0.4f));
+   assert(nearest_back(back, V3{40.0f, 0.6f, 0.0f}, -1, &d) == 5 && near(d, 0.6f));   // the way in, though a bit further
+   assert(nearest_back(back, V3{40.0f, 0.4f, 0.0f}, 20) == 5);
+   assert(nearest_back(back, V3{80.0f, 0.0f, 0.0f}, 4) == 4);
+   assert(nearest_back(longer, V3{0.0f, 0.0f, 0.0f}, 99) == 99 - kWindow);
+   assert(nearest_back(t, V3{kNan, 0.0f, 0.0f}, -1) == -1 && nearest_back(Trail{}, V3{}, -1) == -1);
+   // Where it may cut back to: 16, 8, 4 and 2 points back, never before the oldest.
+   assert(back_candidates(back, 20, cuts) == 4 && cuts[0] == 4 && cuts[1] == 12 && cuts[2] == 16 && cuts[3] == 18);
+   assert(back_candidates(back, 3, cuts) == 2 && cuts[0] == 0 && cuts[1] == 1);
+   assert(back_candidates(back, 0, cuts) == 0 && back_candidates(back, 21, cuts) == 0);
+   assert(prev_of(back, 10) == 9 && prev_of(back, 0) == 0);
+   // Out once no roof is over it two looks in a row.
+   int outLooks = 0;
+   assert(!out_clear(outLooks, false) && out_clear(outLooks, false));
+   assert(!out_clear(outLooks, true) && outLooks == 0 && !out_clear(outLooks, false) && out_clear(outLooks, false));
+   assert(kOutLooks == 2 && kOutJoin == 2.0 && kOutMax == 45.0);
    // A jump is not flown: it starts again, its numbers after every earlier one.
    const int was = newest(t);
    assert(record(t, V3{312.0f, 10.0f, 150.0f}) && t.count == 1 && newest(t) == was + 1 && along(t, newest(t)) == 0.0f);

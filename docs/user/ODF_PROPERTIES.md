@@ -608,7 +608,7 @@ On the leader's class:
 | `WingmanAuto` | `1` or `0` | `1`: wingmen are called up at takeoff; `0`: only on the squad key. Losses are made up either way once they have been. Without it, the INI's `[AI] FlyerWingmenAuto` decides, off by default. | 1.2.0 |
 | `WingmanSlot` | `"x y z [class ...]"` | One slot per line, in metres from the leader (x right, y up, z ahead), written as a command vehicle's `SpawnPointLocation` lines are. Classes named after the numbers keep that slot for themselves, if they are on the `WingmanClass` list. The lines set how many it takes unless `WingmanCount` asks fewer. | 1.2.0 |
 | `WingmanFormation` | names | The map's formation shapes (its formation paths) the flight flies, by name: the first the map has. Without any, the first of its `SquadronFormation` shapes that holds the whole flight (else the largest), else a vee. | 1.2.0 |
-| `WingmanLand` | `1` or `0` | `1`: its wingmen land beside it when it lands, where the ground is level with it, else they circle overhead; `0`: they break off. Over `[AI] FlyerWingmenLand`. | 1.2.0 |
+| `WingmanLand` | `1` or `0` | `1`: its wingmen land beside it when it lands, or on ahead the way it faces, where the ground is level with it, else they circle till a place is free; `0`: they break off. Over `[AI] FlyerWingmenLand`. | 1.2.0 |
 | `WingmanStartOrder` | `formup`, `engage` or `cover` | The order its flight starts with when called up. Form up by default. | 1.2.0 |
 | `WingmanEngageRange` | metres | How far from the leader engaging wingmen take enemies on, 100 to 5000; 800 by default. They chase one a quarter further before giving it up. | 1.2.0 |
 

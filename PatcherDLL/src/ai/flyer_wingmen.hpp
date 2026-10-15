@@ -122,10 +122,25 @@
 // it is let go; asked again every 2 s while still aboard, four times in all),
 // unless its own class says WingmanExitOnLand = 0: then it waits
 // aboard, and when the player takes off (state 1) it takes off too
-// (EntityFlyer::TakeOff) and forms up again. One with no place, or up again
-// before its leader, circles 200 m round a point 150 m over the leader, or, with
-// the leader under a roof, where that would take it into the roof (or the ship
-// or mountain the hangar is in), is let go instead. While landed the squad key is
+// (EntityFlyer::TakeOff) and forms up again. One with no place beside the leader
+// looks on ahead, the way the leader faces (16 places 12 m to its side, every
+// 12 m from 15 m ahead, none past a wall), each with no flyer or vehicle on it
+// (rays down at vehicles alone; the ground's go through them). With none there
+// either, or up again before its leader, it circles till one is free, looking
+// again every 2 s (the user: "Instead of a circle, they should move forward
+// instead. If forward is not clear (wall) then circle until a free spot
+// appears"): 200 m round a point 150 m over the leader, or, with the leader under
+// a roof, where that would take it into the roof, low and slow at its hover
+// height, 15 to 30 m round the point with most room of those over the leader and
+// on ahead (flyer_orders_core.hpp, roof_loiter_radius). With no room for that it
+// is let go, and under a roof one interrupted past its two retries is let go too
+// ("If they cannot land reliably ... disband"); but one let go under a roof, and
+// still flying, first flies back out the way the leader flew in, along its trail
+// backwards (flyer_trail_core.hpp, the way out: the user, "Lots of hangars are
+// single entry/exit, so if they disband it's highly likely they'll crash unless
+// they do this"), and is let go once out from under the roof two looks in a row,
+// or where it is if not on the trail in 2 s, stuck 6 s or still going at 45 s.
+// While landed the squad key is
 // the game's (seats), and the comm keys order nothing. The player getting out of
 // its landed flyer changes none of this for 60 s (flyer_orders_core.hpp,
 // arrival_over; the user, after the first hangar landings: "I just don't see any

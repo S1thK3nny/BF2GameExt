@@ -376,6 +376,12 @@ struct Wingman {
    bool     touchedDown = false;   // landed beside its leader (OnWingmanLanded)
    double   landAt = 0.0;      // told to land (EntityFlyer::Land) ...
    int      landTries = 0;     // ... its landings interrupted so far
+   V3       circleAt;          // with no place yet under a roof, the low circle it flies: round here ...
+   float    circleR = 0.0f;    // ... this far (0: the open sky's, over its leader) ...
+   double   lookAgainAt = 0.0; // ... looking for a free place again from then (kLandLookAgain)
+   double   outFrom = 0.0;     // let go under a roof, it flies back out along the trail first (head_out): since ...
+   int      outLooks = 0;      // ... roof looks in a row with none over it ...
+   const char* outCode = nullptr;   // ... and the reason a script hears once it is out
    double   exitAt = 0.0;      // its pilot last asked to get out ...
    int      exitTries = 0;     // ... how many times
    int      pilot = -1;        // the character flying it as it joined (a script's events), or -1
@@ -411,6 +417,7 @@ enum : int {
    kLandLeaving = 4,   // taking off with its leader
    kLandOut     = 5,   // landed, its pilot getting out (unless WingmanExitOnLand = 0)
    kLandSeek    = 6,   // its landing interrupted: taking off again, for a clear place
+   kLandOutward = 7,   // let go under a roof: flying back out along the leader's trail first (head_out)
 };
 
 // The leader's DoTrick, seen before it runs; it went ahead if the leader is in a
@@ -1945,6 +1952,22 @@ bool roofed(V3 at, uint8_t* ignoreA, uint8_t* ignoreB, float* height = nullptr)
    return true;
 }
 
+// Whether a flyer or vehicle stands on a place (a ship parked in a hangar, the
+// player's own): rays down from `top` onto it at vehicles alone (the ground's
+// rays go through them), at its centre and a third of kLandSpacing to each side.
+bool occupied(V3 spot, float top, uint8_t* self)
+{
+   const float d = flyer_orders::kLandSpacing / 3.0f;
+   const V3 offsets[5] = {V3{0.0f, 0.0f, 0.0f}, V3{d, 0.0f, 0.0f}, V3{-d, 0.0f, 0.0f}, V3{0.0f, 0.0f, d},
+                          V3{0.0f, 0.0f, -d}};
+   for (const V3& o : offsets) {
+      const V3 at = spot + o;
+      if (blocked(V3{at.x, top, at.z}, V3{at.x, spot.y - 1.0f, at.z}, self, nullptr, nullptr, kVehicleTypes))
+         return true;
+   }
+   return false;
+}
+
 // ---- The leader's trail (flyer_trail_core.hpp, FlyerWingmenTrail) --------------------
 // The player's flyer's path, recorded from every flyer's update (the leader's own
 // need not come through UpdateIndirect), with the roof over it looked for every
@@ -1980,10 +2003,12 @@ void update_trail(double now)
          install_log("[Wingmen] you fly %s a roof: your wingmen's slots %s", roof ? "under" : "out from under",
                      roof ? "close up" : "open out again");
       s_player.roofed = roof;
-      // And over each of its wingmen (no_lift).
+      // And over each of its wingmen (no_lift), one on its way out counting the
+      // looks it has been out from under it (out_clear).
       for (int i = 0; i < s_player.count; ++i) {
          Wingman& w = s_player.wing[i];
          w.roofed = handle_of(w.obj) == w.handle && alive(w.obj) && roofed(position_of(w.obj), w.obj, nullptr);
+         if (w.land == kLandOutward) flyer_trail::out_clear(w.outLooks, w.roofed);
       }
    }
    s_player.squeeze = flyer_trail::squeeze(s_player.squeeze, s_player.roofed, (float)(now - s_squeezedAt));
@@ -2093,6 +2118,53 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
    return true;
 }
 
+// One let go under a roof (kLandOutward, head_out) flies back out the way the
+// leader flew in: along its trail backwards (flyer_trail_core.hpp, the way out),
+// at the furthest of the points kCuts back it has a clear line to, looked at
+// every kLookEvery. True while it can, with the point it steers at in `out`.
+bool follow_trail_out(uint8_t* flyer, const Formation& f, Wingman& w, double now, V3& out)
+{
+   if (!trail_live(f)) return false;
+   uint8_t* const leader = f.leader;
+   const V3 me = position_of(flyer);
+   if (now - w.trailLookAt >= flyer_trail::kLookEvery) {
+      w.trailLookAt = now;
+      float d = 0.0f;
+      const int at = flyer_trail::nearest_back(s_trail, me, w.onTrail ? w.trailAt : -1, &d);
+      if (!w.onTrail) {
+         if (at < 0 || !flyer_trail::takes(true, d) || blocked(me, flyer_trail::point(s_trail, at), flyer, leader))
+            return false;
+         w.onTrail = true;
+         w.trailAt = at;
+         w.gainedAt = now;
+      } else if (at >= 0 && at < w.trailAt) {
+         w.trailAt = at;
+         w.gainedAt = now;
+      }
+      int cuts[flyer_trail::kMaxCuts];
+      const int n = flyer_trail::back_candidates(s_trail, w.trailAt, cuts);
+      w.trailTo = flyer_trail::prev_of(s_trail, w.trailAt);
+      for (int k = 0; k < n; ++k)
+         if (!blocked(me, flyer_trail::point(s_trail, cuts[k]), flyer, leader)) {
+            w.trailTo = cuts[k];
+            break;
+         }
+   }
+   if (!w.onTrail || !flyer_trail::has(s_trail, w.trailAt)) return false;
+   // Past the point it steers at between looks: on to the one before it, which
+   // the leader flew from to it.
+   const float* wm = matrix_of(flyer);
+   const V3 nose = wm ? row(wm, 2) : V3{0.0f, 0.0f, 1.0f};
+   if (!flyer_trail::has(s_trail, w.trailTo) || w.trailTo >= w.trailAt) w.trailTo = flyer_trail::prev_of(s_trail, w.trailAt);
+   for (int k = 0; k < 8 && w.trailTo > s_trail.first; ++k) {
+      const V3 to = flyer_trail::point(s_trail, w.trailTo) - me;
+      if (flyer_wingmen::length(to) > kTrailReached && flyer_wingmen::dot(to, nose) > 0.0f) break;
+      w.trailTo = flyer_trail::prev_of(s_trail, w.trailTo);
+   }
+   out = flyer_trail::point(s_trail, w.trailTo);
+   return true;
+}
+
 // The game's lift off for one of the player's wingmen, as on the trail
 // (flyer_trail_core.hpp, lift_off): under a roof itself, or with its leader under
 // one and its line clear as follow_trail last looked. FlyerWingmenTrail's, with
@@ -2103,21 +2175,31 @@ bool no_lift(const Formation& f, const Wingman& w, double now)
 }
 
 // A wingman's place beside the landing leader (flyer_orders_core.hpp,
-// land_tries): the first that is spaced from the places already `taken`, on
+// land_tries), else on ahead the way the leader faces (forward_tries), none past
+// the first wall: the first that is spaced from the places already `taken`, on
 // ground level with the leader's and flat, probed from under any roof over the
-// leader, and, under one, in a clear line from the leader and on a clear way from
-// the wingman, straight or along the leader's trail (reaches_by_trail). Which try
-// it was, or -1 for none.
+// leader, with no flyer or vehicle on it (occupied), and, under a roof, in a clear
+// line from the leader and on a clear way from the wingman, straight or along the
+// leader's trail (reaches_by_trail). Which try it was (from kLandTries on, ahead),
+// or -1 for none.
 int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, const V3* taken, int nTaken, V3& out)
 {
-   V3 tries[flyer_orders::kLandTries];
-   const int n = flyer_orders::land_tries(slot_of(f, w.slot), rank, tries);
+   V3 tries[flyer_orders::kLandTries + flyer_orders::kLandAhead];
+   const V3 slot = slot_of(f, w.slot);
+   const int beside = flyer_orders::land_tries(slot, rank, tries);
+   const int n = beside + flyer_orders::forward_tries(slot, rank, tries + beside);
    const bool roof = f.padRoof < flyer_orders::kNoRoof;
    const float top = f.padGround + flyer_orders::probe_height(f.padRoof);
    const V3 low{f.pad.x, f.padGround + flyer_orders::kLandClear, f.pad.z};
+   V3 ahead = low;   // on ahead: as far as the line has gone, from the leader's
    for (int k = 0; k < n; ++k) {
       V3 spot = f.padFrame.valid ? flyer_wingmen::to_world(f.padFrame, f.pad, tries[k]) : f.pad + tries[k];
       spot.y = f.padGround;
+      if (k >= beside) {   // on ahead: none past a wall
+         const V3 next{spot.x, low.y, spot.z};
+         if (blocked(ahead, next, leader, w.obj)) break;
+         ahead = next;
+      }
       if (!flyer_orders::spaced(spot, taken, nTaken)) continue;
       if (roof && blocked(low, V3{spot.x, low.y, spot.z}, leader, w.obj)) continue;   // a wall between
       float hy = 0.0f, hup = 0.0f;
@@ -2126,6 +2208,7 @@ int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, 
           !flyer_orders::level_spot(hy, hup, f.padGround))
          continue;
       spot.y = hy;
+      if (occupied(spot, top, w.obj)) continue;   // a ship parked on it
       if (roof &&
           blocked(position_of(w.obj), spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f}, leader, w.obj) &&
           !reaches_by_trail(f, w))
@@ -2136,9 +2219,112 @@ int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, 
    return -1;
 }
 
-// The leader comes down: each wingman, in slot order, gets a place beside it
-// (land_place). One with none circles overhead; under a roof, where circling would
-// take it into the roof, it is let go.
+// Where a place is, for the log: beside the leader or on ahead.
+const char* place_said(int k) { return k < flyer_orders::kLandTries ? "beside you" : "on ahead"; }
+
+// Under a roof, where one with no place circles (flyer_orders_core.hpp,
+// roof_loiter_radius): low, at its hover height, round the point with most room
+// every way, of the one over the leader and those on ahead along its line before
+// a wall. False with no room anywhere.
+bool roof_circle(const Formation& f, const Wingman& w, V3& center, float& radius)
+{
+   constexpr int kTypes = kGroundMask | kVehicleTypes;
+   constexpr float kDiag = 0.70710678f;
+   const float reach = flyer_orders::kRoofLoiterMax + flyer_orders::kRoofLoiterRoom;
+   const V3 fwd = f.padFrame.valid ? f.padFrame.fwd : V3{0.0f, 0.0f, 1.0f};
+   const V3 right = f.padFrame.valid ? f.padFrame.right : V3{1.0f, 0.0f, 0.0f};
+   const V3 ways[8] = {fwd, fwd * -1.0f, right, right * -1.0f, (fwd + right) * kDiag, (fwd - right) * kDiag,
+                       (right - fwd) * kDiag, (fwd + right) * -kDiag};
+   V3 at{f.pad.x, f.padGround + flyer_orders::hover_height(f.padRoof), f.pad.z};
+   float best = -1.0f;
+   for (int k = 0; k <= flyer_orders::kLandAhead; ++k) {
+      if (k > 0) {
+         const V3 next = at + fwd * flyer_orders::kLandSpacing;
+         if (blocked(at, next, w.obj, nullptr, nullptr, kTypes)) break;   // a wall ahead
+         at = next;
+      }
+      float room = reach;
+      for (const V3& d : ways) {
+         float along = 0.0f;
+         if (blocked(at, at + d * reach, w.obj, nullptr, &along, kTypes) && along < room) room = along;
+      }
+      if (room > best) {
+         best = room;
+         center = at;
+      }
+      if (best >= reach) break;   // all the room a circle wants
+   }
+   radius = flyer_orders::roof_loiter_radius(best);
+   return radius > 0.0f;
+}
+
+// With no place free: it circles till one is, looking again from kLandLookAgain
+// on (look_again); under a roof low, round `center`, `radius` round (roof_circle),
+// in the open over its leader (radius 0).
+void circle_till_free(Wingman& w, V3 center, float radius, double now)
+{
+   w.land = kLandCircle;
+   w.circleAt = center;
+   w.circleR = radius;
+   w.lookAgainAt = now + flyer_orders::kLandLookAgain;
+}
+
+// The places the others hold, for wingman `i`'s next (land_place): the leader's
+// own, those the others come down at and where those down are; and its turn
+// among the flight in `rank` (those in slots before its own).
+int taken_places(const Formation& f, int i, V3* taken, int& rank)
+{
+   int n = 0;
+   rank = 0;
+   taken[n++] = f.pad;
+   for (int j = 0; j < f.count; ++j) {
+      if (j == i) continue;
+      const Wingman& o = f.wing[j];
+      if (o.slot < f.wing[i].slot) ++rank;
+      if (o.land == kLandComing) taken[n++] = o.spot;
+      else if ((o.land == kLandDown || o.land == kLandOut) && handle_of(o.obj) == o.handle && alive(o.obj))
+         taken[n++] = position_of(o.obj);
+   }
+   return n;
+}
+
+// One let go under a roof (no place and no room to circle, its landings failing,
+// or its time with the player out over), where the game's own AI would most
+// likely fly it into a wall: it flies back out along the leader's trail first
+// (kLandOutward, follow_trail_out) and is let go once out from under the roof
+// (flyer_trail_core.hpp, out_clear), or where it is when stuck or past kOutMax.
+// The user: "can it fly back out the way it flew in, probably by [following] my
+// path backwards? Lots of hangars are single entry/exit, so if they disband it's
+// highly likely they'll crash unless they do this". With no trail it can take,
+// or not flying, it is let go now.
+void head_out(Formation& f, int i, double now, const char* why, const char* code)
+{
+   Wingman& w = f.wing[i];
+   float d = 0.0f;
+   const int at = trail_live(f) && handle_of(w.obj) == w.handle && alive(w.obj) && flying(w.obj)
+                     ? flyer_trail::nearest_back(s_trail, position_of(w.obj), -1, &d)
+                     : -1;
+   if (at < 0 || !flyer_trail::takes(true, d)) {
+      drop(f, i, why, code);
+      return;
+   }
+   w.land = kLandOutward;
+   w.outFrom = now;
+   w.outLooks = 0;
+   w.outCode = code;
+   w.onTrail = false;
+   w.clearLooks = 0;
+   w.trailLookAt = -1e9;
+   w.circleR = 0.0f;
+   if (order_log())
+      install_log("[Wingmen] slot %d (#%u): %s: it flies back out along your trail before it is let go", w.slot + 1,
+                  w.handle, why);
+}
+
+// The leader comes down: each wingman, in slot order, gets a place beside it or
+// on ahead (land_place). One with none circles till one is free: overhead, or
+// under a roof low where there is room (roof_circle); with no room, it flies back
+// out along the trail and is let go (head_out).
 void start_landing(Formation& f, uint8_t* leader, double now)
 {
    f.landing = true;
@@ -2195,56 +2381,101 @@ void start_landing(Formation& f, uint8_t* leader, double now)
          taken[nTaken++] = spot;
          ++beside;
          if (order_log())
-            install_log("[Wingmen] slot %d (#%u) lands beside you %.0f m off (place %d of %d)", w.slot + 1, w.handle,
-                        (double)flyer_orders::across(spot, f.pad), k + 1, flyer_orders::kLandTries);
-      } else if (f.padRoof < flyer_orders::kNoRoof) {   // circling over a roof would take it into it
-         letGo[i] = true;
-         ++gone;
+            install_log("[Wingmen] slot %d (#%u) lands %s %.0f m off (place %d)", w.slot + 1, w.handle,
+                        place_said(k), (double)flyer_orders::across(spot, f.pad), k + 1);
+      } else if (f.padRoof < flyer_orders::kNoRoof) {
+         // Under a roof, where circling overhead would take it into the roof: low,
+         // where there is room, till a place is free; with no room, let go.
+         V3 c;
+         float r = 0.0f;
+         if (roof_circle(f, w, c, r)) {
+            circle_till_free(w, c, r, now);
+            ++over;
+            if (order_log())
+               install_log("[Wingmen] slot %d (#%u): no clear place free: it circles %.0f m round, low under the roof, "
+                           "till one is", w.slot + 1, w.handle, (double)r);
+         } else {
+            letGo[i] = true;
+            ++gone;
+         }
       } else {
          w.spot = f.pad;
-         w.land = kLandCircle;
+         circle_till_free(w, V3{}, 0.0f, now);
          ++over;
       }
    }
    for (int i = f.count - 1; i >= 0; --i)
-      if (letGo[i]) drop(f, i, "nowhere to land beside you, under a roof", "noroom");
+      if (letGo[i]) head_out(f, i, now, "no clear place, and no room to circle under the roof", "noroom");
    if (order_log())
-      install_log("[Wingmen] the leader comes down%s: %d land where they are, %d fly to a place beside it, %d circle "
-                  "overhead, %d let go (nowhere to land under the roof)",
+      install_log("[Wingmen] the leader comes down%s: %d land where they are, %d fly to a place, %d circle till one "
+                  "is free, %d let go (no room under the roof)",
                   f.padRoof < flyer_orders::kNoRoof ? " under a roof" : "", here, beside, over, gone);
 }
 
 // A wingman whose landing was interrupted, up again: a clear place beside its
-// leader (land_place, away from the others' places and from where they are), else,
-// past kLandRetries, or with none, it circles overhead (under a roof, let go).
+// leader or on ahead (land_place, away from the others' places and from where
+// they are), else it circles till one is free (circle_till_free; under a roof
+// low, where there is room, or with none it flies back out and is let go,
+// head_out). One interrupted past kLandRetries lands no more: in the open it
+// circles, under a roof it flies back out and is let go (the user: "If they
+// cannot land reliably and don't crash, they should just find a suitable spot or
+// disband").
 void re_place(Formation& f, uint8_t* leader, int i, double now)
 {
    Wingman& w = f.wing[i];
    V3 taken[flyer_wingmen::kMaxWingmen + 1];
-   int nTaken = 0, rank = 0;
-   taken[nTaken++] = f.pad;
-   for (int j = 0; j < f.count; ++j) {
-      if (j == i) continue;
-      const Wingman& o = f.wing[j];
-      if (o.slot < w.slot) ++rank;
-      if (o.land == kLandComing) taken[nTaken++] = o.spot;
-      else if (o.land == kLandDown || o.land == kLandOut) taken[nTaken++] = position_of(o.obj);
-   }
+   int rank = 0;
+   const int nTaken = taken_places(f, i, taken, rank);
+   const bool roof = f.padRoof < flyer_orders::kNoRoof;
+   const bool done = w.landTries > flyer_orders::kLandRetries;
    V3 spot = f.pad;
-   const int k = w.landTries > flyer_orders::kLandRetries ? -1 : land_place(f, leader, w, rank, taken, nTaken, spot);
+   const int k = done ? -1 : land_place(f, leader, w, rank, taken, nTaken, spot);
+   V3 c;
+   float r = 0.0f;
    if (k >= 0) {
       w.spot = spot;
       w.land = kLandComing;
+      w.circleR = 0.0f;
       if (order_log())
-         install_log("[Wingmen] slot %d (#%u) lands at a clear place %.0f m from you (place %d of %d)", w.slot + 1,
-                     w.handle, (double)flyer_orders::across(spot, f.pad), k + 1, flyer_orders::kLandTries);
-   } else if (f.padRoof < flyer_orders::kNoRoof) {
-      drop(f, i, "nowhere clear to land beside you, under a roof", "noroom");
+         install_log("[Wingmen] slot %d (#%u) lands at a clear place %s, %.0f m from you (place %d)", w.slot + 1,
+                     w.handle, place_said(k), (double)flyer_orders::across(spot, f.pad), k + 1);
+   } else if (roof && !done && roof_circle(f, w, c, r)) {
+      circle_till_free(w, c, r, now);
+      if (order_log())
+         install_log("[Wingmen] slot %d (#%u): no clear place free: it circles %.0f m round, low under the roof, till "
+                     "one is", w.slot + 1, w.handle, (double)r);
+   } else if (roof) {
+      head_out(f, i, now, done ? "it could not land under the roof" : "no clear place, and no room to circle under the roof",
+               "noroom");
    } else {
       w.spot = f.pad;
-      w.land = kLandCircle;
-      if (order_log()) install_log("[Wingmen] slot %d (#%u): nowhere clear to land; it circles", w.slot + 1, w.handle);
+      circle_till_free(w, V3{}, 0.0f, now);
+      if (order_log())
+         install_log("[Wingmen] slot %d (#%u): %s; it circles", w.slot + 1, w.handle,
+                     done ? "it lands no more" : "nowhere clear to land");
    }
+}
+
+// One circling with no place (kLandCircle), every kLandLookAgain: a place free
+// now, it comes down there (the user: "circle until a free spot appears"). Not
+// one interrupted past kLandRetries: it lands no more.
+void look_again(Formation& f, uint8_t* leader, int i, double now)
+{
+   Wingman& w = f.wing[i];
+   w.lookAgainAt = now + flyer_orders::kLandLookAgain;
+   if (w.landTries > flyer_orders::kLandRetries) return;
+   V3 taken[flyer_wingmen::kMaxWingmen + 1];
+   int rank = 0;
+   const int nTaken = taken_places(f, i, taken, rank);
+   V3 spot = f.pad;
+   const int k = land_place(f, leader, w, rank, taken, nTaken, spot);
+   if (k < 0) return;
+   w.spot = spot;
+   w.land = kLandComing;
+   w.circleR = 0.0f;
+   if (order_log())
+      install_log("[Wingmen] slot %d (#%u): a place is free now %s, %.0f m from you (place %d): it comes down there",
+                  w.slot + 1, w.handle, place_said(k), (double)flyer_orders::across(spot, f.pad), k + 1);
 }
 
 // The leader takes off again (or did not land after all): so do they. The
@@ -2266,6 +2497,7 @@ void end_landing(Formation& f)
          w.land = kLandNone;
       }
       w.touchedDown = false;
+      w.circleR = 0.0f;
    }
    if (order_log()) install_log("[Wingmen] the leader takes off: %d of its wingmen take off with it", leaving);
 }
@@ -2286,6 +2518,22 @@ void update_landing(Formation& f, uint8_t* leader)
          Wingman& w = f.wing[i];
          if (w.land == kLandSeek) {
             if (flying(w.obj)) re_place(f, leader, i, now);
+            continue;
+         }
+         // Circling with no place: one free yet (look_again)?
+         if (w.land == kLandCircle) {
+            if (flying(w.obj) && now >= w.lookAgainAt) look_again(f, leader, i, now);
+            continue;
+         }
+         // On its way out from under the roof (head_out): out, it is let go;
+         // stuck, never on the trail or out too long, let go where it is.
+         if (w.land == kLandOutward) {
+            const char* why = nullptr;
+            if (w.outLooks >= flyer_trail::kOutLooks) why = "flown back out from under the roof";
+            else if (now - w.outFrom > flyer_trail::kOutMax) why = "still under the roof on its way out";
+            else if (!w.onTrail && now - w.outFrom > flyer_trail::kOutJoin) why = "no way out along your trail";
+            else if (w.onTrail && now - w.gainedAt > flyer_trail::kStuckFor) why = "stuck on its way out";
+            if (why) drop(f, i, why, w.outCode);
             continue;
          }
          if (w.land != kLandDown || !s_takeOff) continue;
@@ -2314,8 +2562,14 @@ void update_landing(Formation& f, uint8_t* leader)
    for (int i = 0; i < f.count; ++i) {
       Wingman& w = f.wing[i];
       if (w.land == kLandLeaving && flying(w.obj)) w.land = kLandNone;   // up again: to its slot
-      // Up again before its leader (it should wait aboard): it circles.
-      if (w.land == kLandDown && flying(w.obj) && f.landing) w.land = kLandCircle;
+      // Up again before its leader (it should wait aboard): it circles till a
+      // place is free, or under a roof, where that circle would take it into the
+      // roof, it is given one again (re_place: a place, or low round where there
+      // is room).
+      if (w.land == kLandDown && flying(w.obj) && f.landing) {
+         if (f.padRoof < flyer_orders::kNoRoof) w.land = kLandSeek;
+         else circle_till_free(w, V3{}, 0.0f, now);
+      }
       // Down beside its leader: the script hears it once (OnWingmanLanded).
       if (w.land == kLandDown && state_of(w.obj) == kStateLanded && !w.touchedDown) {
          w.touchedDown = true;
@@ -2492,7 +2746,8 @@ void update_target_mark()
 // The player got out of its flyer, landed with its flight: the wingmen still on
 // their way in come down beside it all the same, and their pilots get out (or
 // wait aboard), as with the player aboard, for kArriveFor at most; then the rest
-// are let go. The user: "I just don't see any late arriving wingmen" (they were
+// are let go, under a roof those still flying once they have flown back out
+// (head_out). The user: "I just don't see any late arriving wingmen" (they were
 // let go as the player got out). Back aboard, the player leads them again; in
 // another flyer, or with its own gone or flown off, they are let go. True while
 // it goes on.
@@ -2510,9 +2765,19 @@ bool landing_without_you(double now)
                      f.count, flyer_orders::kArriveFor);
    }
    if (flyer_orders::arrival_over(now - f.outAt)) {
+      // The rest are let go: those down get their pilots out (settle), and under
+      // a roof those still flying fly back out along the trail first (head_out).
       settle(f, now);
-      release_all(f, "60 s after you got out", "leader");
-      return false;
+      const bool roof = f.padRoof < flyer_orders::kNoRoof;
+      for (int i = f.count - 1; i >= 0; --i) {
+         const Wingman& w = f.wing[i];
+         if (w.land == kLandOutward) continue;
+         if (roof && handle_of(w.obj) == w.handle && alive(w.obj) && flying(w.obj))
+            head_out(f, i, now, "60 s after you got out", "leader");
+         else
+            drop(f, i, "60 s after you got out", "leader");
+      }
+      if (f.count == 0) return false;
    }
    drop_gone(f);
    if (s_land) update_landing(f, parked);
@@ -3336,8 +3601,9 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
 
 // While its leader lands: down toward a point over its spot, at its slowest from
 // kLandSlowFrom in, the safe height let go near it, along the leader's trail
-// while a wall is between (follow_trail); else (no level ground, or up again
-// before its leader) round the sky over its leader.
+// while a wall is between (follow_trail); else (no place free, or up again
+// before its leader) round the sky over its leader, or under a roof low and
+// slow round where there is room (roof_circle).
 bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
 {
    const float* wm = matrix_of(flyer);
@@ -3350,7 +3616,15 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
    const float mid = s_midSpeed(flyer, nullptr);
    int safe = kSafeHeightFull;
    float speed = mid;
-   if (w.land == kLandComing) {
+   if (w.land == kLandOutward) {
+      // Let go under a roof: back out along the leader's trail first (head_out),
+      // at its slowest, not lifted.
+      V3 onTrail;
+      if (!follow_trail_out(flyer, f, w, seconds(), onTrail)) return false;
+      st.point = onTrail;
+      speed = lo;
+      safe = kSafeHeightTaperFactor;
+   } else if (w.land == kLandComing) {
       st.point = w.spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f};
       if (flyer_orders::across(me, w.spot) < flyer_orders::kLandSlowFrom) speed = lo;
       safe = kSafeHeightTaper;
@@ -3366,6 +3640,11 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
                        : onTrail;
          safe = kSafeHeightTaperFactor;   // where the leader flew: not lifted (steer_before)
       }
+   } else if (w.land == kLandCircle && w.circleR > 0.0f) {
+      // Under a roof with no place yet: low and slow round where there is room
+      // (roof_circle), till one is free.
+      st.point = flyer_orders::loiter_point(w.circleAt, me, w.circleR);
+      speed = lo;
    } else {
       st.point = flyer_orders::loiter_point(f.pad + V3{0.0f, flyer_orders::kLoiterHeight, 0.0f}, me);
    }

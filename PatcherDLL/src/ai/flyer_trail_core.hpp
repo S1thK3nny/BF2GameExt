@@ -192,6 +192,68 @@ inline float squeeze(float now, bool roofed, float dt)
    return now - step > to ? now - step : to;
 }
 
+// ---- The way out ------------------------------------------------------------------
+// One let go under a roof flies back out the way the leader flew in: along the
+// trail backwards, older points first (nearest_back, back_candidates), until it
+// has been out from under the roof kOutLooks looks in a row (out_clear), then it
+// is let go; one not on it within kOutJoin, stuck (no older point for kStuckFor)
+// or still going after kOutMax is let go where it is. The user: "can it fly back
+// out the way it flew in, probably by [following] my path backwards? Lots of
+// hangars are single entry/exit".
+constexpr int    kOutLooks = 2;      // roof looks in a row with none over it: out
+constexpr double kOutJoin  = 2.0;    // s to get onto the trail
+constexpr double kOutMax   = 45.0;   // s on the way out at most
+
+inline int prev_of(const Trail& t, int n) { return n > t.first ? n - 1 : t.first; }
+
+// The point nearest `p` going back: from point `from` back, kWindow before it at
+// most, so its place never goes forward again; the whole trail where `from` is
+// not on it. Of those within half a step of the nearest, the oldest (flown in and
+// out again: the way in). -1 with none; `dist`, how far it is.
+inline int nearest_back(const Trail& t, V3 p, int from, float* dist = nullptr)
+{
+   if (t.count == 0 || !flyer_wingmen::finite(p)) return -1;
+   const bool on = has(t, from);
+   const int hi = on ? from : newest(t);
+   const int lo = on && from - kWindow > t.first ? from - kWindow : t.first;
+   float best = std::numeric_limits<float>::infinity();
+   for (int n = lo; n <= hi; ++n) {
+      const float d = flyer_wingmen::length(point(t, n) - p);
+      if (d < best) best = d;
+   }
+   if (!std::isfinite(best)) return -1;
+   for (int n = lo; n <= hi; ++n) {
+      const float d = flyer_wingmen::length(point(t, n) - p);
+      if (d <= best + 0.5f * kStep) {
+         if (dist) *dist = d;
+         return n;
+      }
+   }
+   return -1;
+}
+
+// The points before `at` it may steer at going back, the furthest first, the
+// oldest the furthest any can be. How many went into `out` (kMaxCuts at most).
+inline int back_candidates(const Trail& t, int at, int* out)
+{
+   if (!has(t, at)) return 0;
+   int n = 0;
+   for (const int back : kCuts) {
+      const int c = at - back > t.first ? at - back : t.first;
+      if (c >= at || (n > 0 && out[n - 1] == c)) continue;
+      out[n++] = c;
+   }
+   return n;
+}
+
+// A roof look on the way out: true once none has been over it kOutLooks looks
+// in a row.
+inline bool out_clear(int& clearLooks, bool roofed)
+{
+   clearLooks = roofed ? 0 : clearLooks + 1;
+   return clearLooks >= kOutLooks;
+}
+
 // Whether the game's lift is off for a wingman (EntityFlyer::RaiseHeight, which
 // sends it 25 m over the top of what is ahead, a hangar's whole ship): under a
 // roof itself, or with its leader under one and nothing solid on its line, as

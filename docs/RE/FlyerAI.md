@@ -1060,9 +1060,29 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
     again; then, or with the flyer gone, flown off or another taken, the rest are let go.
   - **The shot down go first** (`drop_gone`), each tick before the landing asks any wingman where it is; and
     every guard in `flyer_wingmen.cpp` logs what it caught (`caught`: the 1st, 10th, 100th ... time for each).
+  - **On ahead, then circling till a place is free** (the user: "Instead of a circle, they should move
+    forward instead. If forward is not clear (wall) then circle until a free spot appears"): past its five
+    places beside the leader a wingman tries 16 on ahead, the way the leader faces (`forward_tries`: 12 m to
+    its side, every 12 m from 15 m ahead), none past a wall on that line; every place is also checked for a
+    flyer or vehicle on it (`occupied`: five rays down at vehicles alone, COLL_RIGID, which the ground's rays
+    pass through). With none, it circles and looks again every 2 s (`look_again`): overhead in the open, low
+    and slow under a roof (`roof_circle`: at its hover height, 15 to 30 m round the point with most room, eight
+    rays at static, terrain, water and vehicles, of the one over the leader and those on ahead before a wall;
+    no room, let go). Under a roof one interrupted past its two retries is let go, not sent round again.
+  - **The way out** (the user: "can it fly back out the way it flew in, probably by [following] my path
+    backwards? Lots of hangars are single entry/exit, so if they disband it's highly likely they'll crash
+    unless they do this"): one let go under a roof while flying (no place and no room to circle, its
+    landings failing, or the 60 s with the player out over) flies the trail backwards first (`head_out`,
+    `follow_trail_out`; `flyer_trail_core.hpp`: `nearest_back` takes the oldest of points as near, the way
+    in, and never goes forward again; `back_candidates` cuts back 16, 8, 4 or 2 points where it has a clear
+    line), at its slowest and not lifted, and is let go once its own roof ray has found nothing over it two
+    looks in a row (`out_clear`); with no trail point it can take, at once; not on the trail within 2 s,
+    stuck 6 s or still going at 45 s, where it is.
   - Left for the user to decide: avoidance between flight mates closed up under a roof (it keeps their two
-    radii plus 8 m between them, side by side too, so it pushes them off their slots toward the walls), and a
-    wider search for places under a roof before one is let go.
+    radii plus 8 m between them, side by side too, so it pushes them off their slots toward the walls). It
+    steers a flyer only in normal flight (`EntityFlyer::UpdateIndirect` M `0x004F4C10` calls `CalculateDest`
+    only in state 2, flying; not taking off, state 1, nor in the game's own landing, 3), and counts as
+    obstacles only flyers taking off, flying or landing (not those down, state 0).
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
