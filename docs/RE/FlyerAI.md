@@ -1057,7 +1057,9 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   - **Landing without the player** (`landing_without_you`; `flyer_orders_core.hpp`, `arrival_over`): the
     player out of its landed flyer, the flight goes on landing for 60 s with the empty flyer as its leader (the
     side checked against is the one it came down on, not the empty flyer's); back aboard, the player leads it
-    again; then, or with the flyer gone, flown off or another taken, the rest are let go.
+    again; the flyer destroyed or flown off meanwhile (`leaderGone`), it lands at the pad all the same, the
+    flyer read no further than plain fields (its matrix and velocity come through vtables, which fault once it
+    is freed); after the 60 s, or with another flyer taken, the rest are let go.
   - **The shot down go first** (`drop_gone`), each tick before the landing asks any wingman where it is; and
     every guard in `flyer_wingmen.cpp` logs what it caught (`caught`: the 1st, 10th, 100th ... time for each).
   - **On ahead, then circling till a place is free** (the user: "Instead of a circle, they should move

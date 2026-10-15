@@ -453,7 +453,8 @@ struct Formation {
    float       padGround = 0.0f;      // ... the ground's height there ...
    float       padRoof = flyer_orders::kNoRoof;   // ... a roof's over it (a hangar's), else kNoRoof ...
    int         padTeam = 0;           // ... the leader's team as it came down ...
-   double      outAt = 0.0;           // ... and when the player got out of it, its flight still landing (0: aboard)
+   double      outAt = 0.0;           // ... when the player got out of it, its flight still landing (0: aboard) ...
+   bool        leaderGone = false;    // ... and since then it is gone (destroyed): landing at the pad all the same
    bool        mirror = false;        // left for right, after an odd number of the leader's flips
    float       leaderSpeed = 0.0f;    // as last seen by a wingman's steering: how fast it flies ...
    float       leaderTarget = 0.0f;   // ... and the speed its throttle asks for
@@ -2102,7 +2103,19 @@ bool trail_live(const Formation& f)
 void update_trail(double now)
 {
    uint8_t* const leader = s_player.leader;
-   if (!g_flyerWingmenTrail || !leader || handle_of(leader) != s_player.leaderHandle || !alive(leader)) return;
+   if (!g_flyerWingmenTrail || !leader) return;
+   if (s_player.leaderGone || handle_of(leader) != s_player.leaderHandle || !alive(leader)) {
+      // Gone, its flight still landing: the wingmen's own roofs are still looked for
+      // (no_lift, out_clear), the trail kept as it was.
+      if (!s_player.leaderGone || now - s_player.roofAt < kRoofEvery) return;
+      s_player.roofAt = now;
+      for (int i = 0; i < s_player.count; ++i) {
+         Wingman& w = s_player.wing[i];
+         w.roofed = handle_of(w.obj) == w.handle && alive(w.obj) && roofed(position_of(w.obj), w.obj, nullptr);
+         if (w.land == kLandOutward) flyer_trail::out_clear(w.outLooks, w.roofed);
+      }
+      return;
+   }
    if (s_trailOf != s_player.leaderHandle) {
       flyer_trail::clear(s_trail);
       s_trailOf = s_player.leaderHandle;
@@ -2245,7 +2258,8 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
    }
    if (!w.onTrail) return false;
    const float gap = flyer_wingmen::clamp_spacing(g_flyerWingmenSpacing);
-   behind = flyer_trail::behind_place(s_trail, flyer_trail::leader_along(s_trail, position_of(leader)), rank_of(f, w),
+   const V3 leaderAt = f.leaderGone ? f.pad : position_of(leader);   // gone: where it came down
+   behind = flyer_trail::behind_place(s_trail, flyer_trail::leader_along(s_trail, leaderAt), rank_of(f, w),
                                       gap, w.trailAt);
    if (flyer_trail::stuck(now - w.gainedAt, behind, gap)) {
       w.onTrail = false;
@@ -2485,6 +2499,7 @@ void start_landing(Formation& f, uint8_t* leader, double now)
    f.landing = true;
    f.padTeam = team_of(leader);
    f.outAt = 0.0;
+   f.leaderGone = false;
    const float* lm = matrix_of(leader);
    if (!lm) return;
    f.pad = row(lm, 3);
@@ -2668,7 +2683,7 @@ void end_landing(Formation& f)
 void update_landing(Formation& f, uint8_t* leader)
 {
    const double now = seconds();
-   const int ls = state_of(leader);
+   const int ls = f.leaderGone ? kStateLanded : state_of(leader);   // gone: down where it was
    const bool down = ls == kStateLanding || ls == kStateLanded;
    if (down && !f.landing) start_landing(f, leader, seconds());
    else if (!down && f.landing) end_landing(f);
@@ -2853,6 +2868,7 @@ void reset_orders(Formation& f)
    f.handPicked = false;
    f.landing = false;
    f.outAt = 0.0;
+   f.leaderGone = false;
 }
 
 // Whether the player's flight is made up to its size now (tops_up).
@@ -2882,7 +2898,7 @@ void update_marks()
    for (int i = 0; i < s_player.count; ++i) {
       Wingman& w = s_player.wing[i];
       if (drawn) unmark(w);
-      else if (handle_of(w.obj) == w.handle && alive(w.obj)) mark(w, s_player.leader);
+      else if (handle_of(w.obj) == w.handle && alive(w.obj) && !s_player.leaderGone) mark(w, s_player.leader);
    }
 }
 
@@ -2917,9 +2933,19 @@ bool landing_without_you(double now)
 {
    Formation& f = s_player;
    uint8_t* const parked = f.leader;
-   if (!f.landing || f.count == 0 || !parked || handle_of(parked) != f.leaderHandle || !alive(parked) ||
-       state_of(parked) != kStateLanded)
-      return false;
+   if (!f.landing || f.count == 0 || !parked) return false;
+   // Its flyer gone once the player is out of it (destroyed, or flown off): the
+   // flight lands at the pad all the same, the flyer's memory never read again
+   // past a plain field (the user: "if I exit my ship and it gets destroyed, the
+   // wingmen seem to disband instead of carrying on landing").
+   const bool there = !f.leaderGone && handle_of(parked) == f.leaderHandle && alive(parked) &&
+                      state_of(parked) == kStateLanded;
+   if (!there) {
+      if (f.outAt <= 0.0) return false;   // not out of it yet: let go, as before
+      if (!f.leaderGone && order_log())
+         install_log("[Wingmen] your flyer is gone: your %d wingmen land beside where it was all the same", f.count);
+      f.leaderGone = true;
+   }
    if (f.outAt <= 0.0) {
       f.outAt = now;
       if (order_log())
@@ -3769,9 +3795,9 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
 bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
 {
    const float* wm = matrix_of(flyer);
-   if (!wm || !f.leader || handle_of(f.leader) != f.leaderHandle) return false;
+   if (!wm || !f.leader || (!f.leaderGone && handle_of(f.leader) != f.leaderHandle)) return false;
    const V3 me = row(wm, 3);
-   const float leaderSpeed = flyer_wingmen::length(velocity_of(f.leader));
+   const float leaderSpeed = f.leaderGone ? 0.0f : flyer_wingmen::length(velocity_of(f.leader));
    if (std::isfinite(leaderSpeed)) f.leaderSpeed = f.leaderTarget = leaderSpeed;
    const float hi = flyer_wingmen::stretched_max(s_maxSpeed(flyer, nullptr), high_speed(f));
    const float lo = flyer_wingmen::stretched_min(s_minSpeed(flyer, nullptr), low_speed(f));
@@ -3798,7 +3824,7 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
       float behind = 0.0f;
       if (follow_trail(flyer, f, w, st.point, seconds(), onTrail, behind)) {
          // The trail ends at the leader, down: kept clear of it, as in its slot.
-         const V3 down = position_of(f.leader);
+         const V3 down = f.leaderGone ? f.pad : position_of(f.leader);
          st.point = f.padFrame.valid
                        ? flyer_wingmen::to_world(f.padFrame, me,
                                                  flyer_wingmen::keep_clear(flyer_wingmen::in_frame(f.padFrame, me, onTrail),

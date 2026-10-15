@@ -150,8 +150,11 @@
 // arrival_over; the user, after the first hangar landings: "I just don't see any
 // late arriving wingmen", let go as the player got out): those still on their way
 // land beside it all the same and their pilots get out, and back aboard the
-// player leads the rest again. Then, or with the flyer gone, flown off or
-// another taken, the rest are let go, those down still asked to get out for 20 s.
+// player leads the rest again. Its flyer destroyed or flown off meanwhile, they
+// land beside where it came down all the same (the user: "if I exit my ship and
+// it gets destroyed, the wingmen seem to disband"), the flyer never read again
+// past a plain field. After the 60 s, or with another flyer taken, the rest are
+// let go, those down still asked to get out for 20 s.
 // Each tick lets go of those shot down before the landing asks any where it is:
 // a destroyed flyer is soon freed, and its matrix read through freed memory
 // faulted twice in those landings, the guard leaving the landing half set up.
