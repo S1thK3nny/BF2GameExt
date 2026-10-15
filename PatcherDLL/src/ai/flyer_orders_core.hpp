@@ -453,8 +453,9 @@ inline V3 escape_point(V3 me, V3 target, V3 open, V3 nose)
 // the roof). Under a roof a place must also be in a clear line from the leader,
 // kLandClear over its ground, and the wingman's own way to it clear.
 // It comes down toward a point kLandHover over its spot (lower under a low
-// roof, hover_height) and lands (EntityFlyer::Land, as a node's LandOnArrival
-// does) once within kLandStart of it across and kLandHigh up. With nowhere beside
+// roof, hover_height), no faster than approach_speed, and lands (EntityFlyer::
+// Land, as a node's LandOnArrival does) once within kLandStart of it across and
+// kLandHigh up. With nowhere beside
 // the leader it looks on ahead, and with nowhere there either it circles until a
 // place is free: overhead in the open (kLoiterHeight up, kLoiterRadius round), low
 // under a roof (forward_tries and roof_loiter_radius, below). When the player
@@ -474,10 +475,20 @@ constexpr float kLandStart    = 25.0f;   // m
 constexpr float kLandHigh     = 40.0f;   // m
 constexpr int   kLandTries    = 5;
 constexpr float kNoRoof       = 1e9f;    // no roof over the leader
-constexpr float kLandSlowFrom = 300.0f;  // m across: from here in, at its slowest
+constexpr float kLandEaseFrom = 120.0f;  // m across: from here in it eases off (approach_speed)
 constexpr float kLoiterHeight = 150.0f;  // m
 constexpr float kLoiterRadius = 200.0f;  // m
 constexpr float kLoiterLead   = 0.6f;    // radians ahead on the circle
+
+// Coming down to its place `across` metres off: `cruise` until kLandEaseFrom,
+// easing to `careful` (its class's own lowest speed) by kLandStart, its slowest
+// within it. It flew its slowest from 300 m out, and crawled in under fire.
+inline float approach_speed(float across, float slowest, float careful, float cruise)
+{
+   if (!(across > kLandStart)) return slowest;   // NaN too
+   if (across >= kLandEaseFrom) return cruise;
+   return careful + (cruise - careful) * ((across - kLandStart) / (kLandEaseFrom - kLandStart));
+}
 
 // A slot's place on the ground from the leader, height left out.
 inline V3 land_offset(V3 slot)

@@ -38,7 +38,8 @@ constexpr float kMaxRadius = 40.0f;
 constexpr float kScanRange = 400.0f;   // m: flyers further off are not looked at
 constexpr float kGain      = 1.5f;     // how far a full threat bends its heading (1: 45 degrees square on)
 constexpr float kMaxPush   = 1.5f;     // threats added together, at most this
-constexpr float kMinAhead  = 60.0f;    // m: the bent point at least this far out
+constexpr float kMinAhead  = 60.0f;    // m: the bent point at least this far out ...
+constexpr float kRoofAhead = 15.0f;    // ... and under a roof
 constexpr float kBrake     = 0.4f;     // up to this share of its speed target shed behind a slower one
 constexpr float kSameWay   = 0.5f;     // cosine: the other heading this near its own is going its way
 
@@ -56,7 +57,7 @@ struct Threat {
 // `myVel`, heading `fwd` with `right` to its right. True, with `t` filled, when
 // they will pass within their radii plus kMargin inside kHorizon.
 inline bool assess(V3 me, V3 myVel, float myRadius, V3 fwd, V3 right, V3 other, V3 otherVel, float otherRadius,
-                   Threat& t)
+                   Threat& t, float margin = kMargin)
 {
    if (!finite(me) || !finite(myVel) || !finite(other) || !finite(otherVel) || !finite(fwd)) return false;
    const V3 r = other - me;          // where it is, from this one
@@ -66,7 +67,7 @@ inline bool assess(V3 me, V3 myVel, float myRadius, V3 fwd, V3 right, V3 other, 
    tc = std::isfinite(tc) ? clampf(tc, 0.0f, kHorizon) : 0.0f;
    const V3 c = r + w * tc;          // where it is at the closest
    const float pass = length(c);
-   const float limit = clamp_radius(myRadius) + clamp_radius(otherRadius) + kMargin;
+   const float limit = clamp_radius(myRadius) + clamp_radius(otherRadius) + margin;
    if (!(pass < limit)) return false;
 
    // Away from where it will be, square to this one's heading. On its line of
@@ -87,6 +88,17 @@ inline bool assess(V3 me, V3 myVel, float myRadius, V3 fwd, V3 right, V3 other, 
    t.aheadSameWay = dot(r, fwd) > 0.0f && sameWay;
    t.brake = t.aheadSameWay && dot(w, fwd) < -1.0f ? kBrake * t.urgency : 0.0f;
    return true;
+}
+
+// Under a roof (one of the player's wingmen in a hangar, flyer_wingmen.cpp): the
+// way out to the side only, never up or down, which took wingmen into the
+// ceiling over a ship below them (the user: "The AI also activate avoidance when
+// near my landed ship, causing them to turn into the celing"); straight above or
+// below, no way out at all.
+inline void sideways(Threat& t)
+{
+   t.away.y = 0.0f;
+   if (!normalise(t.away)) t.away = V3{};
 }
 
 // Single file (one of the player's wingmen on its leader's trail, flyer_wingmen.cpp):
@@ -121,8 +133,11 @@ inline void add(Avoid& a, const Threat& t)
 
 // The point it steers at, bent away: the way to `point` turned by the push, at
 // least kMinAhead out. `mayDescend` false (the game lifted the point over
-// terrain or something in its way) keeps it from bending any lower.
-inline V3 bend(V3 me, V3 point, V3 fwd, const Avoid& a, bool mayDescend)
+// terrain or something in its way) keeps it from bending any lower. `roofed`
+// (under a roof): to the side only, at the climb it had, and at the point's own
+// distance, kRoofAhead at least: kMinAhead out from inside a hangar is its roof
+// or its walls.
+inline V3 bend(V3 me, V3 point, V3 fwd, const Avoid& a, bool mayDescend, bool roofed = false)
 {
    if (!a.threats || !finite(point) || !finite(me)) return point;
    V3 to = point - me;
@@ -133,13 +148,14 @@ inline V3 bend(V3 me, V3 point, V3 fwd, const Avoid& a, bool mayDescend)
    if (p > kMaxPush) push = push * (kMaxPush / p);
    V3 dir = to + push * kGain;
    if (!normalise(dir)) return point;
-   if (!mayDescend && dir.y < to.y) {
+   if ((!mayDescend && dir.y < to.y) || (roofed && dir.y != to.y)) {
       // Bent to the side only, at the climb it had.
       V3 flat{dir.x, 0.0f, dir.z};
       const float level = std::sqrt(clampf(1.0f - to.y * to.y, 0.0f, 1.0f));
       dir = normalise(flat) ? V3{flat.x * level, to.y, flat.z * level} : to;
    }
-   const float out = std::isfinite(reach) && reach > kMinAhead ? reach : kMinAhead;
+   const float least = roofed ? kRoofAhead : kMinAhead;
+   const float out = std::isfinite(reach) && reach > least ? reach : least;
    return me + dir * out;
 }
 

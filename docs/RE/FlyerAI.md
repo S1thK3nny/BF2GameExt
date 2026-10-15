@@ -1078,12 +1078,27 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
     radius, as RaiseHeight reads it, plus 2 m out, square to it); the point it steers at is moved off what is
     beside it (`centring`, `flyer_trail_core.hpp` `centre_offset`: rays 40 m each way from the point,
     sideways and up and down; with something both sides, the middle; with one side nearer than its size,
-    away from it), once for each point; within 60 m along the trail of the door (`s_door`, the point where
-    the leader went under a roof), or under a roof itself, it flies at its slowest (`slow_on_trail`); and
+    away from it), once for each point; through the door (`s_door`, the point where the leader went under a
+    roof, while it is under it) no faster than `door_speed` (`trail_cap`): cruising until 50 m short of it,
+    easing to its class's own lowest speed (`GetFlyerMinSpeed`, not stretched: `careful_speed`) at it and
+    inside; and
     on the trail avoidance runs in single file (`flyer_avoidance_core.hpp` `single_file`: a flyer ahead
     going its way brakes it by the threat's urgency, no push to the side). One circling low with no place
     yet comes in to its circle along the trail while a wall is between (it was steering straight at a point
     inside the hangar from outside it).
+  - **Faster in, level under the roof** (the user, after: "Entry into the hangar itself is too slow from too
+    far away, too easy to get shot down. The AI also activate avoidance when near my landed ship, causing them
+    to turn into the celing"). It flew its slowest (the stretch, 10 m/s with the leader down) from 300 m out
+    from its place and 60 m either side of the door. Now `flyer_orders_core.hpp` `approach_speed`: its mid
+    speed until 120 m off its place, easing to its class's own lowest by 25 m, its slowest within that; and
+    `door_speed` as above. Avoidance (`flyer_avoidance.hpp` `Flight`, from `calc_dest_mt`) steers a flyer
+    only in normal flight (`EntityFlyer::UpdateIndirect` M `0x004F4C10` calls `CalculateDest` in state 2
+    alone) but counts flyers taking off, flying or landing (states 1 to 3; not those down), and its push was
+    three-dimensional (a ship below pushed it up) with the bent point at least 60 m out: from inside a hangar,
+    the roof. Under a roof now (the wingman's own roof ray, or its flight landing under one): the push to
+    the side only (`sideways`), the bent point at its own distance, 15 m at least (`bend`, `kRoofAhead`), its
+    flight mates kept only from touching (`assess` with no margin); while the flight lands, its leader is not
+    steered round at all (the places keep 15 m from it).
   - **The way out** (the user: "can it fly back out the way it flew in, probably by [following] my path
     backwards? Lots of hangars are single entry/exit, so if they disband it's highly likely they'll crash
     unless they do this"): one let go under a roof while flying (no place and no room to circle, its

@@ -115,8 +115,10 @@
 // within 40 m: a hangar's, which a ray from 40 m up would hit before the ground);
 // under a roof the place must also be in a clear line from the leader 3 m up, and
 // the wingman's way to it clear, straight or along the leader's trail (below). It
-// comes down toward 15 m over it (lower under
-// a low roof), at its slowest (the stretch lets it go to 10 m/s) from 300 m in,
+// comes down toward 15 m over it (lower under a low roof), at its mid speed
+// until 120 m off, easing to its class's own lowest speed by 25 m, and at its
+// slowest (the stretch lets it go to 10 m/s) only within that (approach_speed:
+// at its slowest from 300 m out, it crawled in under fire),
 // and lands (EntityFlyer::Land) once within 25 m of it across and 40 m up
 // (EntityFlyer::Land needs no landing region). Once down its pilot gets out (and
 // it is let go; asked again every 2 s while still aboard, four times in all),
@@ -169,11 +171,17 @@
 // tries again. Its lines are checked at its whole size (fits: the line and four
 // beside it, its radius plus 2 m out), so it cuts no corner its wings cannot
 // clear; the point it steers at is moved to the middle of an opening, or its
-// size off one wall (centring: rays 40 m each way from the point); within 60 m
-// along the trail of where the leader went under a roof, or under one itself, it
-// flies at its slowest; and avoidance keeps it behind those ahead of it going its
-// way instead of pushing it off the path round them (flyer_avoidance_core.hpp,
-// single_file). The user, after the first entries: "they have a good chance to
+// size off one wall (centring: rays 40 m each way from the point); through the
+// door, where the leader went under a roof, no faster than door_speed: cruising
+// until 50 m short of it, easing to its class's own lowest speed at it and
+// inside (the user: "Entry into the hangar itself is too slow from too far away,
+// too easy to get shot down", at its slowest from 60 m out); and avoidance keeps
+// it behind those ahead of it going its way instead of pushing it off the path
+// round them (flyer_avoidance_core.hpp, single_file). Under a roof avoidance
+// pushes it to the side only, at its point's own distance, keeps its flight mates
+// only from touching, and leaves its landing leader to the places' spacing (the
+// user: "The AI also activate avoidance when near my landed ship, causing them to
+// turn into the celing"). The user, after the first entries: "they have a good chance to
 // hit the rim trying to enter despite following my path". Under a roof over the
 // leader (a ray up 40 m, twice a second) the flight's slots close in to half
 // their spacing, half of it a second, and open out again in the open. Under a roof itself (the same ray from each wingman), or

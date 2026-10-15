@@ -86,6 +86,18 @@ void threats()
    hard.brake = 0.3f;
    single_file(hard);
    assert(near(hard.brake, 0.3f));   // a harder brake already: kept
+   // A margin of its own: 0 keeps two flyers from touching only.
+   assert(assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {14, 0, 0}, {0, 0, 60}, 6.0f, t));
+   assert(!assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {14, 0, 0}, {0, 0, 60}, 6.0f, t, 0.0f));
+   assert(assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {11, 0, 0}, {0, 0, 60}, 6.0f, t, 0.0f));
+   // Under a roof: the way out to the side only; straight below, none at all.
+   Threat under;
+   under.away = V3{0.6f, 0.8f, 0.0f};
+   sideways(under);
+   assert(near(under.away.x, 1.0f) && under.away.y == 0.0f && under.away.z == 0.0f);
+   under.away = V3{0.0f, 1.0f, 0.0f};
+   sideways(under);
+   assert(under.away.x == 0.0f && under.away.y == 0.0f && under.away.z == 0.0f);
    // Radii are kept within bounds; bad input is no threat.
    assert(near(clamp_radius(100.0f), kMaxRadius) && near(clamp_radius(0.0f), kMinRadius) && near(clamp_radius(kNan), kMinRadius));
    assert(!assess({0, 0, 0}, {0, 0, 70}, 6.0f, kFwd, kRight, {kNan, 0, 50}, {0, 0, -70}, 6.0f, t));
@@ -122,6 +134,24 @@ void bending()
    V3 free = bend(me, {0, 130, 400}, kFwd, down, true) - me;
    normalise(free);
    assert(free.y < was.y);
+   // Under a roof: to the side only, at the climb it had, never up or down, and
+   // at the point's own distance (15 m at least), not kMinAhead out.
+   Avoid up;
+   Threat lift;
+   lift.urgency = 1.0f;
+   lift.away = {0.6f, 0.8f, 0.0f};
+   add(up, lift);
+   V3 level = bend(me, {0, 103, 30}, kFwd, up, true, true) - me;
+   assert(near(length(level), std::sqrt(9.0f + 900.0f), 1e-2f));
+   normalise(level);
+   V3 had = V3{0, 3, 30};
+   normalise(had);
+   assert(near(level.y, had.y, 1e-4f) && level.x > 0.1f);
+   assert(near(length(bend(me, {0, 100, 5}, kFwd, a, true, true) - me), kRoofAhead, 1e-2f));
+   V3 open = bend(me, {0, 103, 30}, kFwd, up, true) - me;
+   assert(near(length(open), kMinAhead, 1e-2f));
+   normalise(open);
+   assert(open.y > had.y + 0.05f);   // in the open it may still climb
    // Many threats add up to at most kMaxPush.
    Avoid many;
    for (int i = 0; i < 10; ++i) add(many, t);

@@ -199,12 +199,15 @@ inline float squeeze(float now, bool roofed, float dt)
 // four beside it, its radius plus kFitMargin out), so it cuts no corner its wings
 // cannot clear; the point it steers at is moved off what is beside it
 // (centre_offset: to the middle of an opening narrower than twice kCentreReach,
-// out to its size from one wall nearer than that); and within kDoorSlow along
-// the trail of where the leader went under a roof (near_door), or under one
-// itself, it flies at its slowest.
+// out to its size from one wall nearer than that); and it goes through the door
+// (where the leader went under a roof) no faster than door_speed: its cruising
+// speed until kDoorEase short of it, easing to its class's own lowest speed at
+// the door and inside. At its slowest there instead, from 60 m out, it crawled in
+// under fire (the user: "Entry into the hangar itself is too slow from too far
+// away, too easy to get shot down").
 constexpr float kFitMargin   = 2.0f;    // m beyond its radius
 constexpr float kCentreReach = 40.0f;   // m looked out each way from the point it steers at
-constexpr float kDoorSlow    = 60.0f;   // m along the trail either side of the door
+constexpr float kDoorEase    = 50.0f;   // m along the trail short of the door
 
 // How far to move a point toward `right` between something solid `left` and
 // `right` metres off either side (infinity or NaN: nothing within
@@ -219,9 +222,15 @@ inline float centre_offset(float left, float right, float need)
    return 0.0f;
 }
 
-// Whether a point `along` the trail is within kDoorSlow of the door, `door` the
-// along of the point where the leader went under a roof (NaN: none).
-inline bool near_door(float along, float door) { return std::fabs(along - door) <= kDoorSlow; }   // NaN: no
+// The most a wingman flies on the trail `untilDoor` metres short of the door
+// along it (negative: past it, inside; NaN: no door): `cruise` until kDoorEase
+// short of it, easing to `careful` at it, and `careful` past it.
+inline float door_speed(float untilDoor, float careful, float cruise)
+{
+   if (!(untilDoor < kDoorEase)) return cruise;   // NaN, or still well short of it
+   if (untilDoor <= 0.0f) return careful;
+   return careful + (cruise - careful) * (untilDoor / kDoorEase);
+}
 
 // ---- The way out ------------------------------------------------------------------
 // One let go under a roof flies back out the way the leader flew in: along the

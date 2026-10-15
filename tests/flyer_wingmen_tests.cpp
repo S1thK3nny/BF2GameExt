@@ -1149,6 +1149,13 @@ void landing_now()
    assert(landing_interrupted(false, false, 20.0, 50.0f, 1.0f) == Interrupt::None);   // flying
    assert(landing_interrupted(true, false, 1.0, kNan, 1.0f) == Interrupt::None);
    assert(kLandRetries == 2 && kLandNowRange == 150.0f);
+   // Coming in to its place: cruising until 120 m off, easing to its class's
+   // lowest speed by 25 m, its slowest within 25 m.
+   assert(approach_speed(200.0f, 10.0f, 20.0f, 50.0f) == 50.0f && approach_speed(120.0f, 10.0f, 20.0f, 50.0f) == 50.0f);
+   assert(near(approach_speed(72.5f, 10.0f, 20.0f, 50.0f), 35.0f) && near(approach_speed(119.0f, 10.0f, 20.0f, 50.0f), 20.0f + 30.0f * (94.0f / 95.0f)));
+   assert(approach_speed(25.0f, 10.0f, 20.0f, 50.0f) == 10.0f && approach_speed(0.0f, 10.0f, 20.0f, 50.0f) == 10.0f);
+   assert(near(approach_speed(26.0f, 10.0f, 20.0f, 50.0f), 20.0f + 30.0f / 95.0f));
+   assert(approach_speed(kNan, 10.0f, 20.0f, 50.0f) == 10.0f && kLandEaseFrom == 120.0f && kLandStart == 25.0f);
    // With the player out: 60 s for those still on their way.
    assert(!arrival_over(0.0) && !arrival_over(59.5) && !arrival_over(kArriveFor));
    assert(arrival_over(60.5) && arrival_over(kNan) && kArriveFor == 60.0);
@@ -1216,10 +1223,13 @@ void trail()
    assert(centre_offset(20.0f, kInf, 8.0f) == 0.0f && centre_offset(kInf, 20.0f, 8.0f) == 0.0f);
    assert(centre_offset(kInf, kInf, 8.0f) == 0.0f && centre_offset(40.0f, 5.0f, 8.0f) == -3.0f);
    assert(centre_offset(kNan, 10.0f, 8.0f) == 0.0f && centre_offset(kNan, kNan, 8.0f) == 0.0f);
-   // Slow within 60 m of the door along the trail, either side.
-   assert(near_door(100.0f, 150.0f) && near_door(150.0f, 100.0f) && near_door(100.0f, 160.0f) && !near_door(100.0f, 161.0f));
-   assert(!near_door(100.0f, kNan) && !near_door(kNan, 100.0f));
-   assert(kFitMargin == 2.0f && kCentreReach == 40.0f && kDoorSlow == 60.0f);
+   // Through the door: cruising until 50 m short of it, easing to its class's
+   // lowest speed at it, that inside; with no door, cruising.
+   assert(door_speed(60.0f, 20.0f, 80.0f) == 80.0f && door_speed(50.0f, 20.0f, 80.0f) == 80.0f);
+   assert(near(door_speed(25.0f, 20.0f, 80.0f), 50.0f) && near(door_speed(49.0f, 20.0f, 80.0f), 78.8f));
+   assert(door_speed(0.0f, 20.0f, 80.0f) == 20.0f && door_speed(-30.0f, 20.0f, 80.0f) == 20.0f);
+   assert(door_speed(kNan, 20.0f, 80.0f) == 80.0f);
+   assert(kFitMargin == 2.0f && kCentreReach == 40.0f && kDoorEase == 50.0f);
    // Where it may cut back to: 16, 8, 4 and 2 points back, never before the oldest.
    assert(back_candidates(back, 20, cuts) == 4 && cuts[0] == 4 && cuts[1] == 12 && cuts[2] == 16 && cuts[3] == 18);
    assert(back_candidates(back, 3, cuts) == 2 && cuts[0] == 0 && cuts[1] == 1);

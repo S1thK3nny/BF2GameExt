@@ -2048,7 +2048,8 @@ void update_trail(double now)
    if (now - s_player.roofAt >= kRoofEvery) {
       s_player.roofAt = now;
       const bool roof = roofed(at, leader, nullptr);
-      if (roof && !s_player.roofed) s_door = flyer_trail::newest(s_trail);   // the door (slow_on_trail)
+      if (roof && !s_player.roofed) s_door = flyer_trail::newest(s_trail);   // the door (trail_cap) ...
+      if (!roof && s_player.roofed) s_door = -1;                             // ... while it is under the roof
       if (roof != s_player.roofed && s_player.count > 0 && order_log())
          install_log("[Wingmen] you fly %s a roof: your wingmen's slots %s", roof ? "under" : "out from under",
                      roof ? "close up" : "open out again");
@@ -2098,13 +2099,25 @@ V3 trail_point(uint8_t* flyer, uint8_t* leader, Wingman& w, V3 me)
    return p + w.trailShift;
 }
 
-// On the trail through the door (flyer_trail_core.hpp, near_door: where the
-// leader went under a roof), or under a roof itself: it flies at its slowest.
-bool slow_on_trail(const Wingman& w)
+// Its class's own lowest speed (the game's GetFlyerMinSpeed, not stretched), kept
+// between its slowest and its mid speed: how it goes through a hangar's door and
+// flies inside.
+float careful_speed(uint8_t* flyer, float lo, float mid)
 {
-   if (w.roofed) return true;
-   if (!w.onTrail || !flyer_trail::has(s_trail, w.trailAt) || !flyer_trail::has(s_trail, s_door)) return false;
-   return flyer_trail::near_door(flyer_trail::along(s_trail, w.trailAt), flyer_trail::along(s_trail, s_door));
+   const float m = s_minSpeed(flyer, nullptr);
+   if (!std::isfinite(m)) return lo;
+   return m < lo ? lo : m > mid ? mid : m;
+}
+
+// The most a wingman on the trail flies (flyer_trail_core.hpp, door_speed):
+// `careful` under a roof itself; while its leader is under one, `cruise` until
+// kDoorEase short of the door, easing to `careful` at it; `cruise` elsewhere.
+float trail_cap(const Wingman& w, float careful, float cruise)
+{
+   if (w.roofed) return careful;
+   if (!w.onTrail || !flyer_trail::has(s_trail, w.trailAt) || !flyer_trail::has(s_trail, s_door)) return cruise;
+   return flyer_trail::door_speed(flyer_trail::along(s_trail, s_door) - flyer_trail::along(s_trail, w.trailAt), careful,
+                                  cruise);
 }
 
 // A wingman of the player's with a wall between it and `goal` (its slot, or the
@@ -3670,11 +3683,11 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
    return true;
 }
 
-// While its leader lands: down toward a point over its spot, at its slowest from
-// kLandSlowFrom in, the safe height let go near it, along the leader's trail
-// while a wall is between (follow_trail); else (no place free, or up again
-// before its leader) round the sky over its leader, or under a roof low and
-// slow round where there is room (roof_circle).
+// While its leader lands: down toward a point over its spot, no faster than
+// approach_speed (and through a door trail_cap), the safe height let go near it,
+// along the leader's trail while a wall is between (follow_trail); else (no
+// place free, or up again before its leader) round the sky over its leader, or
+// under a roof low and slow round where there is room (roof_circle).
 bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
 {
    const float* wm = matrix_of(flyer);
@@ -3689,15 +3702,19 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
    float speed = mid;
    if (w.land == kLandOutward) {
       // Let go under a roof: back out along the leader's trail first (head_out),
-      // at its slowest, not lifted.
+      // at its class's lowest speed, not lifted.
       V3 onTrail;
       if (!follow_trail_out(flyer, f, w, seconds(), onTrail)) return false;
       st.point = onTrail;
-      speed = lo;
+      speed = careful_speed(flyer, lo, mid);
       safe = kSafeHeightTaperFactor;
    } else if (w.land == kLandComing) {
       st.point = w.spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f};
-      if (flyer_orders::across(me, w.spot) < flyer_orders::kLandSlowFrom) speed = lo;
+      // At its mid speed until 120 m off, easing to its class's lowest by 25 m,
+      // its slowest only within that (approach_speed): at its slowest from 300 m
+      // out it crawled in under fire.
+      const float careful = careful_speed(flyer, lo, mid);
+      speed = flyer_orders::approach_speed(flyer_orders::across(me, w.spot), lo, careful, mid);
       safe = kSafeHeightTaper;
       V3 onTrail;
       float behind = 0.0f;
@@ -3710,7 +3727,7 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
                                                                            flyer_wingmen::in_frame(f.padFrame, me, down)))
                        : onTrail;
          safe = kSafeHeightTaperFactor;   // where the leader flew: not lifted (steer_before)
-         if (slow_on_trail(w)) speed = lo;   // through the door
+         if (trail_cap(w, careful, mid) < speed) speed = trail_cap(w, careful, mid);   // through the door
       }
    } else if (w.land == kLandCircle && w.circleR > 0.0f) {
       // Under a roof with no place yet: low and slow round where there is room
@@ -3799,8 +3816,11 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
       st.point = flyer_wingmen::to_world(st.frame, me, steer);
       V3 heading = st.point - me;
       if (!flyer_wingmen::finite(st.point) || !flyer_wingmen::normalise(heading)) return false;
-      // Through the door, or under a roof itself: at its slowest (slow_on_trail).
-      const float speed = slow_on_trail(*w) ? lo : flyer_wingmen::formation_speed(f->leaderTarget, behind, lo, hi);
+      // Through the door no faster than trail_cap: its class's lowest speed at it and
+      // inside, cruising until 50 m short of it.
+      const float keep = flyer_wingmen::formation_speed(f->leaderTarget, behind, lo, hi);
+      const float cap = trail_cap(*w, careful_speed(flyer, lo, mid), hi);
+      const float speed = cap < keep ? cap : keep;
       st.target = flyer_wingmen::target_for_speed(speed, lo, mid, hi);
       st.chasing = true;   // off its slot: no slot statistics
       write_dest(flyer, st, heading, kSafeHeightTaperFactor);
@@ -3888,13 +3908,26 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
          flyer_real_flight::restore(onPath);
       }
    }
-   // Every AI flyer, however steered, clear of the flyers around it; one of the
-   // player's wingmen on its leader's trail in single file, kept behind those
-   // ahead rather than pushed off the path round them (single_file).
+   // Every AI flyer, however steered, clear of the flyers around it. One of the
+   // player's wingmen flies among its flight (flyer_avoidance.hpp, Flight): on its
+   // leader's trail in single file; under a roof pushed to the side only, at its
+   // point's own distance, its flight mates only kept from touching; its landing
+   // leader not steered round. The user: "The AI also activate avoidance when
+   // near my landed ship, causing them to turn into the celing".
    if (r && flyer_avoidance::active()) {
-      const bool singleFile = steering && st.w && (st.w->onTrail || st.w->land == kLandOutward);
+      flyer_avoidance::Flight flight;
+      const flyer_avoidance::Flight* mine = nullptr;
+      if (steering && st.w && st.f == &s_player) {
+         flight.singleFile = st.w->onTrail || st.w->land == kLandOutward;
+         flight.roofed = st.w->roofed || (st.f->landing && st.f->padRoof < flyer_orders::kNoRoof);
+         flight.leader = st.f->leader;
+         flight.landing = st.f->landing;
+         for (int i = 0; i < st.f->count && flight.mateCount < flyer_avoidance::Flight::kMaxMates; ++i)
+            if (&st.f->wing[i] != st.w) flight.mates[flight.mateCount++] = st.f->wing[i].obj;
+         mine = &flight;
+      }
       __try {
-         flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed, singleFile);
+         flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed, mine);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
          caught("the avoidance after CalculateDest");
       }

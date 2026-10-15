@@ -30,7 +30,12 @@
 // at all and keep the stock behaviour. One of the player's wingmen on its
 // leader's trail flies in single file: a flyer ahead of it going its way slows it
 // instead of pushing it off the path to the side (single_file), which could
-// push it into a hangar's rim.
+// push it into a hangar's rim. Under a roof one is pushed to the side only, never
+// up or down, at its point's own distance (15 m at least, not 60 m: from inside a
+// hangar that is its roof or walls), and its flight mates are only kept from
+// touching; its leader is not steered round while the flight lands with it (the
+// places keep them apart). The user saw wingmen turn into a hangar's ceiling
+// near the landed leader.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -68,10 +73,19 @@ bool active();
 // After EntityFlyer::CalculateDest steered an AI flyer, from the wingmen's
 // stand-in: `point` bent away from flyers it would pass too close to, `speed`
 // (the target, 0 to 1) eased behind a slower one. `dest` is the
-// ControllableDestination CalculateDest copied. `singleFile`: a wingman on its
-// leader's trail, kept behind a flyer ahead going its way rather than pushed off
-// the path round it (flyer_avoidance_core.hpp, single_file).
-void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, bool singleFile = false);
+// ControllableDestination CalculateDest copied. `flight`: one of the player's
+// wingmen, how it flies among its flight (null for any other flyer).
+struct Flight {
+   static constexpr int kMaxMates = 8;
+   bool singleFile = false;           // on its leader's trail: kept behind a flyer ahead going its way (single_file)
+   bool roofed = false;               // under a roof: pushed to the side only, at its point's own distance,
+                                      // its flight mates only kept from touching (sideways, bend)
+   const uint8_t* leader = nullptr;   // its leader ...
+   bool landing = false;              // ... not steered round while the flight lands with it (the places keep them apart)
+   const uint8_t* mates[kMaxMates] = {};   // its flight's other wingmen
+   int mateCount = 0;
+};
+void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, const Flight* flight = nullptr);
 
 // A flyer's collision sphere's radius, as RaiseHeight reads one, kept within
 // kMinRadius to kMaxRadius.

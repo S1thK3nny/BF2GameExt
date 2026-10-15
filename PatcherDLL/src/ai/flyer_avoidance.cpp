@@ -187,7 +187,7 @@ bool active() { return g_flyerAvoidance && s_installed; }
 
 float size_of(const uint8_t* flyer) { return flyer ? clamp_radius(radius_of(flyer)) : kMinRadius; }
 
-void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, bool singleFile)
+void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, const Flight* flight)
 {
    if (!active() || !flyer || !point) return;
    const double now = seconds();
@@ -203,11 +203,16 @@ void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, boo
    for (int i = 0; i < s_count; ++i) {
       const Body& b = s_bodies[i];
       if (b.obj == flyer) continue;
+      if (flight && flight->landing && b.obj == flight->leader) continue;   // its place keeps it clear of its leader
       const V3 to = b.pos - me;
       if (!(flyer_wingmen::dot(to, to) <= kScanRange * kScanRange)) continue;
+      // Under a roof, its flight mates only kept from touching (no kMargin).
+      bool mate = false;
+      for (int k = 0; flight && flight->roofed && k < flight->mateCount && !mate; ++k) mate = b.obj == flight->mates[k];
       Threat t;
-      if (!assess(me, vel, radius, fwd, right, b.pos, b.vel, b.radius, t)) continue;
-      if (singleFile) single_file(t);
+      if (!assess(me, vel, radius, fwd, right, b.pos, b.vel, b.radius, t, mate ? 0.0f : kMargin)) continue;
+      if (flight && flight->singleFile) single_file(t);
+      if (flight && flight->roofed) sideways(t);
       add(avoid, t);
    }
    s_stats.add(avoid);
@@ -216,7 +221,7 @@ void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, boo
    // CalculateDest lifted the point over the terrain or something in the way:
    // bend it to the side only.
    const bool lifted = dest && point[1] > *(const float*)(dest + kDest_PosY) + 1.0f;
-   const V3 bent = bend(me, {point[0], point[1], point[2]}, fwd, avoid, !lifted);
+   const V3 bent = bend(me, {point[0], point[1], point[2]}, fwd, avoid, !lifted, flight && flight->roofed);
    point[0] = bent.x;
    point[1] = bent.y;
    point[2] = bent.z;
