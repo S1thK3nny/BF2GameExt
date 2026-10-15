@@ -47,6 +47,7 @@ for name, value in {
     "kDest_Taper": 0x2C,
     "kDest_Speed": 0x30,
     "kSafeHeightFull": 0,
+    "kSafeHeightTaperFactor": 3,
     "kVt_GetVelocity": 0x44,
     "kGO_MatrixIface": 0xC,
     "kVt_GetMatrix": 0x40,
@@ -192,6 +193,20 @@ checks = {
                  ("mov", "eax, dword ptr [esi + 0x310]"), ("add", "esi, 0x2c4")],
     0x004F4798: [("ret", "0x14")],
     0x004F4AD9: [("ret", "0x14")],
+    # The leader's trail (flyer_trail_core.hpp) asks for no lift: mDest's safe height 3
+    # (SH_TAPER_FACTOR) hands RaiseHeight the taper flag and mTaperFactor (+0x2C) ...
+    0x004F486A: [("mov", "eax, dword ptr [edi + 0x28]"), ("cmp", "eax, 3"), ("jne", "0x4f487b"),
+                 ("mov", "edx, dword ptr [edi + 0x2c]"), ("mov", "dword ptr [esp + 0x40], edx")],
+    0x004F4883: [("cmp", "eax, 1"), ("je", "0x4f4891"), ("cmp", "eax, 3"), ("je", "0x4f4891")],
+    0x004F48A4: [("call", "0x409827")],
+    0x00409827: [("jmp", "0x4f40a0")],
+    # ... and RaiseHeight, given the flag, takes a factor of 0 or more as it is: the point's y
+    # becomes (lift - y) * factor + y, so a factor of 0 lifts nothing.
+    0x004F4464: [("je", "0x4f44f5")],
+    0x004F446A: [("fld", "dword ptr [esp + 0x74]"), ("fcomp", "dword ptr [0xa2a06c]"), ("fnstsw", "ax"),
+                 ("test", "ah, 1"), ("jne", "0x4f4481"), ("fld", "dword ptr [esp + 0x74]"), ("jmp", "0x4f44e8")],
+    0x004F44E8: [("fld", "dword ptr [ecx + 4]"), ("fxch", "st(2)"), ("fsub", "st(2)"), ("fmul", "st(1)"),
+                 ("faddp", "st(2)")],
     # The barrier slide bit, 0x10 of the flags.
     0x004F46A2: [("and", "byte ptr [ebp + 0x5f4], 0xef")],
     0x004F46A9: [("test", "byte ptr [ebp + 0x5f4], 0x10")],

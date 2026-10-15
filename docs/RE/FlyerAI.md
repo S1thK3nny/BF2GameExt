@@ -1018,6 +1018,30 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   placed as the command post markers are ([HUDSystem.md](HUDSystem.md), "Wingmen markers"). Each tick the
   wingmen's `TargetManager` markers go while a `.hud` binds any wingman event and come back while none does;
   the target's red one likewise with its own events.
+- **The leader's trail** (the user, on wingmen in open space while the player flies into a hangar: "Possibly?
+  Not got a clue how that would be done reliably however", then "Yep, get them done"; `ai/flyer_trail_core.hpp`,
+  `[AI] FlyerWingmenTrail=1`): the player's flyer's path is kept as a point every 8 m, the last 256 (about
+  2 km), started again past a 100 m jump and where the leader takes off after landing. A wingman whose ray to
+  its slot (or, landing, to its place) meets a building, prop, the ground or water (the landing's types 0x190,
+  four times a second) takes the trail from its nearest point within 300 m in a clear line, steers at the
+  furthest of the points 16, 8, 4 and 2 ahead it has a clear line to (else the next), at `formation_speed` on
+  how far it is behind its place in a line, a spacing behind the leader for each wingman in front of it, and
+  goes back to its slot after three clear looks in a row. A wingman that gets no further for 6 s while its place
+  is ahead is left to its own AI for 10 s. Under a roof over the leader (`roofed`, the landing's ray up 40 m,
+  twice a second) the slots close in to half their spacing at half a second's worth a second. Under a roof the
+  landing places the wingman cannot see are still given when it can reach the leader along the trail.
+- **Why the trail turns the lift off.** `EntityFlyer::CalculateDest` (P `0x00523CB0`, M `0x004F4630`) calls
+  `EntityFlyer::RaiseHeight` (P `0x00528910`, M `0x004F40A0` through the thunk `0x00409827`) for safe heights
+  `SH_FULL` (0) and `SH_TAPER` (1) whatever happens, and for any other only when the low level has a path and
+  its flag 2. RaiseHeight samples the heights round the flyer and casts a ray ahead from under it, 1.5 times its
+  set speed long, at types 0x18 (COLL_RIGID and COLL_STATIC: vehicles and buildings); on a hit it takes the top
+  of that object's collision sphere, and then lifts the point toward 25 m over the highest (`fadd [0xa36708]`),
+  and the speed to 20 m/s. For a hangar that sphere is the whole capital ship's, so a wingman flying the
+  leader's path inside would be sent up into the roof. With `SH_TAPER_FACTOR` (3) CalculateDest hands it
+  `mTaperFactor` (+0x2C) and the taper flag (M `0x004F486A`), and RaiseHeight makes the point's y
+  `(lift - y) * factor + y` (M `0x004F446A`, `0x004F44E8`): a factor of 0 lifts nothing. The SafeHeight enum
+  (P): `SH_FULL` 0, `SH_TAPER` 1, `SH_NONE` 2, `SH_TAPER_FACTOR` 3. On the trail a wingman's `mDest` asks for
+  3 with a factor of 0; it still slows for what is ahead, and `AIUtil::AvoidBarriers` still runs.
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
@@ -1113,7 +1137,9 @@ flyer`); the squad key: `squad key on #t: it joins your flight (n)`, `... your f
 `squad key held: break off, n let go`, `markers installed` at start-up; landing: `landing with you installed` at start-up, then `the leader comes down [under a roof]: N land
 beside it, M circle overhead, K let go (nowhere to land under the roof)`, `slot N (#a) lands beside you X m off
 (place k of 5)`, `slot N (#a) lands X m from its spot`, `landed: its pilot gets out`, `the leader takes off: N
-of its wingmen take off with it`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own
+of its wingmen take off with it`; the trail: `slot N (#a): a wall between it and its slot: it flies your trail,
+from X m off`, `its way clear again, off your trail`, `no way along your trail for 6 s: its own AI flies it for
+10 s`, `you fly under a roof: your wingmen's slots close up`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own
 combat may take it back between settings), how the passes fare against terrain, how an AI flyer lands when
 told to at speed, and whether a hangar's roof stops the ray from 40 m up (a roof is looked for whatever it is
 made of; the ray may pass through the back of a face).

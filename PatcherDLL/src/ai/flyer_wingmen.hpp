@@ -113,7 +113,8 @@
 // under a roof over the leader (a ray up from the leader's ground finds one
 // within 40 m: a hangar's, which a ray from 40 m up would hit before the ground);
 // under a roof the place must also be in a clear line from the leader 3 m up, and
-// the wingman's way to it clear. It comes down toward 15 m over it (lower under
+// the wingman's way to it clear, straight or along the leader's trail (below). It
+// comes down toward 15 m over it (lower under
 // a low roof), at its slowest (the stretch lets it go to 10 m/s) from 300 m in,
 // and lands (EntityFlyer::Land) once within 25 m of it across and 40 m up
 // (EntityFlyer::Land needs no landing region). Once down its pilot gets out (and
@@ -126,6 +127,23 @@
 // the leader under a roof, where that would take it into the roof (or the ship
 // or mountain the hangar is in), is let go instead. While landed the squad key is
 // the game's (seats), and the comm keys order nothing.
+//
+// The leader's trail (FlyerWingmenTrail; flyer_trail_core.hpp): the player's
+// flyer's path is kept as a point every 8 m it flies, the last 2 km, started
+// again where it takes off after landing. A wingman whose line to its slot (or,
+// landing, to its place) a building, prop, the ground or water blocks (a ray of
+// the landing's types, four times a second) flies that path instead: from the
+// point nearest it (within 300 m, in a clear line), at the furthest point up to
+// 16 ahead it has a clear line to, at the speed that keeps it its spacing behind
+// the leader for each wingman in front of it, and with CalculateDest's lift off
+// (SH_TAPER_FACTOR with no factor: EntityFlyer::RaiseHeight would raise the
+// point 25 m over whatever its ray ahead meets, buildings and vehicles, a
+// hangar's whole ship, so into the roof). It copies no tricks there. Its line
+// clear three looks in a row, it goes back to its slot. One that gets no further
+// along it for 6 s while its place is ahead is left to its own AI for 10 s, then
+// tries again. Under a roof over the leader (a ray up 40 m, twice a second) the
+// flight's slots close in to half their spacing, half of it a second, and open
+// out again in the open.
 //
 // Getting out: stock, an AI pilot would get out only through its fly agent's
 // own landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within
@@ -359,7 +377,8 @@
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
 // 60, the vee's), FlyerWingmenAuto=1 (called up at takeoff; 0: on the squad key
-// first); FlyerWingmenMarkers=0 for no markers; FlyerRealFlightSquadrons=0 for
+// first); FlyerWingmenMarkers=0 for no markers; FlyerWingmenTrail=0 to keep them
+// off the leader's trail; FlyerRealFlightSquadrons=0 for
 // no AI squadrons (on by default, with FlyerRealFlight).
 // =============================================================================
 
@@ -369,6 +388,7 @@ extern float g_flyerWingmenSpacing;
 extern bool  g_flyerWingmenAuto;
 extern bool  g_flyerWingmenLand;
 extern bool  g_flyerWingmenMarkers;
+extern bool  g_flyerWingmenTrail;
 extern bool  g_flyerRealFlightSquadrons;
 
 void flyer_wingmen_install(uintptr_t exe_base);

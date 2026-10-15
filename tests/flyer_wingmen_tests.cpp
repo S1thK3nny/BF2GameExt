@@ -3,6 +3,7 @@
 // fly as one - the logic in flyer_wingmen_core.hpp, fed what flyer_wingmen.cpp
 // reads.
 #include "../PatcherDLL/src/ai/flyer_orders_core.hpp"
+#include "../PatcherDLL/src/ai/flyer_trail_core.hpp"
 #include "../PatcherDLL/src/ai/flyer_wingmen_core.hpp"
 #include <cassert>
 #include <cmath>
@@ -1130,6 +1131,88 @@ void landing_now()
    assert(kLandRetries == 2 && kLandNowRange == 150.0f);
 }
 
+// The leader's trail: a point every 8 m it flies, the last 256, started again
+// past a jump; where a wingman is on it, where it may cut to, its place in the
+// line, and the slots closing up under a roof.
+void trail()
+{
+   using namespace flyer_trail;
+   Trail t;
+   assert(t.count == 0 && nearest(t, V3{}, -1) == -1 && cut_candidates(t, 0, nullptr) == 0);
+   assert(leader_along(t, V3{5.0f, 0.0f, 0.0f}) == 0.0f);
+   // The first point at once; then only once 8 m on.
+   assert(record(t, V3{0.0f, 10.0f, 0.0f}) && t.count == 1 && newest(t) == 0 && along(t, 0) == 0.0f);
+   assert(!record(t, V3{7.9f, 10.0f, 0.0f}) && t.count == 1);
+   assert(record(t, V3{8.0f, 10.0f, 0.0f}) && t.count == 2 && near(along(t, 1), 8.0f));
+   assert(!record(t, V3{kNan, 10.0f, 0.0f}) && t.count == 2);
+   for (int i = 2; i < 40; ++i) assert(record(t, V3{8.0f * (float)i, 10.0f, 0.0f}));
+   assert(t.count == 40 && newest(t) == 39 && near(along(t, 39), 312.0f) && near(point(t, 39).x, 312.0f));
+   // The leader 5 m past its newest point; a wingman three spaces of 25 m back
+   // is at its place as the second in line.
+   const float lead = leader_along(t, V3{317.0f, 10.0f, 0.0f});
+   assert(near(lead, 317.0f));
+   assert(near(behind_place(t, lead, 0, 25.0f, 36), 317.0f - 25.0f - 288.0f));   // the first: 4 m behind its place
+   assert(near(behind_place(t, lead, 1, 25.0f, 33), 317.0f - 50.0f - 264.0f));   // the second: 3 m behind
+   assert(behind_place(t, lead, 0, 25.0f, 39) < 0.0f);                          // ahead of it: slows
+   assert(behind_place(t, lead, 0, 25.0f, 99) == 0.0f && behind_place(t, kNan, 0, 25.0f, 36) == 0.0f);
+   // Its point: the nearest from its own on, never back; the whole trail with none.
+   float d = 0.0f;
+   assert(nearest(t, V3{97.0f, 13.0f, 0.0f}, -1, &d) == 12 && near(d, std::sqrt(10.0f)));
+   assert(nearest(t, V3{100.0f, 13.0f, 0.0f}, -1) == 13);     // as near as 12: the newer
+   assert(nearest(t, V3{100.0f, 13.0f, 0.0f}, 20) == 20);     // not back past its own
+   assert(nearest(t, V3{kNan, 0.0f, 0.0f}, -1) == -1);
+   Trail longer;
+   for (int i = 0; i < 100; ++i) record(longer, V3{8.0f * (float)i, 0.0f, 0.0f});
+   assert(nearest(longer, V3{720.0f, 0.0f, 0.0f}, 0) == kWindow);   // looked for kWindow on at most
+   assert(nearest(longer, V3{720.0f, 0.0f, 0.0f}, 40) == 90 && nearest(longer, V3{720.0f, 0.0f, 0.0f}, -1) == 90);
+   // Where it may cut to: 16, 8, 4 and 2 points on, never past the newest.
+   int cuts[kMaxCuts];
+   assert(cut_candidates(t, 10, cuts) == 4 && cuts[0] == 26 && cuts[1] == 18 && cuts[2] == 14 && cuts[3] == 12);
+   assert(cut_candidates(t, 34, cuts) == 3 && cuts[0] == 39 && cuts[1] == 38 && cuts[2] == 36);
+   assert(cut_candidates(t, 38, cuts) == 1 && cuts[0] == 39);
+   assert(cut_candidates(t, 39, cuts) == 0 && cut_candidates(t, 40, cuts) == 0);
+   assert(next_of(t, 10) == 11 && next_of(t, 39) == 39);
+   // In and out again the same way: of points as near, the newest (the way out).
+   Trail back;
+   for (int i = 0; i <= 10; ++i) record(back, V3{8.0f * (float)i, 0.0f, 0.0f});
+   for (int i = 9; i >= 0; --i) record(back, V3{8.0f * (float)i, 1.0f, 0.0f});
+   assert(back.count == 21 && nearest(back, V3{40.0f, 0.4f, 0.0f}, -1) == 15);
+   // A jump is not flown: it starts again, its numbers after every earlier one.
+   const int was = newest(t);
+   assert(record(t, V3{312.0f, 10.0f, 150.0f}) && t.count == 1 && newest(t) == was + 1 && along(t, newest(t)) == 0.0f);
+   assert(!has(t, was) && has(t, was + 1));
+   clear(t);
+   assert(t.count == 0 && !has(t, was + 1) && record(t, V3{}) && newest(t) == was + 2);
+   // The last 256 kept, the oldest making way.
+   Trail ring;
+   for (int i = 0; i < kPoints + 10; ++i) record(ring, V3{8.0f * (float)i, 0.0f, 0.0f});
+   assert(ring.count == kPoints && ring.first == 10 && newest(ring) == kPoints + 9);
+   assert(!has(ring, 9) && has(ring, 10) && near(point(ring, 10).x, 80.0f) && near(along(ring, kPoints + 9),
+                                                                                   8.0f * (float)(kPoints + 9)));
+   assert(nearest(ring, V3{}, -1) == 10);   // the oldest kept
+   assert(cut_candidates(ring, 5, cuts) == 0 && nearest(ring, V3{}, 5) == 10);   // a point no longer kept
+   // A jump of exactly kJump starts it again too.
+   Trail jump;
+   record(jump, V3{});
+   record(jump, V3{8.0f, 0.0f, 0.0f});
+   assert(record(jump, V3{8.0f, 0.0f, kJump}) && jump.count == 1 && newest(jump) == 2);
+   assert(record(jump, V3{8.0f, 0.0f, kJump + 99.0f}) && jump.count == 2 && near(along(jump, 3), 99.0f));
+   // Taking it, and leaving it after three clear looks in a row.
+   assert(takes(true, 299.0f) && takes(true, kNear) && !takes(true, 301.0f) && !takes(false, 10.0f) && !takes(true, kNan));
+   int clearLooks = 0;
+   assert(!leaves(clearLooks, true) && !leaves(clearLooks, true) && !leaves(clearLooks, false) && clearLooks == 0);
+   assert(!leaves(clearLooks, true) && !leaves(clearLooks, true) && leaves(clearLooks, true));
+   // Stuck: no further point for 6 s with its place a gap or more ahead.
+   assert(stuck(6.5, 30.0f, 25.0f) && !stuck(5.5, 30.0f, 25.0f) && !stuck(6.5, 20.0f, 25.0f) && !stuck(6.5, -5.0f, 25.0f));
+   // Under a roof the slots close up to half their spacing, half of it a second.
+   assert(near(squeeze(1.0f, true, 0.5f), 0.75f) && near(squeeze(0.75f, true, 1.0f), 0.5f));
+   assert(near(squeeze(0.5f, true, 1.0f), 0.5f) && near(squeeze(0.5f, false, 0.2f), 0.6f));
+   assert(near(squeeze(0.9f, false, 5.0f), 1.0f) && near(squeeze(1.0f, true, 5.0f), 0.5f));   // no further
+   assert(near(squeeze(1.0f, true, kNan), 1.0f) && near(squeeze(1.0f, true, -1.0f), 1.0f));
+   assert(near(squeeze(kNan, true, 0.0f), 1.0f) && near(squeeze(0.2f, false, 0.0f), 1.0f));   // out of range: open
+   assert(kStep == 8.0f && kPoints == 256 && kLookEvery == 0.25 && kLeaveAfter == 3 && kSqueeze == 0.5f);
+}
+
 int main()
 {
    the_vee();
@@ -1159,10 +1242,11 @@ int main()
    squad_key_rules();
    attack_sides();
    landing_now();
+   trail();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
                "orders, passes at the ground, landing, landing places, mission keys, the squad key's hold and "
-               "picks, attack sides, landing right away).\n");
+               "picks, attack sides, landing right away, the leader's trail).\n");
    return 0;
 }

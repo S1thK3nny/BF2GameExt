@@ -129,7 +129,9 @@ Scripts can check the running version through `GameExt.version`.
   order's target a red one; a `.hud` can draw its own from `player1.wingmanN.*` and
   `player1.wingmen.target.*` events instead. Wingmen fire only with a clear line to their
   target and pass at a hardpoint under a ship from below. F5 in the air switches their
-  formation; they land right away when you do.
+  formation; they land right away when you do. One with a wall between it and its slot, as
+  outside a hangar you fly into, follows the path you flew, and under a roof they close up
+  (`[AI] FlyerWingmenTrail=1`).
   Flyer classes set who flies with whom, the formation, the first order, the engage range and a
   wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
   flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with

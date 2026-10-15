@@ -485,10 +485,6 @@ pieces for it, in docs/RE/AISystem.md, "The comm keys' requests and the AI's own
 (docs/RE/HintNodes.md). Keep them and give them a job: a way in that wingmen fly through to a hangar
 and ground AI walk through to a building, or where a pickup waits (the user, 2026-10-14).
 
-**Wingmen and hangars** - Wingmen fly straight at their slots, so with the leader in a hangar they
-scrape or hit its walls. Let one whose line to its slot is blocked follow the leader's trail, and close
-the formation up under a roof (offered 2026-10-14).
-
 **A demonstration campaign map** - Nothing shows the new AI off in one place. Once the AI work is in,
 put together a simple campaign map (the user asked for help with one, 2026-10-14) that walks through
 each feature: squads and formations, wingmen and their orders, landing, the comm keys, AI goals.
