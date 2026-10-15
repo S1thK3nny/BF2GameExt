@@ -1268,7 +1268,7 @@ flight, with events. The user-facing tables are in docs/user/ODF_PROPERTIES.md a
   `tests/flyer_wingmen_abi_tests.py` (the name lookup's push sequence and `_Find`'s guard, the keys' hashes
   absent from the exe, the event rows); the mutation suites `orders` and `wingmen`. Nothing of it played.
 
-## Landing regions as hangars (researched 2026-10-15, not built)
+## Landing regions as hangars (researched and built 2026-10-15, modtools only)
 
 The wingmen find a hangar only from the player's flight: the door is the first trail point where a ray 40 m up
 from the leader meets something, and each wingman's walls come from rays round it. A map cannot mark the
@@ -1295,11 +1295,15 @@ hangars have one; a custom map's open-air pad has one too, so a region alone doe
   `mLandingRegionsExist`, each of the 32 slots (`GetTriggerRegionData`, M thunk `0x00408E95`) of type 2, the
   point tested.
 
-**A hangar from them, vanilla maps included:** a landing region with a roof over it. When the leader lands (or
-flies) inside a landing region, the roof is looked for from its position up to the top of the region (not the
-fixed 40 m), so a tall hangar counts; with no roof found, the region is open air and nothing changes. Under a
-roof: the door is the trail's first point inside the region, wherever the ceiling is; landing places are kept
-inside the region; the closing up, the lift off and the slower door follow from it. Where a map has no landing
-regions, or a hangar's region does not cover its mouth, today's roof ray stays as the fallback. Not yet read:
-how a region's top is worked out for a turned box or cylinder (the corner heights from the matrix and sizes),
-and whether `mRegion` can change while a mission runs (`RemoveLandingRegion`).
+**Built** (`flyer_wingmen.cpp`, `landing_region_core.hpp`): a landing region with a roof over it is a hangar,
+vanilla maps included. `roofed` looks up kLandProbe (40 m) as before, or, from a point inside a landing region
+(`landing_region_at`, the slots read afresh each time, so a script's `AddLandingRegion` or `RemoveLandingRegion`
+counts at once), up to the region's top plus 5 m (300 m at most): a tall hangar has a roof, an open-air pad's
+region none. Everything that asks for a roof follows: the leader's (the door, where the roof begins, so at the
+mouth even if the region reaches out past it; the closing up), each wingman's (the lift off, the door speed) and
+the landing's (`padRoof`). Under a roof, landing places, the low circle's centre and a wingman landing where it
+is must have a roof over them too, so none is put outside the mouth. `landing_region_core.hpp` copies
+`PblRegion::IsPointInside` shape by shape and works out a region's top (a turned box's highest corner, a
+turned cylinder's highest rim, NaN for a plane). `install_regions` checks the game's own reads of them first
+(GetTriggerRegionData's slots, IsInLandingZone's pointer and +0x11C, IsPointInside's shape at +0x54); else the
+40 m ray alone. `tests/flyer_wingmen_abi_tests.py` checks the addresses, the cases' table and the offsets.

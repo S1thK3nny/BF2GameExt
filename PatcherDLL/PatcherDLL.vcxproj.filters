@@ -481,6 +481,9 @@
     <ClInclude Include="src\ai\flyer_trail_core.hpp">
       <Filter>ai</Filter>
     </ClInclude>
+    <ClInclude Include="src\ai\landing_region_core.hpp">
+      <Filter>ai</Filter>
+    </ClInclude>
     <ClInclude Include="src\ai\flyer_real_flight.hpp">
       <Filter>ai</Filter>
     </ClInclude>

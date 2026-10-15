@@ -139,7 +139,8 @@ Scripts can check the running version through `GameExt.version`.
   spot is free, and those still on their way when you get out land all the same; one let go in
   a hangar first flies back out the way you flew in. One with a wall between it and its slot, as outside a hangar you fly
   into, follows the path you flew, at its own size and easing off through the door, and under a
-  roof they close up and stop climbing over what is ahead (`[AI] FlyerWingmenTrail=1`).
+  roof they close up and stop climbing over what is ahead (`[AI] FlyerWingmenTrail=1`); a
+  hangar is found from your path and the map's landing regions, a tall one too.
   Flyer classes set who flies with whom, the formation, the first order, the engage range and a
   wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
   flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with

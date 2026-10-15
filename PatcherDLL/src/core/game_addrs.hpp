@@ -1373,6 +1373,19 @@ namespace modtools {
    // the next, +0xC its formation; the head's +0xC null).
    constexpr uintptr_t flyer_follower_list          = 0x00AD3524;
    constexpr uintptr_t flyer_follower_link          = 0x005E8AE3;
+   // Landing regions, for the wingmen's hangars (flyer_wingmen.cpp,
+   // landing_region_core.hpp; docs/RE/FlyerAI.md, "Landing regions as hangars").
+   // TriggerRegionManager::sInstance, a pointer: its 32 TriggerRegionData slots at
+   // +0x18, 8 bytes each (the PblRegion*, then the TriggerType: 2 landing), the
+   // byte at +0x11C set while there are landing regions. GetTriggerRegionData,
+   // thiscall(int slot), RET 4, reads the slots so (LEA EAX,[ECX+EAX*8+0x18]);
+   // FlagItem::IsInLandingZone loads the pointer and reads +0x11C;
+   // PblRegion::IsPointInside, thiscall(const PblVector3*), RET 4, switches on
+   // the shape at +0x54 (1 to 8).
+   constexpr uintptr_t trigger_region_manager       = 0x00B9A73C;
+   constexpr uintptr_t trigger_region_data          = 0x00664140;
+   constexpr uintptr_t flag_in_landing_zone         = 0x006514E0;
+   constexpr uintptr_t pbl_region_inside            = 0x007E7820;
    constexpr uintptr_t entity_formation_find        = 0x005E2EB0;
    constexpr uintptr_t entity_formation_list        = 0x00AD33C0;
    // Wingmen orders (a prototype, modtools only). Controllable::

@@ -166,15 +166,35 @@ NAMES = ("flyer_update_indirect", "flyer_calc_dest_call", "flyer_calc_dest", "fl
          "processed_inputs_get_digital", "entity_flyer_take_off", "entity_flyer_land", "collision_ray_hit",
          "fly_agent_land_hint_call", "fly_agent_land_hint", "fly_agent_take_off_call", "fly_agent_take_off_call2",
          "ai_set_exit_vehicle", "target_manager_add_marker", "target_manager_remove_marker",
-         "attack_helper_reset")
+         "attack_helper_reset", "trigger_region_manager", "trigger_region_data", "flag_in_landing_zone",
+         "pbl_region_inside")
 EXPECT = (0x004F4C10, 0x004F4D4D, 0x004F4630, 0x004F0950, 0x004F0A10, 0x004F3D10, 0x004F09B0, 0x005E2EB0, 0x004F30C0,
           0x00AD33C0, 0x005E0C70, 0x0059EC20, 0x0055F840, 0x006AECD0, 0x00AE2170, 0x007F3720, 0x0059B460, 0x00743A30,
           0x004F8B70, 0x004F1380, 0x0042E230, 0x005AFDD3, 0x005AED00, 0x005AF154, 0x005AF323,
-          0x005A2170, 0x0048E3A0, 0x0048E650, 0x005B4230)
+          0x005A2170, 0x0048E3A0, 0x0048E650, 0x005B4230, 0x00B9A73C, 0x00664140, 0x006514E0, 0x007E7820)
 for name, value in zip(NAMES, EXPECT):
     assert constant(mt, name) == value, name
 
 checks = {
+    # The landing regions (hangars, landing_region_core.hpp): GetTriggerRegionData's 32
+    # slots of 8 bytes at +0x18, null for an empty one; IsInLandingZone's walk off the
+    # manager's pointer, its +0x11C while there are any, a slot's type 2 a landing region;
+    # IsPointInside's shape at +0x54 (1 to 8), RET 4.
+    0x00664140: [("mov", "eax, dword ptr [esp + 4]"), ("test", "eax, eax"), ("jl", "0x664156"), ("cmp", "eax, 0x20"),
+                 ("jge", "0x664156"), ("lea", "eax, [ecx + eax*8 + 0x18]"), ("cmp", "dword ptr [eax], 0")],
+    0x00664158: [("ret", "4")],
+    0x006514E0: [("push", "ebx"), ("mov", "ebx, dword ptr [0xb9a73c]"), ("mov", "al, byte ptr [ebx + 0x11c]")],
+    0x00651506: [("cmp", "dword ptr [esi + 4], 2")],
+    0x007E7820: [("sub", "esp, 0x10"), ("push", "esi"), ("mov", "esi, ecx"), ("mov", "eax, dword ptr [esi + 0x54]"),
+                 ("dec", "eax"), ("cmp", "eax, 7")],
+    0x007E7878: [("ret", "4")],
+    # Its cases: a sphere's radius at +0x4C; a plane's forward at +0x20; a box on the
+    # world's axes its position at +0x30 and its x half size at +0x40.
+    0x007E783A: [("mov", "eax, dword ptr [esi + 0x4c]")],
+    0x007E7984: [("mov", "eax, dword ptr [esp + 0x18]"), ("fld", "dword ptr [esi + 0x28]"),
+                 ("fmul", "dword ptr [eax + 8]"), ("fld", "dword ptr [esi + 0x24]"), ("fmul", "dword ptr [eax + 4]")],
+    0x007E79B7: [("mov", "ecx, dword ptr [esp + 0x18]"), ("fld", "dword ptr [ecx]"), ("fsub", "dword ptr [esi + 0x30]"),
+                 ("fabs", ""), ("fcomp", "dword ptr [esi + 0x40]")],
     # EntityFlyer::UpdateIndirect: `this` the Controllable, the entity 0x240 below it.
     0x004F4C10: [("sub", "esp, 0x84"), ("push", "ebx"), ("push", "ebp"), ("push", "esi"), ("mov", "esi, ecx")],
     0x004F4CA9: [("lea", "edi, [esi - 0x240]"), ("mov", "ecx, edi"), ("call", "0x401528")],
@@ -624,6 +644,29 @@ for address, expected in checks.items():
     data = image[address - base:address - base + 96]
     actual = [(i.mnemonic, i.op_str) for i in decoder.disasm(data, address, count=len(expected))]
     assert actual == expected, (hex(address), actual, expected)
+# IsPointInside's shapes 1 to 8 (EAX - 1, the table at 0x007E7AD4): sphere, box, cylinder,
+# plane, box on the world's axes, cylinders on x, y and z, as landing_region_core numbers them.
+cases = [int.from_bytes(image[0x007E7AD4 + 4 * k - base:0x007E7AD4 + 4 * k + 4 - base], "little") for k in range(8)]
+assert cases == [0x007E783A, 0x007E787B, 0x007E790F, 0x007E7984, 0x007E79B7, 0x007E79F1, 0x007E7A3A, 0x007E7A6A], \
+    [hex(c) for c in cases]
+regions = (SRC / "ai/landing_region_core.hpp").read_text()
+for name, value in (("kSphere", 1), ("kBox", 2), ("kCylinder", 3), ("kPlane", 4), ("kBoxAligned", 5),
+                    ("kCylinderX", 6), ("kCylinderY", 7), ("kCylinderZ", 8)):
+    match = re.search(r"\b" + name + r"\s*=\s*(\d+)\s*,", regions)
+    assert match and int(match.group(1)) == value, name
+# The slots and a region as flyer_wingmen.cpp reads them, and the install's checks.
+for name, value in (("kTRM_Slots", 0x18), ("kTRM_SlotCount", 32), ("kTRM_LandingExist", 0x11C),
+                    ("kTriggerLanding", 2), ("kRgn_Size", 0x40), ("kRgn_Shape", 0x54)):
+    assert constant(source, name) == value, name
+for row in ("r.right = vec_at(rgn + 0x00);", "r.up = vec_at(rgn + 0x10);", "r.fwd = vec_at(rgn + 0x20);",
+            "r.at = vec_at(rgn + 0x30);", "const uint8_t* const slot = mgr + kTRM_Slots + i * 8;"):
+    assert row in source, row
+want = bytes.fromhex("8B44240485C07C0E83F8207D098D44C118")
+assert image[0x00664140 - base:0x00664140 - base + len(want)] == want
+assert r'"\x8B\x44\x24\x04\x85\xC0\x7C\x0E\x83\xF8\x20\x7D\x09\x8D\x44\xC1\x18", 17' in source
+want = bytes.fromhex("83EC10568BF18B46544883F807")
+assert image[0x007E7820 - base:0x007E7820 - base + len(want)] == want
+assert r'"\x83\xEC\x10\x56\x8B\xF1\x8B\x46\x54\x48\x83\xF8\x07", 13' in source
 # DoTrick's switch on the trick (ebp*4 + 0x004F3FC4) sends SIDE_ROLL (6) to the SideRoll case.
 assert int.from_bytes(image[0x004F3FC4 + 6 * 4 - base:0x004F3FC4 + 7 * 4 - base], "little") == 0x004F3E07
 # The guards' bytes are the code's.

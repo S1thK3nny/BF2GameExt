@@ -5,6 +5,7 @@
 #include "../PatcherDLL/src/ai/flyer_orders_core.hpp"
 #include "../PatcherDLL/src/ai/flyer_trail_core.hpp"
 #include "../PatcherDLL/src/ai/flyer_wingmen_core.hpp"
+#include "../PatcherDLL/src/ai/landing_region_core.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -1284,6 +1285,85 @@ void trail()
    assert(kStep == 8.0f && kPoints == 256 && kLookEvery == 0.25 && kLeaveAfter == 3 && kSqueeze == 0.5f && kFreshLook == 1.0);
 }
 
+// A map's landing regions: each shape the game knows, inside or not as its
+// IsPointInside says, and its top.
+void landing_regions()
+{
+   using namespace landing_region;
+   Region box;   // half sizes 20, 10, 40 at (100, 50, 0), lined up with the world
+   box.shape = kBox;
+   box.at = V3{100.0f, 50.0f, 0.0f};
+   box.x = 20.0f;
+   box.y = 10.0f;
+   box.z = 40.0f;
+   assert(inside(box, V3{100.0f, 50.0f, 0.0f}) && inside(box, V3{119.0f, 59.0f, 39.0f}));
+   assert(!inside(box, V3{121.0f, 50.0f, 0.0f}) && !inside(box, V3{100.0f, 60.0f, 0.0f}));
+   assert(!inside(box, V3{100.0f, 50.0f, -40.0f}) && near(top(box), 60.0f));
+   // Turned a quarter round: its right the world's z, its forward the world's -x.
+   Region turned = box;
+   turned.right = V3{0.0f, 0.0f, 1.0f};
+   turned.fwd = V3{-1.0f, 0.0f, 0.0f};
+   assert(inside(turned, V3{135.0f, 50.0f, 15.0f}) && !inside(turned, V3{125.0f, 50.0f, 25.0f}));
+   assert(near(top(turned), 60.0f));
+   // Tipped over (its up the world's z): its top is its forward half size up.
+   Region tipped = box;
+   tipped.up = V3{0.0f, 0.0f, 1.0f};
+   tipped.fwd = V3{0.0f, -1.0f, 0.0f};
+   assert(near(top(tipped), 90.0f));
+   // A sphere, radius w.
+   Region ball;
+   ball.shape = kSphere;
+   ball.at = V3{0.0f, 10.0f, 0.0f};
+   ball.w = 5.0f;
+   assert(inside(ball, V3{0.0f, 14.9f, 0.0f}) && !inside(ball, V3{0.0f, 15.0f, 0.0f}) && near(top(ball), 15.0f));
+   // A cylinder upright, radius x, half height y; then on its side, its top its rim.
+   Region can;
+   can.shape = kCylinder;
+   can.x = 10.0f;
+   can.y = 5.0f;
+   assert(inside(can, V3{7.0f, 4.0f, 7.0f}) && !inside(can, V3{8.0f, 0.0f, 8.0f}) && !inside(can, V3{0.0f, 5.0f, 0.0f}));
+   assert(near(top(can), 5.0f));
+   Region lying = can;
+   lying.up = V3{1.0f, 0.0f, 0.0f};
+   lying.right = V3{0.0f, 1.0f, 0.0f};
+   assert(near(top(lying), 10.0f) && inside(lying, V3{4.9f, 9.0f, 0.0f}) && !inside(lying, V3{5.1f, 0.0f, 0.0f}));
+   // On the world's axes: a box, and cylinders along x, y and z.
+   Region aligned;
+   aligned.shape = kBoxAligned;
+   aligned.at = V3{0.0f, 20.0f, 0.0f};
+   aligned.x = 5.0f;
+   aligned.y = 6.0f;
+   aligned.z = 7.0f;
+   assert(inside(aligned, V3{4.9f, 25.9f, -6.9f}) && !inside(aligned, V3{0.0f, 26.1f, 0.0f}) && near(top(aligned), 26.0f));
+   assert(!inside(aligned, V3{5.1f, 20.0f, 0.0f}) && !inside(aligned, V3{0.0f, 20.0f, 7.1f}));
+   Region cx;
+   cx.shape = kCylinderX;
+   cx.x = 3.0f;
+   cx.y = 8.0f;
+   assert(inside(cx, V3{7.9f, 2.0f, 2.0f}) && !inside(cx, V3{8.1f, 0.0f, 0.0f}) && !inside(cx, V3{0.0f, 2.5f, 2.5f}));
+   assert(near(top(cx), 3.0f));
+   Region cy = cx;
+   cy.shape = kCylinderY;
+   assert(inside(cy, V3{2.0f, 7.9f, 2.0f}) && !inside(cy, V3{0.0f, 8.1f, 0.0f}) && !inside(cy, V3{2.5f, 0.0f, 2.5f}));
+   assert(near(top(cy), 8.0f));
+   Region cz = cx;
+   cz.shape = kCylinderZ;
+   assert(inside(cz, V3{2.0f, 2.0f, 7.9f}) && !inside(cz, V3{0.0f, 0.0f, 8.1f}) && !inside(cz, V3{2.5f, 2.5f, 0.0f}));
+   assert(near(top(cz), 3.0f));
+   // A plane: inside below it, and no top.
+   Region ground;
+   ground.shape = kPlane;
+   ground.fwd = V3{0.0f, 1.0f, 0.0f};
+   ground.w = 5.0f;
+   assert(inside(ground, V3{100.0f, 4.9f, -3.0f}) && !inside(ground, V3{0.0f, 5.1f, 0.0f}) && std::isnan(top(ground)));
+   // Unknown shapes and bad points are never inside.
+   Region odd;
+   odd.shape = 9;
+   assert(!inside(odd, V3{}) && std::isnan(top(odd)));
+   assert(!inside(box, V3{kNan, 50.0f, 0.0f}) && !inside(ball, V3{kNan, 10.0f, 0.0f}) && !inside(can, V3{0.0f, kNan, 0.0f}));
+   assert(kSphere == 1 && kBox == 2 && kCylinder == 3 && kPlane == 4 && kBoxAligned == 5 && kCylinderZ == 8);
+}
+
 int main()
 {
    the_vee();
@@ -1314,10 +1394,11 @@ int main()
    attack_sides();
    landing_now();
    trail();
+   landing_regions();
    std::printf("Flyer wingmen tests passed (the vee, level frames, slots in the world, steering, trimming, "
                "stretching, speeds, targets through the game's throttle, turning, who flies, class keys, slot keys, "
                "slot classes, ripples, the squadron rule, formation shapes, shapes as drawn, formation keys, stats, "
                "orders, passes at the ground, landing, landing places, mission keys, the squad key's hold and "
-               "picks, attack sides, landing right away, the leader's trail).\n");
+               "picks, attack sides, landing right away, the leader's trail, landing regions).\n");
    return 0;
 }

@@ -112,7 +112,9 @@
 // (CollisionManager::RayHit, the flyer's own landing ray's types 0x190) finds
 // ground within 8 m of the leader's and flat. The ray starts 40 m up, or 2 m
 // under a roof over the leader (a ray up from the leader's ground finds one
-// within 40 m: a hangar's, which a ray from 40 m up would hit before the ground);
+// within 40 m, or inside a map's landing region up to its top: a hangar's,
+// which a ray from 40 m up would hit before the ground; an open-air pad's region
+// has no roof, landing_region_core.hpp);
 // under a roof the place must also be in a clear line from the leader 3 m up, and
 // the wingman's way to it clear, straight or along the leader's trail (below). It
 // comes down toward 15 m over it (lower under a low roof), at its mid speed

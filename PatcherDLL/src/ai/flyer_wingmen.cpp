@@ -6,6 +6,7 @@
 #include "flyer_real_flight.hpp"
 #include "flyer_real_flight_core.hpp"
 #include "flyer_trail_core.hpp"
+#include "landing_region_core.hpp"
 #include "flyer_wingmen_core.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -1945,11 +1946,77 @@ void look_down(uint8_t* self, float& below, float& hitY, float& normalY, float& 
    if (blocked(at, at - V3{0.0f, flyer_orders::kLandReach, 0.0f}, self, nullptr, &along, kVehicleTypes)) onto = along;
 }
 
-// Whether something is over a point within kLandProbe: a roof (a hangar's).
+// ---- Landing regions as hangars (landing_region_core.hpp) ---------------------------
+// The map's landing regions, as TriggerRegionManager keeps them (game_addrs
+// trigger_region_manager): 32 slots at +0x18, each a PblRegion and its type (2 a
+// landing region), while the byte at +0x11C says there are any. A PblRegion is
+// its matrix (right, up, forward, position, 16 bytes each), its sizes at +0x40
+// and its shape at +0x54. Every hangar a player can land in sits in one; an
+// open-air pad's has no roof over it, so a region alone changes nothing: inside
+// one the roof is looked for up to the region's top (roofed), so a hangar taller
+// than kLandProbe still has one. The user: "Landing regions should encompass the
+// hangar model roughly, and so should work. However in custom maps they are used
+// in open air settings too."
+constexpr uint32_t kTRM_Slots        = 0x18;
+constexpr int      kTRM_SlotCount    = 32;
+constexpr uint32_t kTRM_LandingExist = 0x11C;
+constexpr int      kTriggerLanding   = 2;
+constexpr uint32_t kRgn_Size         = 0x40;
+constexpr uint32_t kRgn_Shape        = 0x54;
+constexpr float    kRegionRoofOver   = 5.0f;     // m over a region's top a roof is still looked for ...
+constexpr float    kRegionRoofMax    = 300.0f;   // ... and no further up than this
+uint8_t* const*    s_regionManager   = nullptr;  // TriggerRegionManager::sInstance (install_landing)
+
+V3 vec_at(const uint8_t* p)
+{
+   const float* f = (const float*)p;
+   return V3{f[0], f[1], f[2]};
+}
+
+landing_region::Region read_region(const uint8_t* rgn)
+{
+   landing_region::Region r;
+   r.right = vec_at(rgn + 0x00);
+   r.up = vec_at(rgn + 0x10);
+   r.fwd = vec_at(rgn + 0x20);
+   r.at = vec_at(rgn + 0x30);
+   const float* size = (const float*)(rgn + kRgn_Size);
+   r.x = size[0];
+   r.y = size[1];
+   r.z = size[2];
+   r.w = size[3];
+   r.shape = *(const int*)(rgn + kRgn_Shape);
+   return r;
+}
+
+// The slot of the landing region holding `p` (-1 for none), its top in `top`.
+// Read afresh each time: a script may add or remove one (AddLandingRegion).
+int landing_region_at(V3 p, float* top = nullptr)
+{
+   const uint8_t* const mgr = s_regionManager ? *s_regionManager : nullptr;
+   if (!mgr || !mgr[kTRM_LandingExist]) return -1;
+   for (int i = 0; i < kTRM_SlotCount; ++i) {
+      const uint8_t* const slot = mgr + kTRM_Slots + i * 8;
+      const uint8_t* const rgn = *(const uint8_t* const*)slot;
+      if (!rgn || *(const int*)(slot + 4) != kTriggerLanding) continue;
+      const landing_region::Region r = read_region(rgn);
+      if (!landing_region::inside(r, p)) continue;
+      if (top) *top = landing_region::top(r);
+      return i;
+   }
+   return -1;
+}
+
+// Whether something is over a point: within kLandProbe (a hangar's roof), or,
+// inside a landing region, up to its top (a taller hangar's; an open-air pad's
+// region has nothing over it).
 bool roofed(V3 at, uint8_t* ignoreA, uint8_t* ignoreB, float* height = nullptr)
 {
+   float reach = flyer_orders::kLandProbe, top = 0.0f;
+   if (landing_region_at(at, &top) >= 0 && std::isfinite(top) && top + kRegionRoofOver - at.y > reach)
+      reach = top + kRegionRoofOver - at.y < kRegionRoofMax ? top + kRegionRoofOver - at.y : kRegionRoofMax;
    float along = 0.0f;
-   if (!blocked(at, at + V3{0.0f, flyer_orders::kLandProbe, 0.0f}, ignoreA, ignoreB, &along)) return false;
+   if (!blocked(at, at + V3{0.0f, reach, 0.0f}, ignoreA, ignoreB, &along)) return false;
    if (height) *height = along;
    return true;
 }
@@ -2293,6 +2360,9 @@ int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, 
          continue;
       spot.y = hy;
       if (occupied(spot, top, w.obj)) continue;   // a ship parked on it
+      // Under a roof, only places under it too: in the hangar, not out past its
+      // mouth (the roof looked for up to a landing region's top, roofed).
+      if (roof && !roofed(spot + V3{0.0f, flyer_orders::kLandClear, 0.0f}, leader, w.obj)) continue;
       if (roof &&
           blocked(position_of(w.obj), spot + V3{0.0f, flyer_orders::hover_height(f.padRoof), 0.0f}, leader, w.obj) &&
           !reaches_by_trail(f, w))
@@ -2327,6 +2397,7 @@ bool roof_circle(const Formation& f, const Wingman& w, V3& center, float& radius
          if (blocked(at, next, w.obj, nullptr, nullptr, kTypes)) break;   // a wall ahead
          at = next;
       }
+      if (!roofed(at, w.obj, nullptr)) continue;   // out past the mouth: no circle there
       float room = reach;
       for (const V3& d : ways) {
          float along = 0.0f;
@@ -2445,7 +2516,9 @@ void start_landing(Formation& f, uint8_t* leader, double now)
       float below = 0.0f, hitY = 0.0f, normalY = 0.0f, onto = 0.0f;
       look_down(w.obj, below, hitY, normalY, onto);
       const bool nearLeader = flyer_wingmen::length(at - f.pad) <= flyer_orders::kLandNowRange;
-      if (s_land && flyer_orders::land_here(nearLeader, below, hitY, normalY, f.padGround, onto)) {
+      // Under a roof, only one under it too: not outside the hangar's mouth.
+      const bool under = f.padRoof >= flyer_orders::kNoRoof || roofed(at, w.obj, nullptr);
+      if (s_land && under && flyer_orders::land_here(nearLeader, below, hitY, normalY, f.padGround, onto)) {
          s_land(w.obj);
          w.land = kLandDown;
          w.spot = V3{at.x, hitY, at.z};
@@ -2490,10 +2563,15 @@ void start_landing(Formation& f, uint8_t* leader, double now)
    }
    for (int i = f.count - 1; i >= 0; --i)
       if (letGo[i]) head_out(f, i, now, "no clear place, and no room to circle under the roof", "noroom");
-   if (order_log())
+   if (order_log()) {
+      char roofSaid[96] = "";
+      if (f.padRoof < flyer_orders::kNoRoof)
+         _snprintf_s(roofSaid, sizeof(roofSaid), _TRUNCATE, " under a roof %.0f m up%s", (double)f.padRoof,
+                     landing_region_at(f.pad) >= 0 ? ", in a landing region" : "");
       install_log("[Wingmen] the leader comes down%s: %d land where they are, %d fly to a place, %d circle till one "
                   "is free, %d let go (no room under the roof)",
-                  f.padRoof < flyer_orders::kNoRoof ? " under a roof" : "", here, beside, over, gone);
+                  roofSaid, here, beside, over, gone);
+   }
 }
 
 // A wingman whose landing was interrupted, up again: a clear place beside its
@@ -4048,6 +4126,34 @@ bool install_orders(uintptr_t base)
    return true;
 }
 
+// The landing regions (hangars, landing_region_at), once the game's own reads of
+// them are as expected: GetTriggerRegionData's slots at +0x18, 32 of them;
+// IsInLandingZone loading the manager's pointer and its +0x11C; IsPointInside's
+// shape at +0x54, 1 to 8. Without them the roof is looked for kLandProbe up only.
+void install_regions(uintptr_t base)
+{
+   const auto* a = g_addr;
+   s_regionManager = nullptr;
+   if (!a->trigger_region_manager || !a->trigger_region_data || !a->flag_in_landing_zone || !a->pbl_region_inside)
+      return;
+   const uint32_t mgr = (uint32_t)resolve(base, a->trigger_region_manager);
+   const uint8_t* const zone = (const uint8_t*)resolve(base, a->flag_in_landing_zone);
+   const bool ok =
+      starts_with(base, a->trigger_region_data,
+                  "\x8B\x44\x24\x04\x85\xC0\x7C\x0E\x83\xF8\x20\x7D\x09\x8D\x44\xC1\x18", 17) &&
+      zone[0] == 0x53 && zone[1] == 0x8B && zone[2] == 0x1D && *(const uint32_t*)(zone + 3) == mgr &&
+      zone[7] == 0x8A && zone[8] == 0x83 && *(const uint32_t*)(zone + 9) == kTRM_LandingExist &&
+      starts_with(base, a->pbl_region_inside, "\x83\xEC\x10\x56\x8B\xF1\x8B\x46\x54\x48\x83\xF8\x07", 13);
+   if (!ok) {
+      install_log("[Wingmen] landing regions NOT read: the game's reads of them differ; a roof is looked for 40 m up "
+                  "only");
+      return;
+   }
+   s_regionManager = (uint8_t* const*)(uintptr_t)mgr;
+   install_log("[Wingmen] landing regions read: inside one a roof is looked for up to its top, so a taller hangar "
+               "is still one; an open-air pad's has none");
+}
+
 // Landing with the player: EntityFlyer::Land and TakeOff, thiscall() on the
 // entity, and CollisionManager::RayHit for the ground beside the leader. Both
 // may be detoured already, Land by the LandOnArrival fix and TakeOff by the
@@ -4067,6 +4173,7 @@ bool install_landing(uintptr_t base)
    s_land = (fn_flyer_t)resolve(base, a->entity_flyer_land);
    s_takeOff = (fn_flyer_t)resolve(base, a->entity_flyer_take_off);
    s_rayHit = (fn_ray_hit_t)resolve(base, a->collision_ray_hit);
+   install_regions(base);
    return true;
 }
 
@@ -4732,6 +4839,7 @@ void flyer_wingmen_uninstall()
    s_land = nullptr;
    s_takeOff = nullptr;
    s_rayHit = nullptr;
+   s_regionManager = nullptr;
    if (s_detoured) {
       DetourTransactionBegin();
       DetourUpdateThread(GetCurrentThread());
