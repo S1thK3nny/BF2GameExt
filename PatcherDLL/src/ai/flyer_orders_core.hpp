@@ -578,6 +578,13 @@ inline Interrupt landing_interrupted(bool landing, bool landed, double since, fl
    return Interrupt::None;
 }
 
+// The player out of its flyer, landed: its wingmen still on their way come down
+// beside it all the same, and get out as they would with it aboard, until
+// kArriveFor after it got out; then the rest are let go. The user, after the
+// first hangar landings: "I just don't see any late arriving wingmen".
+constexpr double kArriveFor = 60.0;   // s
+inline bool arrival_over(double sinceOut) { return !(sinceOut <= kArriveFor); }   // NaN: over
+
 // Whether a place is kLandSpacing from each of the `n` already taken.
 inline bool spaced(V3 spot, const V3* taken, int n)
 {

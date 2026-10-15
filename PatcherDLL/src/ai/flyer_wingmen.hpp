@@ -119,15 +119,24 @@
 // a low roof), at its slowest (the stretch lets it go to 10 m/s) from 300 m in,
 // and lands (EntityFlyer::Land) once within 25 m of it across and 40 m up
 // (EntityFlyer::Land needs no landing region). Once down its pilot gets out (and
-// it is let go; asked again every 2 s while still aboard, four times in all, and
-// still asked for 20 s once the player has got out and the flight is let go),
+// it is let go; asked again every 2 s while still aboard, four times in all),
 // unless its own class says WingmanExitOnLand = 0: then it waits
 // aboard, and when the player takes off (state 1) it takes off too
 // (EntityFlyer::TakeOff) and forms up again. One with no place, or up again
 // before its leader, circles 200 m round a point 150 m over the leader, or, with
 // the leader under a roof, where that would take it into the roof (or the ship
 // or mountain the hangar is in), is let go instead. While landed the squad key is
-// the game's (seats), and the comm keys order nothing.
+// the game's (seats), and the comm keys order nothing. The player getting out of
+// its landed flyer changes none of this for 60 s (flyer_orders_core.hpp,
+// arrival_over; the user, after the first hangar landings: "I just don't see any
+// late arriving wingmen", let go as the player got out): those still on their way
+// land beside it all the same and their pilots get out, and back aboard the
+// player leads the rest again. Then, or with the flyer gone, flown off or
+// another taken, the rest are let go, those down still asked to get out for 20 s.
+// Each tick lets go of those shot down before the landing asks any where it is:
+// a destroyed flyer is soon freed, and its matrix read through freed memory
+// faulted twice in those landings, the guard leaving the landing half set up.
+// Every guard here now says what it caught in the log.
 //
 // The leader's trail (FlyerWingmenTrail; flyer_trail_core.hpp): the player's
 // flyer's path is kept as a point every 8 m it flies, the last 2 km, started
@@ -144,7 +153,12 @@
 // along it for 6 s while its place is ahead is left to its own AI for 10 s, then
 // tries again. Under a roof over the leader (a ray up 40 m, twice a second) the
 // flight's slots close in to half their spacing, half of it a second, and open
-// out again in the open.
+// out again in the open. Under a roof itself (the same ray from each wingman), or
+// with the leader under one and its line clear as last looked, a wingman flies
+// at its slot, its place or its target with that lift off too
+// (flyer_trail_core.hpp, lift_off): in the first hangar landings two died soon
+// after leaving the trail or flying to a new place inside, most likely lifted
+// into the roof.
 //
 // Getting out: stock, an AI pilot would get out only through its fly agent's
 // own landing (UnitFlyAgent's FLY state lands at an AI "land" hint node within

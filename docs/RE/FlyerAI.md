@@ -1042,6 +1042,27 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
   `(lift - y) * factor + y` (M `0x004F446A`, `0x004F44E8`): a factor of 0 lifts nothing. The SafeHeight enum
   (P): `SH_FULL` 0, `SH_TAPER` 1, `SH_NONE` 2, `SH_TAPER_FACTOR` 3. On the trail a wingman's `mDest` asks for
   3 with a factor of 0; it still slows for what is ahead, and `AIUtil::AvoidBarriers` still runs.
+- **The first hangar landings (2026-10-15).** The user: "I just don't see any late arriving wingmen ... they
+  seem to panic in tight spaces". The log: the trail never gave up on one (no "no way along your trail"); of
+  the eight times a wingman took it, five left it with their way clear, one crashed on it and two were still
+  on it when the player got out. Three died in the hangars. The rest were let go: as the player got out (the
+  flight went with it), and in each landing one with no clear place under the roof. `BF2GameExt_crash.log`
+  had two faults in `matrix_of` from `start_landing`, reading through `0xDDDDDDDD` (modtools' fill for freed
+  memory): a wingman shot down within the last second, its flyer already freed. The update's guard swallowed
+  them and left those landings half set up (no summary line, a wingman given nothing). Built:
+  - **The lift off under a roof too** (`flyer_trail_core.hpp`, `lift_off`): a wingman under a roof itself
+    (the roof ray from it as from the leader, twice a second), or with its leader under one and its line clear
+    as last looked (within 1 s), flies at its slot, its place or its target with `SH_TAPER_FACTOR` and no
+    factor, as on the trail. With a wall in its way and off the trail it keeps the stock lift.
+  - **Landing without the player** (`landing_without_you`; `flyer_orders_core.hpp`, `arrival_over`): the
+    player out of its landed flyer, the flight goes on landing for 60 s with the empty flyer as its leader (the
+    side checked against is the one it came down on, not the empty flyer's); back aboard, the player leads it
+    again; then, or with the flyer gone, flown off or another taken, the rest are let go.
+  - **The shot down go first** (`drop_gone`), each tick before the landing asks any wingman where it is; and
+    every guard in `flyer_wingmen.cpp` logs what it caught (`caught`: the 1st, 10th, 100th ... time for each).
+  - Left for the user to decide: avoidance between flight mates closed up under a roof (it keeps their two
+    radii plus 8 m between them, side by side too, so it pushes them off their slots toward the walls), and a
+    wider search for places under a roof before one is let go.
 - **Feedback:** "Wingmen: form up", "engage", "attack my target", "cover me", "no target", "no one to call up",
   "target down", "target lost" on the message line in the trooper commands' colour; a map or mod may word them
   under `game.wingmen.formup` ... `.targetlost`.
@@ -1139,7 +1160,10 @@ beside it, M circle overhead, K let go (nowhere to land under the roof)`, `slot 
 (place k of 5)`, `slot N (#a) lands X m from its spot`, `landed: its pilot gets out`, `the leader takes off: N
 of its wingmen take off with it`; the trail: `slot N (#a): a wall between it and its slot: it flies your trail,
 from X m off`, `its way clear again, off your trail`, `no way along your trail for 6 s: its own AI flies it for
-10 s`, `you fly under a roof: your wingmen's slots close up`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own
+10 s`, `you fly under a roof: your wingmen's slots close up`; getting out: `you got out: your N wingmen land
+beside your flyer all the same, 60 s at most`, `you are back aboard`, `your flight is down and out, with you out
+of your flyer`, `N let go: 60 s after you got out`; and any fault a guard caught: `a fault in <where> was caught
+(n so far): that step was skipped`. Unknowns: whether a forced attack target makes a wingman fire (the AI's own
 combat may take it back between settings), how the passes fare against terrain, how an AI flyer lands when
 told to at speed, and whether a hangar's roof stops the ray from 40 m up (a roof is looked for whatever it is
 made of; the ray may pass through the back of a face).

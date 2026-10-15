@@ -1129,6 +1129,9 @@ void landing_now()
    assert(landing_interrupted(false, false, 20.0, 50.0f, 1.0f) == Interrupt::None);   // flying
    assert(landing_interrupted(true, false, 1.0, kNan, 1.0f) == Interrupt::None);
    assert(kLandRetries == 2 && kLandNowRange == 150.0f);
+   // With the player out: 60 s for those still on their way.
+   assert(!arrival_over(0.0) && !arrival_over(59.5) && !arrival_over(kArriveFor));
+   assert(arrival_over(60.5) && arrival_over(kNan) && kArriveFor == 60.0);
 }
 
 // The leader's trail: a point every 8 m it flies, the last 256, started again
@@ -1210,7 +1213,15 @@ void trail()
    assert(near(squeeze(0.9f, false, 5.0f), 1.0f) && near(squeeze(1.0f, true, 5.0f), 0.5f));   // no further
    assert(near(squeeze(1.0f, true, kNan), 1.0f) && near(squeeze(1.0f, true, -1.0f), 1.0f));
    assert(near(squeeze(kNan, true, 0.0f), 1.0f) && near(squeeze(0.2f, false, 0.0f), 1.0f));   // out of range: open
-   assert(kStep == 8.0f && kPoints == 256 && kLookEvery == 0.25 && kLeaveAfter == 3 && kSqueeze == 0.5f);
+   // The game's lift off: under a roof itself; or the leader under one, its line
+   // clear as looked within a second.
+   assert(lift_off(true, false, true, 99.0) && lift_off(true, true, true, kNan));
+   assert(lift_off(false, true, false, 0.5) && lift_off(false, true, false, kFreshLook) && lift_off(false, true, false, 0.0));
+   assert(!lift_off(false, true, true, 0.5));     // a wall in its way: the lift stays
+   assert(!lift_off(false, true, false, 1.5));    // an old look says nothing
+   assert(!lift_off(false, true, false, -1.0) && !lift_off(false, true, false, kNan));
+   assert(!lift_off(false, false, false, 0.5));   // open sky
+   assert(kStep == 8.0f && kPoints == 256 && kLookEvery == 0.25 && kLeaveAfter == 3 && kSqueeze == 0.5f && kFreshLook == 1.0);
 }
 
 int main()

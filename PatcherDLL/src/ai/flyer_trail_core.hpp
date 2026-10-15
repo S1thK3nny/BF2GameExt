@@ -33,6 +33,10 @@
 //   - Under a roof (a ray up from the leader, the landing's roof test) the
 //     slots close up to kSqueeze of their spacing, kSqueezeRate a second
 //     (squeeze), so more of them fit inside.
+//   - The game's lift off (lift_off): under a roof itself, or with the leader
+//     under one and its line clear as looked within kFreshLook, a wingman is not
+//     sent up over what is ahead, as on the trail. The user, of hangars after
+//     the first play: "they seem to panic in tight spaces".
 // =============================================================================
 
 namespace flyer_trail {
@@ -52,6 +56,7 @@ constexpr float  kSqueeze     = 0.5f;     // its slots' share of their spacing u
 constexpr float  kSqueezeRate = 0.5f;     // ... reached at this much a second
 constexpr int    kCuts[]      = {16, 8, 4, 2};   // points ahead it may cut to, the furthest first
 constexpr int    kMaxCuts     = 4;
+constexpr double kFreshLook   = 1.0;      // s: a look along its line older than this says nothing
 
 // The points, oldest first. Their numbers count up for good, so a number a
 // wingman holds is never another point's after the trail starts again.
@@ -185,6 +190,16 @@ inline float squeeze(float now, bool roofed, float dt)
    const float step = kSqueezeRate * dt;
    if (now < to) return now + step < to ? now + step : to;
    return now - step > to ? now - step : to;
+}
+
+// Whether the game's lift is off for a wingman (EntityFlyer::RaiseHeight, which
+// sends it 25 m over the top of what is ahead, a hangar's whole ship): under a
+// roof itself, or with its leader under one and nothing solid on its line, as
+// looked `lookAge` seconds ago, so it flies in through a hangar's mouth. With a
+// wall in its way it keeps the lift, the game's own answer to what is ahead.
+inline bool lift_off(bool roofed, bool leaderRoofed, bool lineShut, double lookAge)
+{
+   return roofed || (leaderRoofed && !lineShut && lookAge >= 0.0 && lookAge <= kFreshLook);
 }
 
 } // namespace flyer_trail

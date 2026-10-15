@@ -397,6 +397,9 @@ struct Wingman {
    int      clearLooks = 0;    // looks in a row with its way clear
    double   gainedAt = 0.0;    // when it last got to a further point
    double   waitUntil = 0.0;   // stuck on it: left to its own AI until then
+   bool     shut = false;      // something solid on its line to where it is going, as last looked ...
+   double   shutAt = -1e9;     // ... when (follow_trail)
+   bool     roofed = false;    // under a roof itself, as last looked (update_trail): the game's lift off (no_lift)
 };
 
 // A wingman of the player's while the player lands and takes off.
@@ -438,7 +441,9 @@ struct Formation {
    V3          pad;                   // ... beside where it came down ...
    Frame       padFrame;              // ... facing as it was ...
    float       padGround = 0.0f;      // ... the ground's height there ...
-   float       padRoof = flyer_orders::kNoRoof;   // ... and a roof's over it (a hangar's), else kNoRoof
+   float       padRoof = flyer_orders::kNoRoof;   // ... a roof's over it (a hangar's), else kNoRoof ...
+   int         padTeam = 0;           // ... the leader's team as it came down ...
+   double      outAt = 0.0;           // ... and when the player got out of it, its flight still landing (0: aboard)
    bool        mirror = false;        // left for right, after an odd number of the leader's flips
    float       leaderSpeed = 0.0f;    // as last seen by a wingman's steering: how fast it flies ...
    float       leaderTarget = 0.0f;   // ... and the speed its throttle asks for
@@ -783,6 +788,33 @@ bool order_log()
    return true;
 }
 
+// A fault one of the guards here caught: what it was doing is skipped and the
+// game carries on (BF2GameExt_crash.log has where it faulted, the first few
+// times). Said the 1st, 10th, 100th ... time for each place, so one that keeps
+// happening shows without filling the log; two in the first hangar landings
+// showed nowhere but the crash log (start_landing; drop_gone).
+void caught(const char* where)
+{
+   struct Place {
+      const char* where;
+      uint32_t    count;
+   };
+   static Place places[24];
+   static int   used = 0;
+   Place* p = nullptr;
+   for (int i = 0; i < used && !p; ++i)
+      if (places[i].where == where) p = &places[i];
+   if (!p) {
+      if (used == 24) return;
+      places[used] = Place{where, 0};
+      p = &places[used++];
+   }
+   const uint32_t n = ++p->count;
+   uint32_t say = 1;
+   while (say < n && say <= 100000000u) say *= 10;
+   if (say == n) install_log("[Wingmen] a fault in %s was caught (%u so far): that step was skipped", where, n);
+}
+
 // One of the player's wingmen leaves its flight: the script hears it
 // (OnWingmanLost, with `code` for GetWingmanLostReason), with its flyer while
 // that is still the one it was.
@@ -864,6 +896,16 @@ void release_all(Formation& f, const char* why, const char* code = nullptr)
    f.trick = LeaderTrick{};
 }
 
+// Those shot down since the last tick, first, before anything asks one where it
+// is: a destroyed flyer is soon freed (modtools fills it with 0xDD), and its
+// matrix is then read through freed memory (the crash log's two faults of
+// 2026-10-15, both in start_landing, each on a wingman just shot down).
+void drop_gone(Formation& f)
+{
+   for (int i = f.count - 1; i >= 0; --i)
+      if (handle_of(f.wing[i].obj) != f.wing[i].handle || !alive(f.wing[i].obj)) drop(f, i, "gone", "killed");
+}
+
 // An AI squadron's end. Its wingmen need nothing put back: no longer in
 // formation, each goes back to real flight at its next update.
 void dissolve(Formation& f, const char* why)
@@ -888,7 +930,8 @@ const char* lost(const Wingman& w, const Formation& f, double now, const char** 
    *code = "landed";
    if (!flying(w.obj) && !(landing && on_or_near_ground(w.obj))) return "not flying";
    *code = "team";
-   if (team_of(w.obj) != team_of(f.leader)) return "changed sides";
+   // The player out of its flyer: the side it came down on (an empty flyer's may not be).
+   if (team_of(w.obj) != (f.outAt > 0.0 ? f.padTeam : team_of(f.leader))) return "changed sides";
    if (w.target || landing) return nullptr;
    const bool keep = &f == &s_forms[0] && s_locked;
    *code = "late";
@@ -1937,6 +1980,11 @@ void update_trail(double now)
          install_log("[Wingmen] you fly %s a roof: your wingmen's slots %s", roof ? "under" : "out from under",
                      roof ? "close up" : "open out again");
       s_player.roofed = roof;
+      // And over each of its wingmen (no_lift).
+      for (int i = 0; i < s_player.count; ++i) {
+         Wingman& w = s_player.wing[i];
+         w.roofed = handle_of(w.obj) == w.handle && alive(w.obj) && roofed(position_of(w.obj), w.obj, nullptr);
+      }
    }
    s_player.squeeze = flyer_trail::squeeze(s_player.squeeze, s_player.roofed, (float)(now - s_squeezedAt));
    s_squeezedAt = now;
@@ -1979,6 +2027,8 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
    if (now - w.trailLookAt >= flyer_trail::kLookEvery) {
       w.trailLookAt = now;
       const bool shut = blocked(me, goal, flyer, leader);
+      w.shut = shut;
+      w.shutAt = now;
       if (w.onTrail && !flyer_trail::has(s_trail, w.trailAt)) w.onTrail = false;   // the trail started again
       if (w.onTrail) {
          if (flyer_trail::leaves(w.clearLooks, !shut)) {
@@ -2043,6 +2093,15 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
    return true;
 }
 
+// The game's lift off for one of the player's wingmen, as on the trail
+// (flyer_trail_core.hpp, lift_off): under a roof itself, or with its leader under
+// one and its line clear as follow_trail last looked. FlyerWingmenTrail's, with
+// the roofs it looks for.
+bool no_lift(const Formation& f, const Wingman& w, double now)
+{
+   return &f == &s_player && g_flyerWingmenTrail && flyer_trail::lift_off(w.roofed, f.roofed, w.shut, now - w.shutAt);
+}
+
 // A wingman's place beside the landing leader (flyer_orders_core.hpp,
 // land_tries): the first that is spaced from the places already `taken`, on
 // ground level with the leader's and flat, probed from under any roof over the
@@ -2083,6 +2142,8 @@ int land_place(const Formation& f, uint8_t* leader, const Wingman& w, int rank, 
 void start_landing(Formation& f, uint8_t* leader, double now)
 {
    f.landing = true;
+   f.padTeam = team_of(leader);
+   f.outAt = 0.0;
    const float* lm = matrix_of(leader);
    if (!lm) return;
    f.pad = row(lm, 3);
@@ -2308,8 +2369,9 @@ void settle(const Formation& f, double now)
    if (!s_exitVehicle) return;
    for (int i = 0; i < f.count; ++i) {
       const Wingman& w = f.wing[i];
-      if ((w.land != kLandDown && w.land != kLandOut) || !flyer_wingmen::exits_on_land(keys_of(w.obj))) continue;
+      if (w.land != kLandDown && w.land != kLandOut) continue;
       if (handle_of(w.obj) != w.handle || *(uint8_t* const*)(w.obj + kFly_Ctrl) != w.uc) continue;
+      if (!flyer_wingmen::exits_on_land(keys_of(w.obj))) continue;
       if (s_settlingCount >= kMaxSettling) return;
       Settling& e = s_settling[s_settlingCount++];
       e = Settling{w.obj, w.handle, w.uc, now, w.land == kLandOut ? w.exitAt : -1e9, w.exitTries};
@@ -2374,6 +2436,7 @@ void reset_orders(Formation& f)
    f.brokenOff = false;
    f.handPicked = false;
    f.landing = false;
+   f.outAt = 0.0;
 }
 
 // Whether the player's flight is made up to its size now (tops_up).
@@ -2426,11 +2489,49 @@ void update_target_mark()
    s_addMarker(want, nullptr, kMarkerIcon, kMarkerScale, s_targetMark.teams, kTargetMarkColor, 1, 0, 0, 0.0f);
 }
 
+// The player got out of its flyer, landed with its flight: the wingmen still on
+// their way in come down beside it all the same, and their pilots get out (or
+// wait aboard), as with the player aboard, for kArriveFor at most; then the rest
+// are let go. The user: "I just don't see any late arriving wingmen" (they were
+// let go as the player got out). Back aboard, the player leads them again; in
+// another flyer, or with its own gone or flown off, they are let go. True while
+// it goes on.
+bool landing_without_you(double now)
+{
+   Formation& f = s_player;
+   uint8_t* const parked = f.leader;
+   if (!f.landing || f.count == 0 || !parked || handle_of(parked) != f.leaderHandle || !alive(parked) ||
+       state_of(parked) != kStateLanded)
+      return false;
+   if (f.outAt <= 0.0) {
+      f.outAt = now;
+      if (order_log())
+         install_log("[Wingmen] you got out: your %d wingmen land beside your flyer all the same, %.0f s at most",
+                     f.count, flyer_orders::kArriveFor);
+   }
+   if (flyer_orders::arrival_over(now - f.outAt)) {
+      settle(f, now);
+      release_all(f, "60 s after you got out", "leader");
+      return false;
+   }
+   drop_gone(f);
+   if (s_land) update_landing(f, parked);
+   for (int i = f.count - 1; i >= 0; --i) {
+      const char* code = nullptr;
+      if (const char* why = lost(f.wing[i], f, now, &code)) drop(f, i, why, code);
+   }
+   if (f.count > 0) return true;
+   if (order_log()) install_log("[Wingmen] your flight is down and out, with you out of your flyer");
+   return false;
+}
+
 void tick(double now)
 {
    update_settling(now);
    uint8_t* const leader = player_flyer();
-   if (!leader || !leads(leader)) {
+   if (!leader && landing_without_you(now)) {
+      // Its wingmen still landing beside the flyer the player got out of.
+   } else if (!leader || !leads(leader)) {
       if (s_player.landing) settle(s_player, now);
       release_all(s_player, leader ? "the player's flyer leads none" : "the player is not flying", "leader");
       s_player.leader = nullptr;
@@ -2449,6 +2550,11 @@ void tick(double now)
          s_player.order = start_order_for(leader);
          choose_player_shape(leader);
       }
+      if (s_player.outAt > 0.0) {   // back aboard the flyer it got out of (landing_without_you)
+         s_player.outAt = 0.0;
+         if (order_log()) install_log("[Wingmen] you are back aboard: %d wingmen with you", s_player.count);
+      }
+      drop_gone(s_player);
       if (s_land && lands(leader)) update_landing(s_player, leader);
       for (int i = s_player.count - 1; i >= 0; --i) {
          const char* code = nullptr;
@@ -2906,6 +3012,7 @@ bool __fastcall hooked_update(void* ctrl, void* edx, float dt)
          maybe_squadron(obj, dt);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("the flyer update (the wingmen's tick, keys, trail and landing)");
    }
    const bool r = s_update(ctrl, edx, dt);
    // The script hears what changed once the flyer's own update is done.
@@ -2931,6 +3038,7 @@ float __cdecl max_speed_for(uint8_t* flyer)
       Formation* f = nullptr;
       if (const Wingman* w = find(flyer, &f); w && !w->target) return flyer_wingmen::stretched_max(v, high_speed(*f));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a wingman's top speed");
    }
    return v;
 }
@@ -2942,6 +3050,7 @@ float __cdecl min_speed_for(uint8_t* flyer)
       Formation* f = nullptr;
       if (const Wingman* w = find(flyer, &f); w && !w->target) return flyer_wingmen::stretched_min(v, low_speed(*f));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a wingman's lowest speed");
    }
    return v;
 }
@@ -3039,6 +3148,7 @@ bool __cdecl trick_allowed(uint8_t* flyer, int trick)
       note_leader_trick(flyer, trick);
       return !in_slot(flyer);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a trick's check");
       return true;
    }
 }
@@ -3219,6 +3329,7 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
    st.target = flyer_wingmen::target_for_speed(speed, lo, mid, hi);
    st.keepCos = flyer_real_flight::kPursuitKeepCos;
    st.chasing = true;
+   if (w.roofed) safe = kSafeHeightTaperFactor;   // under a roof itself: the game's lift off (no_lift)
    write_dest(flyer, st, heading, safe);
    return true;
 }
@@ -3230,7 +3341,7 @@ bool steer_chase(uint8_t* flyer, Wingman& w, Steer& st)
 bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
 {
    const float* wm = matrix_of(flyer);
-   if (!wm || !f.leader) return false;
+   if (!wm || !f.leader || handle_of(f.leader) != f.leaderHandle) return false;
    const V3 me = row(wm, 3);
    const float leaderSpeed = flyer_wingmen::length(velocity_of(f.leader));
    if (std::isfinite(leaderSpeed)) f.leaderSpeed = f.leaderTarget = leaderSpeed;
@@ -3258,6 +3369,9 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
    } else {
       st.point = flyer_orders::loiter_point(f.pad + V3{0.0f, flyer_orders::kLoiterHeight, 0.0f}, me);
    }
+   // Under a roof, or its leader under one and its line clear: the game's lift
+   // off, as on the trail, so it is not sent up into the roof.
+   if (no_lift(f, w, seconds())) safe = kSafeHeightTaperFactor;
    V3 heading = st.point - me;
    if (!flyer_wingmen::finite(st.point) || !flyer_wingmen::normalise(heading)) return false;
    st.target = flyer_wingmen::target_for_speed(speed, lo, mid, hi);
@@ -3352,7 +3466,10 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
       speed = flyer_wingmen::formation_speed(f->leaderTarget, 0.0f, lo, hi);
    }
    st.target = flyer_wingmen::target_for_speed(speed, lo, mid, hi);
-   write_dest(flyer, st, heading, kSafeHeightFull);
+   // At its slot under a roof (or flying in to one with a clear line): the game's
+   // lift off, as on the trail (no_lift). Up 25 m over the top of what is ahead,
+   // in a hangar the whole ship, is into the roof.
+   write_dest(flyer, st, heading, no_lift(*f, *w, now) ? kSafeHeightTaperFactor : kSafeHeightFull);
    st.f = f;
    st.w = w;
    return true;
@@ -3390,6 +3507,7 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
       steering = steer_before(flyer, dt, st);
       if (!steering) chasing = flyer_real_flight::steer_before(flyer, onPath);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("the steering before CalculateDest");
       steering = chasing = false;
       if (st.dest) std::memcpy(st.dest, st.saved, kDestSize);
       flyer_real_flight::restore(onPath);
@@ -3399,11 +3517,13 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
       __try {
          steer_after(flyer, st, r, point, speed);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
+         caught("the steering after CalculateDest");
       }
    } else if (chasing) {
       __try {
          flyer_real_flight::steer_after(flyer, onPath, r, point, speed);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
+         caught("real flight's steering after CalculateDest");
          flyer_real_flight::restore(onPath);
       }
    }
@@ -3412,6 +3532,7 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
       __try {
          flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
+         caught("the avoidance after CalculateDest");
       }
    }
    return r;
@@ -3568,6 +3689,7 @@ bool __fastcall land_hint_mt(uint8_t* agent, void*)
       uint8_t* const obj = owner ? object_of(owner) : nullptr;
       wingman = obj && held(obj);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("the land hint check");
       wingman = false;
    }
    return wingman ? false : s_landHint(agent);
@@ -3586,6 +3708,7 @@ void __fastcall agent_take_off_mt(uint8_t* flyer, void*)
       const Wingman* w = find(flyer, &f);
       wait = (w && f->landing && w->land == kLandDown) || settling(flyer);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("the take-off check");
       wait = false;
    }
    if (!wait) s_takeOff(flyer);
@@ -3828,6 +3951,7 @@ int call(bool setSize, int size)
       refresh(seconds());
       n = player_leads_now() ? s_player.count : 0;
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's CallWingmen");
       n = 0;
    }
    flush_events();
@@ -3846,6 +3970,7 @@ int dismiss()
       n = s_player.count;
       release_all(s_player, "dismissed by the mission", "dismissed");
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's DismissWingmen");
    }
    flush_events();
    return n;
@@ -3858,6 +3983,7 @@ bool add(WingmanRef unit)
    __try {
       ok = add_unit(unit);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's AddWingman");
       ok = false;
    }
    flush_events();
@@ -3871,6 +3997,7 @@ bool remove(WingmanRef unit)
    __try {
       ok = remove_unit(unit);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's RemoveWingman");
       ok = false;
    }
    flush_events();
@@ -3885,6 +4012,7 @@ bool give_order(const char* name, WingmanRef target, bool hasTarget)
    __try {
       ok = ::give_order(o, target, hasTarget);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's SetWingmenOrder");
       ok = false;
    }
    flush_events();
@@ -3906,6 +4034,7 @@ bool formation(const char* name)
    __try {
       ok = set_formation(name);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's SetWingmenFormation");
       ok = false;
    }
    flush_events();
@@ -3952,6 +4081,7 @@ int pilot(const uint8_t* flyer)
    __try {
       index = pilot_of(flyer);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's look-up of a wingman's pilot");
       index = -1;
    }
    return index;
@@ -3970,6 +4100,7 @@ uint8_t* character_object(int index, bool vehicleOnly)
          obj = vehicle ? object_of(vehicle) : !vehicleOnly && unit ? object_of(unit) : nullptr;
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's look-up of a character's flyer");
       obj = nullptr;
    }
    return obj;
@@ -3982,6 +4113,7 @@ uint8_t* object(WingmanRef unit)
    __try {
       obj = object_of_ref(unit);
    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      caught("a script's look-up of a unit");
       obj = nullptr;
    }
    return obj;
