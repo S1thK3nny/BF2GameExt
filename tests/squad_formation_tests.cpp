@@ -179,6 +179,10 @@ void keys_from_odf_values()
    assert(set_key(k, Key::Spacing, "100") && near(k.spacing, kMaxSpacing));
    assert(set_key(k, Key::Follower, "0") && k.hasFollower && !k.follower);
    assert(set_key(k, Key::Follower, "1") && k.follower);
+   assert(!k.hasCommandAny && !k.commandAny);
+   assert(set_key(k, Key::CommandAny, "1") && k.hasCommandAny && k.commandAny);
+   assert(set_key(k, Key::CommandAny, "0") && k.hasCommandAny && !k.commandAny);
+   assert(set_key(k, Key::CommandAny, " 2 ") && k.commandAny);
    // Values that are not numbers or names leave the key as it was.
    ClassKeys u;
    assert(!set_key(u, Key::Leader, "officer") && !u.hasLeader);
@@ -187,6 +191,7 @@ void keys_from_odf_values()
    assert(!set_key(u, Key::Spacing, "") && !u.hasSpacing);
    assert(!set_key(u, Key::Spacing, "nan") && !u.hasSpacing);
    assert(!set_key(u, Key::Follower, nullptr) && !u.hasFollower);
+   assert(!set_key(u, Key::CommandAny, "yes") && !u.hasCommandAny);
 }
 
 // A key a class sets decides that setting, whatever the INI says; one it leaves

@@ -83,6 +83,12 @@ goals = (SRC / "ai/ai_goals.cpp").read_text()
 assert constant(goals, "kChr_PlayerId") == constant(source, "kChr_PlayerId")
 squads = (SRC / "ai/ai_squads.cpp").read_text()
 assert constant(squads, "kIsFollowingChr") == constant(source, "kEvqIsFollowing")
+# The squad key's recruit, which a squadmate gets again as its order ends.
+formation = (SRC / "ai/squad_formation.cpp").read_text()
+assert constant(formation, "kFollowChr") == constant(squads, "kFollowChr") == constant(source, "kEvtFollowChr") == 0x10
+# CommandAnyFriendly, one of the squad keys a soldier class sets (through ClassParent).
+assert 'kHashCommandAny = pbl_hash("CommandAnyFriendly")' in formation and "case kHashCommandAny: key = Key::CommandAny;" in formation
+assert "keys->hasCommandAny && keys->commandAny" in source
 assert constant(wingmen, "kCtl_Reticule") == constant(source, "kCtl_Reticule")
 assert constant(wingmen, "kUC_Agent") == constant(source, "kUC_Agent")
 assert constant(wingmen, "kAgent_Ctrl") == 0x0C   # the agent's mCtrl, which CalcMyAidTypes reads

@@ -793,10 +793,25 @@ then M.
   `MemoryPool::Allocate` asks for nothing and its free list then runs across the heap. Each lasts 5 s (M
   `0x00AD74F4`), so a request goes out at most every 0.25 s and only while fewer than 48 are live (the list
   at `TeamAssistManager::sInstance` M `0x00BA37F4` +0x18, each's next at +0).
-- **Who answers.** AI characters (`mPlayerId` +0x130 below 0) of the player's team, alive, not in a flyer;
-  for a goal also not answering another order and not following the player as its squad
-  (`EVQ_SC_IsFollowingChr`, 0x0F, through `squad_send_event`: they would follow on regardless). The nearest
-  first (`comm_orders_core.hpp`).
+- **Who answers** (reworked after the user tried it: "On foot, orders should only apply to current
+  followers/squadmates recruited via F4", and the rest below). AI characters (`mPlayerId` +0x130 below 0) of
+  the player's team, alive, not in a flyer, and for a goal not answering another order. The squad is those
+  following the player's soldier (`EVQ_SC_IsFollowingChr`, 0x0F, through `squad_send_event`), and those
+  carried over from the squad's last order. Attack and Defend go to the whole squad (within 300 m), or,
+  with `CommandAnyFriendly` (a soldier class's, squad_formation's keys) or a script's
+  `SetCommandAnyFriendly`, to the whole squad and the nearest friendlies until there are four (Attack) or
+  three (Defend). Spotted goes to anyone; Medic, Repair and Ammo to a squadmate who can, else the nearest
+  friendly who can; Pickup and Backup to friendlies outside the squad (`comm_orders_core.hpp`, `pick`).
+  Those friendlies' help is brief: over 15 s after the first of them came within 20 m of the player, or
+  30 s after it was asked if none did (`help_over`).
+- **A squadmate on an order.** Its goal's forced command (`Assign`) replaces its follow, so it leaves the
+  squad to obey. When the order ends it is told to wait with the rest (`UnAssignAll`) and then sent the
+  squad key's own `EVT_SC_FollowChr` (0x10) on the player's soldier, so it follows again; a new squad order
+  ends the squad's last ones first and takes their squadmates over (they are not following then, so the
+  game would not count them), and any it does not take follow again. A unit killed meanwhile is let go at
+  once (its own goal cleared): its next life is not sent back to the order, nor back to the player.
+  Followers cannot give aid (the follow agent has no RepairHelper), so a squadmate answering Medic, Repair
+  or Ammo leaves following for its Defend goal on the player and rejoins after.
 - **What the crosshair is on**, for Spotted and Attack, is the enemy the game's own auto-aim marks first
   (`mReticuleTarget`, Controllable +0x164 and its handle +0x168, a weapon channel each, as
   `PlayerController::Update` writes it), else the line's; for Defend a friend on the line first, else one the

@@ -14,7 +14,15 @@
 // Ammo as agreed; "F10 ... should not strictly follow you like how F4 makes
 // them"; "F12 could be a defend my target, so you aim at a friendly under the
 // cross hair, OR if nothing and they can reach it then the position you are
-// aiming at"; Pickup last, hovers first. Then "Yep, get them done".
+// aiming at"; Pickup last, hovers first. Then "Yep, get them done". And after
+// trying it: "On foot, orders should only apply to current followers/squadmates
+// recruited via F4. F5 is fine to work for general nearby friendlies not in the
+// squad, but the text should signify it. F6/7/8 are also fine for general
+// friendlies, but prioritise squadmates if possible. F9 also general friendlies,
+// same for F10 to a degree. They should only help you out for a few seconds,
+// maybe 10-15 max. F11, F12 - apply to squadmates only. However, an ODF param
+// should be instated and when set, means you can issue commands to any
+// friendlies without requiring squadmates."
 // =============================================================================
 
 namespace comm_orders {
@@ -69,12 +77,23 @@ inline bool reachable_spot(float normalUp, float dist)
 enum class Ask : uint8_t {
    Nothing,        // nothing to do (no target for it): the stock marker and shout only
    ShootTarget,    // Spotted: those who see the enemy aim at it where they stand
-   AidPlayer,      // Medic, Repair, Ammo: the nearest who can give it comes to the player
-   DefendPlayer,   // Backup: a few fight round the player for a while
-   DestroyTarget,  // Attack an enemy: a few go after it
-   DefendTarget,   // Defend a friend: a few guard it
-   DefendSpot,     // Attack or Defend a place: a few go there and hold it
+   AidPlayer,      // Medic, Repair, Ammo: one who can give it comes to the player
+   DefendPlayer,   // Backup: a few fight round the player for a moment
+   DestroyTarget,  // Attack an enemy: the squad goes after it
+   DefendTarget,   // Defend a friend: the squad guards it
+   DefendSpot,     // Attack or Defend a place: the squad goes there and holds it
    PickUpPlayer,   // Pickup: the nearest hover with an AI driver comes to the player
+};
+
+// Who an order goes to: the player's squad is the AI following it (the squad
+// key's recruits, F4 for the user).
+enum class Who : uint8_t {
+   Anyone,      // every friendly, the squad's too (Spotted: "general nearby friendlies")
+   SquadFirst,  // a squadmate who can, else the nearest friendly who can (Medic, Repair, Ammo)
+   Allies,      // friendlies outside the squad, which follows anyway (Pickup, Backup)
+   Squad,       // the squad alone (Attack, Defend) ...
+   SquadPlus,   // ... or, where the player may command any friendly (CommandAnyFriendly),
+                // the whole squad and the nearest friendlies until there are enough
 };
 
 inline Ask ask_for(int code, Aim aim, bool spotReachable)
@@ -96,25 +115,43 @@ inline Ask ask_for(int code, Aim aim, bool spotReachable)
    }
 }
 
-// How many answer, from how far, and for how long.
+// How many answer, from how far, for how long, and who. A brief help (`brief`)
+// is over kHelpFor after the first of them reached the player, or kTravelFor
+// after it was asked if none has (help_over); `lasts` is the others' time. A
+// squad order sends the whole squad (`units` 0); with any friendly to command,
+// at least `units` (the squad first).
 struct Order {
-   int    units = 0;     // how many AI are sent (0: every one that qualifies)
-   float  range = 0.0f;  // m: from the player (Spotted: from the target)
-   double lasts = 0.0;   // s the goal holds before they go back to their own (0: at once, one look)
+   int    units = 0;      // how many AI are sent (0: every one that qualifies)
+   float  range = 0.0f;   // m: from the player (Spotted: from the target)
+   double lasts = 0.0;    // s the goal holds before they go back (0: at once, one look)
+   Who    who = Who::Anyone;
+   bool   brief = false;
 };
 
-inline Order order_for(Ask ask)
+constexpr double kHelpFor   = 15.0;   // s with the player (the user: "maybe 10-15 max")
+constexpr double kTravelFor = 30.0;   // s at most to reach it
+constexpr float  kWithYou   = 20.0f;  // m: reached it
+
+inline Order order_for(Ask ask, bool anyFriendly)
 {
+   const Who squad = anyFriendly ? Who::SquadPlus : Who::Squad;
    switch (ask) {
-   case Ask::ShootTarget: return {0, 150.0f, 0.0};
-   case Ask::AidPlayer: return {1, 300.0f, 45.0};
-   case Ask::DefendPlayer: return {3, 200.0f, 60.0};
-   case Ask::DestroyTarget: return {4, 250.0f, 90.0};
-   case Ask::DefendTarget: return {3, 250.0f, 90.0};
-   case Ask::DefendSpot: return {3, 250.0f, 90.0};
-   case Ask::PickUpPlayer: return {1, 400.0f, 60.0};
+   case Ask::ShootTarget: return {0, 150.0f, 0.0, Who::Anyone, false};
+   case Ask::AidPlayer: return {1, 150.0f, 0.0, Who::SquadFirst, true};
+   case Ask::DefendPlayer: return {3, 150.0f, 0.0, Who::Allies, true};
+   case Ask::PickUpPlayer: return {1, 300.0f, 0.0, Who::Allies, true};
+   case Ask::DestroyTarget: return {anyFriendly ? 4 : 0, 300.0f, 90.0, squad, false};
+   case Ask::DefendTarget:
+   case Ask::DefendSpot: return {anyFriendly ? 3 : 0, 300.0f, 90.0, squad, false};
    default: return {};
    }
+}
+
+// A brief help: over kHelpFor after one reached the player (`reached`, a time,
+// below 0 for not yet), else kTravelFor after it was asked.
+inline bool help_over(double now, double asked, double reached)
+{
+   return reached >= 0.0 ? now - reached >= kHelpFor : now - asked >= kTravelFor;
 }
 
 // The nearest of `n` candidates (`dist`, m; `ok`, whether each may answer)
@@ -132,6 +169,39 @@ inline int nearest(const float* dist, const bool* ok, int n, int want, float ran
       out[b] = v;
    }
    return want > 0 && count > want ? want : count;
+}
+
+// Whom an order goes to, of `n` candidates (`dist` from where it is about,
+// `ok` able to, `squad` in the player's squad), within `range`, as `who` and
+// `want` say (Order), into `out` (room for `n`), squadmates first where both
+// may go. How many.
+inline int pick(const float* dist, const bool* ok, const bool* squad, int n, Who who, int want, float range, int* out)
+{
+   constexpr int kMax = 256;
+   if (n > kMax) n = kMax;
+   bool mates[kMax], others[kMax];
+   for (int i = 0; i < n; ++i) {
+      mates[i] = ok[i] && squad[i];
+      others[i] = ok[i] && !squad[i];
+   }
+   int a[kMax], b[kMax];
+   switch (who) {
+   case Who::Anyone: return nearest(dist, ok, n, want, range, out);
+   case Who::Allies: return nearest(dist, others, n, want, range, out);
+   case Who::Squad: return nearest(dist, mates, n, 0, range, out);
+   case Who::SquadFirst:
+   case Who::SquadPlus: {
+      const int m = nearest(dist, mates, n, who == Who::SquadPlus ? 0 : want, range, a);
+      int count = 0;
+      for (int k = 0; k < m; ++k) out[count++] = a[k];
+      const int room = want > 0 ? want - count : 0;
+      if (room <= 0) return count;
+      const int o = nearest(dist, others, n, room, range, b);
+      for (int k = 0; k < o; ++k) out[count++] = b[k];
+      return count;
+   }
+   }
+   return 0;
 }
 
 } // namespace comm_orders

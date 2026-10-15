@@ -278,7 +278,7 @@ inline FollowAction follow_action(FollowState& s, Vec2 pos, Vec2 slot, Vec2 lead
 // ---- A class's ODF keys over the INI ----------------------------------------
 // Each key a class sets, itself or through ClassParent, decides that setting
 // for the class, whatever the INI says; a key it leaves out takes the INI's.
-enum class Key { Leader, Size, Formation, Spacing, Follower };
+enum class Key { Leader, Size, Formation, Spacing, Follower, CommandAny };
 
 struct ClassKeys {
    bool   hasLeader = false;    int    leader = 0;      // SquadLeader: rank, 0 never leads
@@ -286,6 +286,8 @@ struct ClassKeys {
    bool   hasFormation = false; Layout formation = Layout::Auto;
    bool   hasSpacing = false;   float  spacing = kDefaultSpacing;
    bool   hasFollower = false;  bool   follower = true; // SquadFollower: 0 never joins
+   bool   hasCommandAny = false; bool  commandAny = false;   // CommandAnyFriendly: 1 orders any friendly
+                                                             // with the comm keys (ai/comm_orders.hpp)
 };
 
 constexpr int kMaxRank = 100;
@@ -324,6 +326,9 @@ inline bool set_key(ClassKeys& keys, Key key, const char* value)
       } else if (key == Key::Size) {
          keys.size = v < 0 ? 0 : v > kMaxSquadSize ? kMaxSquadSize : (int)v;
          keys.hasSize = true;
+      } else if (key == Key::CommandAny) {
+         keys.commandAny = v != 0;
+         keys.hasCommandAny = true;
       } else {
          keys.follower = v != 0;
          keys.hasFollower = true;

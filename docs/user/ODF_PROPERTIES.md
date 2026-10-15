@@ -65,6 +65,7 @@ Set on the concrete soldier class.
 | `SquadSpacing` | metres | Space between members of squads this class leads, 1.5 to 10. | 1.2.0 |
 | `SquadSize` | number | How many followers squads this class leads take, 0 to 8. On the class you play, friendlies who start following you on their own join your squad in formation while this is above 0, and trail loosely as in stock BF2 at 0. | 1.2.0 |
 | `SquadFollower` | `0` or `1` | `0` keeps the class out of squads: it never joins one in formation. Hero classes stay out unless they set `1`. | 1.2.0 |
+| `CommandAnyFriendly` | `1` | Playing this class, the comm keys Attack and Defend order any friendly, not your squad alone: your whole squad and the nearest friendlies until there are four (Attack) or three (Defend). For a commander or officer class. A mission script can say otherwise (`SetCommandAnyFriendly`). See [Comm Key Orders](FEATURES.md#ai-systems). Modtools only for now. | 1.2.0 |
 
 **Notes on the override texture slots.** The model needs a material named `override_texture3`, `override_texture4` or `override_texture5` for the matching slot to do anything, following the same naming the stock two slots use. `OverrideTexture` must also be set or none of the extra slots apply. They are read off the concrete class only and are not inherited through `ClassParent`.
 

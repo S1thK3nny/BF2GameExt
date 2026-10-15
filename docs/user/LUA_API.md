@@ -196,6 +196,22 @@ local hold = AddAIGoal(ATT, "Defend", 1, "cp3")
 SetUnitGoal(5, hold)
 ```
 
+## Comm Key Orders
+
+*Modtools only for now, single player.*
+
+On foot the comm keys Attack and Defend order your squad, the AI following you ([Comm Key Orders](FEATURES.md#ai-systems)). These let a mission script have you order any friendly instead, as a class's `CommandAnyFriendly` ODF property does.
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetCommandAnyFriendly([on])` | `true` or `1`: Attack and Defend order any friendly, your whole squad and the nearest friendlies until there are four (Attack) or three (Defend). `false` or `0`: your squad alone. With nothing, your class's `CommandAnyFriendly` decides again. Holds for the rest of the mission. | 1.2.0 |
+| `GetCommandAnyFriendly()` | Whether you order any friendly now. | 1.2.0 |
+
+```lua
+-- The commander's mission: the player orders every friendly near it.
+SetCommandAnyFriendly(true)
+```
+
 ## Loading Screen
 
 | Function | Description | Since |

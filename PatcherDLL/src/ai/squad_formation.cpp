@@ -68,6 +68,7 @@ constexpr uint32_t kHashSize      = pbl_hash("SquadSize");
 constexpr uint32_t kHashFormation = pbl_hash("SquadFormation");
 constexpr uint32_t kHashSpacing   = pbl_hash("SquadSpacing");
 constexpr uint32_t kHashFollower  = pbl_hash("SquadFollower");
+constexpr uint32_t kHashCommandAny = pbl_hash("CommandAnyFriendly");   // the comm keys' (ai/comm_orders.hpp)
 
 using fn_reserve_offset_t = float*(__cdecl*)(float* out, void* leader, void* follower, int type);
 using fn_count_t          = int(__cdecl*)(void* obj, int team, int type);
@@ -291,6 +292,7 @@ bool on_property(void* cls, uint32_t hash, const char* value)
    case kHashFormation: key = Key::Formation; break;
    case kHashSpacing:   key = Key::Spacing;   break;
    case kHashFollower:  key = Key::Follower;  break;
+   case kHashCommandAny: key = Key::CommandAny; break;
    default:             return false;
    }
    if (cls) squad_formation::set_key(s_classes[cls], key, value);

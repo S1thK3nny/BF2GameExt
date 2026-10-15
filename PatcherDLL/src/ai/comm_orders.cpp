@@ -92,6 +92,7 @@ struct GoalTarget {
 static_assert(sizeof(GoalTarget) == 0x1C, "GoalTarget");
 // The squad commands (ai_squads.cpp, squad_formation.cpp)
 constexpr int kEvqIsFollowing = 0x0F;   // EVQ_SC_IsFollowingChr
+constexpr int kEvtFollowChr   = 0x10;   // EVT_SC_FollowChr, the squad key's recruit
 // The crosshair's ray: what the engine's own search may pick (soldiers,
 // vehicles, buildings and props, attached objects) and the ground; water left
 // out (target_bar_latch.cpp's kAimRayMask). A soldier's sight: buildings, props,
@@ -248,8 +249,9 @@ uint8_t* character_of(const uint8_t* obj)
 // ---- The player ---------------------------------------------------------------
 struct Player {
    uint8_t* chr = nullptr;
-   uint8_t* ctl = nullptr;   // what it controls
-   uint8_t* obj = nullptr;   // ... as a GameObject
+   uint8_t* ctl = nullptr;       // what it controls
+   uint8_t* obj = nullptr;       // ... as a GameObject
+   uint8_t* soldier = nullptr;   // its soldier (mUnit), in a vehicle too
    int      team = -1;
 };
 
@@ -261,6 +263,8 @@ bool player(Player& p)
    p.obj = p.ctl ? object_of(p.ctl) : nullptr;
    if (!p.obj || !alive(p.obj)) return false;
    p.team = *(const int*)(p.chr + layout::Character::kTeam);
+   uint8_t* const unit = *(uint8_t**)(p.chr + layout::Character::kUnit);
+   p.soldier = unit ? object_of(unit) : nullptr;
    return true;
 }
 
@@ -359,37 +363,92 @@ Aimed aimed(const Player& p, int code)
 
 // ---- Who answers -----------------------------------------------------------------
 // An AI of the player's side, on foot or in a ground vehicle (pilots have their
-// own business); for a goal, also not following the player as its squad (it
-// would follow on regardless) nor answering another request.
+// own business), in the player's squad or not: following it (the squad key's
+// recruits, EVQ_SC_IsFollowingChr) or carried over from the squad's last order;
+// for a goal, not answering another order.
 struct Unit {
    uint8_t* chr = nullptr;
    uint8_t* obj = nullptr;
    uint8_t* uc = nullptr;
-   int      index = -1;
+   int      index = -1;      // its character, -1 once let go
+   uint32_t life = 0;        // its soldier as it was sent (life_of): one killed is let go
+   bool     squad = false;
 };
 
 struct Request {
    bool     active = false;
    int      code = -1;
    Ask      ask = Ask::Nothing;
-   uint8_t* goal = nullptr;          // AIGoalManager's
+   bool     brief = false;            // a friendly's few seconds' help (Order::brief)
+   bool     any = false;              // others sent too, where the player may command any friendly
+   uint8_t* goal = nullptr;           // AIGoalManager's
    int      team = -1;
-   int      units[8] = {};           // character indices
+   Unit     units[8];
    int      count = 0;
-   uint8_t* target = nullptr;        // the enemy or friend, or null for a place (or the player)
+   uint8_t* target = nullptr;         // the enemy, friend, hover or what is aided; null for a place or the player
    uint32_t targetHandle = 0;
-   Pos      spot;                    // a place's
-   double   until = 0.0;
-   uint32_t markTeams = 0;           // the target's marker, while it has one
+   Pos      spot;                     // a place's
+   double   askedAt = 0.0;
+   double   reachedAt = -1.0;         // a brief help: when the first of them reached the player
+   double   until = 0.0;              // the others' end
+   uint32_t markTeams = 0;            // the target's marker, while it has one
 };
 Request s_requests[kMaxRequests];   // one for each key
+
+// The squad's last order's squadmates, handed to the next while it is made:
+// they stopped following to obey, so the game counts them its squad no more.
+Unit s_carried[8];
+int  s_carriedCount = 0;
+int  s_scriptAny = -1;   // SetCommandAnyFriendly: 1 or 0 over the class's key; -1 the class decides
+
+// An order the squad is on: Attack, Defend, or a squadmate's aid.
+bool holds_squad(const Request& r)
+{
+   if (r.code == comm_orders::kAttack || r.code == comm_orders::kDefend) return true;
+   for (int k = 0; k < r.count; ++k)
+      if (r.units[k].index >= 0 && r.units[k].squad) return true;
+   return false;
+}
 
 bool answering(int index)
 {
    for (const Request& r : s_requests)
       for (int k = 0; r.active && k < r.count; ++k)
-         if (r.units[k] == index) return true;
+         if (r.units[k].index == index) return true;
    return false;
+}
+
+bool carried(int index)
+{
+   for (int k = 0; k < s_carriedCount; ++k)
+      if (s_carried[k].index == index) return true;
+   return false;
+}
+
+// A character's life: its soldier (mUnit) while alive, by handle; 0 for none.
+uint32_t life_of(uint8_t* chr)
+{
+   uint8_t* const unit = chr ? *(uint8_t**)(chr + layout::Character::kUnit) : nullptr;
+   uint8_t* const soldier = unit ? object_of(unit) : nullptr;
+   return soldier && alive(soldier) ? handle_of(soldier) : 0;
+}
+
+bool same_life(const Unit& u) { return u.index >= 0 && u.life && life_of(character(u.index)) == u.life; }
+
+// What a unit controls now, and its controller.
+uint8_t* unit_object(const Unit& u, uint8_t** uc = nullptr)
+{
+   uint8_t* const chr = character(u.index);
+   uint8_t* const ctl = chr ? controlled(chr) : nullptr;
+   if (uc) *uc = ctl ? *(uint8_t**)(ctl + kCtl_Ctrl) : nullptr;
+   return ctl ? object_of(ctl) : nullptr;
+}
+
+// Following the player: its soldier, or what it controls.
+bool follows(const Player& p, uint8_t* uc)
+{
+   if (p.soldier && squad_send_event(uc, kEvqIsFollowing, p.soldier) == 1) return true;
+   return p.obj != p.soldier && squad_send_event(uc, kEvqIsFollowing, p.obj) == 1;
 }
 
 int candidates(const Player& p, Unit* out, int max, bool forGoal)
@@ -406,10 +465,21 @@ int candidates(const Player& p, Unit* out, int max, bool forGoal)
       if (!obj || !alive(obj) || is_rtti(obj, kRttiFlyer)) continue;
       uint8_t* const uc = *(uint8_t**)(ctl + kCtl_Ctrl);
       if (!uc || !is_rtti(uc, kRttiUnitController)) continue;
-      if (forGoal && squad_send_event(uc, kEvqIsFollowing, p.obj) == 1) continue;   // the player's squad
-      out[n++] = {chr, obj, uc, i};
+      Unit u{chr, obj, uc, i, life_of(chr), false};
+      u.squad = carried(i) || follows(p, uc);
+      out[n++] = u;
    }
    return n;
+}
+
+// Whether the player may order any friendly, not its squad alone: a script's
+// SetCommandAnyFriendly, else its soldier class's CommandAnyFriendly
+// (squad_formation's keys, through ClassParent).
+bool command_any(const Player& p)
+{
+   if (s_scriptAny >= 0) return s_scriptAny != 0;
+   const squad_formation::ClassKeys* const keys = p.soldier ? squad_class_keys(p.soldier) : nullptr;
+   return keys && keys->hasCommandAny && keys->commandAny;
 }
 
 // ---- Lines on the HUD ----------------------------------------------------------
@@ -434,16 +504,23 @@ void say(const Line& line, int n = -1)
    s_message(0, text, color);
 }
 
-constexpr Line kSayNone    = {pbl_hash("game.commorders.none"), L"No one can answer"};
-constexpr Line kSayAim     = {pbl_hash("game.commorders.notarget"), L"No target there"};
-constexpr Line kSaySpotted = {pbl_hash("game.commorders.spotted"), L"Spotted: they have it in sight"};
-constexpr Line kSayAid     = {pbl_hash("game.commorders.aid"), L"One is on the way to you"};
-constexpr Line kSayBackup  = {pbl_hash("game.commorders.backup"), L"Backup on the way"};
-constexpr Line kSayAttack  = {pbl_hash("game.commorders.attack"), L"Attacking your target"};
-constexpr Line kSayHold    = {pbl_hash("game.commorders.hold"), L"Moving to hold that position"};
-constexpr Line kSayDefend  = {pbl_hash("game.commorders.defend"), L"Defending your target"};
-constexpr Line kSayPickup  = {pbl_hash("game.commorders.pickup"), L"A ride is on the way"};
-constexpr Line kSayNoNeed  = {pbl_hash("game.commorders.noneed"), L"You don't need that now"};
+// Friendlies outside the squad are "nearby allies" (the user: "the text should
+// signify it"); the squad's orders say so.
+constexpr Line kSayNone      = {pbl_hash("game.commorders.none"), L"No one nearby can help"};
+constexpr Line kSayNoSquad   = {pbl_hash("game.commorders.nosquad"), L"No squadmates to order"};
+constexpr Line kSayAim       = {pbl_hash("game.commorders.notarget"), L"No target there"};
+constexpr Line kSayNoNeed    = {pbl_hash("game.commorders.noneed"), L"You don't need that now"};
+constexpr Line kSaySpotted   = {pbl_hash("game.commorders.spotted"), L"Spotted: nearby allies have it in sight"};
+constexpr Line kSayAidSquad  = {pbl_hash("game.commorders.aidsquad"), L"A squadmate is coming to help"};
+constexpr Line kSayAidAlly   = {pbl_hash("game.commorders.aid"), L"A nearby ally is coming to help"};
+constexpr Line kSayPickup    = {pbl_hash("game.commorders.pickup"), L"A nearby ally is coming to pick you up"};
+constexpr Line kSayBackup    = {pbl_hash("game.commorders.backup"), L"Nearby allies are coming to back you up"};
+constexpr Line kSayAttack    = {pbl_hash("game.commorders.attack"), L"Squad: attacking your target"};
+constexpr Line kSayDefend    = {pbl_hash("game.commorders.defend"), L"Squad: defending your target"};
+constexpr Line kSayHold      = {pbl_hash("game.commorders.hold"), L"Squad: holding that position"};
+constexpr Line kSayAttackAny = {pbl_hash("game.commorders.attackany"), L"Attacking your target"};
+constexpr Line kSayDefendAny = {pbl_hash("game.commorders.defendany"), L"Defending your target"};
+constexpr Line kSayHoldAny   = {pbl_hash("game.commorders.holdany"), L"Holding that position"};
 
 // ---- Markers ---------------------------------------------------------------------
 constexpr uint32_t kMarkerIcon   = pbl_hash("hud_objective_icon_circle");
@@ -466,21 +543,77 @@ void unmark(Request& r)
 }
 
 // ---- Requests ---------------------------------------------------------------------
+// A squadmate, still in the life it was sent in, follows the player again (the
+// squad key's own EVT_SC_FollowChr, to the player's soldier). True if it took it.
+bool refollow(const Player& p, const Unit& u)
+{
+   if (!same_life(u)) return false;
+   uint8_t* uc = nullptr;
+   unit_object(u, &uc);
+   if (!uc || !is_rtti(uc, kRttiUnitController)) return false;
+   return squad_send_event(uc, kEvtFollowChr, p.soldier ? p.soldier : p.obj) == 1;
+}
+
+const char* ask_name(Ask a)
+{
+   switch (a) {
+   case Ask::ShootTarget: return "spotted";
+   case Ask::AidPlayer: return "aid";
+   case Ask::DefendPlayer: return "backup";
+   case Ask::DestroyTarget: return "attack";
+   case Ask::DefendTarget: return "defend";
+   case Ask::DefendSpot: return "hold a place";
+   case Ask::PickUpPlayer: return "pickup";
+   default: return "nothing";
+   }
+}
+
 // Over: its members told to wait (UnAssignAll, as the game's DeleteAIGoal does
-// first: DeleteGoal changes no order, and a Defend order never ends), each unit
-// back to the weighted rule (the next goal update gives a waiting one its new
-// goal's order), the goal deleted, the marker off.
-void end(Request& r, const char* why)
+// first: DeleteGoal changes no order, and a Defend order never ends), each unit's
+// own goal let go (the next goal update gives a waiting one its team's), the
+// goal deleted, the marker off; its squadmates follow the player again, or, for
+// the squad's next order (`carry`), are handed to it.
+void end(Request& r, const char* why, bool carry = false)
 {
    if (!r.active) return;
    unmark(r);
    uint8_t* const mgr = s_goalManager ? *s_goalManager : nullptr;
    uint8_t* const goal = r.goal && ai_goals_lua::goal_exists(r.goal) ? r.goal : nullptr;
    if (goal && s_unassignAll) s_unassignAll(goal);
-   for (int k = 0; k < r.count; ++k) ai_goals_lua::clear_unit_goal(r.units[k]);
+   Player p;
+   const bool here = player(p);
+   int back = 0, handed = 0, freed = 0;
+   for (int k = 0; k < r.count; ++k) {
+      const Unit& u = r.units[k];
+      if (u.index < 0) continue;
+      ai_goals_lua::clear_unit_goal(u.index);
+      if (u.squad && same_life(u)) {
+         if (carry && s_carriedCount < 8) {
+            s_carried[s_carriedCount++] = u;
+            ++handed;
+            continue;
+         }
+         if (here && refollow(p, u)) {
+            ++back;
+            continue;
+         }
+      }
+      ++freed;
+   }
    if (goal && mgr && s_deleteGoal) s_deleteGoal(mgr, goal);
-   if (log_room()) install_log("[CommKeys] request over (%s): %d let go", why, r.count);
+   if (log_room())
+      install_log("[CommKeys] %s over (%s): %d back with you, %d to the next order, %d let go", ask_name(r.ask), why,
+                  back, handed, freed);
    r = Request{};
+}
+
+// The squadmates carried over, if no order took them: back with the player.
+void refollow_carried()
+{
+   Player p;
+   const bool here = player(p);
+   for (int k = 0; k < s_carriedCount && here; ++k) refollow(p, s_carried[k]);
+   s_carriedCount = 0;
 }
 
 // A goal for the units: theirs alone (ai_goals' own goals), so no one else
@@ -493,31 +626,13 @@ bool give_goal(Request& r, int type, const GoalTarget& target, const Unit* units
    if (!r.goal) return false;
    r.count = 0;
    for (int k = 0; k < n && r.count < 8; ++k)
-      if (ai_goals_lua::set_unit_goal(units[k].index, r.goal)) r.units[r.count++] = units[k].index;
+      if (ai_goals_lua::set_unit_goal(units[k].index, r.goal)) r.units[r.count++] = units[k];
    if (r.count == 0) {
       if (s_deleteGoal) s_deleteGoal(mgr, r.goal);
       r.goal = nullptr;
       return false;
    }
    return true;
-}
-
-// The units to send for `ask`, nearest first from `from`, within its range.
-int choose(const Player& p, Ask ask, Pos from, Unit* chosen)
-{
-   Unit all[kMaxCharacters];
-   const int n = candidates(p, all, kMaxCharacters, ask != Ask::ShootTarget);
-   float dist[kMaxCharacters];
-   bool ok[kMaxCharacters];
-   for (int i = 0; i < n; ++i) {
-      dist[i] = distance(position_of(all[i].obj), from);
-      ok[i] = ask != Ask::PickUpPlayer || is_rtti(all[i].obj, kRttiHover);   // Pickup: hovers' drivers
-   }
-   const comm_orders::Order order = comm_orders::order_for(ask);
-   int picked[kMaxCharacters];
-   const int m = comm_orders::nearest(dist, ok, n, order.units, order.range, picked);
-   for (int k = 0; k < m; ++k) chosen[k] = all[picked[k]];
-   return m;
 }
 
 // Whether a unit sees `t`: nothing solid between its eye (a soldier's own, else
@@ -542,20 +657,6 @@ bool sees(const Unit& u, uint8_t* t)
    uint8_t* ignore[2] = {u.obj, t};
    const float fraction = s_rayHit(start, d, len - kSightShort, &hit, normal, ignore, 2, kSightMask, 0);
    return !(fraction >= 0.0f && fraction < 1.0f);
-}
-
-const char* ask_name(Ask a)
-{
-   switch (a) {
-   case Ask::ShootTarget: return "spotted";
-   case Ask::AidPlayer: return "aid";
-   case Ask::DefendPlayer: return "backup";
-   case Ask::DestroyTarget: return "attack";
-   case Ask::DefendTarget: return "defend";
-   case Ask::DefendSpot: return "hold a place";
-   case Ask::PickUpPlayer: return "pickup";
-   default: return "nothing";
-   }
 }
 
 // The game's own line, marker and shout for the key: NetGame::DisplayMessage, as
@@ -597,7 +698,8 @@ void stock_request(const Player& p, int code, double now)
 // vehicle's), its class one that aids at all (GetSoldierType 2 or 3: pilot,
 // repair, support, special; the stock check's gate), and its weapons giving it
 // (RepairHelper::CalcMyAidTypes on a stand-in whose +4 is the unit's agent, all
-// that function reads).
+// that function reads). A squadmate aids too, out of following for it: the
+// follow agent has no RepairHelper.
 bool can_aid(const Unit& u, uint32_t type, bool ammo)
 {
    if (!s_aidTypes || *(uint8_t* const*)(u.chr + layout::Character::kVehicle) || !is_rtti(u.obj, kRttiSoldier))
@@ -624,9 +726,7 @@ bool can_aid(const Unit& u, uint32_t type, bool ammo)
 
 uint8_t* aided(const Player& p, int code)
 {
-   if (code == comm_orders::kMedic)
-      if (uint8_t* const unit = *(uint8_t* const*)(p.chr + layout::Character::kUnit))
-         if (uint8_t* const soldier = object_of(unit)) return soldier;
+   if (code == comm_orders::kMedic && p.soldier) return p.soldier;
    return p.obj;
 }
 
@@ -634,6 +734,33 @@ bool needs_health(const uint8_t* obj)
 {
    const float cur = *(const float*)(obj + kGO_Health), max = *(const float*)(obj + kGO_MaxHealth);
    return std::isfinite(cur) && std::isfinite(max) && cur < max;
+}
+
+// Spotted: every friendly within 150 m of the enemy that sees it aims at it where
+// it stands; nothing lasting.
+void spotted(const Player& p, uint8_t* t)
+{
+   Unit all[kMaxCharacters];
+   const int m = candidates(p, all, kMaxCharacters, false);
+   float dist[kMaxCharacters];
+   bool ok[kMaxCharacters], squad[kMaxCharacters];
+   for (int i = 0; i < m; ++i) {
+      dist[i] = distance(position_of(all[i].obj), position_of(t));
+      ok[i] = true;
+      squad[i] = all[i].squad;
+   }
+   const comm_orders::Order order = comm_orders::order_for(Ask::ShootTarget, false);
+   int picked[kMaxCharacters];
+   const int n = comm_orders::pick(dist, ok, squad, m, order.who, order.units, order.range, picked);
+   int shooting = 0;
+   for (int k = 0; k < n; ++k)
+      if (s_forceTarget && sees(all[picked[k]], t)) {
+         s_forceTarget(all[picked[k]].uc, t);
+         ++shooting;
+      }
+   if (shooting) say(kSaySpotted, shooting);
+   else say(kSayNone);
+   if (log_room()) install_log("[CommKeys] spotted #%u: %d of %d near it see it and aim at it", handle_of(t), shooting, n);
 }
 
 void press(int code, double now)
@@ -646,48 +773,51 @@ void press(int code, double now)
    const Aimed a = aimed(p, code);
    const bool reach = a.aim == Aim::Spot && comm_orders::reachable_spot(a.normalUp, a.dist);
    const Ask ask = comm_orders::ask_for(code, a.aim, reach);
+   const bool any = command_any(p);
+   const comm_orders::Order order = comm_orders::order_for(ask, any);
    if (log_room())
-      install_log("[CommKeys] key %d: %s (the crosshair: %s, %.0f m)", code + 5, ask_name(ask),
+      install_log("[CommKeys] key %d: %s (the crosshair: %s, %.0f m)%s", code + 5, ask_name(ask),
                   a.aim == Aim::Enemy ? "an enemy" : a.aim == Aim::Friend ? "a friend" : a.aim == Aim::Spot ? "a place"
                                                                                                          : "nothing",
-                  (double)a.dist);
+                  (double)a.dist, any ? "; any friendly may be ordered" : "");
    switch (ask) {
    case Ask::Nothing:
       if (code == comm_orders::kSpotted || code == comm_orders::kAttack || code == comm_orders::kDefend) say(kSayAim);
       return;
-   case Ask::ShootTarget: {
-      // Those near it who can see it aim at it, where they stand.
-      Unit around[kMaxCharacters];
-      const int n = choose(p, ask, position_of(a.obj), around);
-      int shooting = 0;
-      for (int k = 0; k < n; ++k)
-         if (s_forceTarget && sees(around[k], a.obj)) {
-            s_forceTarget(around[k].uc, a.obj);
-            ++shooting;
-         }
-      if (shooting) say(kSaySpotted, shooting);
-      else say(kSayNone);
-      if (log_room()) install_log("[CommKeys] spotted #%u: %d of %d near it see it and aim at it", handle_of(a.obj), shooting, n);
-      return;
-   }
+   case Ask::ShootTarget: spotted(p, a.obj); return;
    default: break;
    }
-   // The goals: Backup on the player, Attack on the enemy, Defend on the friend,
-   // either on a place.
+   uint8_t* const who = ask == Ask::AidPlayer ? aided(p, code) : nullptr;
+   if (who && (code == comm_orders::kMedic || code == comm_orders::kRepair) && !needs_health(who)) {
+      say(kSayNoNeed);
+      return;
+   }
+   // A squad order replaces the squad's last ones (whatever their keys): their
+   // squadmates are handed to it.
+   const bool squadOrder = order.who == comm_orders::Who::Squad || order.who == comm_orders::Who::SquadPlus;
+   s_carriedCount = 0;
+   if (squadOrder) {
+      for (Request& old : s_requests)
+         if (old.active && holds_squad(old)) end(old, "a new squad order", true);
+   } else {
+      end(s_requests[code], "a new one");
+   }
    Request& r = s_requests[code];
-   end(r, "a new one");
+   r = Request{};
    r.ask = ask;
    r.code = code;
    r.team = p.team;
+   r.brief = order.brief;
    GoalTarget target;
    int type = kGoalDefend;
-   Pos from = position_of(p.obj);
-   if (ask == Ask::AidPlayer) {
-      // below
-   } else if (ask == Ask::DefendPlayer || ask == Ask::PickUpPlayer) {
+   if (ask == Ask::DefendPlayer || ask == Ask::PickUpPlayer || ask == Ask::AidPlayer) {
       target.type = kGttCharacter;   // wherever the player goes
       target.chr = p.chr;
       if (ask == Ask::PickUpPlayer) type = kGoalFollow;
+      if (who) {
+         r.target = who;   // the request ends with it gone, or (Medic, Repair) once whole
+         r.targetHandle = handle_of(who);
+      }
    } else if (ask == Ask::DefendSpot) {
       target.type = kGttPos;
       target.pos[0] = a.at.x;
@@ -710,61 +840,64 @@ void press(int code, double now)
          target.handle = r.targetHandle;
       }
    }
+   // Who goes (comm_orders_core.hpp, Order::who): Pickup a hover's driver, the
+   // aid one who can give it.
+   Unit all[kMaxCharacters];
+   const int m = candidates(p, all, kMaxCharacters, true);
+   float dist[kMaxCharacters];
+   bool ok[kMaxCharacters], squad[kMaxCharacters];
+   const Pos from = position_of(p.obj);
+   const uint32_t kind = who ? *(const uint32_t*)(who + kGO_Flags) & kHealthTypeBits : 0;
+   for (int i = 0; i < m; ++i) {
+      dist[i] = distance(position_of(all[i].obj), from);
+      squad[i] = all[i].squad;
+      ok[i] = ask == Ask::PickUpPlayer ? is_rtti(all[i].obj, kRttiHover)
+              : ask == Ask::AidPlayer  ? can_aid(all[i], kind, code == comm_orders::kAmmo)
+                                       : true;
+   }
+   int picked[kMaxCharacters];
+   int n = comm_orders::pick(dist, ok, squad, m, order.who, order.units, order.range, picked);
+   if (n > 8) n = 8;
    Unit units[8];
-   int n = 0;
-   if (ask == Ask::AidPlayer) {
-      // The nearest that can give it, sent to the player (a Defend goal on its
-      // character): there, idle, the game's own check aids it (DefendHelper's idle
-      // states, every 5 s; at once within 30 m while the player stands still or
-      // faces it).
-      uint8_t* const who = aided(p, code);
-      if ((code == comm_orders::kMedic || code == comm_orders::kRepair) && !needs_health(who)) {
-         say(kSayNoNeed);
-         r = Request{};
-         return;
-      }
-      const uint32_t kind = *(const uint32_t*)(who + kGO_Flags) & kHealthTypeBits;
-      Unit all[kMaxCharacters];
-      const int m = candidates(p, all, kMaxCharacters, true);
-      float dist[kMaxCharacters];
-      bool ok[kMaxCharacters];
-      for (int i = 0; i < m; ++i) {
-         dist[i] = distance(position_of(all[i].obj), from);
-         ok[i] = can_aid(all[i], kind, code == comm_orders::kAmmo);
-      }
-      int picked[kMaxCharacters];
-      const comm_orders::Order order = comm_orders::order_for(ask);
-      n = comm_orders::nearest(dist, ok, m, order.units, order.range, picked);
-      for (int k = 0; k < n && k < 8; ++k) units[k] = all[picked[k]];
-      target.type = kGttCharacter;
-      target.chr = p.chr;
-      r.target = who;   // the request ends with it gone, or (Medic, Repair) once whole
-      r.targetHandle = handle_of(who);
-   } else {
-      n = choose(p, ask, from, units);
+   int mates = 0;
+   for (int k = 0; k < n; ++k) {
+      units[k] = all[picked[k]];
+      mates += units[k].squad;
    }
    if (n == 0 || !give_goal(r, type, target, units, n)) {
-      say(kSayNone);
-      if (log_room()) install_log("[CommKeys] %s: no one to send", ask_name(ask));
+      say(squadOrder && !any ? kSayNoSquad : kSayNone);
+      if (log_room())
+         install_log("[CommKeys] %s: no one to send%s", ask_name(ask), squadOrder && !any ? " (no squadmates)" : "");
+      refollow_carried();
       r = Request{};
       return;
    }
+   // Squadmates handed on that this order did not take (too far) follow again.
+   for (int k = 0; k < s_carriedCount; ++k) {
+      bool taken = false;
+      for (int j = 0; j < r.count && !taken; ++j) taken = r.units[j].index == s_carried[k].index;
+      if (!taken) refollow(p, s_carried[k]);
+   }
+   s_carriedCount = 0;
    r.active = true;
-   r.until = now + comm_orders::order_for(ask).lasts;
+   r.any = mates < r.count;
+   r.askedAt = now;
+   r.until = now + order.lasts;
    if (ask == Ask::PickUpPlayer) {
       r.target = units[0].obj;   // the hover: the request ends as the player boards it
       r.targetHandle = handle_of(units[0].obj);
    }
-   say(ask == Ask::DefendPlayer    ? kSayBackup
-       : ask == Ask::DestroyTarget ? kSayAttack
-       : ask == Ask::DefendSpot    ? kSayHold
-       : ask == Ask::PickUpPlayer  ? kSayPickup
-       : ask == Ask::AidPlayer     ? kSayAid
-                                   : kSayDefend,
-       ask == Ask::PickUpPlayer || ask == Ask::AidPlayer ? -1 : r.count);
+   switch (ask) {
+   case Ask::AidPlayer: say(mates ? kSayAidSquad : kSayAidAlly); break;
+   case Ask::PickUpPlayer: say(kSayPickup); break;
+   case Ask::DefendPlayer: say(kSayBackup, r.count); break;
+   case Ask::DestroyTarget: say(r.any ? kSayAttackAny : kSayAttack, r.count); break;
+   case Ask::DefendSpot: say(r.any ? kSayHoldAny : kSayHold, r.count); break;
+   default: say(r.any ? kSayDefendAny : kSayDefend, r.count); break;
+   }
    if (log_room())
-      install_log("[CommKeys] %s: %d sent for %.0f s%s", ask_name(ask), r.count, comm_orders::order_for(ask).lasts,
-                  r.target ? "" : ask == Ask::DefendSpot ? " to the place aimed at" : " round you");
+      install_log("[CommKeys] %s: %d sent (%d of your squad)%s%s", ask_name(ask), r.count, mates,
+                  r.brief ? ", a few seconds' help" : "", ask == Ask::DefendSpot ? ", to the place aimed at" : "");
 }
 
 // The Attack and Defend targets' markers, each frame: off while a .hud draws its
@@ -779,8 +912,9 @@ void update_marks()
    }
 }
 
-// Each frame: the keys, and the requests' ends (their time, their target down,
-// the player gone for Backup).
+// Each frame: the requests' ends (a unit killed let go, its next life not sent
+// back; a brief help kHelpFor once one reached the player; the others' time;
+// their target down or gone; the player aboard its ride, or whole), then the keys.
 void tick()
 {
    const double now = seconds();
@@ -788,7 +922,23 @@ void tick()
    const bool here = player(p);
    for (Request& r : s_requests) {
       if (!r.active) continue;
-      if (now >= r.until) end(r, "its time is up");
+      int left = 0;
+      for (int k = 0; k < r.count; ++k) {
+         Unit& u = r.units[k];
+         if (u.index < 0) continue;
+         if (!same_life(u)) {
+            ai_goals_lua::clear_unit_goal(u.index);
+            u.index = -1;
+            continue;
+         }
+         ++left;
+         if (r.brief && r.reachedAt < 0.0 && here)
+            if (uint8_t* const obj = unit_object(u); obj && distance(position_of(obj), position_of(p.obj)) <= comm_orders::kWithYou)
+               r.reachedAt = now;
+      }
+      if (left == 0) end(r, "its units are gone");
+      else if (r.brief ? comm_orders::help_over(now, r.askedAt, r.reachedAt) : now >= r.until)
+         end(r, r.brief && r.reachedAt >= 0.0 ? "its help is done" : "its time is up");
       else if (r.target && (handle_of(r.target) != r.targetHandle || !alive(r.target)))
          end(r, r.ask == Ask::DestroyTarget ? "its target is down" : "the one it was for is gone");
       else if (r.ask == Ask::PickUpPlayer && here && p.obj == r.target)
@@ -920,7 +1070,26 @@ void comm_orders_mission_end()
 {
    for (Request& r : s_requests) r = Request{};
    s_lastBits = 0;
+   s_carriedCount = 0;
+   s_scriptAny = -1;
 }
+
+namespace comm_orders_lua {
+
+void set_command_any(int on) { s_scriptAny = on < 0 ? -1 : on ? 1 : 0; }
+
+bool command_any()
+{
+   bool any = s_scriptAny > 0;
+   __try {
+      Player p;
+      if (player(p)) any = ::command_any(p);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   return any;
+}
+
+} // namespace comm_orders_lua
 
 void comm_orders_goals_changed()
 {
