@@ -390,7 +390,8 @@ void building_lights_install(uintptr_t exe_base)
    // Without the listener nothing is ever marked, so the hooks would be inert
    s_numAttached = (uint32_t*)resolve(exe_base, g_addr->attach_class_num);
    s_attachData  = (uint8_t*)resolve(exe_base, g_addr->attach_class_data);
-   if (!odf_add_property_handler(on_property)) {
+   // ODF files alone: RemoveOnDeath marks the attachment the lines above it made.
+   if (!odf_add_property_handler(on_property, false)) {
       s_origKill    = nullptr;
       s_origRespawn = nullptr;
       return;

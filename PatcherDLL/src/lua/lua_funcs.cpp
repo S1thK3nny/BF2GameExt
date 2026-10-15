@@ -4,7 +4,6 @@
 #include "lua_hooks.hpp"
 #include "lua_wingmen.hpp"
 #include "lua_goals.hpp"
-#include "lua_comm_orders.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -1746,9 +1745,6 @@ static const lua_func_entry custom_functions[] = {
    { "SetUnitGoal",              lua_SetUnitGoal },
    { "ClearUnitGoal",            lua_ClearUnitGoal },
    { "GetUnitGoal",              lua_GetUnitGoal },
-   // The comm keys' orders (lua_comm_orders.cpp; modtools only for now).
-   { "SetCommandAnyFriendly",    lua_SetCommandAnyFriendly },
-   { "GetCommandAnyFriendly",    lua_GetCommandAnyFriendly },
    { nullptr, nullptr }
 };
 

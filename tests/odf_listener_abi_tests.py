@@ -125,9 +125,40 @@ for build, filename in builds:
             inside = {t for t in branch_targets(image, base, reader_starts[build][reader], va + 0x100)
                       if va < t < va + 8}
             assert not inside, (build, reader, "a branch lands inside the Derive site", inside)
-        print("%-8s ok: Derive sites 0x%08X (EntityClass::Read), 0x%08X (WeaponClass::Read)"
-              % (build, addrs["entity_class_read_derive_site"], addrs["weapon_class_read_derive_site"]))
+        # A script's SetClassProperty (Lua_Callbacks::SetClassProperty): its one vcall to the
+        # class's SetProperty (slot 0x18), the class in EDI, the value in ESI, the hash in EAX
+        # (modtools) or at [EAX] (Steam, GOG), nothing relocated, no branch into it, and after it
+        # only POP ESI / POP EBX: the shim's pushad/popad leave it as SetProperty would.
+        va = addrs["lua_set_class_property_site"]
+        lua_text = "8B 17 56 50 8B CF FF 52 18" if kind == "modtools" else "8B 17 8B CF 56 FF 30 FF 52 18"
+        size = len(lua_text.split())
+        assert image[va - base:va - base + size] == bytes.fromhex(lua_text), (build, "Lua SetClassProperty bytes")
+        assert ", ".join("0x" + b for b in lua_text.split()) in odf, (build, "Lua site bytes changed in the source")
+        ins = list(decoder.disasm(image[va - base:va - base + 16], va))
+        want = ([("mov", "edx, dword ptr [edi]"), ("push", "esi"), ("push", "eax"), ("mov", "ecx, edi"),
+                 ("call", "dword ptr [edx + 0x18]")] if kind == "modtools" else
+                [("mov", "edx, dword ptr [edi]"), ("mov", "ecx, edi"), ("push", "esi"), ("push", "dword ptr [eax]"),
+                 ("call", "dword ptr [edx + 0x18]")])
+        assert [(x.mnemonic, x.op_str) for x in ins[:5]] == want, (build, [(x.mnemonic, x.op_str) for x in ins[:6]])
+        assert ins[5].address == va + size and (ins[5].mnemonic, ins[5].op_str) == ("pop", "esi"), (build, "after")
+        assert not any(va - 3 <= r < va + size for r in relocs), (build, "relocated Lua site bytes")
+        lua_fn = {"modtools": 0x004728F0, "steam": 0x0058ECC0, "gog": 0x0058FC60}[build]
+        inside = {t for t in branch_targets(image, base, lua_fn, va + 0x20) if va < t < va + size}
+        assert not inside, (build, "a branch lands inside the Lua site", inside)
+        print("%-8s ok: Derive sites 0x%08X (EntityClass::Read), 0x%08X (WeaponClass::Read); Lua SetClassProperty 0x%08X"
+              % (build, addrs["entity_class_read_derive_site"], addrs["weapon_class_read_derive_site"], va))
     finally:
         pe.close()
+
+# The script route's shims push (this, hash, value, slot 0x18) to its own dispatcher, which skips the
+# ODF-only listeners (attached_effects_cleanup's RemoveOnDeath).
+for name, hash_push in (("shim_mt_lua_class", "push eax"), ("shim_rt_lua_class", "push dword ptr [eax]")):
+    body = re.search(r"void " + name + r"\(\)\s*\{\s*__asm \{(.*?)\}\s*\}", odf, re.S).group(1)
+    lines = [ln.split("//")[0].strip() for ln in body.splitlines() if ln.split("//")[0].strip()]
+    assert lines[:7] == ["pushad", "push 0x18", "push esi", hash_push, "push edi", "call odf_script_prop_dispatch",
+                         "add  esp, 16"] and lines[7] == "popad" and lines[-1] == "jmp  [s_contLuaClass]", (name, lines)
+assert "if (s_handlerScripts[i]) consumed = s_propertyHandlers[i](cls, hash, value);" in odf
+cleanup = (SRC / "entity" / "attached_effects_cleanup.cpp").read_text()
+assert "odf_add_property_handler(on_property, false)" in cleanup
 
 print("ODF listener ABI: all builds ok")

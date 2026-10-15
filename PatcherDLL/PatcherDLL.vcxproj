@@ -149,7 +149,6 @@
     <ClInclude Include="src\lua\lua_events.hpp" />
     <ClInclude Include="src\lua\lua_wingmen.hpp" />
     <ClInclude Include="src\lua\lua_goals.hpp" />
-    <ClInclude Include="src\lua\lua_comm_orders.hpp" />
     <ClInclude Include="src\ai\ai_goals.hpp" />
     <ClInclude Include="src\ai\ai_goals_core.hpp" />
     <ClInclude Include="src\debug_commands\command_registry.hpp" />
@@ -383,7 +382,6 @@
     <ClCompile Include="src\lua\lua_events.cpp" />
     <ClCompile Include="src\lua\lua_wingmen.cpp" />
     <ClCompile Include="src\lua\lua_goals.cpp" />
-    <ClCompile Include="src\lua\lua_comm_orders.cpp" />
     <ClCompile Include="src\ai\ai_goals.cpp" />
     <ClCompile Include="src\debug_commands\debug_command.cpp" />
     <ClCompile Include="src\debug_commands\command_registry.cpp" />

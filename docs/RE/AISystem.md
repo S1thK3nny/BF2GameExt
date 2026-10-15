@@ -798,12 +798,13 @@ then M.
   the player's team, alive, not in a flyer, and for a goal not answering another order. The squad is those
   following the player's soldier (`EVQ_SC_IsFollowingChr`, 0x0F, through `squad_send_event`), and those
   carried over from the squad's last order. Attack and Defend go to the whole squad (within 300 m), or,
-  with `CommandAnyFriendly` (a soldier class's, squad_formation's keys) or a script's
-  `SetCommandAnyFriendly`, to the whole squad and the nearest friendlies until there are four (Attack) or
-  three (Defend). Spotted goes to anyone; Medic, Repair and Ammo to a squadmate who can, else the nearest
-  friendly who can; Pickup and Backup to friendlies outside the squad (`comm_orders_core.hpp`, `pick`).
-  Those friendlies' help is brief: over 15 s after the first of them came within 20 m of the player, or
-  30 s after it was asked if none did (`help_over`).
+  with `CommandAnyFriendly` (a soldier class's, squad_formation's keys; a script sets it with the stock
+  `SetClassProperty`, which odf_gameext_props.cpp routes to the listeners), to the whole squad and the
+  nearest friendlies until there are four (Attack) or three (Defend). Spotted goes to anyone; Medic,
+  Repair and Ammo to a squadmate who can, else the nearest friendly who can; Pickup and Backup to
+  friendlies outside the squad (`comm_orders_core.hpp`, `pick`). Those friendlies' help is brief: over
+  15 s after the first of them came within 20 m of the player, or 30 s after it was asked if none did
+  (`help_over`).
 - **A squadmate on an order.** Its goal's forced command (`Assign`) replaces its follow, so it leaves the
   squad to obey. When the order ends it is told to wait with the rest (`UnAssignAll`) and then sent the
   squad key's own `EVT_SC_FollowChr` (0x10) on the player's soldier, so it follows again; a new squad order

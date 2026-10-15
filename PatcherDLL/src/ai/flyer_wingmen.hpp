@@ -14,11 +14,12 @@
 // Who: the player's flyer, flying, leads. Friendly AI flyers its class lets
 // follow it are called up, the nearest first, however far: the classes its
 // WingmanClass keys name, or with none any that can keep up (top speed at least
-// 90% of the leader's). They are called at takeoff (WingmanAuto, else the INI)
-// or on the squad key; from then on losses are made up whenever they happen. One
-// further than 150 m flies in, and has 20 s plus 1 s for every 20 m it started
-// off (3 minutes at most) to reach its slot. One is let go once dead, landed,
-// flown by someone else or, in its slot, further than 800 m.
+// 90% of the leader's). They are called on the squad key, or at takeoff where
+// WingmanAuto (else the INI, off by default: the user, "no wingman squad is
+// formed until the player presses F4") says so; from then on losses are made up
+// whenever they happen. One further than 150 m flies in, and has 20 s plus 1 s
+// for every 20 m it started off (3 minutes at most) to reach its slot. One is let
+// go once dead, landed, flown by someone else or, in its slot, further than 800 m.
 //
 // The player may also pick them one at a time: the squad key with a friendly AI
 // flyer in the air under the reticule (Controllable::mReticuleTarget, either
@@ -376,8 +377,8 @@
 //
 // INI: [AI] FlyerWingmen=1 gives every flyer
 // wingmen, FlyerWingmenCount=3 (0 to 8), FlyerWingmenSpacing=25 (metres, 8 to
-// 60, the vee's), FlyerWingmenAuto=1 (called up at takeoff; 0: on the squad key
-// first); FlyerWingmenMarkers=0 for no markers; FlyerWingmenTrail=0 to keep them
+// 60, the vee's), FlyerWingmenAuto=0 (on the squad key first; 1: called up at
+// every takeoff); FlyerWingmenMarkers=0 for no markers; FlyerWingmenTrail=0 to keep them
 // off the leader's trail; FlyerRealFlightSquadrons=0 for
 // no AI squadrons (on by default, with FlyerRealFlight).
 // =============================================================================

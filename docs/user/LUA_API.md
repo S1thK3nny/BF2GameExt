@@ -196,20 +196,14 @@ local hold = AddAIGoal(ATT, "Defend", 1, "cp3")
 SetUnitGoal(5, hold)
 ```
 
-## Comm Key Orders
+## GameExt Class Properties
 
-*Modtools only for now, single player.*
-
-On foot the comm keys Attack and Defend order your squad, the AI following you ([Comm Key Orders](FEATURES.md#ai-systems)). These let a mission script have you order any friendly instead, as a class's `CommandAnyFriendly` ODF property does.
-
-| Function | Description | Since |
-|----------|-------------|-------|
-| `SetCommandAnyFriendly([on])` | `true` or `1`: Attack and Defend order any friendly, your whole squad and the nearest friendlies until there are four (Attack) or three (Defend). `false` or `0`: your squad alone. With nothing, your class's `CommandAnyFriendly` decides again. Holds for the rest of the mission. | 1.2.0 |
-| `GetCommandAnyFriendly()` | Whether you order any friendly now. | 1.2.0 |
+The stock `SetClassProperty(className, property, value)` also sets the properties BF2GameExt adds to entity classes, as if the line were in the class's ODF. See [From a Mission Script](ODF_PROPERTIES.md#from-a-mission-script).
 
 ```lua
--- The commander's mission: the player orders every friendly near it.
-SetCommandAnyFriendly(true)
+-- The commander's mission: the player's officer orders every friendly near it
+-- with the comm keys, not its squad alone.
+SetClassProperty("rep_inf_ep3_officer", "CommandAnyFriendly", 1)
 ```
 
 ## Loading Screen

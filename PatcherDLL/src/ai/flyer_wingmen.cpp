@@ -29,7 +29,7 @@
 bool  g_flyerWingmen        = false;
 int   g_flyerWingmenCount   = flyer_wingmen::kDefaultWingmen;
 float g_flyerWingmenSpacing = flyer_wingmen::kDefaultSpacing;
-bool  g_flyerWingmenAuto    = true;
+bool  g_flyerWingmenAuto    = false;   // the user: none until the squad key calls them
 bool  g_flyerWingmenLand    = true;
 bool  g_flyerWingmenMarkers = true;
 bool  g_flyerWingmenTrail   = true;

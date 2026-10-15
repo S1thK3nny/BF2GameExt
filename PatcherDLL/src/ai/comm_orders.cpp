@@ -399,7 +399,6 @@ Request s_requests[kMaxRequests];   // one for each key
 // they stopped following to obey, so the game counts them its squad no more.
 Unit s_carried[8];
 int  s_carriedCount = 0;
-int  s_scriptAny = -1;   // SetCommandAnyFriendly: 1 or 0 over the class's key; -1 the class decides
 
 // An order the squad is on: Attack, Defend, or a squadmate's aid.
 bool holds_squad(const Request& r)
@@ -472,12 +471,11 @@ int candidates(const Player& p, Unit* out, int max, bool forGoal)
    return n;
 }
 
-// Whether the player may order any friendly, not its squad alone: a script's
-// SetCommandAnyFriendly, else its soldier class's CommandAnyFriendly
-// (squad_formation's keys, through ClassParent).
+// Whether the player may order any friendly, not its squad alone: its soldier
+// class's CommandAnyFriendly (squad_formation's keys, through ClassParent; a
+// script sets it with SetClassProperty).
 bool command_any(const Player& p)
 {
-   if (s_scriptAny >= 0) return s_scriptAny != 0;
    const squad_formation::ClassKeys* const keys = p.soldier ? squad_class_keys(p.soldier) : nullptr;
    return keys && keys->hasCommandAny && keys->commandAny;
 }
@@ -1071,25 +1069,7 @@ void comm_orders_mission_end()
    for (Request& r : s_requests) r = Request{};
    s_lastBits = 0;
    s_carriedCount = 0;
-   s_scriptAny = -1;
 }
-
-namespace comm_orders_lua {
-
-void set_command_any(int on) { s_scriptAny = on < 0 ? -1 : on ? 1 : 0; }
-
-bool command_any()
-{
-   bool any = s_scriptAny > 0;
-   __try {
-      Player p;
-      if (player(p)) any = ::command_any(p);
-   } __except (EXCEPTION_EXECUTE_HANDLER) {
-   }
-   return any;
-}
-
-} // namespace comm_orders_lua
 
 void comm_orders_goals_changed()
 {

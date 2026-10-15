@@ -39,8 +39,9 @@
 //     cross hair, OR if nothing and they can reach it then the position you are
 //     aiming at").
 //   - A player whose soldier class says CommandAnyFriendly = 1 (squad_formation's
-//     keys, through ClassParent), or for whom a script said
-//     SetCommandAnyFriendly(true), orders any friendly with Attack and Defend:
+//     keys, through ClassParent; a script sets it with the stock
+//     SetClassProperty, odf_gameext_props.hpp), orders any friendly with Attack
+//     and Defend:
 //     the whole squad and the nearest friendlies until there are four (Attack)
 //     or three (Defend). The user: "an ODF param should be instated and when
 //     set, means you can issue commands to any friendlies without requiring
@@ -66,7 +67,7 @@ void comm_orders_install(uintptr_t exe_base);
 void comm_orders_uninstall();
 
 // The mission is over (EventManager::Cleanup): its requests go, nothing is
-// deleted (the goals go with the mission), and what a script said with them.
+// deleted (the goals go with the mission).
 void comm_orders_mission_end();
 
 // A goal was deleted or a team's cleared (ai_goals.cpp, after the game's own
@@ -77,14 +78,3 @@ void comm_orders_goals_changed();
 // For the HUD (render/hud_wingmen.hpp): the target of the Attack (0) or Defend
 // (1) request under way, an object (`obj`) or a place (`place`); false for none.
 bool comm_orders_hud_target(int which, uint8_t** obj, float place[3]);
-
-// From a mission script (lua/lua_comm_orders.cpp; docs/user/LUA_API.md, "Comm
-// Key Orders"), for the rest of the mission.
-namespace comm_orders_lua {
-// SetCommandAnyFriendly: 1, the player orders any friendly with Attack and
-// Defend; 0, its squad alone; -1, its soldier class's CommandAnyFriendly decides
-// again.
-void set_command_any(int on);
-// Whether the player orders any friendly now.
-bool command_any();
-} // namespace comm_orders_lua

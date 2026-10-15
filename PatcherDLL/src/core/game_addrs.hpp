@@ -336,6 +336,11 @@ namespace modtools {
    constexpr uintptr_t explosion_class_read_prop_site = 0x00601fab;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x00605a4b;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0061e46c;
+   // Lua_Callbacks::SetClassProperty (0x004728F0) hands the class, the property's
+   // hash and its value to the class's SetProperty (slot 0x18) here: MOV EDX,[EDI]
+   // / PUSH ESI / PUSH EAX / MOV ECX,EDI / CALL [EDX+0x18], this=EDI hash=EAX
+   // value=ESI. The listeners see a script's properties there too.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0047296e;
 
    // Second self-piloted-hover crash: issuing a unit order crashes in
    // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
@@ -2695,6 +2700,9 @@ namespace steam {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f842d;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067a2b9;
+   // Lua_Callbacks::SetClassProperty (0x0058ECC0): MOV EDX,[EDI] / MOV ECX,EDI /
+   // PUSH ESI / PUSH [EAX] / CALL [EDX+0x18], this=EDI hash=[EAX] value=ESI.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0058ed36;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -4080,6 +4088,8 @@ namespace gog {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f94cd;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067b359;
+   // Lua_Callbacks::SetClassProperty (0x0058FC60), the same bytes as Steam's.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0058fcd6;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;

@@ -10,6 +10,11 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **GameExt class properties from scripts** - The stock Lua `SetClassProperty` sets the properties
+  BF2GameExt adds to entity classes too (the squad, wingmen, comm key, camera shake and directional
+  roll and jet properties), as if the line were in the class's ODF; `RemoveOnDeath` stays ODF-only.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#from-a-mission-script).
+
 - **Camera shake** - The stock shake from explosions, walker deaths and flyer crashes is
   drawn as a blast, a smooth roll and sway that follows the strongest explosion running
   and shrinks while zoomed in, instead of a new random jolt every frame. ODFs can shake
@@ -122,8 +127,9 @@ Scripts can check the running version through `GameExt.version`.
   barriers, as soldiers going anywhere else do, then falls back into formation. Stock followers
   walk straight along their place's trail and get caught on scenery. `[AI] SquadPathfinding=1`;
   not yet tested in play.
-- **Flyer wingmen** - Friendly AI flyers fly in formation on the player's flyer, take orders
-  from the squad and comm keys (form up, engage, attack my target, cover me) and land with it.
+- **Flyer wingmen** - Friendly AI flyers fly in formation on the player's flyer once the squad key
+  calls them up (or at every takeoff, `[AI] FlyerWingmenAuto=1`), take orders from the squad and
+  comm keys (form up, engage, attack my target, cover me) and land with it.
   Aim the squad key at a friendly flyer to pick it, hold it to break the flight off; each
   wingman has a marker on the map and on screen (`[AI] FlyerWingmenMarkers=1`), and an attack
   order's target a red one; a `.hud` can draw its own from `player1.wingmanN.*` and
@@ -143,12 +149,12 @@ Scripts can check the running version through `GameExt.version`.
 - **Comm key orders** - In single player the comm keys ask the AI for help. Attack and Defend order
   your squad (the AI following you): after your target or to the place you aim at, or to guard the
   friendly or place you aim at, falling back in behind you after; the `CommandAnyFriendly` soldier
-  property and Lua `SetCommandAnyFriendly` let you order any friendly. Spotted points nearby allies who
-  can see your target at it; Medic, Repair and Ammo bring a squadmate who can give it, else the nearest
-  friendly who can; Pickup brings the nearest AI-driven hover; Backup brings three nearby allies; those
-  outside your squad help for 15 seconds. Each key also gets the game's chat line, marker and shout,
-  and the Attack and Defend targets markers a `.hud` can draw from `player1.orders.attack.*` and
-  `.defend.*`. A prototype, modtools only, `[AI] CommKeyOrders=1`; partly played.
+  property lets you order any friendly. Spotted points nearby allies who can see your target at it;
+  Medic, Repair and Ammo bring a squadmate who can give it, else the nearest friendly who can; Pickup
+  brings the nearest AI-driven hover; Backup brings three nearby allies; those outside your squad help
+  for 15 seconds. Each key also gets the game's chat line, marker and shout, and the Attack and Defend
+  targets markers a `.hud` can draw from `player1.orders.attack.*` and `.defend.*`. A prototype,
+  modtools only, `[AI] CommKeyOrders=1`; partly played.
 - **AI goal limit and units' own goals** - Up to 64 AI goals at once instead of 20
   (`[LimitIncreases] AIGoalLimit=64`), and `SetUnitGoal`, `ClearUnitGoal` and `GetUnitGoal`
   give an AI unit a goal of its own that it keeps across respawns and no one else joins.
