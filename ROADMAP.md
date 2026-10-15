@@ -484,6 +484,13 @@ the chat the host passes on (docs/RE/AISystem.md, "The comm keys' requests and t
 (docs/RE/HintNodes.md). Keep them and give them a job: a way in that wingmen fly through to a hangar
 and ground AI walk through to a building, or where a pickup waits (the user, 2026-10-14).
 
+**Hangars from landing regions** - Wingmen find a hangar only from the player's flight: the door is
+where a ray 40 m up first meets a roof, so a taller hangar has none, and vanilla maps carry no access
+hints to mark it. Every hangar a player can land in sits in a landing region, but custom maps use them
+in the open air too: count a landing region with a roof over it as a hangar, its door where the trail
+enters it and its places kept inside it, with today's ray as the fallback (docs/RE/FlyerAI.md, "Landing
+regions as hangars").
+
 **A demonstration campaign map** - Nothing shows the new AI off in one place. Once the AI work is in,
 put together a simple campaign map (the user asked for help with one, 2026-10-14) that walks through
 each feature: squads and formations, wingmen and their orders, landing, the comm keys, AI goals.

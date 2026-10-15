@@ -1267,3 +1267,39 @@ flight, with events. The user-facing tables are in docs/user/ODF_PROPERTIES.md a
   engage range and its clamp, the roles' foe choice, Wingman = 0, the script's flight size);
   `tests/flyer_wingmen_abi_tests.py` (the name lookup's push sequence and `_Find`'s guard, the keys' hashes
   absent from the exe, the event rows); the mutation suites `orders` and `wingmen`. Nothing of it played.
+
+## Landing regions as hangars (researched 2026-10-15, not built)
+
+The wingmen find a hangar only from the player's flight: the door is the first trail point where a ray 40 m up
+from the leader meets something, and each wingman's walls come from rays round it. A map cannot mark the
+opening: access hints (type 3) are dropped at load and the stock maps have none (docs/RE/HintNodes.md). The
+user: "My only issue is with backwards compatibility with vanilla maps where these nodes aren't used", then
+"Landing regions should encompass the hangar model roughly, and so should work. However in custom maps they
+are used in open air settings too." Every place a player may land is inside a landing region, so vanilla
+hangars have one; a custom map's open-air pad has one too, so a region alone does not say hangar.
+
+**What the game keeps** (read in P, then M):
+
+- `TriggerRegionManager::sInstance`, M `0x00B9A73C` (a pointer; P `0x00C73084`). `mTriggerRegions` at `+0x18`:
+  32 `TriggerRegionData` of 8 bytes, the `PblRegion*` then its `TriggerType` (`TRIGGER_DEATH` 0, `TRIGGER_SINK`
+  1, `TRIGGER_LANDING` 2); `mSinkHeight` `+0x118`; `mLandingRegionsExist` (a byte) `+0x11C`.
+- `TriggerRegionManager::AddRegion` (M `0x00663F80`, P `0x00781FC0`, thiscall(name, type), RET 8) finds the
+  world's region by name (`PblRegion::Find`, M `0x007E91E0`) and takes the first free slot; Lua
+  `AddLandingRegion` (M `0x0046C710`, P `0x00654860`) adds one as `TRIGGER_LANDING` (not on a network client).
+- `PblRegion`, 0x60 bytes: its matrix (right `+0x00`, up `+0x10`, forward `+0x20`, position `+0x30`), `mSize`
+  `+0x40` (x, y, z, w), `mId` `+0x50` (the name's hash), `mType` `+0x54`: 1 sphere (radius `w`), 2 box (half
+  sizes x, y, z along right, up and forward), 3 cylinder (radius x, half height y along up), 4 plane, 5 box on
+  the world's axes, 6 to 8 cylinders on the world's x, y and z.
+- `PblRegion::IsPointInside` (M `0x007E7820`, P `0x00868C40`, thiscall(const PblVector3*), RET 4) tests a
+  point by those shapes. `FlagItem::IsInLandingZone` (M `0x006514E0`, P `0x005BCC30`) shows the walk: while
+  `mLandingRegionsExist`, each of the 32 slots (`GetTriggerRegionData`, M thunk `0x00408E95`) of type 2, the
+  point tested.
+
+**A hangar from them, vanilla maps included:** a landing region with a roof over it. When the leader lands (or
+flies) inside a landing region, the roof is looked for from its position up to the top of the region (not the
+fixed 40 m), so a tall hangar counts; with no roof found, the region is open air and nothing changes. Under a
+roof: the door is the trail's first point inside the region, wherever the ceiling is; landing places are kept
+inside the region; the closing up, the lift off and the slower door follow from it. Where a map has no landing
+regions, or a hangar's region does not cover its mouth, today's roof ray stays as the fallback. Not yet read:
+how a region's top is worked out for a turned box or cylinder (the corner heights from the matrix and sizes),
+and whether `mRegion` can change while a mission runs (`RemoveLandingRegion`).
