@@ -67,6 +67,25 @@ void threats()
    // A faster one closing from behind: step aside, no braking.
    assert(assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {2, 0, -60}, {0, 0, 90}, 6.0f, t));
    assert(t.brake == 0.0f);
+   // Single file (a wingman on the trail): one ahead going its way is kept
+   // behind, slowed by the threat's urgency, not passed round; one behind it or
+   // meeting it is stepped round as before.
+   assert(assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {2, 0, 18}, {0, 0, 60}, 6.0f, t) && t.aheadSameWay);
+   const float urgent = t.urgency;
+   single_file(t);
+   assert(t.away.x == 0.0f && t.away.y == 0.0f && t.away.z == 0.0f && urgent > 0.0f && near(t.brake, kBrake * urgent));
+   assert(assess({0, 0, 0}, {0, 0, 60}, 6.0f, kFwd, kRight, {2, 0, -18}, {0, 0, 60}, 6.0f, t) && !t.aheadSameWay);
+   single_file(t);
+   assert(t.away.x < -0.99f);   // behind it: unchanged
+   assert(assess({0, 0, 0}, {0, 0, 70}, 6.0f, kFwd, kRight, {-10, 0, 200}, {0, 0, -70}, 6.0f, t) && !t.aheadSameWay);
+   single_file(t);
+   assert(t.away.x > 0.99f);    // meeting it: stepped round
+   Threat hard;
+   hard.aheadSameWay = true;
+   hard.urgency = 0.1f;
+   hard.brake = 0.3f;
+   single_file(hard);
+   assert(near(hard.brake, 0.3f));   // a harder brake already: kept
    // Radii are kept within bounds; bad input is no threat.
    assert(near(clamp_radius(100.0f), kMaxRadius) && near(clamp_radius(0.0f), kMinRadius) && near(clamp_radius(kNan), kMinRadius));
    assert(!assess({0, 0, 0}, {0, 0, 70}, 6.0f, kFwd, kRight, {kNan, 0, 50}, {0, 0, -70}, 6.0f, t));

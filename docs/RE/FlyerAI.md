@@ -1069,6 +1069,21 @@ and `ai/flyer_orders_core.hpp`. None of it played yet.
     and slow under a roof (`roof_circle`: at its hover height, 15 to 30 m round the point with most room, eight
     rays at static, terrain, water and vehicles, of the one over the leader and those on ahead before a wall;
     no room, let go). Under a roof one interrupted past its two retries is let go, not sent round again.
+  - **Through the mouth** (the user: "they have a good chance to hit the rim trying to enter despite
+    following my path"; the log had one die entering along the trail). The trail's line checks were one ray
+    down the middle, so a wingman could cut the corner of the mouth its wings could not clear; it flew it at
+    the speed that keeps its place in the line; and avoidance could push it sideways off the path round the
+    one ahead. Now:
+    every line on the trail is checked at its size (`fits`: the line and four beside it, its collision
+    radius, as RaiseHeight reads it, plus 2 m out, square to it); the point it steers at is moved off what is
+    beside it (`centring`, `flyer_trail_core.hpp` `centre_offset`: rays 40 m each way from the point,
+    sideways and up and down; with something both sides, the middle; with one side nearer than its size,
+    away from it), once for each point; within 60 m along the trail of the door (`s_door`, the point where
+    the leader went under a roof), or under a roof itself, it flies at its slowest (`slow_on_trail`); and
+    on the trail avoidance runs in single file (`flyer_avoidance_core.hpp` `single_file`: a flyer ahead
+    going its way brakes it by the threat's urgency, no push to the side). One circling low with no place
+    yet comes in to its circle along the trail while a wall is between (it was steering straight at a point
+    inside the hangar from outside it).
   - **The way out** (the user: "can it fly back out the way it flew in, probably by [following] my path
     backwards? Lots of hangars are single entry/exit, so if they disband it's highly likely they'll crash
     unless they do this"): one let go under a roof while flying (no place and no room to circle, its

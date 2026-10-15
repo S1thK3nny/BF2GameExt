@@ -192,6 +192,37 @@ inline float squeeze(float now, bool roofed, float dt)
    return now - step > to ? now - step : to;
 }
 
+// ---- Through a hangar's mouth ------------------------------------------------------
+// The user, after the first entries along the trail: "they have a good chance to
+// hit the rim trying to enter despite following my path". On the trail a
+// wingman's lines are checked at its whole size (the caller's rays: the line and
+// four beside it, its radius plus kFitMargin out), so it cuts no corner its wings
+// cannot clear; the point it steers at is moved off what is beside it
+// (centre_offset: to the middle of an opening narrower than twice kCentreReach,
+// out to its size from one wall nearer than that); and within kDoorSlow along
+// the trail of where the leader went under a roof (near_door), or under one
+// itself, it flies at its slowest.
+constexpr float kFitMargin   = 2.0f;    // m beyond its radius
+constexpr float kCentreReach = 40.0f;   // m looked out each way from the point it steers at
+constexpr float kDoorSlow    = 60.0f;   // m along the trail either side of the door
+
+// How far to move a point toward `right` between something solid `left` and
+// `right` metres off either side (infinity or NaN: nothing within
+// kCentreReach), for a flyer needing `need` either side: to the middle with
+// both within reach; away from one nearer than `need`; else not at all.
+inline float centre_offset(float left, float right, float need)
+{
+   const bool l = left < kCentreReach, r = right < kCentreReach;
+   if (l && r) return 0.5f * (right - left);
+   if (l && left < need) return need - left;
+   if (r && right < need) return right - need;
+   return 0.0f;
+}
+
+// Whether a point `along` the trail is within kDoorSlow of the door, `door` the
+// along of the point where the leader went under a roof (NaN: none).
+inline bool near_door(float along, float door) { return std::fabs(along - door) <= kDoorSlow; }   // NaN: no
+
 // ---- The way out ------------------------------------------------------------------
 // One let go under a roof flies back out the way the leader flew in: along the
 // trail backwards, older points first (nearest_back, back_candidates), until it

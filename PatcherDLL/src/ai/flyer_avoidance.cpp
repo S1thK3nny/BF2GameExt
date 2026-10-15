@@ -185,7 +185,9 @@ void uninstall()
 
 bool active() { return g_flyerAvoidance && s_installed; }
 
-void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed)
+float size_of(const uint8_t* flyer) { return flyer ? clamp_radius(radius_of(flyer)) : kMinRadius; }
+
+void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, bool singleFile)
 {
    if (!active() || !flyer || !point) return;
    const double now = seconds();
@@ -204,7 +206,9 @@ void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed)
       const V3 to = b.pos - me;
       if (!(flyer_wingmen::dot(to, to) <= kScanRange * kScanRange)) continue;
       Threat t;
-      if (assess(me, vel, radius, fwd, right, b.pos, b.vel, b.radius, t)) add(avoid, t);
+      if (!assess(me, vel, radius, fwd, right, b.pos, b.vel, b.radius, t)) continue;
+      if (singleFile) single_file(t);
+      add(avoid, t);
    }
    s_stats.add(avoid);
    report(now);

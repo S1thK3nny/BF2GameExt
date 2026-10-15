@@ -49,6 +49,7 @@ struct Threat {
    V3    away;             // the way out, square to its heading
    float brake = 0.0f;     // 0 to kBrake: a slower flyer ahead going its way
    float pass = 0.0f;      // m between the two at their closest
+   bool  aheadSameWay = false;   // the other ahead of it, going its way
 };
 
 // The other flyer, `other` with `otherVel`, against this one at `me` with
@@ -83,8 +84,21 @@ inline bool assess(V3 me, V3 myVel, float myRadius, V3 fwd, V3 right, V3 other, 
    // Ahead of it, going its way, and closing from behind: ease off too.
    V3 otherFwd = otherVel;
    const bool sameWay = normalise(otherFwd) && dot(otherFwd, fwd) > kSameWay;
-   t.brake = dot(r, fwd) > 0.0f && sameWay && dot(w, fwd) < -1.0f ? kBrake * t.urgency : 0.0f;
+   t.aheadSameWay = dot(r, fwd) > 0.0f && sameWay;
+   t.brake = t.aheadSameWay && dot(w, fwd) < -1.0f ? kBrake * t.urgency : 0.0f;
    return true;
+}
+
+// Single file (one of the player's wingmen on its leader's trail, flyer_wingmen.cpp):
+// a flyer ahead of it going its way is not passed round, which would push it off
+// the path into what is beside it (a hangar's rim), but kept behind: no push to
+// the side, and its speed eased by the threat's urgency (kBrake at most).
+inline void single_file(Threat& t)
+{
+   if (!t.aheadSameWay) return;
+   t.away = V3{};
+   const float b = kBrake * t.urgency;
+   if (b > t.brake) t.brake = b;
 }
 
 // The threats together.

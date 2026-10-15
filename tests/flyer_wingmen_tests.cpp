@@ -17,6 +17,7 @@ using namespace flyer_wingmen;
 namespace {
 
 const float kNan = std::numeric_limits<float>::quiet_NaN();
+const float kInf = std::numeric_limits<float>::infinity();
 
 bool near(float a, float b, float eps = 1e-4f) { return std::fabs(a - b) <= eps; }
 
@@ -1207,6 +1208,18 @@ void trail()
    assert(nearest_back(back, V3{80.0f, 0.0f, 0.0f}, 4) == 4);
    assert(nearest_back(longer, V3{0.0f, 0.0f, 0.0f}, 99) == 99 - kWindow);
    assert(nearest_back(t, V3{kNan, 0.0f, 0.0f}, -1) == -1 && nearest_back(Trail{}, V3{}, -1) == -1);
+   // Through a hangar's mouth: to the middle between two walls within 40 m;
+   // away from one nearer than it needs; nothing else moves it.
+   assert(near(centre_offset(10.0f, 30.0f, 8.0f), 10.0f) && near(centre_offset(30.0f, 10.0f, 8.0f), -10.0f));
+   assert(near(centre_offset(39.0f, 39.5f, 8.0f), 0.25f));
+   assert(near(centre_offset(5.0f, kInf, 8.0f), 3.0f) && near(centre_offset(kInf, 5.0f, 8.0f), -3.0f));
+   assert(centre_offset(20.0f, kInf, 8.0f) == 0.0f && centre_offset(kInf, 20.0f, 8.0f) == 0.0f);
+   assert(centre_offset(kInf, kInf, 8.0f) == 0.0f && centre_offset(40.0f, 5.0f, 8.0f) == -3.0f);
+   assert(centre_offset(kNan, 10.0f, 8.0f) == 0.0f && centre_offset(kNan, kNan, 8.0f) == 0.0f);
+   // Slow within 60 m of the door along the trail, either side.
+   assert(near_door(100.0f, 150.0f) && near_door(150.0f, 100.0f) && near_door(100.0f, 160.0f) && !near_door(100.0f, 161.0f));
+   assert(!near_door(100.0f, kNan) && !near_door(kNan, 100.0f));
+   assert(kFitMargin == 2.0f && kCentreReach == 40.0f && kDoorSlow == 60.0f);
    // Where it may cut back to: 16, 8, 4 and 2 points back, never before the oldest.
    assert(back_candidates(back, 20, cuts) == 4 && cuts[0] == 4 && cuts[1] == 12 && cuts[2] == 16 && cuts[3] == 18);
    assert(back_candidates(back, 3, cuts) == 2 && cuts[0] == 0 && cuts[1] == 1);

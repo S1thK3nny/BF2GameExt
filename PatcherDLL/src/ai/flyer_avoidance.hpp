@@ -27,7 +27,10 @@
 //     it climb and brake: the avoidance keeps it clear instead.
 //
 // Placed flyers (on their paths' curves, not on real flight) are not steered
-// at all and keep the stock behaviour.
+// at all and keep the stock behaviour. One of the player's wingmen on its
+// leader's trail flies in single file: a flyer ahead of it going its way slows it
+// instead of pushing it off the path to the side (single_file), which could
+// push it into a hangar's rim.
 //
 // READ ON MODTOOLS (Steam and GOG: not yet):
 //
@@ -65,7 +68,13 @@ bool active();
 // After EntityFlyer::CalculateDest steered an AI flyer, from the wingmen's
 // stand-in: `point` bent away from flyers it would pass too close to, `speed`
 // (the target, 0 to 1) eased behind a slower one. `dest` is the
-// ControllableDestination CalculateDest copied.
-void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed);
+// ControllableDestination CalculateDest copied. `singleFile`: a wingman on its
+// leader's trail, kept behind a flyer ahead going its way rather than pushed off
+// the path round it (flyer_avoidance_core.hpp, single_file).
+void adjust(uint8_t* flyer, const uint8_t* dest, float* point, float* speed, bool singleFile = false);
+
+// A flyer's collision sphere's radius, as RaiseHeight reads one, kept within
+// kMinRadius to kMaxRadius.
+float size_of(const uint8_t* flyer);
 
 } // namespace flyer_avoidance

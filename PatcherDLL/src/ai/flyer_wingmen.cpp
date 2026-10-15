@@ -403,6 +403,8 @@ struct Wingman {
    int      clearLooks = 0;    // looks in a row with its way clear
    double   gainedAt = 0.0;    // when it last got to a further point
    double   waitUntil = 0.0;   // stuck on it: left to its own AI until then
+   int      shiftFor = -1;     // the point it steers at moved off what is beside it (centring): that point ...
+   V3       trailShift;        // ... and the move
    bool     shut = false;      // something solid on its line to where it is going, as last looked ...
    double   shutAt = -1e9;     // ... when (follow_trail)
    bool     roofed = false;    // under a roof itself, as last looked (update_trail): the game's lift off (no_lift)
@@ -1968,6 +1970,52 @@ bool occupied(V3 spot, float top, uint8_t* self)
    return false;
 }
 
+// Whether `self`, its radius plus kFitMargin round, fits along the line from
+// `from` to `to`: nothing solid on the line, nor on the four beside it that far
+// out square to it (right, left, up, down). The trail's checks were the line
+// alone, and wingmen cut the corner of a hangar's mouth their wings could not.
+bool fits(V3 from, V3 to, uint8_t* self, uint8_t* leader)
+{
+   if (blocked(from, to, self, leader)) return false;
+   V3 dir = to - from;
+   if (!flyer_wingmen::normalise(dir)) return true;
+   V3 side = flyer_wingmen::cross(dir, V3{0.0f, 1.0f, 0.0f});
+   if (!flyer_wingmen::normalise(side)) side = V3{1.0f, 0.0f, 0.0f};
+   const V3 up = flyer_wingmen::cross(side, dir);
+   const float r = flyer_avoidance::size_of(self) + flyer_trail::kFitMargin;
+   const V3 out[4] = {side * r, side * -r, up * r, up * -r};
+   for (const V3& o : out)
+      if (blocked(from + o, to + o, self, leader)) return false;
+   return true;
+}
+
+// How far `at` is from something solid the way `dir` goes, kCentreReach at
+// most: infinity for nothing within it.
+float room_toward(V3 at, V3 dir, uint8_t* self, uint8_t* leader)
+{
+   float along = 0.0f;
+   return blocked(at, at + dir * flyer_trail::kCentreReach, self, leader, &along)
+             ? along
+             : std::numeric_limits<float>::infinity();
+}
+
+// The move that takes a point a wingman steers at on the trail, toward which it
+// flies along `dir`, off what is beside it (flyer_trail_core.hpp,
+// centre_offset): to the middle of an opening (a hangar's mouth), or its radius
+// plus kFitMargin out from one wall; the same up and down.
+V3 centring(V3 p, V3 dir, uint8_t* self, uint8_t* leader)
+{
+   V3 side = flyer_wingmen::cross(dir, V3{0.0f, 1.0f, 0.0f});
+   if (!flyer_wingmen::normalise(side)) return V3{0.0f, 0.0f, 0.0f};
+   const V3 up{0.0f, 1.0f, 0.0f};
+   const float need = flyer_avoidance::size_of(self) + flyer_trail::kFitMargin;
+   const float across = flyer_trail::centre_offset(room_toward(p, side * -1.0f, self, leader),
+                                                   room_toward(p, side, self, leader), need);
+   const float rise = flyer_trail::centre_offset(room_toward(p, up * -1.0f, self, leader),
+                                                 room_toward(p, up, self, leader), need);
+   return side * across + up * rise;
+}
+
 // ---- The leader's trail (flyer_trail_core.hpp, FlyerWingmenTrail) --------------------
 // The player's flyer's path, recorded from every flyer's update (the leader's own
 // need not come through UpdateIndirect), with the roof over it looked for every
@@ -1976,6 +2024,7 @@ constexpr double kRoofEvery    = 0.5;     // s
 constexpr float  kTrailReached = 10.0f;   // m: the point it steers at, passed
 flyer_trail::Trail s_trail;
 uint32_t s_trailOf = 0;      // the leader whose path it is (its handle)
+int      s_door = -1;        // the trail's point where the leader last went under a roof
 double   s_squeezedAt = 0.0;
 
 bool trail_live(const Formation& f)
@@ -1999,6 +2048,7 @@ void update_trail(double now)
    if (now - s_player.roofAt >= kRoofEvery) {
       s_player.roofAt = now;
       const bool roof = roofed(at, leader, nullptr);
+      if (roof && !s_player.roofed) s_door = flyer_trail::newest(s_trail);   // the door (slow_on_trail)
       if (roof != s_player.roofed && s_player.count > 0 && order_log())
          install_log("[Wingmen] you fly %s a roof: your wingmen's slots %s", roof ? "under" : "out from under",
                      roof ? "close up" : "open out again");
@@ -2036,6 +2086,27 @@ bool reaches_by_trail(const Formation& f, const Wingman& w)
    return at >= 0 && flyer_trail::takes(true, d) && !blocked(me, flyer_trail::point(s_trail, at), w.obj, f.leader);
 }
 
+// The point a wingman on the trail steers at, moved off what is beside it
+// (centring), worked out once for each point.
+V3 trail_point(uint8_t* flyer, uint8_t* leader, Wingman& w, V3 me)
+{
+   const V3 p = flyer_trail::point(s_trail, w.trailTo);
+   if (w.shiftFor != w.trailTo) {
+      w.trailShift = centring(p, p - me, flyer, leader);
+      w.shiftFor = w.trailTo;
+   }
+   return p + w.trailShift;
+}
+
+// On the trail through the door (flyer_trail_core.hpp, near_door: where the
+// leader went under a roof), or under a roof itself: it flies at its slowest.
+bool slow_on_trail(const Wingman& w)
+{
+   if (w.roofed) return true;
+   if (!w.onTrail || !flyer_trail::has(s_trail, w.trailAt) || !flyer_trail::has(s_trail, s_door)) return false;
+   return flyer_trail::near_door(flyer_trail::along(s_trail, w.trailAt), flyer_trail::along(s_trail, s_door));
+}
+
 // A wingman of the player's with a wall between it and `goal` (its slot, or the
 // place it lands at) flies its leader's trail, looked at every kLookEvery: true
 // while it does, with the point it steers at in `out` and how far behind its
@@ -2051,7 +2122,7 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
    const V3 me = position_of(flyer);
    if (now - w.trailLookAt >= flyer_trail::kLookEvery) {
       w.trailLookAt = now;
-      const bool shut = blocked(me, goal, flyer, leader);
+      const bool shut = !fits(me, goal, flyer, leader);   // its whole size: no corners cut
       w.shut = shut;
       w.shutAt = now;
       if (w.onTrail && !flyer_trail::has(s_trail, w.trailAt)) w.onTrail = false;   // the trail started again
@@ -2086,7 +2157,7 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
          const int n = flyer_trail::cut_candidates(s_trail, w.trailAt, cuts);
          w.trailTo = flyer_trail::next_of(s_trail, w.trailAt);
          for (int k = 0; k < n; ++k)
-            if (!blocked(me, flyer_trail::point(s_trail, cuts[k]), flyer, leader)) {
+            if (fits(me, flyer_trail::point(s_trail, cuts[k]), flyer, leader)) {
                w.trailTo = cuts[k];
                break;
             }
@@ -2114,7 +2185,7 @@ bool follow_trail(uint8_t* flyer, const Formation& f, Wingman& w, V3 goal, doubl
       if (flyer_wingmen::length(to) > kTrailReached && flyer_wingmen::dot(to, nose) > 0.0f) break;
       w.trailTo = flyer_trail::next_of(s_trail, w.trailTo);
    }
-   out = flyer_trail::point(s_trail, w.trailTo);
+   out = trail_point(flyer, leader, w, me);
    return true;
 }
 
@@ -2145,7 +2216,7 @@ bool follow_trail_out(uint8_t* flyer, const Formation& f, Wingman& w, double now
       const int n = flyer_trail::back_candidates(s_trail, w.trailAt, cuts);
       w.trailTo = flyer_trail::prev_of(s_trail, w.trailAt);
       for (int k = 0; k < n; ++k)
-         if (!blocked(me, flyer_trail::point(s_trail, cuts[k]), flyer, leader)) {
+         if (fits(me, flyer_trail::point(s_trail, cuts[k]), flyer, leader)) {
             w.trailTo = cuts[k];
             break;
          }
@@ -2161,7 +2232,7 @@ bool follow_trail_out(uint8_t* flyer, const Formation& f, Wingman& w, double now
       if (flyer_wingmen::length(to) > kTrailReached && flyer_wingmen::dot(to, nose) > 0.0f) break;
       w.trailTo = flyer_trail::prev_of(s_trail, w.trailTo);
    }
-   out = flyer_trail::point(s_trail, w.trailTo);
+   out = trail_point(flyer, leader, w, me);
    return true;
 }
 
@@ -3639,11 +3710,21 @@ bool steer_land(uint8_t* flyer, Formation& f, Wingman& w, Steer& st)
                                                                            flyer_wingmen::in_frame(f.padFrame, me, down)))
                        : onTrail;
          safe = kSafeHeightTaperFactor;   // where the leader flew: not lifted (steer_before)
+         if (slow_on_trail(w)) speed = lo;   // through the door
       }
    } else if (w.land == kLandCircle && w.circleR > 0.0f) {
       // Under a roof with no place yet: low and slow round where there is room
-      // (roof_circle), till one is free.
-      st.point = flyer_orders::loiter_point(w.circleAt, me, w.circleR);
+      // (roof_circle), till one is free; in to it along the leader's trail while
+      // a wall is between (from outside the hangar it was steering straight at
+      // a point inside).
+      V3 onTrail;
+      float behind = 0.0f;
+      if (follow_trail(flyer, f, w, w.circleAt, seconds(), onTrail, behind)) {
+         st.point = onTrail;
+         safe = kSafeHeightTaperFactor;
+      } else {
+         st.point = flyer_orders::loiter_point(w.circleAt, me, w.circleR);
+      }
       speed = lo;
    } else {
       st.point = flyer_orders::loiter_point(f.pad + V3{0.0f, flyer_orders::kLoiterHeight, 0.0f}, me);
@@ -3718,8 +3799,9 @@ bool steer_before(uint8_t* flyer, float dt, Steer& st)
       st.point = flyer_wingmen::to_world(st.frame, me, steer);
       V3 heading = st.point - me;
       if (!flyer_wingmen::finite(st.point) || !flyer_wingmen::normalise(heading)) return false;
-      st.target = flyer_wingmen::target_for_speed(flyer_wingmen::formation_speed(f->leaderTarget, behind, lo, hi), lo,
-                                                  mid, hi);
+      // Through the door, or under a roof itself: at its slowest (slow_on_trail).
+      const float speed = slow_on_trail(*w) ? lo : flyer_wingmen::formation_speed(f->leaderTarget, behind, lo, hi);
+      st.target = flyer_wingmen::target_for_speed(speed, lo, mid, hi);
       st.chasing = true;   // off its slot: no slot statistics
       write_dest(flyer, st, heading, kSafeHeightTaperFactor);
       st.f = f;
@@ -3806,10 +3888,13 @@ bool __fastcall calc_dest_mt(uint8_t* flyer, void*, float dt, void* dest, float*
          flyer_real_flight::restore(onPath);
       }
    }
-   // Every AI flyer, however steered, clear of the flyers around it.
+   // Every AI flyer, however steered, clear of the flyers around it; one of the
+   // player's wingmen on its leader's trail in single file, kept behind those
+   // ahead rather than pushed off the path round them (single_file).
    if (r && flyer_avoidance::active()) {
+      const bool singleFile = steering && st.w && (st.w->onTrail || st.w->land == kLandOutward);
       __try {
-         flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed);
+         flyer_avoidance::adjust(flyer, (const uint8_t*)dest, point, speed, singleFile);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
          caught("the avoidance after CalculateDest");
       }

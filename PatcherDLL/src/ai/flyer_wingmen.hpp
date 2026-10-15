@@ -166,9 +166,17 @@
 // hangar's whole ship, so into the roof). It copies no tricks there. Its line
 // clear three looks in a row, it goes back to its slot. One that gets no further
 // along it for 6 s while its place is ahead is left to its own AI for 10 s, then
-// tries again. Under a roof over the leader (a ray up 40 m, twice a second) the
-// flight's slots close in to half their spacing, half of it a second, and open
-// out again in the open. Under a roof itself (the same ray from each wingman), or
+// tries again. Its lines are checked at its whole size (fits: the line and four
+// beside it, its radius plus 2 m out), so it cuts no corner its wings cannot
+// clear; the point it steers at is moved to the middle of an opening, or its
+// size off one wall (centring: rays 40 m each way from the point); within 60 m
+// along the trail of where the leader went under a roof, or under one itself, it
+// flies at its slowest; and avoidance keeps it behind those ahead of it going its
+// way instead of pushing it off the path round them (flyer_avoidance_core.hpp,
+// single_file). The user, after the first entries: "they have a good chance to
+// hit the rim trying to enter despite following my path". Under a roof over the
+// leader (a ray up 40 m, twice a second) the flight's slots close in to half
+// their spacing, half of it a second, and open out again in the open. Under a roof itself (the same ray from each wingman), or
 // with the leader under one and its line clear as last looked, a wingman flies
 // at its slot, its place or its target with that lift off too
 // (flyer_trail_core.hpp, lift_off): in the first hangar landings two died soon
