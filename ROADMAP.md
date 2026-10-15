@@ -368,6 +368,16 @@ transforms, once per slot: `EventNameFilter` only renumbers by camera, once on P
 `Repeat` block that re-reads its contents N times with the filter set to each index, as
 `ViewPort` does per camera.
 
+**Holographic look** - A `.hud` can already glow: `BlendMode = Additive` on bitmap and vector
+layers, and for a `Model3D` an additive material in its `.msh`
+([docs/RE/HUDBlendMode.md](docs/RE/HUDBlendMode.md)). But nothing in a `.hud` moves over time,
+so a hologram cannot shimmer, pulse or flicker. Add a time-driven transform
+(`TransformNumberWave`: a sine pulse, a flicker, a small random jitter) to drive `Alpha`,
+`Position` or `Color`, with VisualHUD support. Also check whether text honours `Additive`
+(`RedGlyphCacheElement`'s render was never traced), and whether a bitmap can take a scrolling
+texture offset for scanlines. A glow worked out live from any element, a bloom pass over the
+HUD alone, belongs to Shader Patch's renderer, not GameExt.
+
 ## Sound
 
 **Sound region and stream manipulation** - Goal is runtime control over ambient sound
