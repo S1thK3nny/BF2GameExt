@@ -237,6 +237,7 @@
     <ClInclude Include="src\render\scripted_camera.hpp" />
     <ClInclude Include="src\render\scripted_camera_core.hpp" />
     <ClInclude Include="src\lua\lua_camera.hpp" />
+    <ClInclude Include="src\lua\lua_coroutines.hpp" />
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp" />
     <ClInclude Include="src\render\light_projected_texture_fix.hpp" />
     <ClInclude Include="src\render\water_texture_count_fix.hpp" />
@@ -435,6 +436,7 @@
     <ClCompile Include="src\render\hud_team_texture.cpp" />
     <ClCompile Include="src\render\scripted_camera.cpp" />
     <ClCompile Include="src\lua\lua_camera.cpp" />
+    <ClCompile Include="src\lua\lua_coroutines.cpp" />
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp" />
     <ClCompile Include="src\render\light_projected_texture_fix.cpp" />
     <ClCompile Include="src\render\water_texture_count_fix.cpp" />

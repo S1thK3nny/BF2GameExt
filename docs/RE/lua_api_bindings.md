@@ -211,3 +211,37 @@ All addresses are unrelocated (imagebase `0x400000`). Resolution handles ASLR au
 | `luaopen_string` | `0x7BBDE0` |
 | `luaopen_math` | `0x7BA390` |
 | `luaopen_debug` | `0x7B9BD0` |
+
+## Coroutines and `LuaHelper::mState`
+
+The game's Lua bindings never use the `lua_State*` they are called with. Every one read
+so far takes its arguments from, and pushes its results onto, `LuaHelper::mState`, the
+one global state (`g_lua_state_ptr`: modtools `0x00B35A58`, Steam `0x01E579A0`, GOG
+`0x01E58E50`). `GetPathPoint` (M `0x00470380`) is typical: `luaL_checklstring(mState,
+1)`, then its matrix pushed onto `mState`. A coroutine runs on a state of its own, so a
+stock call inside one read the main stack's values and left its results there, and the
+coroutine saw nothing come back. GameExt's own functions use the state they are given.
+
+`lua_resume` is where a coroutine runs:
+
+| | modtools | Steam | GOG |
+|---|---|---|---|
+| `coroutine.resume` (`luaB_coresume`) | `0x007BD860` | `0x006A0640` | `0x006A16D0` |
+| `coroutine.wrap`'s functions (`auxwrap`) | `0x007BD8E0` | `0x006A0AB0` | `0x006A1B40` |
+| `auxresume` | `0x007BD7E0` | `0x006A0850` | `0x006A18E0` |
+| `lua_resume` | `0x007BFAD0` | `0x006A3420` | `0x006A44B0` |
+
+`lua_resume` is cdecl(`lua_State* co`, `int nargs`) with a plain `RET`, and names "cannot
+resume dead coroutine" and "cannot resume non-suspended coroutine". Its one caller is
+`auxresume`, after `lua_xmove` has moved the arguments onto the coroutine, and both
+`coroutine.resume` and the functions `coroutine.wrap` makes go through `auxresume`. On
+modtools `luaB_coresume` hands `auxresume` its arguments in registers (EAX the count, ESI
+the coroutine, EDI the caller); on retail it is cdecl.
+
+`lua/lua_coroutines.cpp` detours `lua_resume` with a stub that sets `mState` to the
+coroutine for the call and puts back whatever it was when the call returns, keeping ECX and
+EDX. `lua_resume` catches a Lua error itself (`luaD_rawrunprotected`), so it always returns
+through the stub, and a coroutine resuming another saves and restores in turn. An event
+callback a stock call fires from inside a coroutine runs on the coroutine's stack, which Lua
+allows. `tests/lua_coroutines_tests.cpp` runs the stub against a stand-in `lua_resume`;
+`tests/lua_coroutines_abi_tests.py` audits all of the above on the three builds.

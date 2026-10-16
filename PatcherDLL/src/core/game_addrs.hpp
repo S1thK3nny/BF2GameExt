@@ -47,6 +47,11 @@ namespace modtools {
    // is lua_newuserdata(L, 0x40) and a copy (docs/RE/ScriptedCamera.md).
    constexpr uintptr_t lua_type          = 0x7B7FE0;
    constexpr uintptr_t lua_newuserdata   = 0x7B8E90;
+   // lua_resume: cdecl(lua_State* co, int nargs), plain RET; names "cannot resume
+   // dead coroutine". Its one caller is auxresume 0x007BD7E0 (coroutine.resume
+   // 0x007BD860 and coroutine.wrap's functions), after lua_xmove. Detoured so the
+   // game's functions work inside coroutines (lua/lua_coroutines.cpp).
+   constexpr uintptr_t lua_resume        = 0x7BFAD0;
 
    // Stock Lua callback: CreateEntity(class, matrix, name). Detoured to apply
    // VehicleSpawn-style post-create fixup (team + activate) so vehicles
@@ -2031,6 +2036,8 @@ namespace steam {
    // 0x00591200 calls lua_newuserdata(L, 0x40).
    constexpr uintptr_t lua_type          = 0x69c680;
    constexpr uintptr_t lua_newuserdata   = 0x69be30;
+   // lua_resume, as on modtools; auxresume 0x006A0850 (cdecl here) calls it.
+   constexpr uintptr_t lua_resume        = 0x6a3420;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
@@ -3826,6 +3833,8 @@ namespace gog {
    // 0x005921A0 calls lua_newuserdata(L, 0x40).
    constexpr uintptr_t lua_type                       = 0x0069d710;
    constexpr uintptr_t lua_newuserdata                = 0x0069cec0;
+   // lua_resume, as on Steam; auxresume 0x006A18E0 calls it.
+   constexpr uintptr_t lua_resume                     = 0x006a44b0;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ------------------

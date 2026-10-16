@@ -186,6 +186,11 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- The game's Lua functions work inside coroutines. Every one of them read its arguments
+  from the main script's stack whoever called it, so inside a coroutine it got the wrong
+  arguments and its results went missing. While a coroutine runs, the game's functions
+  now use its stack, so a mission script can pause halfway through a sequence and go on.
+  See [Lua API](docs/user/LUA_API.md#coroutines).
 - `GameExtContentCensus()`, the name the documentation gives for the content budget
   report, did not exist: the report was registered for Lua as `ContentCensus()`. Both
   names now work.

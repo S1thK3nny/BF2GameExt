@@ -189,6 +189,8 @@ See **[HUD System](HUD.md)** for how to use them and **[HUD Properties](HUD_PROP
 
 ## Mission Scripting
 
+- **Coroutines** - The game's Lua has coroutines, but the game's own functions read the main script's stack whoever calls them, so inside a coroutine they got the wrong arguments and their results went missing, and a script could not pause halfway through a sequence. They now work inside coroutines, so a mission script can write a sequence top to bottom with waits in it. See [Lua API](LUA_API.md#coroutines).
+
 - **Scripted Camera** - A mission script had no way to move the player's camera: the only views were the player's own and pre-rendered movies. A script can now take the view for a shot from any spot, a chase camera on any unit or a flight along a ZeroEditor path, aim it at a moving target, zoom and shake it, then blend back to the player's own camera. Over gameplay it can also turn the player's view toward something for a moment. The player is shown in third person while a script holds the view. See [Lua API](LUA_API.md#camera).
 
 ## Additional Console Commands

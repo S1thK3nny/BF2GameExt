@@ -4,6 +4,7 @@
 #include "apply_patches.hpp"
 #include "resolve.hpp"
 #include "lua/lua_hooks.hpp"
+#include "lua/lua_coroutines.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/menu_navigation.hpp"
@@ -381,6 +382,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
 
    // Resolve Lua API addresses and register our custom functions into the live Lua state.
    lua_hooks_install(exe_base);
+   lua_coroutines_install(exe_base);   // Detours lua_resume - needs the RW window
 
    // Installers that select their address set from g_addr; each no-ops where its
    // addresses are unknown.  Called here while sections are still RW.

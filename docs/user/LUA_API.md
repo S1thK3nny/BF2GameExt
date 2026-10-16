@@ -357,6 +357,73 @@ CameraShake(1.5, 2)
 `GetCameraMatrix()` keeps a view to come back to: store it in a script variable and
 hand it to `CameraShot` later.
 
+## Coroutines
+
+The game's Lua has coroutines (`coroutine.create`, `resume`, `yield`, `wrap`), but the
+game's own functions did not work inside one: they read their arguments from the main
+script's stack whatever called them, so inside a coroutine they got the wrong arguments
+and their results went missing. With BF2GameExt they work inside coroutines as anywhere
+else, so a sequence can be written top to bottom with waits in it. Since 1.2.0; check
+`GameExt_TestVersion(1, 2, 0)` before relying on it.
+
+A coroutine pauses with `coroutine.yield` and goes on when something resumes it. The
+game has no wait of its own, so a small helper resumes it from a timer:
+
+```lua
+-- Sequence(body) runs body as a coroutine; Wait(seconds) inside it pauses it.
+local sequenceWaits = 0
+local function Sequence(body)
+   local co = coroutine.create(body)
+   local function step()
+      local ok, seconds = coroutine.resume(co)
+      if not ok then
+         print("Sequence: " .. tostring(seconds))
+      elseif seconds then
+         sequenceWaits = sequenceWaits + 1
+         local t = CreateTimer("sequence_wait" .. sequenceWaits)
+         SetTimerValue(t, seconds)
+         StartTimer(t)
+         OnTimerElapse(function(timer) DestroyTimer(timer) step() end, t)
+      end
+   end
+   step()
+end
+
+local function Wait(seconds)
+   coroutine.yield(seconds)
+end
+
+-- The first time a human player spawns, a short scene.
+local played = false
+OnCharacterSpawn(function(player)
+   if played or not IsCharacterHuman(player) then return end
+   played = true
+   Sequence(function()
+      Wait(3)
+      CameraFollow(player, { offset = { 0, 3, -8 }, blend = 1 })
+      Wait(4)
+      local unit = GetCharacterUnit(player)   -- a stock function, inside the coroutine
+      if unit then
+         CameraShot(GetEntityMatrix(unit), { offset = { 0, 5, 15 }, lookAt = player, blend = 1 })
+      end
+      Wait(4)
+      CameraRelease(1)
+   end)
+end)
+```
+
+Things to know:
+
+- Only a coroutine can wait. An event callback such as `OnCharacterSpawn`'s function is
+  not one, so start a `Sequence` from it rather than calling `Wait` in it directly.
+- An event callback that a game function fires from inside a coroutine (a `KillObject`
+  firing `OnObjectKill`, say) runs at once, as it always does, and cannot wait either.
+- An error inside a coroutine stops that coroutine only: `coroutine.resume` returns
+  `false` and the message, which `Sequence` above prints.
+- In multiplayer, timers and event callbacks run on the host, so a sequence that waits on
+  them runs there. A script that relies on this needs BF2GameExt on the machine that runs
+  it.
+
 ## HTTP
 
 Make HTTP requests directly from Lua. Useful for telemetry, live configuration, or external API integration in either singleplayer or multiplayer missions.

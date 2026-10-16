@@ -63,6 +63,7 @@
 #include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
 #include "render/scripted_camera.hpp"
+#include "lua/lua_coroutines.hpp"
 #include "render/hud_team_texture.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -380,6 +381,7 @@ void lua_hooks_uninstall()
    lightsaber_illumination_uninstall();
    // After it, so its deactivate_all() above is still covered by the guard.
    scripted_camera_uninstall();
+   lua_coroutines_uninstall();
    water_texture_count_fix_uninstall();
    light_projected_texture_fix_uninstall();
    red_light_stale_node_fix_uninstall();

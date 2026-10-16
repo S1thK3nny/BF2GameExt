@@ -388,6 +388,9 @@
     <ClInclude Include="src\lua\lua_camera.hpp">
       <Filter>lua</Filter>
     </ClInclude>
+    <ClInclude Include="src\lua\lua_coroutines.hpp">
+      <Filter>lua</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -916,6 +919,9 @@
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="src\lua\lua_camera.cpp">
+      <Filter>lua</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lua\lua_coroutines.cpp">
       <Filter>lua</Filter>
     </ClCompile>
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp">
