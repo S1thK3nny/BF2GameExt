@@ -364,6 +364,15 @@
     <ClInclude Include="src\render\hud_team_texture.hpp">
       <Filter>render</Filter>
     </ClInclude>
+    <ClInclude Include="src\render\scripted_camera.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\render\scripted_camera_core.hpp">
+      <Filter>render</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lua\lua_camera.hpp">
+      <Filter>lua</Filter>
+    </ClInclude>
     <ClInclude Include="src\render\red_light_stale_node_fix.hpp">
       <Filter>render</Filter>
     </ClInclude>
@@ -824,6 +833,12 @@
     </ClCompile>
     <ClCompile Include="src\render\hud_team_texture.cpp">
       <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\render\scripted_camera.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lua\lua_camera.cpp">
+      <Filter>lua</Filter>
     </ClCompile>
     <ClCompile Include="src\render\red_light_stale_node_fix.cpp">
       <Filter>render</Filter>

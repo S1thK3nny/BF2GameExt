@@ -93,6 +93,28 @@ using fn_lua_insert = void(__cdecl*)(lua_State* L, int idx);
 // Steam builds export it (modtools 0x7B8860, steam 0x69bdb0).
 using fn_lua_newtable = void(__cdecl*)(lua_State* L);
 
+// lua_type(L, idx) - the type tag of the value at idx (lua_t below), lua_t::none
+// past the top. Tells a stock matrix (full userdata) from an entity pointer
+// (light userdata).
+using fn_lua_type = int(__cdecl*)(lua_State* L, int idx);
+
+// lua_newuserdata(L, size) - allocates a full userdata block, pushes it and
+// returns it. The game's matrices are 64-byte ones with no metatable.
+using fn_lua_newuserdata = void*(__cdecl*)(lua_State* L, size_t size);
+
+// Lua 5.0 type tags, as lua_type returns them.
+namespace lua_t {
+constexpr int none          = -1;
+constexpr int nil           = 0;
+constexpr int boolean       = 1;
+constexpr int lightuserdata = 2;
+constexpr int number        = 3;
+constexpr int string        = 4;
+constexpr int table         = 5;
+constexpr int function      = 6;
+constexpr int userdata      = 7;
+} // namespace lua_t
+
 // =============================================================================
 // Lua globals - resolved at runtime from exe base + addresses above
 // =============================================================================
@@ -116,6 +138,8 @@ struct lua_api {
    fn_lua_settop       settop       = nullptr;
    fn_lua_insert       insert       = nullptr;
    fn_lua_newtable     newtable     = nullptr;   // modtools + steam
+   fn_lua_type         type         = nullptr;
+   fn_lua_newuserdata  newuserdata  = nullptr;
 
    int tointeger(lua_State* L, int idx) const { return static_cast<int>(tonumber(L, idx)); }
 

@@ -57,6 +57,7 @@
 #include "entity/foleyfx_region_fix.hpp"
 #include "render/light_projected_texture_fix.hpp"
 #include "render/water_texture_count_fix.hpp"
+#include "render/scripted_camera.hpp"
 #include "render/hud_team_texture.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
@@ -271,6 +272,10 @@ void lua_hooks_install(uintptr_t exe_base)
    g_lua.insert       = (fn_lua_insert)       resolve(exe_base, g_addr->lua_insert);
    if (g_addr->lua_newtable)
       g_lua.newtable  = (fn_lua_newtable)      resolve(exe_base, g_addr->lua_newtable);
+   if (g_addr->lua_type)
+      g_lua.type      = (fn_lua_type)          resolve(exe_base, g_addr->lua_type);
+   if (g_addr->lua_newuserdata)
+      g_lua.newuserdata = (fn_lua_newuserdata) resolve(exe_base, g_addr->lua_newuserdata);
    original_init_state = (fn_init_state)resolve(exe_base, g_addr->init_state);
 
    // Character-exit-vehicle event hook — needs the exit function AND the char
@@ -369,6 +374,7 @@ void lua_hooks_uninstall()
    // the engine's global light lists first, and nothing else ever would.
    lightsaber_illumination_uninstall();
    // After it, so its deactivate_all() above is still covered by the guard.
+   scripted_camera_uninstall();
    water_texture_count_fix_uninstall();
    light_projected_texture_fix_uninstall();
    red_light_stale_node_fix_uninstall();

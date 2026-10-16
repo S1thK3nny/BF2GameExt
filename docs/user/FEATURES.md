@@ -181,6 +181,10 @@ See **[HUD System](HUD.md)** for how to use them and **[HUD Properties](HUD_PROP
 
   There is a fourth, `[AI] PlayerThreatFairness`, which is **off by default**. Stock BF2 treats you as more dangerous while you are aiming at an AI, and turning this on removes that. It makes the AI fairer on paper but noticeably less responsive to play against, because they stop reacting to being aimed at and will sometimes ignore you outright while you have them in your sights. Set it to 1 only if you want the AI to weigh you exactly like a bot in every situation.
 
+## Mission Scripting
+
+- **Scripted Camera** - A mission script had no way to move the player's camera: the only views were the player's own and pre-rendered movies. A script can now take the view for a shot from any spot, a chase camera on any unit or a flight along a ZeroEditor path, aim it at a moving target, zoom and shake it, then blend back to the player's own camera. Over gameplay it can also turn the player's view toward something for a moment. The player is shown in third person while a script holds the view. See [Lua API](LUA_API.md#camera).
+
 ## Additional Console Commands
 
 Extra commands added to the in-game console (`~`). Modtools only, because the

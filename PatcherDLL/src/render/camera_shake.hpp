@@ -86,3 +86,15 @@ enum CameraShakeChannel {
 };
 
 void camera_shake_install(uintptr_t exe_base);
+
+// For a mission script's view (render/scripted_camera.cpp), which goes on after
+// the shake in the same SetupCamera detour:
+//  - this frame's blast, the stock shake queue as drawn here, to shake the
+//    script's view by too (the player's own shakes stay with the player's
+//    camera); false when there is none;
+//  - after the script's view has been set, keep the reticule on the player's
+//    own view, as it is kept on the unshaken one.
+namespace camera_shake { struct Offset; }
+bool camera_shake_hooked();   // the SetupCamera detour is in
+bool camera_shake_blast(camera_shake::Offset& out);
+void camera_shake_view_replaced(void* camera);

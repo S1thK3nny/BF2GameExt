@@ -14,6 +14,7 @@
 #include "core/pbl_hash.hpp"
 #include "core/resolve.hpp"
 #include "entity/odf_gameext_props.hpp"
+#include "render/scripted_camera.hpp"
 #include "util/install_log.hpp"
 
 #include <detours.h>
@@ -470,6 +471,13 @@ ReticleView s_reticle;
 // back before the next SetupCamera (LeftShake).
 LeftShake s_left;
 
+// This frame's blast: the stock queue as drawn, for a scripted view to shake
+// by too (camera_shake_blast).
+Offset s_blast;
+
+// The SetupCamera detour is in, so a scripted view has somewhere to draw.
+bool s_setupHooked = false;
+
 void play(KickChannel& channel, const ClassShake* cs, int id, const Shape& base, float extra = 1.0f)
 {
    Shape shape;
@@ -809,6 +817,7 @@ void shake_view(uint8_t* self, void* camera, float dt)
    s_reticle.valid = false;
    std::memcpy(s_reticle.unshaken, static_cast<uint8_t*>(camera) + layout::RedCamera::kMatrixInverse,
                sizeof s_reticle.unshaken);
+   s_blast = {};
 
    uint8_t* owner = at<uint8_t*>(self, cam::kOwner);
    if (!owner) {
@@ -909,7 +918,8 @@ void shake_view(uint8_t* self, void* camera, float dt)
    total += turbulence(s_boostShape, s_time, s_boost.level);
    total += turbulence(s_turnShape, s_time, s_turn.level);
    total += sway(s_brakeShape, s_time, s_brake.level);
-   total += blast_offset(self, camera, s_odfShakes ? cs : nullptr);
+   s_blast = finite_offset(blast_offset(self, camera, s_odfShakes ? cs : nullptr));
+   total += s_blast;
    // In first person, cockpits included, a shake turns the view but never
    // moves it: the camera is at the eye, and the arms and cockpit drawn from
    // mMatrix would move with it.
@@ -961,6 +971,9 @@ void __fastcall hooked_SetupCamera(uint8_t* self, void* edx, void* camera, float
    s_setupCamera(self, edx, camera, dt);
    suppress = saved;
    shake_view_guarded(self, camera, dt);
+   // A mission script's view, if one holds it, goes on last
+   // (render/scripted_camera.cpp).
+   scripted_camera::after_setup(self, camera, dt);
 }
 
 // The GameObject a weapon's owner is, or null.
@@ -1437,6 +1450,29 @@ void install_hover(uintptr_t base, bool modtools)
 
 } // namespace
 
+bool camera_shake_hooked()
+{
+   return s_setupHooked;
+}
+
+bool camera_shake_blast(camera_shake::Offset& out)
+{
+   out = s_blast;
+   return !s_blast.negligible();
+}
+
+void camera_shake_view_replaced(void* camera)
+{
+   __try {
+      s_reticle.camera = static_cast<uint8_t*>(camera);
+      std::memcpy(s_reticle.shaken, s_reticle.camera + layout::RedCamera::kMatrixInverse,
+                  sizeof s_reticle.shaken);
+      s_reticle.valid = true;
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+      s_reticle.valid = false;
+   }
+}
+
 void camera_shake_install(uintptr_t base)
 {
    const bool modtools = g_build == GameBuild::Modtools;
@@ -1500,6 +1536,7 @@ void camera_shake_install(uintptr_t base)
       return;
    }
    const bool ok = DetourTransactionCommit() == NO_ERROR;
+   s_setupHooked = ok;
    install_log("[CameraShake] %s (SetupCamera 0x%08X): the stock shake drawn as a blast, ODF shakes %s",
                ok ? "installed" : "commit failed", (unsigned)g_addr->chase_camera_setup_camera,
                s_odfShakes ? "on" : "unavailable");

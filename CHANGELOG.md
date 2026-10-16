@@ -76,6 +76,14 @@ Scripts can check the running version through `GameExt.version`.
   while it is on. An element that comes to rest between two pixels looks slightly
   softer; `HudSubPixel=0` keeps the stock rounding. See
   [Configuration](docs/user/CONFIGURATION.md).
+- **Scripted camera** - `CameraShot`, `CameraFollow`, `CameraPath`, `CameraLookAt`,
+  `CameraFOV`, `CameraShake` and `CameraRelease` let a mission script take the
+  player's view and hand it back with a blend: a shot from a matrix, a unit or a
+  point, a chase camera on any unit, a flight along a ZeroEditor path, a look toward
+  something, a zoom and a shake. `GetCameraMatrix`, `GetCameraPosition` and
+  `IsCameraScripted` read it back. The player is shown in third person while a script
+  holds the view. Local to each machine. See
+  [Lua API](docs/user/LUA_API.md#camera).
 - **Team icons in every mode** - `[Features] HudTeamTextureAlways`, on by default,
   sends `player1.team1.texture` and `player1.team2.texture` in every mode but Space
   Assault. The game sent them only in 1-flag and 2-flag CTF, so the icon under each

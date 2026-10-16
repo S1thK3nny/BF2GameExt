@@ -187,6 +187,96 @@ a mission is actually live and reports nil when one is not.
 | `SetFogEnable(enable)` | Toggles the D3D fog render state. Takes `1`/`0` or `true`/`false`. | 1.0.0 |
 | `SetFogRange(start, end)` | Sets near/far fog distances. | 1.0.0 |
 
+## Camera
+
+A mission script can take the player's view: a shot from a fixed spot, a chase camera
+on any unit, a flight along a ZeroEditor path, a look toward something, a zoom and a
+shake, then a blend back to the player's own camera.
+
+The camera only changes what this machine draws. Nothing reaches the simulation or the
+network, and the player's aim and controls are untouched. It works while the player has
+a unit in the world. Before they spawn, and while they are dead, the game draws no
+player camera for it to take over.
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `CameraShot(where [, opts])` | Puts the view at `where`: a matrix (`GetPathPoint`, `GetEntityMatrix`, `CreateMatrix`, `GetCameraMatrix`) or a unit, looking the way it faces, or a point `{x, y, z}`. | 1.2.0 |
+| `CameraFollow(unit [, opts])` | A chase camera on any unit, trailing it a little. | 1.2.0 |
+| `CameraPath(path, seconds [, opts])` | Flies the camera along a ZeroEditor path in `seconds`, passing through every node. | 1.2.0 |
+| `CameraLookAt(target [, opts])` | With a scripted view on screen, aims it at `target`; `nil` goes back to the view's own aim. Without one, turns the player's own view toward `target` for a moment, then back. | 1.2.0 |
+| `CameraFOV([fov [, seconds]])` | Changes the field of view of whatever is on screen over `seconds`, in the game's own measure: 48 is its default. With no `fov`, the game has its own back. | 1.2.0 |
+| `CameraShake(amount [, seconds])` | Shakes the view as an explosion would: a grenade's is 0.5 and a detpack's 2. Lasts 1 second unless told otherwise. | 1.2.0 |
+| `CameraRelease([seconds])` | Blends back to the player's own camera over `seconds` (1 unless told; 0 cuts). | 1.2.0 |
+| `GetCameraMatrix()` | The view on screen as a matrix, facing the way the camera looks. | 1.2.0 |
+| `GetCameraPosition()` | The view's position, as `x, y, z`. | 1.2.0 |
+| `IsCameraScripted()` | True while a script holds the view, a release included. | 1.2.0 |
+
+A **unit** is given the way the stock functions give one: an entity pointer
+(`GetEntityPtr`, `GetCharacterUnit`, `GetCharacterVehicle`, an event's object), a
+world object's name, or a character index, which follows whatever that character
+is in. A pointer has to be a named object or one a character is in now.
+
+**Options** every view takes, in the `opts` table:
+
+| Option | Meaning |
+|--------|---------|
+| `lookAt` | A unit or point to keep the camera aimed at, moving or not. `lookAtOffset = {right, up, forward}` moves the aim point on a unit (1 m up unless told). |
+| `fov` | The field of view while it holds the view, in the game's measure. |
+| `blend` | Seconds to blend in from the view on screen. 0, the default, cuts. |
+| `time` | Seconds before it lets go by itself. Without it, the view holds until `CameraRelease` or another camera command. |
+| `release` | Seconds that letting go blends back over (1 unless told). |
+
+And what each command adds:
+
+| Command | Option | Meaning |
+|---------|--------|---------|
+| `CameraShot` | `offset` | `{right, up, forward}` metres from `where` in its own frame; for a point, in world `x, y, z`. |
+| `CameraFollow` | `offset` | `{right, up, forward}` from the unit, `{0, 4, -12}` unless told: 4 m up and 12 m behind. |
+| | `aim` | The point on the unit it looks at, `{0, 1, 0}` unless told. |
+| | `lag` | Seconds the camera trails its spot by, 0.3 unless told; 0 sticks to it. |
+| | `world` | `true` keeps the offset in world axes, so the camera does not swing round with the unit. |
+| `CameraPath` | `aim` | `"path"`, the default, looks the way it flies; `"nodes"` turns to each node's rotation as set in ZeroEditor. `lookAt` overrides both. |
+| | `ease` | `"inout"`, the default, `"in"`, `"out"` or `"linear"`. |
+| | `loop` | `true` flies it round and round, back to the first node at the end. |
+| | `release` | Lets go at the end, over that many seconds. Without it, the last view holds. |
+| `CameraLookAt` | `time`, `blend`, `release` | Without a scripted view: how long the look holds (2 seconds), turns there (0.5) and turns back (0.5). |
+| | `offset` | Moves the aim point on a unit, as `lookAtOffset` does. |
+
+Things to know:
+
+- A new camera command replaces the one before it, blending from the view on screen.
+- While a shot, a follow or a path holds the view, the player is shown in third person,
+  so their arms and cockpit do not hang in the shot. Their own first-person setting comes
+  back once the release has finished. A cut from first person waits a frame or two for
+  the switch.
+- If the unit a camera follows or looks at is destroyed or deleted, the camera stays
+  where it last was.
+- Explosions near the player and `CameraShake` shake a scripted view too. The player's
+  own shakes, from firing, landing or being hit, do not.
+- A scope's zoom gives way to a shot and comes back after.
+- The HUD stays on screen.
+- Each command returns `true`, or `nil` with a warning in the game's log when an argument
+  is wrong, such as a path the map does not have.
+
+```lua
+-- A flyby: the camera rides "cam_dropship" in 8 seconds, watching the lead
+-- gunship, then hands the view back over 1.5 seconds.
+CameraPath("cam_dropship", 8, { lookAt = "laat_lead", release = 1.5 })
+
+-- A fixed shot of the landing pad from a ZeroEditor path node, with a slow zoom.
+CameraShot(GetPathPoint("cam_spots", 2), { blend = 1, fov = 30, time = 5 })
+
+-- Ride along behind the player's wingman, 20 m back and 6 m up, for 6 seconds.
+CameraFollow("red2_spawn", { offset = { 0, 6, -20 }, lag = 0.5, time = 6, release = 1 })
+
+-- Make the player glance at the shield generator when it blows.
+CameraLookAt("shield_gen", { time = 1.5 })
+CameraShake(1.5, 2)
+```
+
+`GetCameraMatrix()` keeps a view to come back to: store it in a script variable and
+hand it to `CameraShot` later.
+
 ## HTTP
 
 Make HTTP requests directly from Lua. Useful for telemetry, live configuration, or external API integration in either singleplayer or multiplayer missions.

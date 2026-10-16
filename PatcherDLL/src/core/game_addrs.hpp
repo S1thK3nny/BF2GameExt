@@ -42,6 +42,11 @@ namespace modtools {
    constexpr uintptr_t lua_settop        = 0x7B7E70;
    constexpr uintptr_t lua_insert        = 0x7B7F20;
    constexpr uintptr_t lua_newtable      = 0x7B8860;
+   // lua_type and lua_newuserdata, cdecl: luaB_type 0x007BCEF0 calls luaL_checkany,
+   // lua_type, lua_typename, lua_pushstring; GetPathPoint's matrix push 0x004701A0
+   // is lua_newuserdata(L, 0x40) and a copy (docs/RE/ScriptedCamera.md).
+   constexpr uintptr_t lua_type          = 0x7B7FE0;
+   constexpr uintptr_t lua_newuserdata   = 0x7B8E90;
 
    // Stock Lua callback: CreateEntity(class, matrix, name). Detoured to apply
    // VehicleSpawn-style post-create fixup (team + activate) so vehicles
@@ -1273,6 +1278,21 @@ namespace modtools {
    constexpr uintptr_t red_camera_set_matrix        = 0x007FEED0;
    constexpr uintptr_t tracker_is_first_person_view = 0x0049FDD0;
    constexpr uintptr_t flyer_do_trick               = 0x004F3D10;
+   // Scripted camera (render/scripted_camera.cpp); docs/RE/ScriptedCamera.md.
+   // RedCamera::SetFOV: thiscall(float fov, float aspect), RET 8. It writes the
+   // unzoomed half-FOV tangents (+0x138, and +0x13C = +0x138 * aspect) and
+   // rebuilds the projection, which reads the zoom (+0x140). SetupCamera eases
+   // the FOV through it at its end (CALL at 0x004A2A74).
+   // Trackable::CheckFirstPerson: thiscall(int playerId), bool in AL, RET 4.
+   // Trackable::UpdateFirstThirdPerson, which Controllable::Update calls each
+   // update, asks it which view the player should have and switches to it.
+   // The path list GetPathPoint 0x00470380 searches (MOV ECX,0x00AE33F0 / CALL
+   // 0x00820C20): its +0x4 is the first list node, a list node's +0x4 the next
+   // and +0xC its path (null ends it), a path's +0x14 its name hash, +0x18 its
+   // nodes and +0x1C how many; a node is 0x1C bytes, position then rotation.
+   constexpr uintptr_t red_camera_set_fov           = 0x007FEF90;
+   constexpr uintptr_t trackable_check_first_person = 0x004BAC10;
+   constexpr uintptr_t path_list                    = 0x00AE33F0;
    // CameraManager::ApplyShake: thiscall(float amount, float duration), RET 8;
    // queues a stock shake on the chase camera. EntityFlyer::PostCollisionUpdate
    // and CollisionCallback CALL it, through its thunk at 0x004162D4, for a bump
@@ -1809,6 +1829,10 @@ namespace steam {
    constexpr uintptr_t lua_settop        = 0x69c400;
    constexpr uintptr_t lua_insert        = 0x69bc00;
    constexpr uintptr_t lua_newtable      = 0x69bdb0;
+   // luaB_type 0x0069FF20 calls lua_type second; GetPathPoint's matrix push
+   // 0x00591200 calls lua_newuserdata(L, 0x40).
+   constexpr uintptr_t lua_type          = 0x69c680;
+   constexpr uintptr_t lua_newuserdata   = 0x69be30;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
@@ -2745,6 +2769,13 @@ namespace steam {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CBEF0;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3C0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // Scripted camera, as on modtools: RedCamera::SetFOV with the same contract
+   // (SetupCamera's CALL at 0x0045459D), CheckFirstPerson thiscall(int), RET 4,
+   // and the path list GetPathPoint 0x0058EFE0 searches (MOV ECX,0x007DF840 /
+   // CALL 0x006DDFF0), laid out the same.
+   constexpr uintptr_t red_camera_set_fov           = 0x006CBE60;
+   constexpr uintptr_t trackable_check_first_person = 0x00658830;
+   constexpr uintptr_t path_list                    = 0x007DF840;
    // CameraManager::ApplyShake: ECX the manager, the amount in XMM1 and the
    // duration in XMM2, plain RET. It changes only EAX, ECX and XMM1, and both
    // flyer collision callers use EDX and XMM0 after it. EntityFlyer::
@@ -3449,6 +3480,12 @@ namespace gog {
    constexpr uintptr_t red_camera_set_matrix        = 0x006CCF90;
    constexpr uintptr_t tracker_is_first_person_view = 0x0044E3A0;
    constexpr uintptr_t flyer_do_trick               = 0x004B18F0;
+   // Scripted camera, as on Steam: SetFOV (SetupCamera's CALL at 0x0045457D),
+   // CheckFirstPerson, and the path list GetPathPoint 0x0058FF80 searches
+   // (MOV ECX,0x007E0840 / CALL 0x006DF090).
+   constexpr uintptr_t red_camera_set_fov           = 0x006CCF00;
+   constexpr uintptr_t trackable_check_first_person = 0x006598D0;
+   constexpr uintptr_t path_list                    = 0x007E0840;
    // CameraManager::ApplyShake, as on Steam; its two flyer collision CALLs are
    // at Steam's addresses.
    constexpr uintptr_t camera_manager_apply_shake   = 0x0044F4A0;
@@ -3538,6 +3575,10 @@ namespace gog {
    constexpr uintptr_t lua_settop                     = 0x0069d490;
    constexpr uintptr_t lua_insert                     = 0x0069cc90;
    constexpr uintptr_t lua_newtable                   = 0x0069ce40;
+   // luaB_type 0x006A0FB0 calls lua_type second; GetPathPoint's matrix push
+   // 0x005921A0 calls lua_newuserdata(L, 0x40).
+   constexpr uintptr_t lua_type                       = 0x0069d710;
+   constexpr uintptr_t lua_newuserdata                = 0x0069cec0;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ------------------

@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "util/content_census.hpp"
 #include "lua_funcs.hpp"
+#include "lua_camera.hpp"
 #include "lua_hooks.hpp"
+#include "render/scripted_camera.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -1724,6 +1726,17 @@ static const lua_func_entry custom_functions[] = {
    { "SetInstanceProperty",      lua_SetInstanceProperty },
    { "SetFogRange",              lua_SetFogRange },
    { "SetFogEnable",             lua_SetFogEnable },
+   // The scripted camera (lua/lua_camera.cpp, render/scripted_camera.cpp).
+   { "CameraShot",               lua_CameraShot },
+   { "CameraFollow",             lua_CameraFollow },
+   { "CameraPath",               lua_CameraPath },
+   { "CameraLookAt",             lua_CameraLookAt },
+   { "CameraFOV",                lua_CameraFOV },
+   { "CameraShake",              lua_CameraShake },
+   { "CameraRelease",            lua_CameraRelease },
+   { "GetCameraMatrix",          lua_GetCameraMatrix },
+   { "GetCameraPosition",        lua_GetCameraPosition },
+   { "IsCameraScripted",         lua_IsCameraScripted },
    { nullptr, nullptr }
 };
 
@@ -1795,6 +1808,10 @@ void register_lua_functions(lua_State* L)
 
    const bool canBuildTable = g_lua.newtable &&
                               g_lua.pushlstring && g_lua.settable;
+   // A genuinely new Lua state is a new mission: a view the last one's script
+   // held is dropped with it.
+   if (!alreadyPresent) scripted_camera::reset();
+
    if (alreadyPresent) {
       s_gameExtTableBuilt = true;                    // table persists; reader can index it
    } else if (canBuildTable) {
