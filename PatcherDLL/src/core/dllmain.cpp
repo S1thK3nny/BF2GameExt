@@ -51,10 +51,19 @@
 #include "util/mp_spawn_delay.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "ai/ai_goals.hpp"
 #include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "entity/foleyfx_region_fix.hpp"
 #include "ai/ai_update_budget.hpp"
+#include "ai/ai_sprint.hpp"
+#include "ai/squad_formation.hpp"
+#include "ai/ai_squads.hpp"
+#include "ai/flyer_wingmen.hpp"
+#include "ai/flyer_real_flight.hpp"
+#include "ai/flyer_avoidance.hpp"
+#include "ai/comm_orders.hpp"
+#include "ai/squad_formation_core.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
@@ -306,9 +315,34 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_walkerStompFix            = cfg.get_bool("Fixes", "WalkerStompFix", true);
       g_aiDecisionRate            = cfg.get_float("AI", "AIDecisionRate", 1.0f);
       g_reservationPoolSize       = cfg.get_int("LimitIncreases", "ReservationPoolSize", 127);
+      g_aiGoalLimit               = cfg.get_int("LimitIncreases", "AIGoalLimit", 64);
       g_contentCensusInterval     = cfg.get_int("Diagnostic", "ContentCensus", 0);
       g_contentCensusNames        = cfg.get_bool("Diagnostic", "ContentCensusNames", false);
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
+      g_aiSprint                  = cfg.get_bool("AI", "AISprint", true);
+      g_aiSprintDistance          = cfg.get_float("AI", "AISprintDistance", 30.0f);
+      {
+         char layout[16];
+         cfg.get_string("AI", "SquadFormation", "auto", layout, sizeof layout);
+         g_squadFormation = (int)squad_formation::parse_layout(layout, squad_formation::Layout::Auto);
+      }
+      g_squadSpacing              = cfg.get_float("AI", "SquadSpacing", 3.0f);
+      g_squadAutoFormUp           = cfg.get_bool("AI", "SquadAutoFormUp", true);
+      g_squadSize                 = cfg.get_int("AI", "SquadSize", 4);
+      g_squadPathfinding          = cfg.get_bool("AI", "SquadPathfinding", true);
+      // Prototypes, off by default.
+      g_flyerWingmen              = cfg.get_bool("AI", "FlyerWingmen", false);
+      g_flyerWingmenCount         = cfg.get_int("AI", "FlyerWingmenCount", 3);
+      g_flyerWingmenSpacing       = cfg.get_float("AI", "FlyerWingmenSpacing", 25.0f);
+      g_flyerWingmenAuto          = cfg.get_bool("AI", "FlyerWingmenAuto", false);
+      g_flyerWingmenLand          = cfg.get_bool("AI", "FlyerWingmenLand", true);
+      g_flyerWingmenMarkers       = cfg.get_bool("AI", "FlyerWingmenMarkers", true);
+      g_flyerWingmenTrail         = cfg.get_bool("AI", "FlyerWingmenTrail", true);
+      g_flyerRealFlight           = cfg.get_bool("AI", "FlyerRealFlight", false);
+      g_flyerRealFlightPursuit    = cfg.get_bool("AI", "FlyerRealFlightPursuit", true);
+      g_flyerRealFlightSquadrons  = cfg.get_bool("AI", "FlyerRealFlightSquadrons", true);
+      g_flyerAvoidance            = cfg.get_bool("AI", "FlyerAvoidance", false);
+      g_commKeyOrders             = cfg.get_bool("AI", "CommKeyOrders", true);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
       g_walkerFootDiag            = cfg.get_bool("Diagnostic", "WalkerFootDiag", false);
@@ -435,10 +469,16 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    foleyfx_region_install(exe_base); // rewrites a CALL rel32 - needs the RW window
    ai_decision_rate_install(exe_base); // byte-patches .text/.rdata - needs the RW window
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
+   ai_goals_install(exe_base);         // Detours .text, byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread
    scene_tree_depth_guard_install(exe_base); // crash fix, always on
    prop_generator_fix_install(exe_base);     // rewrites a CALL rel32 - needs the RW window
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
+   ai_sprint_install(exe_base);        // Detours .text
+   squad_formation_install(exe_base);  // rewrites a CALL rel32, byte-patches .text - needs the RW window
+   ai_squads_install(exe_base);        // off for now (logs it); after squad_formation, whose keys and events it uses
+   flyer_wingmen_install(exe_base);    // Detours .text, rewrites a CALL rel32 - needs the RW window
+   comm_orders_install(exe_base);      // Detours .text; after ai_goals, whose own goals it uses
    memory_pool_heap_fix_install(exe_base);
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.

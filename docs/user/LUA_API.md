@@ -126,6 +126,86 @@ takes) and the vehicle entity as light userdata. As with the stock `On*` events,
 the filtered variants match on the *character*, not on the vehicle, and callbacks
 only fire on the host in multiplayer.
 
+## Flyer Wingmen
+
+*A prototype: modtools only for now, in single player and on the host.*
+
+The player's [flyer wingmen](FEATURES.md#ai-systems) as a mission script shapes them. Whatever a script sets holds for the rest of the mission.
+
+A **unit** is a flyer or other world object, given the way the game's own functions take one: an entity pointer (`GetEntityPtr`, `GetCharacterVehicle`, an event's object), a world object's name, or a character index (its vehicle; for an attack's target, its soldier when it has no vehicle). A vehicle spawner's flyer carries the spawner's name, so naming a spawner names whichever flyer it sends out, the next one included.
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `CallWingmen([count])` | Calls wingmen up now if the player flies, and at every takeoff after, even after the player broke a flight off or picked one by hand. `count` sets how many are called up on their own (0 to 8; a negative number: the class's own number again). Returns how many fly with the player. | 1.2.0 |
+| `DismissWingmen()` | Lets the flight go and forgets the flyers named to it. None is called up on its own again until `CallWingmen` or the squad key. Returns how many were let go. | 1.2.0 |
+| `AddWingman(unit)` | Names a flyer to the player's flight: it joins as soon as it is a friendly AI flyer in the air, from anywhere, before any called up on its own and whatever its class's keys say. Up to 8 named. Returns true once named. | 1.2.0 |
+| `RemoveWingman(unit)` | Unnames it and lets it go. It is never called up on its own again. | 1.2.0 |
+| `SetWingmenOrder(order [, target])` | `"formup"`, `"engage"` or `"cover"`: the flight's order now, and the one flights start with from then on. `"attack"`: the flight in the air goes for `target`, or without one the player's lock or what is under the reticule, until it is down or 3 km away, then back to the order before. Puts nothing on the HUD. Returns true if given. | 1.2.0 |
+| `GetWingmenOrder()` | `"formup"`, `"engage"`, `"attack"` or `"cover"`; nil with no flight. | 1.2.0 |
+| `SetWingmenLocked(locked)` | A locked flight calls no one up on its own, not even on the squad key, and lets none go for straying or arriving late. Names, removals and losses still count. | 1.2.0 |
+| `SetWingmenFormation([name])` | The flight flies the map's formation shape `name`, or `"vee"`; with no name, its class's own choice again. Returns false if the map has no such shape. | 1.2.0 |
+| `SetWingmenLand([land])` | `true`: wingmen land beside the player; `false`: they break off when it lands; with nothing, the class and the INI decide again. | 1.2.0 |
+| `GetWingmenCount()` | How many fly with the player. | 1.2.0 |
+| `GetWingman(i)` | The `i`th wingman, 1 first, in slot order: its pilot's character index and its flyer. nil past the last. | 1.2.0 |
+| `IsWingman(unit)` | Whether it flies in the player's flight. | 1.2.0 |
+| `GetWingmanLeader(unit)` | The character index of whoever it flies as a wingman of: the player, or an AI squadron leader's pilot. nil if it flies as no one's. | 1.2.0 |
+| `GetWingmanLostReason()` | Inside `OnWingmanLost`, why: `"killed"`, `"pilot"` (someone else flies it), `"landed"`, `"noroom"` (nowhere to land beside the player under a roof), `"team"`, `"far"`, `"late"`, `"removed"`, `"dismissed"`, `"breakoff"` (the player held the squad key), `"formation"` (the new formation holds fewer) or `"leader"` (the player stopped leading). nil anywhere else. | 1.2.0 |
+
+The events are engine events like `OnCharacterExitVehicle`, with the same `Name`, `Team` and `Class` filters on the character and a `Release` function each:
+
+| Event | `fn` receives | Since |
+|-------|---------------|-------|
+| `OnWingmanJoin(fn)` | A flyer joins the player's flight: its pilot's character index and its flyer. | 1.2.0 |
+| `OnWingmanLost(fn)` | One leaves it: its pilot's character index and its flyer, nil once destroyed. `GetWingmanLostReason()` says why. | 1.2.0 |
+| `OnWingmenOrder(fn)` | An order is given, by a key or a script, or an attack ends: the player's character index and the attack's target (nil for the other orders). `GetWingmenOrder()` says which. | 1.2.0 |
+| `OnWingmanLanded(fn)` | A wingman lands beside the player: its pilot's character index and its flyer. | 1.2.0 |
+
+They fire once the flyer's own update is done, so a callback may call any of the functions above.
+
+```lua
+-- Two named wingmen from their spawners for the whole mission, engaging from takeoff.
+AddWingman("red2_spawn")
+AddWingman("red3_spawn")
+SetWingmenLocked(true)
+SetWingmenOrder("engage")
+
+OnWingmanLost(function(charIndex, flyer)
+   if GetWingmanLostReason() == "killed" then
+      ShowMessageText("level.mymap.wingman_down")
+   end
+end)
+```
+
+## AI Goals
+
+*Modtools only for now, with `[LimitIncreases] AIGoalLimit` above 20 (64 by default). Single player and the host.*
+
+AI goals belong to a team: the game puts each AI unit in one of its team's goals by weight and keeps it there until it respawns. These give a unit a goal of its own. A goal is what the game's own `AddAIGoal` returns. Up to 64 goals may be set at once, not 20.
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetUnitGoal(charIndex, goal)` | Puts the AI unit in `goal`, a goal of its own team, now and again after every respawn, and it takes the goal's order at once. The goal is kept for the units scripts put in it: no one else joins it by weight, whatever its weight. Returns true if done. | 1.2.0 |
+| `ClearUnitGoal(charIndex)` | Back to its team's goals by weight. Returns true if it had a goal of its own. | 1.2.0 |
+| `GetUnitGoal(charIndex)` | The goal the unit is in now, as `AddAIGoal` gave it, or nil. | 1.2.0 |
+
+Deleting a goal (`DeleteAIGoal`, `ClearAIGoals`) frees its units to the weighted rule. A new mission starts with none.
+
+```lua
+-- Character 5, an attacker, holds cp3 whatever its team's goals say, across respawns.
+local hold = AddAIGoal(ATT, "Defend", 1, "cp3")
+SetUnitGoal(5, hold)
+```
+
+## GameExt Class Properties
+
+The stock `SetClassProperty(className, property, value)` also sets the properties BF2GameExt adds to entity classes, as if the line were in the class's ODF. See [From a Mission Script](ODF_PROPERTIES.md#from-a-mission-script).
+
+```lua
+-- The commander's mission: the player's officer orders every friendly near it
+-- with the comm keys, not its squad alone.
+SetClassProperty("rep_inf_ep3_officer", "CommandAnyFriendly", 1)
+```
+
 ## Loading Screen
 
 | Function | Description | Since |

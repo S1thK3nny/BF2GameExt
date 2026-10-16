@@ -4,6 +4,7 @@
 #include "hud_number_math.hpp"
 #include "hud_class_icons.hpp"
 #include "hud_command_posts.hpp"
+#include "hud_wingmen.hpp"
 #include "hud_bar_fill_from.hpp"
 #include "hud_editor_properties.hpp"
 #include "hud_sub_pixel.hpp"
@@ -834,6 +835,7 @@ static void __cdecl hooked_UpdateFloat(float dt)   // modtools
    hud_number_math_update();
    hud_class_icons_update();
    hud_command_posts_update();
+   hud_wingmen_update();
 }
 
 static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was dropped
@@ -845,6 +847,7 @@ static void __cdecl hooked_UpdateVoid()            // Steam, GOG: the float was 
    hud_number_math_update();
    hud_class_icons_update();
    hud_command_posts_update();
+   hud_wingmen_update();
 }
 
 // HUD::Manager::Open switches to GameMemory::RunTimeHeap before calling
@@ -858,6 +861,7 @@ static void __cdecl hooked_Open()
    hud_number_math_open();
    hud_class_icons_open();
    hud_command_posts_open();
+   hud_wingmen_open();
    hud_bar_fill_from_open();
    hud_editor_properties_open();   // after every item factory is made
 
@@ -1025,6 +1029,7 @@ void target_bar_latch_install(uintptr_t exe_base)
    if (s_installed) hud_number_math_resolve(exe_base);
    if (s_installed) hud_class_icons_resolve(exe_base);
    if (s_installed) hud_command_posts_resolve(exe_base);
+   if (s_installed) hud_wingmen_resolve(exe_base);
 }
 
 void target_bar_latch_uninstall()

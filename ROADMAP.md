@@ -437,24 +437,26 @@ list in [docs/RE/EngineLimits.md](docs/RE/EngineLimits.md).
 
 ## AI
 
-**New AI behaviours** - AI sprint only to catch up with a squad leader, never to cross the
-map, melee units trade blows with little blocking or spacing, and general behaviour
-has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its 14
-behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
-be added there, starting with sprinting to distant goals out of combat and blocking and backing
-off in melee duels. Needs the goal and combat layers mapped first (AI systems documentation,
-below). Details in [docs/RE/AISystem.md](docs/RE/AISystem.md).
+**AI squads (built, switched off)** - AI soldiers can form squads with each other
+(`ai/ai_squads.*`), but it needs work, so nothing installs for now. `auto` drops to a column almost
+everywhere: the game's room test wants a clear 10 m circle, and each follower asks for itself, so a
+squad mixes shapes. A column also plays badly, and any class leads unless every ODF says otherwise.
+Your own squad's `auto` has the same column problem. Fixes: choose the shape once per squad, never a
+column, with a delay before switching; more layouts (staggered, echelon, diamond, arc, loose);
+spread out in combat; pick leaders without ODF edits (opt-in, INI class patterns, no snipers).
+Details in [docs/RE/AISystem.md](docs/RE/AISystem.md#ai-led-squads-built-2026-10-12).
+
+**New AI behaviours** - Melee units trade blows with little blocking or spacing, and general
+behaviour has few tactical touches. The behaviour layer is built for swapping: `UnitAgent` and its
+14 behaviours each have their own `EnterState` / `UpdateState` / `ExitState`, so new behaviour can
+be added there, starting with blocking and backing off in melee duels. Needs the goal and combat
+layers mapped first (AI systems documentation, below). Details in
+[docs/RE/AISystem.md](docs/RE/AISystem.md).
 
 **Flyers on maps with no flyer paths** - A flyer on a map with no flyer paths just circles. The
 engine already has a movement mode that needs no path, used for strafing runs. The idea is to
 fall back to it when the flyer cannot find a path, so flyers work on maps that never had flyer
 paths made. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
-
-**Squad formations** - Friendlies who tag along when the player runs past trail in a loose
-clump, and AI never form squads with each other. The engine already has formation slots for
-followers ordered with "follow me": use them for tag-alongs too, give a squad one layout and
-spacing, and let AI form squads behind an AI leader. Details in
-[docs/RE/AISystem.md](docs/RE/AISystem.md#squad-formations-researched-2026-10-11-not-built).
 
 **Smoother AI turning** - AI soldiers swing their head and upper body onto a target at once,
 and turn sharply while moving. Ease both: a capped, eased turn rate for where they look and for
@@ -468,8 +470,66 @@ at the advanced point. Details in [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md).
 **Flyer wingmen** - A player's flyer has no wingmen: the squad key does nothing in the air, and
 every stock follow turns into boarding. Recruit friendly AI fighters with the squad key in flight,
 steer them to formation slots each frame, and give Rogue Leader's orders (form up, engage, attack
-my target, cover me). A prototype must show the AI can hold a slot at fighter speed. Details in
+my target, cover me). A modtools prototype (`[AI] FlyerWingmen=1`) held 10-25 m in level flight in the
+first test; later rounds added speed matching, the squad key, ODF keys (`WingmanClass`, `WingmanCount`,
+`WingmanAuto`, `WingmanSlot`) and wingmen copying the player's flips and side rolls down the
+formation; the flight now flies the map's formation shapes as drawn (`WingmanFormation`), as the AI
+squadrons do. Orders are built (the squad key's played; the comm keys and landing fixed after the first
+play, unplayed since): wingmen called up from anywhere, losses made up, form up and engage on the squad
+key, which also picks the friendly flyer under the reticule and, held, breaks the flight off, a marker on
+each wingman, attack my target and cover me on the comm keys Attack and Defend (F11, F12), a line on the
+HUD for each, and landing beside the player, under a roof too (pilots get out unless `WingmanExitOnLand = 0`;
+`WingmanLand = 0` lets the flight go instead), the keys `Wingman = 0`, `WingmanRole`, `WingmanStartOrder` and
+`WingmanEngageRange`, and Lua calls and events for missions (`CallWingmen`, `AddWingman`, `SetWingmenOrder`,
+`SetWingmenLocked`, `OnWingmanLost` ...; docs/user/LUA_API.md)
+([docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-orders-prototype-2026-10-14-modtools-only)). Next: play
+them; cycling formations; Steam and GOG. Details in
 [docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#wingmen-for-a-players-flyer-researched-2026-10-11-not-built).
+
+**The comm keys online** - In single player the comm keys are requests the AI answers (Comm Key
+Orders); online they are still only team chat. Let the host's AI answer its players' requests too, from
+the chat the host passes on (docs/RE/AISystem.md, "The comm keys' requests and the AI's own aid").
+
+**Access hint nodes** - The map loader drops `access` hints (type 3) at load, so they do nothing
+(docs/RE/HintNodes.md). Keep them and give them a job: a way in that wingmen fly through to a hangar
+and ground AI walk through to a building, or where a pickup waits (the user, 2026-10-14).
+
+**A demonstration campaign map** - Nothing shows the new AI off in one place. Once the AI work is in,
+put together a simple campaign map (the user asked for help with one, 2026-10-14) that walks through
+each feature: squads and formations, wingmen and their orders, landing, the comm keys, AI goals.
+
+**Wingmen call signs and AI flights from Lua** - Missions can script the player's flight but not name its
+wingmen or the AI's. Give wingmen call signs for the HUD's lines and radio chatter ("Red Two: copy"), and
+let a script make or break an AI squadron (`SetSquadron(leader, {members}, formation)`, `BreakSquadron`).
+
+**AI goals on Steam and GOG, and orders per unit** - The 64-goal limit and units' own goals
+(`SetUnitGoal`) are built on modtools only (docs/RE/AISystem.md, "The goal limit and units' own goals").
+Port them to Steam and GOG, and add `SetUnitOrder` for the squad orders a unit can be given on top of its
+goal (follow, get in, get out).
+
+**Ground AI into the air** - A trooper following you cannot board your single-seat fighter, so it stops
+following. Send each one to the nearest free friendly flyer (`EVT_SC_GetIntoVehicle`), call it into your
+flight first once it flies, and after you land have it get out and follow you on foot again.
+
+**AI land hints** - Land hints never work: the game stubbed out a hint's command post
+(`BaseHint::GetCommandPost` always returns none, the loader drops the `CommandPost` line) and an AI flyer
+lands only at a hint with one; patrol hints die the same way. Keep each land hint's post from its
+`CommandPost` line and answer `GetCommandPost` with it (docs/RE/HintNodes.md).
+
+**Real flight on paths** - AI flyers on paths are placed on the curve, not flown, so they look on
+rails and cannot really fight. A modtools prototype (`[AI] FlyerRealFlight=1`, or
+`PathFollowerRealFlight = 1` on a flyer class) steps the path follower on a point about a second
+ahead and flies the ship after it by physics; it works on Cato Neimoidia since danger regions and
+hangar shields stopped trapping it. It now chases its attacker for real when the game turns it on one,
+and gathers squadrons by the game's rule in the map's formation shapes (both unplayed). Next: play them,
+Steam/GOG. Details in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#real-flight-on-paths-prototype-2026-10-13-modtools-only).
+
+**Flyers keep clear of each other** - Nothing keeps two AI flyers apart, and a flyer ahead makes an AI
+climb and brake as if it were a building. A modtools prototype (`[AI] FlyerAvoidance=1`) bends every
+AI-steered flyer away from any it would pass within a few metres of in the next 2 s, and lets
+`RaiseHeight` pass over flyers. Unplayed. Details in
+[docs/RE/FlyerAI.md](docs/RE/FlyerAI.md#flyer-to-flyer-avoidance-prototype-2026-10-14-modtools-only).
 
 ## Controller
 

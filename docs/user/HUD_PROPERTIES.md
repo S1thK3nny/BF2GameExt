@@ -125,6 +125,46 @@ Put the rotation on a group with `Scale(1,1,1)` and give the artwork its own sca
 
 Slots follow each post's `HUDIndex`, lowest first, then posts without one in map order. Posts with `HUDIndexDisplay = 0`, such as the invisible spawn posts and command vehicles, are left out, and a destroyed post drops out of the row. Give neutral posts an icon from the mission script with `SetTeamIcon(0, "icon_name")`. On a multiplayer client, owners are always right but capture progress only moves for posts near the player.
 
+### Wingmen
+
+Markers for your flyer's wingmen ([Flyer Wingmen](FEATURES.md)), so a `.hud` can draw its own. `N` is the wingman, from 1 to 8, in slot order. While a `.hud` binds none of the wingman events, each wingman gets the game's own marker instead (a cyan circle on the minimap and a bracket on screen, `[AI] FlyerWingmenMarkers`); likewise the attack target's events and its red marker. Modtools only, as the wingmen are.
+
+| Event | Type | Description | Since |
+|-------|------|-------------|-------|
+| `player1.wingmen.count` | Uint number | How many wingmen fly with you. | 1.2.0 |
+| `player1.wingmanN.position` | Vector3 | Where the wingman is on screen, for `EventPosition` on a marker group: 1.3 m above its middle, as the command post markers sit. Off screen or behind you it stays on the screen's edge. | 1.2.0 |
+| `player1.wingmanN.onScreen` | Bool | Sent as the wingman comes into view. | 1.2.0 |
+| `player1.wingmanN.offScreen` | Bool | Sent as it leaves the view, and when the slot empties, so it alone can hide a marker. | 1.2.0 |
+| `player1.wingmanN.direction` | Vector3 | `(0, 0, angle)` for `EventRotation`, turning an arrow drawn pointing up toward the wingman. | 1.2.0 |
+| `player1.wingmanN.distance` | Float | How far away the wingman is, in metres, from what you control. | 1.2.0 |
+| `player1.wingmanN.health` | Float | The wingman's health, `0` to `1`. | 1.2.0 |
+| `player1.wingmanN.disable` | Bool | The slot is empty. | 1.2.0 |
+| `player1.wingmen.target.position` | Vector3 | Where the target of an attack my target order is on screen, placed as a wingman is. | 1.2.0 |
+| `player1.wingmen.target.onScreen` | Bool | Sent as the target comes into view. | 1.2.0 |
+| `player1.wingmen.target.offScreen` | Bool | Sent as it leaves the view, and when the attack ends. | 1.2.0 |
+| `player1.wingmen.target.direction` | Vector3 | `(0, 0, angle)` toward the target. | 1.2.0 |
+| `player1.wingmen.target.distance` | Float | How far away the target is, in metres. | 1.2.0 |
+| `player1.wingmen.target.disable` | Bool | No attack is under way. | 1.2.0 |
+
+### Comm key orders
+
+Markers for what the comm keys send the AI after on foot ([Comm key orders](FEATURES.md)): `attack` is the Attack key's target, `defend` the Defend key's, each over the unit or object, or over the place aimed at. While a `.hud` binds none of a target's events, an object target gets the game's own marker instead (red for Attack, green for Defend, `[AI] CommKeyOrders`); a place has none. Modtools only, as the comm key orders are.
+
+| Event | Type | Description | Since |
+|-------|------|-------------|-------|
+| `player1.orders.attack.position` | Vector3 | Where the Attack key's target is on screen, for `EventPosition` on a marker group, placed as a wingman is. | 1.2.0 |
+| `player1.orders.attack.onScreen` | Bool | Sent as it comes into view. | 1.2.0 |
+| `player1.orders.attack.offScreen` | Bool | Sent as it leaves the view, and when the order ends. | 1.2.0 |
+| `player1.orders.attack.direction` | Vector3 | `(0, 0, angle)` toward it. | 1.2.0 |
+| `player1.orders.attack.distance` | Float | How far away it is, in metres. | 1.2.0 |
+| `player1.orders.attack.disable` | Bool | No Attack order is under way. | 1.2.0 |
+| `player1.orders.defend.position` | Vector3 | Where the Defend key's target is on screen. | 1.2.0 |
+| `player1.orders.defend.onScreen` | Bool | Sent as it comes into view. | 1.2.0 |
+| `player1.orders.defend.offScreen` | Bool | Sent as it leaves the view, and when the order ends. | 1.2.0 |
+| `player1.orders.defend.direction` | Vector3 | `(0, 0, angle)` toward it. | 1.2.0 |
+| `player1.orders.defend.distance` | Float | How far away it is, in metres. | 1.2.0 |
+| `player1.orders.defend.disable` | Bool | No Defend order is under way. | 1.2.0 |
+
 ## Element Properties
 
 | Property | Element | Value | Description | Since |

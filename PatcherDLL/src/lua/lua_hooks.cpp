@@ -38,6 +38,7 @@
 #include "util/snd_engine_open_fix.hpp"
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
+#include "ai/ai_goals.hpp"
 #include "util/content_census.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
@@ -46,6 +47,10 @@
 #include "entity/walker_stomp_fix.hpp"
 #include "render/prop_generator_fix.hpp"
 #include "ai/ai_update_budget.hpp"
+#include "ai/ai_sprint.hpp"
+#include "ai/squad_formation.hpp"
+#include "ai/ai_squads.hpp"
+#include "ai/flyer_wingmen.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "shell/ingame_movie_path.hpp"
 #include "entity/anim_bank_append.hpp"
@@ -393,8 +398,13 @@ void lua_hooks_uninstall()
    foleyfx_region_uninstall();
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
+   ai_goals_uninstall();
    content_census_uninstall();
    ai_update_budget_uninstall();
+   ai_sprint_uninstall();
+   ai_squads_uninstall();
+   flyer_wingmen_uninstall();
+   squad_formation_uninstall();
    memory_pool_heap_fix_uninstall();
 
    DetourTransactionBegin();

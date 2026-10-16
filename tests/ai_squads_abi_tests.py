@@ -1,0 +1,256 @@
+"""Read-only audit of everything AI squads read, call or detour in all three supported game PEs.
+
+Usage: python tests/ai_squads_abi_tests.py PATH_TO_GAMEDATA
+Requires pefile and capstone. Does not execute the game or modify its files.
+These are instruction/layout regression checks, not an in-game behaviour test.
+The follow events themselves are audited by tests/squad_formation_abi_tests.py.
+"""
+import re
+import struct
+import sys
+from pathlib import Path
+
+import capstone
+import pefile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "PatcherDLL/src"
+source = (SRC / "ai/ai_squads.cpp").read_text()
+formation = (SRC / "ai/squad_formation.cpp").read_text()
+sprint = (SRC / "ai/ai_sprint.cpp").read_text()
+addrs = (SRC / "core/game_addrs.hpp").read_text()
+
+
+def constant(text, name):
+    match = re.search(r"\b" + name + r"\s*=\s*(-?0x[0-9a-fA-F]+|-?\d+)\s*;", text)
+    assert match, name
+    return int(match.group(1), 0)
+
+
+for name, value in {
+    "kNodeNext": 0x04,
+    "kNodePayload": 0x0C,
+    "kVt_IsRtti": 0x00,
+    "kVt_AgentIsRtti": 0x20,
+    "kCtrl_Owner": 0x04,
+    "kOwner_Trackable": 0x18,
+    "kVt_GetTrackable": 0x20,
+    "kUC_State": 0x7C,
+    "kUC_Agent": 0x2C0,
+    "kGO_MatrixTrans": 0x120,
+    "kGO_CurHealth": 0x144,
+    "kGO_Flags": 0x1FC,
+    "kGO_HandleId": 0x204,
+    "kGO_Team": 0x234,
+    "kStateCombat": 2,
+    "kFollowChr": 0x10,
+    "kIsFollowingChr": 0x0F,
+    "kVt_AgentSetNext": 0x1C,
+    "kAgentExit": 100,
+}.items():
+    assert constant(source, name) == value, name
+# Where a unit is going: the same reads AI sprint makes, which tests/ai_sprint_abi_tests.py audits.
+for name in ("kUC_LowLevel", "kLL_Navigator", "kVt_NavIsDone", "kVt_NavIsRtti", "kGraph_GlobalDest",
+             "kNav_PathFollower", "kPF_FinalPoint"):
+    assert constant(source, name) == constant(sprint, name), name
+for cls in ("NavigatorFollowTarget", "NavigatorGraphFollower", "NavigatorPathFollower"):
+    assert f'pbl_hash("{cls}")' in source, cls
+# The follower's navigator says yes to GraphFollower too: it is ruled out first.
+assert source.index("kRttiFollowTarget, kVt_NavIsRtti") < source.index("kRttiGraphFollower, kVt_NavIsRtti")
+for cls in ("UnitController", "UnitFollowAgent", "EntitySoldier"):
+    assert f'pbl_hash("{cls}")' in source, cls
+assert "(*(const uint32_t*)(obj + kGO_Flags) >> 3) & 1u" in source           # alive: bit 3
+assert "(int32_t)(*(const uint32_t*)(obj + kGO_Team) << 28) >> 28" in source  # team: the low 4 bits, signed
+# An agent's IsRtti is at vptr +0x20; its slot 0 is EnterState. Every agent test asks there.
+agent_tests = re.findall(r"is_rtti\(agent, [^)]*\)", source)
+assert len(agent_tests) >= 2 and all(t.endswith(", kVt_AgentIsRtti)") for t in agent_tests), agent_tests
+# The prologues the install guards, as the source spells them.
+assert r'"\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C"' in source
+assert '"xxxxxxxxxxxxx????xxxxxxx"' in source
+assert r'"\x51\xA1\x00\x00\x00\x00\x53\x55\x56\x8B\x70\x04", "xx????xxxxxx"' in source
+assert r'"\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", 12' in formation
+assert r'"\x83\xEC\x0C\x56\x57\x33\xFF\x83\xEC\x08", 10' in formation
+assert r'"\x55\x8B\xEC\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", 15' in formation
+assert r'"\x55\x8B\xEC\x83\xEC\x10\x83\xEC\x08", 9' in formation
+assert constant(formation, "kEventInfoSize") == 0x58
+
+NAMES = ("controller_manager_update", "ai_controller_list", "event_info_ctor", "unit_controller_send_event")
+
+
+def namespace(text, name):
+    body = re.search(r"namespace %s\s*\{(.*?)\n\s*\}\s*//\s*namespace %s" % (name, name), text, re.S).group(1)
+    return {n: constant(body, n) for n in NAMES}
+
+
+assert namespace(addrs, "modtools") == dict(zip(NAMES, (0x005997A0, 0x00B8EE70, 0x0052ADE0, 0x0059F8A0)))
+assert namespace(addrs, "steam") == dict(zip(NAMES, (0x00486370, 0x01E30934, 0x0043EDF0, 0x006640D0)))
+assert namespace(addrs, "gog") == dict(zip(NAMES, (0x00486370, 0x01E31DCC, 0x0043EDE0, 0x00665170)))
+
+mt_checks = {
+    # ControllerManager::Update, cdecl(float). Its first loop walks sPlayerCtrls at [0xB8EE6C], player
+    # controllers only (Phantom names it), updating each through vptr +0x14: not the list to read.
+    0x005997A0: [("push", "ecx"), ("mov", "eax, dword ptr [0xb8ee6c]"), ("push", "ebx"), ("push", "ebp"),
+                 ("push", "esi"), ("mov", "esi, dword ptr [eax + 4]"), ("mov", "ecx, dword ptr [esi + 0xc]"),
+                 ("test", "ecx, ecx"), ("je", "0x5997c7"), ("mov", "eax, dword ptr [esp + 0x14]"),
+                 ("mov", "edx, dword ptr [ecx]"), ("mov", "esi, dword ptr [esi + 4]"), ("push", "eax"),
+                 ("call", "dword ptr [edx + 0x14]"), ("mov", "ecx, dword ptr [esi + 0xc]"),
+                 ("test", "ecx, ecx"), ("jne", "0x5997b3")],
+    # sAICtrls at [0xB8EE70]: the first node at +4, each node's UnitController at +0xC (ECX for a
+    # UnitController method) and the next at +4, a null controller the end.
+    0x00599AFE: [("mov", "ecx, dword ptr [0xb8ee70]"), ("mov", "esi, dword ptr [ecx + 4]"),
+                 ("mov", "ecx, dword ptr [esi + 0xc]"), ("test", "ecx, ecx"), ("je", "0x599b24"),
+                 ("mov", "edi, edi"), ("mov", "edx, dword ptr [esp + 0x14]"), ("mov", "esi, dword ptr [esi + 4]"),
+                 ("push", "edx"), ("call", "0x416004"), ("mov", "ecx, dword ptr [esi + 0xc]"),
+                 ("test", "ecx, ecx")],
+    # UnitController::UpdateHighLevel: the soldier through the owner's +0x18 interface, vptr
+    # +0x20, and bit 3 of +0x1FC (the Damageable at +0x140, its word at +0xBC) for alive.
+    0x005A03B1: [("mov", "edx, dword ptr [eax + 0x18]"), ("lea", "ecx, [eax + 0x18]"),
+                 ("call", "dword ptr [edx + 0x20]"), ("add", "eax, 0x140"), ("mov", "eax, dword ptr [eax + 0xbc]"),
+                 ("shr", "eax, 3")],
+    # Lua GetObjectHealth: mCurHealth +0x144.
+    0x004720E1: [("mov", "eax, dword ptr [esi + 0x144]")],
+    # UnitController::IsInCombat: state +0x7C is 2.
+    0x0059EA10: [("mov", "edx, dword ptr [ecx + 0x7c]"), ("xor", "eax, eax"), ("cmp", "edx, 2"),
+                 ("sete", "al"), ("ret", "")],
+    # SendEvent: the agent at +0x2C0, its EventHandler at vptr +0x50.
+    0x0059F8A0: [("sub", "esp, 0x34"), ("push", "esi"), ("mov", "esi, ecx"), ("mov", "ecx, dword ptr [esi + 0x2c0]"),
+                 ("xor", "eax, eax"), ("test", "ecx, ecx"), ("je", "0x59f943"), ("mov", "eax, dword ptr [ecx]"),
+                 ("push", "ebx"), ("push", "edi"), ("mov", "edi, dword ptr [esp + 0x44]"), ("push", "edi"),
+                 ("call", "dword ptr [eax + 0x50]")],
+    # EventInfo's constructor: thiscall, RET 8.
+    0x0052ADE0: [("sub", "esp, 0xc"), ("push", "esi"), ("push", "edi"), ("xor", "edi, edi"), ("sub", "esp, 8")],
+    0x0052AE45: [("pop", "edi"), ("mov", "eax, esi"), ("pop", "esi"), ("add", "esp, 0xc"), ("ret", "8")],
+    # UnitFollowAgent::EventHandler, stop following: SetNextState(100) at vptr +0x1C, then answers 1.
+    0x005B10BC: [("push", "0x64"), ("mov", "ecx, esi"), ("call", "dword ptr [eax + 0x1c]"), ("mov", "eax, 1")],
+    # SetNextState: stores the state at +8, RET 4.
+    0x00597880: [("mov", "eax, dword ptr [esp + 4]"), ("mov", "dword ptr [ecx + 8], eax"), ("ret", "4")],
+    # UnitFollowAgent::IsRtti, at +0x20 of its vtable.
+    0x005B00C0: [("mov", "eax, dword ptr [esp + 4]"), ("cmp", "dword ptr [0xb8f20c], eax")],
+    0x0040D5B2: [("jmp", "0x5b00c0")],
+    # CheckForAutoFollow: the team, the low 4 bits of +0x234, signed.
+    0x0059ADD9: [("mov", "edx, dword ptr [esi + 0x234]"), ("shl", "edx, 0x1c"), ("push", "3"), ("sar", "edx, 0x1c")],
+}
+# UnitFollowAgent's vtable, laid out as Phantom's UnitAgent_vftable: EnterState at +0x00, IsRtti at
+# +0x20, EventHandler at +0x50 (the slot SendEvent calls).
+mt_slots = [(0x00A487F0, 0x00, 0x005B0190), (0x00A487F0, 0x1C, 0x00597880), (0x00A487F0, 0x20, 0x005B00C0),
+            (0x00A487F0, 0x50, 0x005B0EC0)]
+mt_rtti = {"UnitController": 0x00B8EFBC, "UnitFollowAgent": 0x00B8F20C, "EntitySoldier": 0x00B7E098}
+
+
+def retail(update, player_list, ai_list, high_level, health, combat, send, ctor, follow_rtti, follow_global,
+           team, stop):
+    return {
+        # UnitFollowAgent::EventHandler, stop following: SetNextState(100) at vptr +0x1C.
+        stop: [("push", "0x64"), ("call", "dword ptr [eax + 0x1c]"), ("mov", "eax, 1")],
+        # SetNextState: stores the state at +8, RET 4.
+        0x00478620: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
+                     ("mov", "dword ptr [ecx + 8], eax"), ("pop", "ebp"), ("ret", "4")],
+        # ControllerManager::Update: dt in XMM0, no stack argument; its first loop is sPlayerCtrls.
+        update: [("push", "ebp"), ("mov", "ebp, esp"), ("and", "esp, 0xfffffff8"), ("sub", "esp, 0xc"),
+                 ("push", "ebx"), ("push", "esi"), ("mov", f"esi, dword ptr [{player_list:#x}]"), ("push", "edi"),
+                 ("movss", "dword ptr [esp + 0xc], xmm0"), ("mov", "esi, dword ptr [esi + 4]"),
+                 ("mov", "ecx, dword ptr [esi + 0xc]"), ("test", "ecx, ecx"), ("je", f"{update + 0x3D:#x}"),
+                 ("mov", "eax, dword ptr [ecx]"), ("mov", "esi, dword ptr [esi + 4]"), ("push", "ecx"),
+                 ("movss", "dword ptr [esp], xmm0"), ("call", "dword ptr [eax + 0x14]"),
+                 ("mov", "ecx, dword ptr [esi + 0xc]")],
+        # sAICtrls: each node's controller (+0xC) handed to SendEvent, a UnitController method.
+        update + 0x262: [("mov", f"esi, dword ptr [{ai_list:#x}]"), ("mov", "esi, dword ptr [esi + 4]"),
+                         ("mov", "eax, dword ptr [esi + 0xc]"), ("test", "eax, eax"), ("je", f"{update + 0x28E:#x}"),
+                         ("mov", "esi, dword ptr [esi + 4]"), ("mov", "ecx, eax"), ("push", "ebx"),
+                         ("call", f"{send:#x}"), ("cmp", "eax, 1")],
+        high_level: [("mov", "ecx, dword ptr [esi + 4]"), ("add", "ecx, 0x18"), ("mov", "eax, dword ptr [ecx]"),
+                     ("call", "dword ptr [eax + 0x20]"), ("mov", "eax, dword ptr [eax + 0x1fc]"), ("shr", "eax, 3"),
+                     ("test", "al, 1")],
+        health: [("movss", "xmm0, dword ptr [esi + 0x144]")],
+        combat: [("cmp", "dword ptr [ecx + 0x7c], 2"), ("sete", "al"), ("ret", "")],
+        send: [("push", "ebp"), ("mov", "ebp, esp"), ("sub", "esp, 0x34"), ("push", "esi"), ("mov", "esi, ecx"),
+               ("mov", "ecx, dword ptr [esi + 0x2c0]"), ("test", "ecx, ecx"), ("je", f"{send + 0x90:#x}"),
+               ("mov", "eax, dword ptr [ecx]"), ("push", "ebx"), ("mov", "ebx, dword ptr [ebp + 8]"), ("push", "edi"),
+               ("push", "ebx"), ("call", "dword ptr [eax + 0x50]")],
+        ctor: [("push", "ebp"), ("mov", "ebp, esp"), ("sub", "esp, 0x10"), ("sub", "esp, 8")],
+        follow_rtti: [("push", "ebp"), ("mov", "ebp, esp"), ("mov", "eax, dword ptr [ebp + 8]"),
+                      ("cmp", f"dword ptr [{follow_global:#x}], eax")],
+        team: [("mov", "edx, dword ptr [ebx + 0x234]"), ("mov", "ecx, ebx"), ("shl", "edx, 0x1c"),
+               ("sar", "edx, 0x1c")],
+    }
+
+
+steam_checks = retail(update=0x00486370, player_list=0x01E30930, ai_list=0x01E30934, high_level=0x006639A7,
+                      health=0x0058E59D, combat=0x00663B92, send=0x006640D0, ctor=0x0043EDF0,
+                      follow_rtti=0x00667F00, follow_global=0x01F993E8, team=0x0061C1A2, stop=0x00668C46)
+gog_checks = retail(update=0x00486370, player_list=0x01E31DDC, ai_list=0x01E31DCC, high_level=0x00664A47,
+                    health=0x0058F53D, combat=0x00664C32, send=0x00665170, ctor=0x0043EDE0,
+                    follow_rtti=0x00668FA0, follow_global=0x01F9A89C, team=0x0061D212, stop=0x00669CE6)
+steam_slots = [(0x007AFB10, 0x00, 0x006680D0), (0x007AFB10, 0x1C, 0x00478620), (0x007AFB10, 0x20, 0x00667F00),
+               (0x007AFB10, 0x50, 0x00668A80)]
+gog_slots = [(0x007B0A88, 0x00, 0x00669170), (0x007B0A88, 0x1C, 0x00478620), (0x007B0A88, 0x20, 0x00668FA0),
+             (0x007B0A88, 0x50, 0x00669B20)]
+steam_rtti = {"UnitController": 0x01F99384, "UnitFollowAgent": 0x01F993E8, "EntitySoldier": 0x01EBC054}
+gog_rtti = {"UnitController": 0x01F9A838, "UnitFollowAgent": 0x01F9A89C, "EntitySoldier": 0x01EBD558}
+
+builds = [
+    ("modtools", "BF2_modtools_NoDVD_NoConsole.exe", mt_checks, mt_slots, mt_rtti),
+    ("steam", "BattlefrontII.exe", steam_checks, steam_slots, steam_rtti),
+    ("gog", "BattlefrontII_GoG.exe", gog_checks, gog_slots, gog_rtti),
+]
+decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+
+# The install guards' bytes against each image, masked where an address sits.
+UPDATE_RT = (b"\x55\x8B\xEC\x83\xE4\xF8\x83\xEC\x0C\x53\x56\x8B\x35\x00\x00\x00\x00\x57\xF3\x0F\x11\x44\x24\x0C",
+             "xxxxxxxxxxxxx????xxxxxxx")
+SEND_RT = (b"\x55\x8B\xEC\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", "x" * 15)
+CTOR_RT = (b"\x55\x8B\xEC\x83\xEC\x10\x83\xEC\x08", "x" * 9)
+guards = {
+    "modtools": [(0x005997A0, b"\x51\xA1\x00\x00\x00\x00\x53\x55\x56\x8B\x70\x04", "xx????xxxxxx"),
+                 (0x0059F8A0, b"\x83\xEC\x34\x56\x8B\xF1\x8B\x8E\xC0\x02\x00\x00", "x" * 12),
+                 (0x0052ADE0, b"\x83\xEC\x0C\x56\x57\x33\xFF\x83\xEC\x08", "x" * 10)],
+    "steam": [(0x00486370,) + UPDATE_RT, (0x006640D0,) + SEND_RT, (0x0043EDF0,) + CTOR_RT],
+    "gog": [(0x00486370,) + UPDATE_RT, (0x00665170,) + SEND_RT, (0x0043EDE0,) + CTOR_RT],
+}
+
+
+def follow(image, base, address):
+    """An incremental-link thunk (JMP rel32) to its target."""
+    code = image[address - base:address - base + 5]
+    if code[0] == 0xE9:
+        return address + 5 + struct.unpack("<i", code[1:5])[0]
+    return address
+
+
+def rtti_globals(image, base, name):
+    """The globals PblHash is built into from a class name: PUSH "<name>" / MOV ECX,<global> / CALL."""
+    found = []
+    start = 0
+    while (text := image.find(name.encode() + b"\0", start)) >= 0:   # a name can be stored twice
+        push = 0
+        while (push := image.find(b"\x68" + struct.pack("<I", base + text), push)) >= 0:   # and pushed for more
+            if image[push + 5] == 0xB9:
+                found.append(struct.unpack("<I", image[push + 6:push + 10])[0])
+            push += 1
+        start = text + 1
+    return found
+
+
+for name, filename, checks, slots, rtti in builds:
+    pe = pefile.PE(str(Path(sys.argv[1]) / filename))
+    try:
+        image = pe.get_memory_mapped_image()
+        base = pe.OPTIONAL_HEADER.ImageBase
+        assert base == 0x400000
+        for address, expected in checks.items():
+            data = image[address - base:address - base + 128]
+            actual = [(i.mnemonic, i.op_str) for i in decoder.disasm(data, address, count=len(expected))]
+            assert actual == expected, (name, hex(address), actual, expected)
+        for table, offset, function in slots:
+            entry = struct.unpack("<I", image[table + offset - base:table + offset - base + 4])[0]
+            assert follow(image, base, entry) == function, (name, hex(table), hex(offset), hex(entry))
+        for cls, address in rtti.items():
+            assert address in rtti_globals(image, base, cls), (name, cls)
+        for address, pattern, mask in guards[name]:
+            code = image[address - base:address - base + len(mask)]
+            assert all(m != "x" or code[i] == pattern[i] for i, m in enumerate(mask)), (name, hex(address))
+        print(f"{name}: {len(checks)} instruction checks, {len(slots)} vtable slots, the RTTI names "
+              f"and {len(guards[name])} install guards passed")
+    finally:
+        pe.close()

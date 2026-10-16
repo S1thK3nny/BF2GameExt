@@ -569,7 +569,7 @@ rolls `AIUtil::GetRandomInt(0, 2)` until `mask & (1 << roll)` is set, so the mas
 
 `LoadUtil::ProcessHintInfo` handles only the `INFO` chunk (`NAME`, `TYPE`, `XFRM`) and constructs
 the hint. The stances arrive separately: `LoadUtil::ProcessHint` (Phantom 0x638310, modtools
-0x451AE0) walks the sibling `PROP` chunks and calls `BaseHint::SetProperty(hash, valueString)`
+0x451F00) walks the sibling `PROP` chunks and calls `BaseHint::SetProperty(hash, valueString)`
 (Phantom 0x5EC750, modtools 0x5C45B0, Steam 0x543670, GOG 0x5443C0) for each. The property hashes:
 
 | PblHash | Property | Parsed as |
@@ -649,6 +649,211 @@ Singleton that manages high-level AI goals (capture CP, defend, destroy target, 
 - `GiveDifferentOrder` - forces a unit to a different goal
 - `PrintInfoConsole`/`PrintInfoInstConsole` - debug output
 
+### Team goals, joined per unit (read 2026-10-14)
+
+The user asked whether AI units can have goals of their own rather than their team's. Read in P.
+
+- **Goals belong to a team.** `AddGoal(team, type, weight, target)` (P `0x0047DF90`, Lua `AddAIGoal`) makes a
+  Conquest, Destroy (a target), Defend (a target), Deathmatch, CTF offense or defense, or Follow (a character
+  or object) goal; at most 20 at once across all teams. Each `AIGoal` holds its team, weight, an enabled flag
+  and its own list of members (`mUnitList`, a `PblList<Character>`).
+- **Membership is per unit.** Every AI character sits in exactly one goal's list (its `Character::mGoalNode`).
+  `AssignUnit` (P `0x0047E370`) puts a unit with none in the enabled goal of its team that is least full for
+  its weight (members ÷ (weight share × team size)). `AIGoalManager::Update` (P `0x0047EA20`, M `0x005CDE20`, every 1 s) gives
+  every AI character without a goal one, then updates each goal, which hands its members their commands. A
+  unit keeps its goal until it respawns (`Character::Respawn` calls `ReassignIfNeeded`, P `0x0047E990`:
+  remove, then `AssignUnit` again) or changes team.
+- **So a unit can have a goal of its own:** move it into a chosen goal's list and put it back there after
+  each respawn; or make a goal just for it: a goal with a tiny weight is already "full" with one member, so
+  `AssignUnit` never adds others to it. The 20-goal cap is the limit.
+- **Orders on top of goals, per unit:** the squad commands, sent with `UnitController::SendEvent` (as
+  `ai_squads.cpp` sends them): `EVT_SC_FollowChr` (16) and `EVT_SC_FollowChrLoose` (17), `EVT_SC_StopFollowChr`
+  (18), `EVT_SC_GetIntoVehicle` (19, the vehicle in the event's object) and `EVT_SC_GetOutOfVehicle` (20,
+  which also keeps the unit out of vehicles for 20 s). `UnitAgent::HandleSquadCommandEvent` (P `0x007844D0`)
+  turns them into follow, board and unboard commands. The unit leaves its goal's commands while it obeys and
+  returns to them after.
+- **The flyer wingmen touch neither:** an AI pilot's goal keeps running under them (its fly agent still picks
+  its own destinations); they replace where it steers and what it aims at each frame, and keep it from its
+  own landings. Let go, it carries on with its goal.
+
+### The goal limit and units' own goals (built 2026-10-14, modtools only)
+
+`ai/ai_goals.cpp`, `[LimitIncreases] AIGoalLimit` (64). Read in P for the names, then M.
+
+- **The limit is two things.** `AIUtil::Init` sizes `AIGoal::sMemoryPool` to 20 elements of 0x3C (the largest
+  goal: Defend, Destroy, Follow), M `0x0058CD3E`. And `AIGoalManager` (0x6C bytes, heap: `Create`, M
+  `0x005CD5B0`, `operator new(0x6C)` then the constructor, into `mInstance` M `0x00B8FAA4`) ends with
+  `mGoals[20]` at +0x1C, so the array grows in place with a bigger allocation: `Create` is replaced (the game's
+  own `operator new`, M `0x007E34A0`, so its destructor's `operator delete` matches, and its constructor, which
+  clears 20 slots; the stand-in clears 65), and the pool's count becomes the limit.
+- **Every loop over the array counts to 20** and is patched to the limit: `AddGoal` (`CMP EDI, 0x14`, M
+  `0x005CD19C`), `DeleteGoal` (M `0x005CD4E8`), `ClearAllGoals` (counted down, M `0x005CD55A`), `FindGoal` (M
+  `0x005CDD32`), `Update` (counted down, M `0x005CDEE4`) and the debug listing `PrintInfoInstConsole` (M
+  `0x005CDA70`: its loop unrolled five at a time, `CMP EDX, 0x14` at +0xA0, its "none of this team" test at
+  +0xB7, which must become the loop's end, the first multiple of five at or past the limit, and its list at
+  +0x126). The unrolled loop reads up to four slots past the last below the limit, so the manager keeps one
+  slot more than the limit allows, always empty. Its `ADD EAX, 0x14` steps five pointers, not a count.
+- **`AssignUnit` (M `0x005CD5E0`) keeps the weights in a 20-float array on its stack**, so it is replaced: the
+  same rule (`ai_goals_core.hpp`, `pick_goal`: the team's enabled goals, the least full for its weight share,
+  the first on a tie, under 1e11, M `0x00A4A3C0`; a total below 0 counts as 1) over the limit. Its callers,
+  `MakeSureUnitHasGoal` and `ReassignIfNeeded`, return straight after it. `MakeSureUnitHasGoal` does keep ECX
+  live across its call to `FindGoal` (it calls `AssignUnit` after with no `MOV ECX`), which is why `FindGoal`
+  is only byte-patched.
+- **Units' own goals** (Lua `SetUnitGoal`, `ClearUnitGoal`, `GetUnitGoal`): a character's goal of its own is
+  kept per character index. The replaced `AssignUnit` puts a unit back in its own while that is an enabled
+  goal of its team (respawn calls `ReassignIfNeeded`, M `0x005CDCD0`: `RemoveUnit` M `0x005CDA00`, then
+  `AssignUnit`), and passes goals kept for others over in the weighted pick (their weight left out of the
+  total). `DeleteGoal` and `ClearAllGoals` are detoured to drop the keeps of goals gone, before the pool hands
+  the memory to a new goal. `SetUnitGoal` moves the unit at once, as `ReassignIfNeeded` would. Every mission
+  starts with none (`Create`). A goal is the pointer the stock `AddAIGoal(team, type, weight, target)` returns
+  (P `0x00650D80`; a number target is a character for a Follow goal).
+- **Callers checked:** the Lua `ClearAIGoals` and `DeleteAIGoal` return straight after their calls, and
+  `AIUtil::Init` makes plain calls after `Create`; nothing keeps a register live across the replaced
+  functions. The other `mInstance` readers (`RequestSpawnPoint`, `Respawn`, `SetTeam`, the Lua functions) go
+  through these methods; M `0x005CD0A0`, `0x005CD0B0`, `0x005CD0C0` and `0x005CD0D0` are empty stubs.
+- **Checks:** `tests/ai_goals_tests.cpp` (the limit, the listing's end, the pick against the stock rule's
+  corners, kept goals), `tests/ai_goals_abi_tests.py` (every count's bytes and instruction, `Create`'s shape and
+  its constructor, `AssignUnit`'s reads, the RETs), the `goals` mutation suite. Not played.
+
+### The comm keys' requests and the AI's own aid (read 2026-10-14)
+
+The user asked for the comm keys in single player, with the AI doing what they say. Read in P.
+
+- **What a comm key sends.** `RawControllerInputs::TeamOrderInputProcess` (runs only networked, see
+  docs/RE/FlyerAI.md) queues team chat through `NetGame::AddChatMessageToQue` (P `0x00684440`) with a `Code`:
+  `Spotted` 0, `NeedMedic` 1, `NeedRepair` 2, `NeedAmmo` 3, `NeedPickup` 4, `NeedBackup` 5,
+  `AttackPosition` 6, `DefendPosition` 7. The host passes it on (`ReadChatMessageFromClient`, P `0x0069BE80`)
+  and each machine shows it (`ReadChatMessageFromServer`, P `0x0069BFA0`, then `DisplayMessage`, P
+  `0x0068D030`: the text, team-only lines in green, and for a code `TeamAssistManager::AddRequest`; on
+  modtools, M `0x0070C490`, the text is looked up again on each machine, `common.chat.<code>`, the line is
+  always yellow, and a hero asking for Medic or Ammo gets nothing).
+- **`TeamAssistManager`** (one, made for every mission by `PostLoad`, P `0x005CD4A7`). `AddRequest(code,
+  character)` (P `0x007775A0`) makes a `TeamAssist` (pool, 0x14 bytes) for the requester (its controllable's
+  trackable: its vehicle or itself), its team's mask and a timer (`sDuration`); the constructor (P
+  `0x007773F0`) puts a marker on the requester for its team (P: `hud_objective_icon_circle`; M: the code's
+  own `PC_spotted_icon` ... `PC_defend_icon`, scale 5, from the table at M `0x00AD74F8`)
+  (`TargetManager::AddMarker`, scale 3, flashing and pulsing; docs/RE/FlyerAI.md, "Markers") and plays the
+  request's shout (`AI::VOHelper::Play(VOT_TA_First + code)`). `Update` (P `0x007776D0`) counts the timers
+  down and deletes the expired. Nothing else reads the list: no AI acts on a request, online or not.
+- **The AI's own aid** (`RepairHelper`, one per `UnitAgent`; data: the agent, `mAidType`, `mContactTime`
+  +0xC, `mPathing`, `mPathTime`, `mHealth`, `mSearchTime`, `mAidTarget` +0x20 a handle,
+  `mCheckForRecipientTime` +0x28). `CheckForRecipientAndInit` (P `0x00738EF0`), in three of the trooper
+  agent's states and three of the DefendHelper's (below),
+  every 5 s: what it can give (`CalcMyAidTypes`: repair, health, ammo, from its weapons), then friendlies
+  within 75 m (`TeamManager::GetObjectsInRange`, at most 50) that need it (`FindAidNeed`) and have an open
+  `RT_REPAIR` reservation, the nearest (a player under extra conditions on its speed and facing); it
+  reserves it, sets `mAidTarget`, stands still and says `VOT_RepairStart`. `Update` keeps the target alive
+  and reserved, takes up the aid weapon (`SetAidWpn`), aims (`AILowLevel::SetTarget`) and closes in;
+  `FireRepairWeapon` (P `0x007398F0`) fires a `WeaponRepair` while lined up, or a `WeaponDispenser` once
+  per contact (`VOT_GivePowerup`).
+- **For the comm keys (agreed with the user, 2026-10-14):** every key plays the stock marker and shout by
+  calling `AddRequest` itself; Spotted marks the enemy under the crosshair and nearby AI that can see it
+  aim at it where they stand (`ForceSetAttackHelperTarget`); Medic, Repair and Ammo point the nearest
+  capable AI's `RepairHelper` at the player from further than 75 m; Backup gives a few nearby AI a timed
+  Defend goal on the player (they fight round it, no formation: the user, "they should not strictly
+  follow you like how F4 makes them"); Attack a timed Destroy goal on the enemy under the crosshair, else
+  the spot aimed at; Defend (the user: "aim at a friendly under the cross hair, OR if nothing and they can
+  reach it then the position you are aiming at") a timed Defend goal on that friendly, a command post, or
+  the spot (a bare spot needs a stand-in, unread); Pickup last, hovers first (the user: "what exactly
+  picks you up. Hovers, walkers, flyers?"), and as a passenger Attack and Defend direct the driver.
+
+### The comm keys in single player (built 2026-10-15, modtools only)
+
+`ai/comm_orders.cpp`, `[AI] CommKeyOrders` (on). The user: "Yep, get them done". Read in P for the names,
+then M.
+
+- **The clock.** A detour of `ControllerManager::Update` (M `0x005997A0`, cdecl(float dt); its first loop
+  hands dt to each player controller's update, vptr +0x14) reads the keys once a frame: the local
+  character's controllable's `mCtrl` (+0xC8), a `PlayerController`, its `ProcessedInputs` (+0x88) bits 20
+  to 27 (+0x10), each counted as it goes down. Only offline (`net_in_shell ? net_enabled_next :
+  net_enabled`, the game's own test before `ChatInputProcess`), and not in a flyer (the wingmen's keys).
+  The AI squads detour the same function when they are on; each guard takes the other's JMP.
+- **What the crosshair is on.** One `CollisionManager::RayHit` along the crosshair's line (as
+  `target_bar_latch.cpp`'s `aimed_unit`: `mEyePoint` +0xDC in unzoomed first person, else
+  `mTargetInfo.mAimStart` +0x148, along `mEyeDir` +0xE8), 600 m, mask 0x02|0x08|0x10|0x20|0x80. A
+  GameObject hit is an enemy or a friend by `GetAffiliationToMe` (M `0x0055F840`); anything else is a
+  place, which a soldier can be sent to if it faces up 0.7 or more and lies within 400 m.
+- **Goals.** `AIGoalManager::AddGoal` (M `0x005CD130`, thiscall(team, type, weight, GoalTarget*), RET
+  0x10; the switch's Destroy and Defend cases construct `DestroyGoal` M `0x005CF6C0` and `DefendGoal` M
+  `0x005CF4E0`, which copy the GoalTarget: type +0, position +4, character +0x10, object +0x14, handle
+  +0x18). The units sent are put in it as their own goal (`ai_goals_lua::set_unit_goal`, so no one else
+  joins it by weight); when the order's time is up, or its target is down, each goes back to the weighted
+  rule and the goal is deleted (`DeleteGoal`, M `0x005CD4D0`, through ai_goals' detour, which drops the
+  keeps first). Backup: Defend, GTT_CHARACTER the player. Attack: Destroy, GTT_GAMEOBJECT the enemy.
+  Defend: Defend, GTT_CHARACTER for a friend a character controls (wherever it goes), else
+  GTT_GAMEOBJECT. A place: Defend, GTT_POS. Pickup: Follow (`FollowGoal::Assign`, P `0x005C8650`, forces
+  the same follow command as the squad key, `UnitFollowInfo`, on the character's entity), GTT_CHARACTER
+  the player, for the nearest AI driving an `EntityHover`, until the player is aboard it.
+- **The stock request.** Each key, on foot or in a ground vehicle, calls `NetGame::DisplayMessage` (M
+  `0x0070C490`, cdecl(NG_ChatMsg*): M's message is 0x128 bytes, the sender's id +0, a team flag +4, the code
+  +0x10), as each machine does with the chat online: "<name>: Medic!" and `AddRequest`'s marker and shout.
+  It finds the sender by its id and hands it to `AddRequest` unchecked, so it is called only where the
+  player's id is its own slot in `sCharacters`; else `AddRequest` (M `0x00687440`, cdecl(code, Character*))
+  alone. The requests come from a pool of 64 (`GameLoop::Init`, M `0x00734763`) that cannot grow: past it
+  `MemoryPool::Allocate` asks for nothing and its free list then runs across the heap. Each lasts 5 s (M
+  `0x00AD74F4`), so a request goes out at most every 0.25 s and only while fewer than 48 are live (the list
+  at `TeamAssistManager::sInstance` M `0x00BA37F4` +0x18, each's next at +0).
+- **Who answers** (reworked after the user tried it: "On foot, orders should only apply to current
+  followers/squadmates recruited via F4", and the rest below). AI characters (`mPlayerId` +0x130 below 0) of
+  the player's team, alive, not in a flyer, and for a goal not answering another order. The squad is those
+  following the player's soldier (`EVQ_SC_IsFollowingChr`, 0x0F, through `squad_send_event`), and those
+  carried over from the squad's last order. Attack and Defend go to the whole squad (within 300 m), or,
+  with `CommandAnyFriendly` (a soldier class's, squad_formation's keys; a script sets it with the stock
+  `SetClassProperty`, which odf_gameext_props.cpp routes to the listeners), to the whole squad and the
+  nearest friendlies until there are four (Attack) or three (Defend). Spotted goes to anyone; Medic,
+  Repair and Ammo to a squadmate who can, else the nearest friendly who can; Pickup and Backup to
+  friendlies outside the squad (`comm_orders_core.hpp`, `pick`). Those friendlies' help is brief: over
+  15 s after the first of them came within 20 m of the player, or 30 s after it was asked if none did
+  (`help_over`).
+- **A squadmate on an order.** Its goal's forced command (`Assign`) replaces its follow, so it leaves the
+  squad to obey. When the order ends it is told to wait with the rest (`UnAssignAll`) and then sent the
+  squad key's own `EVT_SC_FollowChr` (0x10) on the player's soldier, so it follows again; a new squad order
+  ends the squad's last ones first and takes their squadmates over (they are not following then, so the
+  game would not count them), and any it does not take follow again. A unit killed meanwhile is let go at
+  once (its own goal cleared): its next life is not sent back to the order, nor back to the player.
+  Followers cannot give aid (the follow agent has no RepairHelper), so a squadmate answering Medic, Repair
+  or Ammo leaves following for its Defend goal on the player and rejoins after.
+- **What the crosshair is on**, for Spotted and Attack, is the enemy the game's own auto-aim marks first
+  (`mReticuleTarget`, Controllable +0x164 and its handle +0x168, a weapon channel each, as
+  `PlayerController::Update` writes it), else the line's; for Defend a friend on the line first, else one the
+  auto-aim marks, so an enemy in the lock-on cone does not keep it from holding a place.
+- **Medic, Repair, Ammo.** The nearest AI on foot within 300 m that can give it, sent to the player with a
+  Defend goal on its character (GTT_CHARACTER: it comes within 2 to 5 m and holds there); idle there, the
+  game's own check gives the aid. Can give it: its class aids at all (the object's class, vptr +0x24
+  `GetSoldierType`, 2 or 3: pilot, repair, support, special; `CheckForRecipientAndInit`'s gate, M
+  `0x005BC82B`), and its weapons give that aid to what is aided (`RepairHelper::CalcMyAidTypes`, M
+  `0x005BBD20`, thiscall(healthMask, ammoMask), RET 8, on a 0x30-byte stand-in whose +4 is the unit's agent,
+  UnitController +0x2C0: all it reads is the agent's mCtrl +0xC and that one's owner +4; a bit per recipient
+  health type, GameObject +0x1FC & 7). What is aided: for Medic the player's soldier, for Repair and Ammo what
+  it controls. Medic and Repair with nothing to mend say so and send no one, and end once it is whole.
+- **The aid itself** (read in P and M): `CheckForRecipientAndInit` runs in the trooper agent's states 2, 4
+  and 5 (CaptureCP) and in DefendHelper's states 3 (idle at what it defends), 5 and 6 (in a fortification),
+  every 5 s; not in a follower (the follow agent has no RepairHelper). Its candidates are friends within
+  75 m (an immediate, M `0x005BC8EB`); a player within 30 m standing still (under 0.5 m/s) or facing within
+  about 139 degrees of the helper is taken at once; further, a still one. It never aids an AI soldier. A
+  powerup within 15 m of the player covers the need. `RepairHelper::Update` (M `0x005BCD30`) walks into
+  reach and fires the aid weapon, and gives up 20 s after its last contact.
+- **Ending an order.** `DeleteGoal` changes no member's order (it only clears the list), and a Defend order
+  never ends, so the members are told to wait first (`AIGoal::UnAssignAll`, M `0x005CCD00`, thiscall(),
+  plain RET: CMD_WAIT to each through `ForceCommand`, then the list cleared; the game's own `DeleteAIGoal` and
+  `ClearAllGoals` do the same), then each unit's own goal is let go and the goal deleted. A goal a script
+  deletes or clears meanwhile is forgotten (ai_goals' detours call `comm_orders_goals_changed`), before the
+  pool can hand its memory to a new goal.
+- **Taking an order at once.** `AIGoal::Update` (M `0x005CCEE0`) hands a goal's order only to a member idle,
+  waiting or done, so `SetUnitGoal` and `ClearUnitGoal` (ai_goals.cpp) now call the goal's `Assign` (vptr
+  +0x1C, thiscall(Character*), RET 4; Defend's M `0x005CF5C0`, Destroy's `0x005CF7A0`) as they move a unit.
+- **Spotted** sets nothing lasting: each of the player's side within 150 m of the enemy whose eye (its
+  controllable's `mEyePoint`) has a clear line to it (mask 0x90) gets
+  `UnitController::ForceSetAttackHelperTarget` (M `0x0059EC20`) on it.
+- **Markers.** The Attack and Defend targets: `player1.orders.attack.*` and `.defend.*` (HUDSystem.md,
+  "Wingmen markers"), else the game's `TargetManager` marker, red and green, each frame by what the HUD
+  binds. A place has only the HUD's.
+- **Checks:** `tests/comm_orders_tests.cpp` (the keys, the places, what each key asks, how many answer,
+  who), the `comm` mutation suite (all caught), `tests/comm_orders_abi_tests.py` (the clock's prologue and its
+  dt, AddGoal's shape, switch and constructors, DeleteGoal, UnAssignAll, DisplayMessage's reads and its call
+  to AddRequest, the request pool, CalcMyAidTypes and the aid gate, the guards and the other features'
+  offsets it shares), `tests/ai_goals_abi_tests.py` (the goals' Assign). Not played.
+
 ---
 
 ## Key Insight: The "Bubble" System
@@ -661,10 +866,11 @@ The AI deliberately misses shots via `DumbDown` (1270 bytes) and `CalculateBubbl
 
 ---
 
-## Squad formations (researched 2026-10-11, not built)
+## Squad formations (researched 2026-10-11, built 2026-10-12)
 
-Read in Ghidra by a research pass; nothing here is patched yet, and each address is to be re-read
-before it is used. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
+Read in Ghidra by a research pass, then re-read on every build for `[AI] SquadFormation` and
+`[AI] SquadAutoFormUp` (`ai/squad_formation.cpp`) and for AI-led squads (`ai/ai_squads.cpp`), both
+built below. P = Phantom, M = modtools, S = Steam, G = GOG. S and G addresses are as Ghidra
 shows them and move with the exe.
 
 ### Two kinds of follower
@@ -717,7 +923,154 @@ Why a commanded squad still clumps (inferred):
 - `ReserveOffset` could gain a line-abreast layout and a column that starts one slot back.
 - `UpdateTarget` could turn the slots with the leader's direction of travel instead of the camera.
 
-## AI sprinting (researched 2026-10-11, not built)
+### Built (2026-10-12)
+
+- The follow agent's one call to `ReserveOffset` (M `0x005B0AB1`, S `0x006687BC`, G `0x0066985C`)
+  goes to a stand-in. It calls `ReserveOffset` for single file, which keeps the game's reservation
+  and gives the slot number as -z (M `0x005C69FB`, S `0x0062FBF1`, G `0x00630C91`), then lays the
+  slot out in formation space by the leader's layout and spacing. `auto` takes the layout helper's
+  answer: a wedge when it says there is room (6), a column otherwise. The slot goes back divided by
+  the agent's 2.0 with 1e-20 in y; every stock slot has 0 there.
+- The turn cannot go into that offset. `AILowLevel::SetNavigator_FollowTarget` (P `0x00480CC0`)
+  keeps the follower's `NavigatorFollowTarget` only while `IsEqual` (P `0x0067A860`) finds the same
+  leader and a bit-identical `mFollowOffset`; otherwise it deletes the navigator and builds a new one,
+  whose crumbs start again from the leader. An offset that changed as the leader turned would rebuild
+  it nearly every update. The formation-space slot stays the same while the slot number does.
+- `UpdateTarget`'s `D3DXVec3TransformCoord(out, &mFollowOffset, leader matrix)` goes to a stand-in
+  too (M `0x005A6A49`, a CALL to the thunk `0x007CB7B5`, `JMP [0x00ADFC58]`: D3DX is linked into
+  modtools and dispatches through that pointer; S `0x005ACC31` and G `0x005ADBE1`, `CALL [IAT]` to
+  d3dx9_43). A tagged offset turns to the squad's heading round the leader's position, every update;
+  any other goes on to D3DX. The navigator is `mFollowOffset` - 0x4C, its leader at +0x44 with the
+  handle id at +0x48. The two stand-ins go in together or not at all.
+- `ReserveOffset` has two other callers, which keep the stock slots: CTF escorts
+  (`UnitCTFOffenseAgent`, two abreast for the Empire and the Republic and jittered for the other
+  sides, P `0x0078D980`) and convoys (`UnitTrooperAgent`, `FT_CONVOY` scaled by the two collision
+  radii).
+- The heading is the leader's direction of travel (`GetVelocity`, GameObject vptr +0x44) once the
+  leader moves at 1.5 m/s, easing round over about a third of a second, and the last one while the
+  leader stands. The agent's 2.2 applies under 4 m/s, compared squared (16) on every build.
+- Tag-alongs: two calls in `CheckForAutoFollow` are redirected, together or not at all. Its count of
+  the player's formation reservations (M `0x0059ADE9`, S `0x0061C1B2`, G `0x0061D222`; on S and G
+  ECX = object, EDX = team and the type pushed) comes back as 2 once the squad is full and 0 before,
+  so its own `CMP EAX,2` stops at the squad size. Its recruit, `UnitController::SendEvent` (M
+  `0x0059AFC3`, S `0x0061C3E1`, G `0x0061D451`; thiscall, RET 4) on an `EventInfo` built with type
+  0x11, goes out as 0x10, or not at all for a class that never joins. The constructor only stores
+  the type (+0x34) and the object (+0x38, +0x3C), so changing the type afterwards is the same as
+  building it with 0x10. `UnitAgent::HandleSquadCommandEvent` builds the same follow command for
+  both types, tight when the type is 0x10 (M `0x005AA059`, S `0x0065EA25`, G `0x0065FAC5`).
+- ODF keys (`SquadFormation`, `SquadSpacing`, `SquadSize`, `SquadFollower`, and `SquadLeader` for
+  AI-led squads) are kept per soldier class, read through `Controllable + g_soldier->classPtr`, and
+  win over the INI key by key. A hero class is one with bit 1 of the class flags byte (+0x36C on M,
+  +0x328 on S and G) set by `Team::AddSpecialClass`, Lua's `SetHeroClass` (M `0x00662EE0`,
+  S `0x00653F00`, G `0x00654FA0`); `Character::IsHero` reads it (P `0x0049E1C0`).
+
+### Why `auto` is mostly a column (read 2026-10-12)
+
+`GetFormationType` (P `0x007926E0`) gives the wedge when `Controller::mOpenRadius` (+0x48) is above
+10. `Controller::UpdateFreeSpace` (P `0x004F1250`) sets it every 2 s of mission time
+(`mOpenRadiusTime`, +0x4C). It starts at 10 m with a step of 5 m, asks `PathFinder::IsPointValid`
+twice whether a circle of that radius, plus the unit's collision radius, is clear round the unit,
+and widens or narrows by the step, which halves. So the value is only ever 2.5, 7.5, 12.5 or 17.5,
+and above 10 only where a 10.5 m circle is clear. Anything within 10 m, such as a building, a rock or
+a barrier, gives double file in stock and a column under GameExt's `auto`. Each follower asks for
+itself, so one squad can mix shapes, and a follower's slot jumps when its answer changes.
+
+### AI-led squads (built 2026-10-12)
+
+**Switched off (2026-10-12)** until reworked: `ai_squads_install` returns at once, whatever the INI
+or a class's keys say; see the ROADMAP's "AI squads". What follows is what was built.
+
+Stock BF2 has none: an AI follows a leader only when the player commands it, tags along behind the
+player, or a Lua `Follow` goal sends it. All three end in `UnitController::SendEvent` with an
+`EventInfo` of `EVT_SC_FollowChr` about the leader, and nothing on that path needs the leader to be
+a player, so `[AI] AISquads` sends the same event to AI about an AI leader.
+
+- A tick runs once a second before `ControllerManager::Update` (M `0x005997A0`, cdecl(float); S and
+  G `0x00486370`, the delta in XMM0 and no stack argument, behind a naked shim that keeps every
+  register). It walks `sAICtrls`, the ordered list of every `UnitController` that `Update`'s decision
+  budget and its low-level loop walk (the global M `0x00B8EE70`, S `0x01E30934`, G `0x01E31DCC`; +4
+  the first node, a node's +4 the next and +0xC the controller, a null controller the end). The
+  list `Update` walks first, through vptr +0x14, is `sPlayerCtrls` (M `0x00B8EE6C`, S `0x01E30930`,
+  G `0x01E31DDC`): player controllers only. The first build walked that one and found no AI.
+- Each `UnitController` whose owner (+4, the GameObject through the owner's +0x18 interface, vptr
+  +0x20) is a soldier, alive and with health, is a candidate. Alive is bit 3 of GameObject +0x1FC,
+  the bit `UnitController::UpdateHighLevel` tests before a unit thinks at all (M `0x005A03BA`
+  through the Damageable at +0x140, S `0x006639B2`, G `0x00664A52`). Health is +0x144, as Lua's
+  `GetObjectHealth` reads it (M `0x004720E1`, S `0x0058E59D`, G `0x0058F53D`), and the team the low
+  4 bits of +0x234, signed. It already follows someone when its agent (+0x2C0, as `SendEvent` reads
+  it) answers `IsRtti` for `UnitFollowAgent` (M `0x005B00C0`, S `0x00667F00`, G `0x00668FA0`), and
+  fights while its state (+0x7C) is 2. An agent's `IsRtti` is at vptr +0x20: Phantom's
+  `UnitAgent_vftable` starts `EnterState`, `ExitState`, `UpdateState`, and has `EventHandler` at
+  +0x50 (`UnitFollowAgent`'s vtable: M `0x00A487F0`, S `0x007AFB10`, G `0x007B0A88`). The first build
+  called slot 0, `EnterState`, on every AI agent once a second, and read its return as the answer.
+- Recruits are built with the game's `EventInfo` constructor (M `0x0052ADE0`, S `0x0043EDF0`,
+  G `0x0043EDE0`; thiscall, RET 8, 0x58 bytes, a destructor that does nothing). Squads the tick made
+  are checked each tick with `EVQ_SC_IsFollowingChr`, which `UnitFollowAgent::EventHandler` answers 1
+  only about the leader it follows (P `0x00792300`). A recruit's follow order waits in its
+  controller's command queue until the controller's next decision (`UpdateHighLevel`), so for a few
+  seconds it still answers 0: it counts as a member, and taken, for 6 s from joining before it must
+  answer 1.
+- `UnitCombatAgent::EventHandler` hands a squad command on to `UnitAgent`'s (P `0x0078A300`), so a
+  fighting unit would leave its fight to follow: the tick takes nobody in combat, and starts no
+  squad round a leader in combat.
+- `HandleSquadCommandEvent` plays `VOT_SC_FollowResponse` for each recruit, through
+  `VOHelper::Play` with no listener, which plays it at the local player (P `0x0041BAA9`).
+- Only a soldier on its way somewhere recruits: its navigator (`AILowLevel` +0x18, read as AI sprint
+  reads it, a follower's `NavigatorFollowTarget` ruled out) takes it 20 m or more. Snipers sit at
+  snipe hints inside the trooper and defend agents (`SnipeHelper`; the AI calls a soldier a sniper
+  by its weapon, `CombatUtil::IsSniperWpn`, P `0x004C9480`: a class flag and a zoom of 6 or more),
+  so travel is the general test. A squad whose leader stands within 3 m of one place out of combat
+  for 20 s is let go: each follower's agent gets `SetNextState(100)` (vptr +0x1C, which stores +8),
+  what `UnitFollowAgent::EventHandler` does for `EVT_SC_StopFollowChr` (M `0x005B10BC`,
+  S `0x00668C46`, G `0x00669CE6`) without its `VOT_SC_StopFollowResponse`.
+- A squad ends with its leader: a follower whose leader's handle goes stale leaves its follow state,
+  and one whose leader boards a vehicle boards it too (`UnitBoardInfo`), as for the player.
+- Points as a tie-break were left out: `PlayerStats` is `sPlayerStats[(character - sCharacters) /
+  0x1B0]` (P `Character::GetPlayerStats`, `0x0049DE60`), more reads per build than a tie-break is
+  worth. The tick notes when it first sees each soldier instead.
+
+### Follower routes (built 2026-10-12)
+
+Why tight followers get caught on scenery, read in P:
+
+- `NavigatorFollowTarget::UpdateTarget` drops a crumb every 2 m: the slot turned by the leader's
+  matrix, not the leader's own path, into a ring of 32 (64 m). So the trail of a slot 3 m beside a
+  leader who walks past a wall runs through the wall.
+- `LookForCrumbs` (P `0x0067A960`) takes the newest crumb within 2 m of the follower, or, every 2 s of
+  mission time, the newest within 30 m that `PathFinder::TestTrivialStraightLineHit` finds clear.
+  `UpdateFollowCrumbs` (P `0x0067AB50`) gives a straight `PathFollower` to the crumb after it, and
+  sets `HEIGHT_SPRINT` while the follower is more than 1 m from the newest crumb.
+- A `PathFollower` that stops with `PF_PATHBLOCKED` ends the navigator (state 100,
+  `UpdateState`, P `0x0067AE90`). `IsEqual` refuses a navigator in state 100, so the agent's next
+  call builds a new one, its crumbs restarting at the leader. Only a new navigator that finds no
+  crumb plans (`EnterState`, P `0x0067A2E0`): a straight `PathFollower` within 100 m when the line
+  is clear, otherwise `NavigatorGraphFollower`, the coarse hub graph.
+- A loose follower (`UnitFollowAgent::EnterState` state 5, P `0x00791E40`) goes by
+  `SetNavigator_Goto` to a valid point about 10 m behind the leader, which is why followers find
+  their way again once they stop following tightly.
+
+`AILowLevel::SetNavigator_Goto(dest, obstacle, bool, bool)` (P `0x00480D90`, M `0x005A2E00`,
+S `0x0043BF30`, G `0x0043BF20`; thiscall, RET 0x10) deletes the navigator and moves both ends to
+the closest valid points. Unless the first bool is set it asks `PathManager::GetPathPriority`
+(P `0x007118E0`: 50 m or more). A long trip, for a non-flyer whose AI type the world graph carries,
+gets a `NavigatorGraphFollower` (0x44 bytes, its last argument the second bool); anything else a
+`NavigatorPathFollower` (0x34) and `RequestPath`, the planner's A*, one request at a time. The
+loose follow and deathmatch agents call it (dest, null, false, false). On S and G it reads only
+ECX and its stack, and so does `SetNavigator_FollowTarget` (RET 8).
+
+**Built as `[AI] SquadPathfinding`** (`ai/squad_formation.cpp`). The follow agent's call to
+`SetNavigator_FollowTarget` (M `0x005B0AE1` through the thunk `0x0040650A`, S `0x0066880C`,
+G `0x006698AC`) goes to a stand-in. The game's crumbs stay while the follower keeps up. Once the
+follower is more than 10 m from its slot, or more than 3 m with no metre of headway for 2 s while
+its slot moved on at least a metre, it gets `SetNavigator_Goto` to the leader's position. It keeps
+that route until it is within 4 m of its slot or its leader, and then goes back to the crumbs.
+It sprints on the route while more than 4 m from its slot. A route is asked for at most every 3 s,
+since a unit that asks again goes to the back of the planner's queue. The route's navigator is
+known by its address and its vptr, as the pool can hand the address to another navigator. A
+follower unseen for over a second (out of the follow state, or the game paused) starts afresh,
+but keeps the time it last asked.
+
+## AI sprinting (researched 2026-10-11, built 2026-10-12)
 
 AI never touch `mControlSprint`, but they do sprint. `AILowLevel::mHeight` set to `HEIGHT_SPRINT` (3)
 makes `EntitySoldier::UpdateIndirect` (P `0x00588E10`, M `0x0053B920`, S and G `0x004F0110`) call the
@@ -744,11 +1097,27 @@ What a sprint does, read in P and M:
 - **Being shot at:** a sprinter's target bubble grows and its stance modifier doubles, so enemy AI hit
   it less (inferred).
 
-A traversal sprint could set `mHeight` to sprint in a detour of `UpdateIndirect`, just before the
-original reads it, and put it back afterwards: only with no target and no recent threat, a far
-destination, a long current leg with a shallow next turn, and the energy to cover the leg
-(`EnergyMinSprint` and the class's drain). The height jump table itself must stay as it is:
-`soldier_prone` patches entries in it.
+**Built as `[AI] AISprint`** (`ai/ai_sprint.cpp`). A detour of `EntitySoldier::UpdateIndirect` raises
+`mHeight` from stand to sprint for one update and puts it back afterwards, unless the AI set a height
+of its own meanwhile, so the AI's own state never keeps it. The height jump table is left alone
+(`soldier_prone` patches entries in it). It sprints when:
+
+- the AI asked to stand, and the soldier is standing or already sprinting (`Sprint()`'s own test);
+- its controller is not in combat (`UnitController` state 2, read at +0x7C) and `AILowLevel::mTarget`
+  holds nothing;
+- it travels a path of its own: a `NavigatorGraphFollower` (to `mGlobalDest`, +0x24) or a
+  `NavigatorPathFollower` (to its path follower's `mFinalPoint`), not following a leader. A
+  follower's `NavigatorFollowTarget` derives from `NavigatorGraphFollower` and its `IsRtti` says yes
+  to both (P `0x0067A8F0`, M `0x005A63E0`, S `0x005AC510`, G `0x005AD4C0`), so it is ruled out
+  first;
+- that destination is at least `AISprintDistance` away on the ground (30 m), or half that once
+  sprinting;
+- its energy bar is not overheated, and to start a sprint it is at least half full.
+
+`EntitySoldier::Update` drains any soldier in the sprint state (P `0x00583112`, the bar at Controllable
++0x7E0 on P and M, +0x7D0 on retail), so a sprint ends at the bar's overheat latch and resumes once it
+clears, as a player's does. Every read and call is listed per build in `ai/ai_sprint.hpp` and checked by
+`tests/ai_sprint_abi_tests.py`. Not yet tried in play.
 
 ## Path following (researched 2026-10-11)
 

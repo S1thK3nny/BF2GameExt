@@ -165,6 +165,25 @@
 // The child comes back in EAX, and each site's next instruction moves it into
 // a register of its own, so the shim leaves EAX as it found it. Phantom's
 // EntityClass::Read (0x005020F0) shows the shape the four builds share.
+//
+// -----------------------------------------------------------------------------
+// A script's SetClassProperty, for the property listeners
+//
+// Lua's SetClassProperty(class, property, value) finds the entity class by name
+// and calls its SetProperty itself (Lua_Callbacks::SetClassProperty, Phantom
+// 0x0064E9A0; a boolean value becomes "1" or "0"), past the readers. So its one
+// vcall is a site too: the listeners see a script's property as a reader's
+// (odf_script_prop_dispatch), all but those registered for ODF files alone. No
+// @GameExt override or window: a script names the property it means.
+//
+//   build     site        bytes                           this hash   value slot
+//   --------  ----------  ------------------------------  ---- ------ ----- ----
+//   modtools  0x0047296E  8B 17 56 50 8B CF FF 52 18      EDI  EAX    ESI   0x18
+//   Steam     0x0058ED36  8B 17 8B CF 56 FF 30 FF 52 18   EDI  [EAX]  ESI   0x18
+//   GOG       0x0058FCD6  same as Steam
+//
+// After the vcall each pops ESI and EBX and returns 0, so pushad/popad round the
+// shim's call leave it exactly as SetProperty would have.
 // =============================================================================
 
 namespace {
@@ -213,8 +232,9 @@ int    s_recentUsed      = 0;   // slots filled, saturates at kWindow
 uint32_t s_applied = 0;
 
 // Listeners registered by other modules (odf_add_*_handler).
-constexpr int kMaxHandlers = 4;
+constexpr int kMaxHandlers = 8;
 OdfPropertyHandler s_propertyHandlers[kMaxHandlers] = {};
+bool               s_handlerScripts[kMaxHandlers]   = {};   // it sees a script's SetClassProperty too
 OdfDeriveHandler   s_deriveHandlers[kMaxHandlers]   = {};
 int s_propertyHandlerCount = 0;
 int s_deriveHandlerCount   = 0;
@@ -281,6 +301,17 @@ extern "C" void __cdecl odf_gameext_prop_dispatch(void* cls, uint32_t hash,
    remember(hash);
 }
 
+// A script's SetClassProperty: the listeners that take scripts' properties, then
+// the class's own SetProperty unless one consumed it.
+extern "C" void __cdecl odf_script_prop_dispatch(void* cls, uint32_t hash, const char* value, uint32_t vslot)
+{
+   if (cls == nullptr) return;
+   bool consumed = false;
+   for (int i = 0; i < s_propertyHandlerCount && !consumed; ++i)
+      if (s_handlerScripts[i]) consumed = s_propertyHandlers[i](cls, hash, value);
+   if (!consumed) call_set_property(cls, vslot, hash, value);
+}
+
 // Called by the derive shims once a reader has made a class from its base.
 extern "C" void __cdecl odf_class_derived(const void* parent, void* child)
 {
@@ -288,9 +319,10 @@ extern "C" void __cdecl odf_class_derived(const void* parent, void* child)
    for (int i = 0; i < s_deriveHandlerCount; ++i) s_deriveHandlers[i](parent, child);
 }
 
-bool odf_add_property_handler(OdfPropertyHandler handler)
+bool odf_add_property_handler(OdfPropertyHandler handler, bool scripts)
 {
    if (!handler || s_propertyHandlerCount == kMaxHandlers) return false;
+   s_handlerScripts[s_propertyHandlerCount] = scripts;
    s_propertyHandlers[s_propertyHandlerCount++] = handler;
    return true;
 }
@@ -431,18 +463,52 @@ __declspec(naked) void shim_rt_weapon_derive()
    }
 }
 
+// A script's SetClassProperty: the class in EDI, the value in ESI, the hash in
+// EAX (modtools) or at [EAX] (Steam, GOG).
+void* s_contLuaClass = nullptr;
+
+__declspec(naked) void shim_mt_lua_class()
+{
+   __asm {
+      pushad
+      push 0x18
+      push esi
+      push eax
+      push edi
+      call odf_script_prop_dispatch
+      add  esp, 16
+      popad
+      jmp  [s_contLuaClass]
+   }
+}
+
+__declspec(naked) void shim_rt_lua_class()
+{
+   __asm {
+      pushad
+      push 0x18
+      push esi
+      push dword ptr [eax]
+      push edi
+      call odf_script_prop_dispatch
+      add  esp, 16
+      popad
+      jmp  [s_contLuaClass]
+   }
+}
+
 struct Site {
    const char* name;      // reader, for the install log
    uintptr_t va;          // site, unrelocated
-   uint8_t   len;         // bytes replaced: 9 for a PROP dispatch, 8 for a Derive call
-   uint8_t   expect[9];   // exact bytes the site must carry (the first len)
+   uint8_t   len;         // bytes replaced: 9 for a PROP dispatch, 8 for a Derive call, 9 or 10 for Lua's
+   uint8_t   expect[10];  // exact bytes the site must carry (the first len)
    void    (*shim)();
    void**    cont;        // where the shim returns to (site + len)
 };
 
-constexpr int kMaxSites = 6;
+constexpr int kMaxSites = 7;
 uint8_t* s_patched[kMaxSites] = {};
-uint8_t  s_orig[kMaxSites][9] = {};
+uint8_t  s_orig[kMaxSites][10] = {};
 uint8_t  s_origLen[kMaxSites] = {};
 int      s_patchCount = 0;
 
@@ -554,6 +620,20 @@ void odf_gameext_props_install(uintptr_t exe_base)
    }
 
    install_log("[ODF] class derivation: %d/2 readers hooked", derived);
+
+   // A script's SetClassProperty.
+   const Site lua = modtools
+      ? Site{ "Lua SetClassProperty", g_addr->lua_set_class_property_site, 9,
+              {0x8B, 0x17, 0x56, 0x50, 0x8B, 0xCF, 0xFF, 0x52, 0x18},
+              &shim_mt_lua_class, &s_contLuaClass }
+      : Site{ "Lua SetClassProperty", g_addr->lua_set_class_property_site, 10,
+              {0x8B, 0x17, 0x8B, 0xCF, 0x56, 0xFF, 0x30, 0xFF, 0x52, 0x18},
+              &shim_rt_lua_class, &s_contLuaClass };
+   if (install_site(exe_base, lua))
+      install_log("[ODF] Lua SetClassProperty hooked: GameExt's class properties can be set from scripts");
+   else
+      install_log("[ODF] Lua SetClassProperty site 0x%08x did not match - GameExt's class properties are "
+                  "ODF-only", lua.va);
 }
 
 void odf_gameext_props_uninstall()

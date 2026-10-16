@@ -10,6 +10,11 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **GameExt class properties from scripts** - The stock Lua `SetClassProperty` sets the properties
+  BF2GameExt adds to entity classes too (the squad, wingmen, comm key, camera shake and directional
+  roll and jet properties), as if the line were in the class's ODF; `RemoveOnDeath` stays ODF-only.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#from-a-mission-script).
+
 - **Camera shake** - The stock shake from explosions, walker deaths and flyer crashes is
   drawn as a blast, a smooth roll and sway that follows the strongest explosion running
   and shrinks while zoomed in, instead of a new random jolt every frame. ODFs can shake
@@ -123,6 +128,56 @@ Scripts can check the running version through `GameExt.version`.
   gate what it loads on a minimum version in one line:
   `GameExt_TestVersion and GameExt_TestVersion(1, 2, 0)`.
   See [Lua API](docs/user/LUA_API.md#detection).
+- **AI sprint** - AI soldiers out of combat sprint on long runs, starting 30 m from where they
+  are going and stopping at half that, until their energy runs out. Stock AI only sprint to catch
+  up with a squad leader. `[AI] AISprint=1`, `[AI] AISprintDistance=30`; not yet tested in play.
+- **Squad formations** - A squad lines up on its leader in one layout (`[AI] SquadFormation`:
+  auto, wedge, file, column, line or stock) at one spacing (`SquadSpacing=3`), facing the way it
+  travels rather than the way the leader looks. Friendlies who join you on their own follow in
+  formation, up to `SquadSize=4` (`SquadAutoFormUp=1`); heroes stay out. Soldier classes can set
+  `SquadFormation`, `SquadSpacing`, `SquadSize` and `SquadFollower` in their ODFs, and those win
+  over the INI. Not yet tested in play.
+- **Squad pathfinding** - A squad follower more than 10 m behind its place, or caught on
+  something for 2 s as its squad moves on, finds its way to its leader round obstacles and
+  barriers, as soldiers going anywhere else do, then falls back into formation. Stock followers
+  walk straight along their place's trail and get caught on scenery. `[AI] SquadPathfinding=1`;
+  not yet tested in play.
+- **Flyer wingmen** - Friendly AI flyers fly in formation on the player's flyer once the squad key
+  calls them up (or at every takeoff, `[AI] FlyerWingmenAuto=1`), take orders from the squad and
+  comm keys (form up, engage, attack my target, cover me) and land with it.
+  Aim the squad key at a friendly flyer to pick it, hold it to break the flight off; each
+  wingman has a marker on the map and on screen (`[AI] FlyerWingmenMarkers=1`), and an attack
+  order's target a red one; a `.hud` can draw its own from `player1.wingmanN.*` and
+  `player1.wingmen.target.*` events instead. Wingmen fire only with a clear line to their
+  target and pass at a hardpoint under a ship from below. F5 in the air switches their
+  formation; they land right away when you do, beside you or further ahead, circling till a
+  spot is free, and those still on their way when you get out land all the same; one let go in
+  a hangar first flies back out the way you flew in. One with a wall between it and its slot, as outside a hangar you fly
+  into, follows the path you flew, at its own size and easing off through the door, and under a
+  roof they close up and stop climbing over what is ahead (`[AI] FlyerWingmenTrail=1`); a
+  hangar is found from your path and the map's landing regions, a tall one too.
+  Flyer classes set who flies with whom, the formation, the first order, the engage range and a
+  wingman's role with `Wingman*` keys, and mission scripts call up, name, order and lock the
+  flight with `CallWingmen`, `AddWingman`, `SetWingmenOrder`, `SetWingmenLocked` and more, with
+  `OnWingmanJoin`, `OnWingmanLost`, `OnWingmenOrder` and `OnWingmanLanded` events. A prototype,
+  modtools only, `[AI] FlyerWingmen=0`; the squad key's orders work in play, the comm keys,
+  landing and the Lua side are not yet tested.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#flyer-wingmen) and
+  [Lua API](docs/user/LUA_API.md#flyer-wingmen).
+- **Comm key orders** - In single player the comm keys ask the AI for help. Attack and Defend order
+  your squad (the AI following you): after your target or to the place you aim at, or to guard the
+  friendly or place you aim at, falling back in behind you after; the `CommandAnyFriendly` soldier
+  property lets you order any friendly. Spotted points nearby allies who can see your target at it;
+  Medic, Repair and Ammo bring a squadmate who can give it, else the nearest friendly who can; Pickup
+  brings the nearest AI-driven hover; Backup brings three nearby allies; those outside your squad help
+  for 15 seconds. Each key also gets the game's chat line, marker and shout, and the Attack and Defend
+  targets markers a `.hud` can draw from `player1.orders.attack.*` and `.defend.*`. A prototype,
+  modtools only, `[AI] CommKeyOrders=1`; partly played.
+- **AI goal limit and units' own goals** - Up to 64 AI goals at once instead of 20
+  (`[LimitIncreases] AIGoalLimit=64`), and `SetUnitGoal`, `ClearUnitGoal` and `GetUnitGoal`
+  give an AI unit a goal of its own that it keeps across respawns and no one else joins.
+  Modtools only for now; not yet tested in play.
+  See [Lua API](docs/user/LUA_API.md#ai-goals).
 - **Walker foot diagnostic** - `[Diagnostic] WalkerFootDiag=1` logs each step of each
   foot of the walker you drive: how far it came down, the biggest drop in a single
   update, and whether BF2 counted the landing, which is what plays the stomp effect,

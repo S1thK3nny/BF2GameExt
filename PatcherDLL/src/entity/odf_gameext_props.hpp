@@ -36,8 +36,14 @@ uint32_t odf_gameext_props_applied();
 // starts as a copy of its parent, before its own properties are read, so this
 // is where a property kept outside the class object has to be inherited.
 //
-// Register from an installer, before any level loads; up to four of each.
+// A property handler also sees what a mission script sets with the stock
+// SetClassProperty(class, property, value) on an entity class, as it would the
+// same line in the class's ODF: the class it names, already loaded, and the
+// value as text (a boolean as "1" or "0"). Unless registered with `scripts`
+// false, for a property whose meaning hangs on the lines read before it.
+//
+// Register from an installer, before any level loads; up to eight of each.
 using OdfPropertyHandler = bool (*)(void* cls, uint32_t hash, const char* value);
 using OdfDeriveHandler   = void (*)(const void* parent, void* child);
-bool odf_add_property_handler(OdfPropertyHandler handler);
+bool odf_add_property_handler(OdfPropertyHandler handler, bool scripts = true);
 bool odf_add_derive_handler(OdfDeriveHandler handler);

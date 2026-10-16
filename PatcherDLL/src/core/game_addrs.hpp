@@ -341,6 +341,11 @@ namespace modtools {
    constexpr uintptr_t explosion_class_read_prop_site = 0x00601fab;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x00605a4b;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0061e46c;
+   // Lua_Callbacks::SetClassProperty (0x004728F0) hands the class, the property's
+   // hash and its value to the class's SetProperty (slot 0x18) here: MOV EDX,[EDI]
+   // / PUSH ESI / PUSH EAX / MOV ECX,EDI / CALL [EDX+0x18], this=EDI hash=EAX
+   // value=ESI. The listeners see a script's properties there too.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0047296e;
 
    // Second self-piloted-hover crash: issuing a unit order crashes in
    // EntitySoldier::Update's event-0x1a/0x1b order-acknowledge block, which
@@ -1324,6 +1329,199 @@ namespace modtools {
    // (entity/walker_stomp_fix.cpp).
    constexpr uintptr_t walker_update_state          = 0x0055B3C0;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00555D0F;
+   // EntitySoldier::UpdateIndirect: thiscall(float dt), bool in AL, RET 4;
+   // `this` the soldier's Controllable. An AI soldier's per-update stance
+   // switch on AILowLevel::mHeight. AI sprint detours it (ai/ai_sprint.cpp).
+   constexpr uintptr_t entity_soldier_update_indirect = 0x0053B920;
+   // UnitFollowAgent's tight follow state: its CALL to ReserveManager::
+   // ReserveOffset (through the thunk 0x00406E29), cdecl(out, leader, follower,
+   // type). Squad formations redirect this one call (ai/squad_formation.cpp).
+   constexpr uintptr_t follow_reserve_offset_call   = 0x005B0AB1;
+   constexpr uintptr_t reserve_offset               = 0x005C6840;
+   // NavigatorFollowTarget::UpdateTarget's CALL that turns the follow offset by
+   // the leader's matrix: D3DXVec3TransformCoord, linked into this exe, reached
+   // through the thunk 0x007CB7B5 (JMP [0x00ADFC58], a pointer in .data).
+   constexpr uintptr_t follow_target_transform_call = 0x005A6A49;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x00ADFC58;
+   // PlayerController::CheckForAutoFollow: its CALL to ReserveManager::
+   // GetReservationCountForObject (cdecl(obj, team, type), through the thunk
+   // 0x0040200E), and the CALL to UnitController::SendEvent (thiscall(EventInfo*),
+   // through 0x0040C216) that recruits a friendly with EVT_SC_FollowChrLoose.
+   constexpr uintptr_t auto_follow_count_call       = 0x0059ADE9;
+   constexpr uintptr_t reservation_count_for_object = 0x005C6560;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0059AFC3;
+   constexpr uintptr_t unit_controller_send_event   = 0x0059F8A0;
+   // EventInfo::EventInfo(EventType, GameObject*): thiscall, RET 8, 0x58 bytes
+   // (through the thunk 0x00407C61). AI squads build their "follow me" with it.
+   constexpr uintptr_t event_info_ctor              = 0x0052ADE0;
+   // The follow agent's CALL to AILowLevel::SetNavigator_FollowTarget (through
+   // the thunk 0x0040650A), thiscall(leader, offset), RET 8, and
+   // AILowLevel::SetNavigator_Goto, thiscall(dest, obstacle, bool, bool),
+   // RET 0x10: squad formations give a follower left behind a planned route.
+   constexpr uintptr_t follow_set_navigator_call    = 0x005B0AE1;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x005A3180;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x005A2E00;
+   // Flyer wingmen (a prototype, modtools only). EntityFlyer::UpdateIndirect,
+   // thiscall(float dt) on the flyer's Controllable (entity +0x240), RET 4; its
+   // one CALL to EntityFlyer::CalculateDest (through the thunk 0x00401726),
+   // thiscall(dt, ControllableDestination*, point*, speed*, myPos*) on the
+   // entity, RET 0x14; GetFlyerMaxSpeed and GetFlyerMinSpeed, thiscall() on
+   // the entity, the speed in ST0.
+   constexpr uintptr_t flyer_update_indirect        = 0x004F4C10;
+   constexpr uintptr_t flyer_calc_dest_call         = 0x004F4D4D;
+   constexpr uintptr_t flyer_calc_dest              = 0x004F4630;
+   constexpr uintptr_t flyer_max_speed              = 0x004F0950;
+   constexpr uintptr_t flyer_min_speed              = 0x004F0A10;
+   constexpr uintptr_t flyer_mid_speed              = 0x004F09B0;   // GetFlyerMidSpeed, as the two above
+   // (EntityFlyer::DoTrick is flyer_do_trick, above.)
+   // Real flight on paths (a prototype, modtools only). EntityPathFollower::Update,
+   // thiscall(BranchParams*, float dt, float* velocityOut, PblMatrix* matrixOut,
+   // bool forceBranch, float boostRatio, float energyRatio) on the follower
+   // (entity +0x3CC), RET 0x1C, false when it has no path; EntityFlyer::
+   // UpdatePathFollower, thiscall(float dt, PblMatrix*) on the entity, RET 8;
+   // EntityFlyer::Update's CALL to it (through the thunk 0x00411CA2) and, when
+   // the flyer is not on its path, its CALL to EntityPathFollower::Reset (through
+   // the thunk 0x00404133; path_follower_reset, above).
+   constexpr uintptr_t flyer_path_step              = 0x005EC8F0;
+   constexpr uintptr_t flyer_update_path_follower   = 0x004F30C0;
+   constexpr uintptr_t flyer_update_path_call       = 0x004FDD93;
+   constexpr uintptr_t flyer_free_reset_call        = 0x004FDDED;
+   // EntityFlyer::RaiseHeight's CALL to CollisionManager::RayHit (through the
+   // thunk 0x00407581), cdecl(start, dir, length, hit*, normal*, ignore list,
+   // ignore count, type mask, bool ordnanceOnly), the fraction in ST0; and
+   // CollisionModel::RayHit, thiscall(matrix, pose, start, dir, length, normal*,
+   // body*, bool ordnanceOnly, ...), RET 0x24, which with ordnanceOnly tests only
+   // the bodies in its ordnance mask (+0x12C; the vehicle mask is +0x114).
+   constexpr uintptr_t flyer_raise_ray_call         = 0x004F429E;
+   constexpr uintptr_t collision_ray_hit            = 0x0042E230;
+   constexpr uintptr_t collision_model_ray_hit      = 0x004359C0;
+   // Flyer-to-flyer avoidance and AI squadrons (prototypes, modtools only).
+   // Every EntityPathFollower (one in every EntityFlyer, at its +0x3CC) links
+   // itself into one list in its constructor (the link-in is at
+   // flyer_follower_link): the list's head node (+4 the first node; a node's +4
+   // the next, +0xC its follower; the head's own +0xC is null), its count at
+   // +0x10. EntityFormation::Find, cdecl(uint32_t nameHash): the map's formation
+   // shape of that name (an EntityFormation path), or null; it walks the list of
+   // them from entity_formation_list's head node (+4 the first node; a node's +4
+   // the next, +0xC its formation; the head's +0xC null).
+   constexpr uintptr_t flyer_follower_list          = 0x00AD3524;
+   constexpr uintptr_t flyer_follower_link          = 0x005E8AE3;
+   // Landing regions, for the wingmen's hangars (flyer_wingmen.cpp,
+   // landing_region_core.hpp; docs/RE/FlyerAI.md, "Landing regions as hangars").
+   // TriggerRegionManager::sInstance, a pointer: its 32 TriggerRegionData slots at
+   // +0x18, 8 bytes each (the PblRegion*, then the TriggerType: 2 landing), the
+   // byte at +0x11C set while there are landing regions. GetTriggerRegionData,
+   // thiscall(int slot), RET 4, reads the slots so (LEA EAX,[ECX+EAX*8+0x18]);
+   // FlagItem::IsInLandingZone loads the pointer and reads +0x11C;
+   // PblRegion::IsPointInside, thiscall(const PblVector3*), RET 4, switches on
+   // the shape at +0x54 (1 to 8).
+   constexpr uintptr_t trigger_region_manager       = 0x00B9A73C;
+   constexpr uintptr_t trigger_region_data          = 0x00664140;
+   constexpr uintptr_t flag_in_landing_zone         = 0x006514E0;
+   constexpr uintptr_t pbl_region_inside            = 0x007E7820;
+   constexpr uintptr_t entity_formation_find        = 0x005E2EB0;
+   constexpr uintptr_t entity_formation_list        = 0x00AD33C0;
+   // Wingmen orders (a prototype, modtools only). Controllable::
+   // GetTargetLockedObj, thiscall() on a Controllable, the GameObject in EAX,
+   // RET: a player's from its LockOnManager, kept at +0x138 (+0x13C its handle).
+   // UnitController::ForceSetAttackHelperTarget, thiscall(GameObject*), RET 4:
+   // its agent (+0x2C0) and that one's AttackHelper (+0x10, the target there
+   // and its handle at +4) through AttackHelper::SetVisibleTarget.
+   // GameObject::GetAffiliationToMe, thiscall(GameObject* other), RET 4: below
+   // 0 an enemy. The HUD's message line, cdecl(int player, const wchar_t*
+   // text, const RedColor* color): sends player%d.message.color, then
+   // player%d.message, as the trooper squad commands show theirs (EntitySoldier
+   // 0x00549A6D); their colour is hud_message_color. The localisation lookup,
+   // cdecl(uint32_t hash, bool nullIfMissing), a wide string. The comm keys
+   // are read from the player's processed inputs (PlayerController +0x88, as
+   // player_controller_update loads them): ProcessedInputs::GetDigital,
+   // thiscall(input), RET 4, bit n of +0x10 for digital input n below 0x1E
+   // (Comm_Chat_6 Attack 26, Comm_Chat_7 Defend 27). The game's own comm-key
+   // processing (TeamOrderInputProcess 0x00745D00, its CALL to
+   // NetGame::AddChatMessageToQue at 0x00745DC3) runs only in a networked game.
+   constexpr uintptr_t controllable_locked_target   = 0x005E0C70;
+   constexpr uintptr_t uc_force_attack_target       = 0x0059EC20;
+   constexpr uintptr_t object_affiliation           = 0x0055F840;
+   constexpr uintptr_t hud_message                  = 0x006AECD0;
+   constexpr uintptr_t hud_message_color            = 0x00AE2170;
+   constexpr uintptr_t localize_find                = 0x007F3720;
+   constexpr uintptr_t processed_inputs_get_digital = 0x00743A30;
+   // TargetManager's markers (the map's icons, and with hudTarget a "common" HUD
+   // target bracket on screen), 32 in all: AddMarker, cdecl(object, region, icon
+   // hash, scale, team mask, colour hash, hudTarget, flash, pulse, pulse start),
+   // and RemoveMarker, cdecl(object, region, team mask), as Lua's
+   // MapAddEntityMarker (0x00471D72, the caller popping 0x28) and
+   // MapRemoveEntityMarker (0x00471E1C, popping 0xC) call them.
+   constexpr uintptr_t target_manager_add_marker    = 0x0048E3A0;
+   constexpr uintptr_t target_manager_remove_marker = 0x0048E650;
+   // AttackHelper::Reset, thiscall() on the AttackHelper (UnitAgent +0x10), RET:
+   // no target (handle cleared, not visible, last seen at -1000), as
+   // SetVisibleTarget (0x005B43D0, from ForceSetAttackHelperTarget) calls it first.
+   constexpr uintptr_t attack_helper_reset          = 0x005B4230;
+   // EntityFlyer::TakeOff, thiscall() on the entity, RET: from landed or landing
+   // to taking off (state 1), its free-flight and trick times zeroed (Lua's
+   // EntityFlyerTakeOff, 0x004729D4, and the player's own, 0x004FE7F6, call it).
+   // The same function as carrier_take_off, which the carrier fixes detour.
+   constexpr uintptr_t entity_flyer_take_off        = 0x004F8B70;
+   // Wingmen waiting aboard. UnitFlyAgent::UpdateStatePostVision's FLY state
+   // CALLs IsNearLandingPt (thiscall() on the agent, bool in AL; near a map land
+   // hint it lands there, then its DROPOFF state gets the pilot out through
+   // AILowLevel::SetExitVehicle, thiscall(CommandPost*) on UnitController
+   // +0x2C4, RET 4); UnitFlyAgent::EnterState's TAKEOFF and FLY states CALL
+   // EntityFlyer::TakeOff on a landed flyer.
+   constexpr uintptr_t fly_agent_land_hint_call     = 0x005AFDD3;
+   constexpr uintptr_t fly_agent_land_hint          = 0x005AED00;
+   constexpr uintptr_t fly_agent_take_off_call      = 0x005AF154;
+   constexpr uintptr_t fly_agent_take_off_call2     = 0x005AF323;
+   constexpr uintptr_t ai_set_exit_vehicle          = 0x005A2170;
+   // The AI goal manager (ai/ai_goals.cpp): AIUtil::Init's PUSH 0x3C; PUSH 0x14
+   // for AIGoal::sMemoryPool; AIGoalManager::Create (cdecl(), operator new(0x6C)
+   // and the constructor, into mInstance) and mInstance; AddGoal, DeleteGoal,
+   // ClearAllGoals, AssignUnit, RemoveUnit (the character on the stack, RET 4),
+   // the debug listing, FindGoal and Update, each counting mGoals to 20
+   // (thiscall, RET 4 but Create and Update).
+   constexpr uintptr_t ai_goal_pool_setup           = 0x0058CD3C;
+   constexpr uintptr_t ai_goal_manager_create       = 0x005CD5B0;
+   constexpr uintptr_t ai_goal_manager_instance     = 0x00B8FAA4;
+   constexpr uintptr_t ai_goal_add                  = 0x005CD130;
+   constexpr uintptr_t ai_goal_delete               = 0x005CD4D0;
+   constexpr uintptr_t ai_goal_clear_all            = 0x005CD550;
+   constexpr uintptr_t ai_goal_assign_unit          = 0x005CD5E0;
+   constexpr uintptr_t ai_goal_remove_unit          = 0x005CDA00;
+   constexpr uintptr_t ai_goal_print                = 0x005CDA70;
+   constexpr uintptr_t ai_goal_find                 = 0x005CDD00;
+   constexpr uintptr_t ai_goal_update               = 0x005CDE20;
+   // AIGoal::UnAssignAll, thiscall() on a goal, plain RET: CMD_WAIT to each member
+   // (its controllable's mCtrl +0xC8, ForceCommand), then its list cleared. The
+   // game's DeleteAIGoal and ClearAllGoals call it before deleting: DeleteGoal
+   // changes no member's order (the comm keys' orders, ai/comm_orders.cpp).
+   constexpr uintptr_t ai_goal_unassign_all         = 0x005CCD00;
+   // The comm keys' stock request (ai/comm_orders.cpp). NetGame::DisplayMessage,
+   // cdecl(NG_ChatMsg*), plain RET: what each machine does with a chat line online
+   // (the sender's mName, ": ", common.chat.<code>, in yellow on the message line,
+   // then TeamAssistManager::AddRequest(code, sender)); the sender is found by its
+   // id (+0) and handed on unchecked. M's NG_ChatMsg is 0x128 bytes (AddChatMessage
+   // ToQue's new): id +0, team flag +4, code +0x10. AddRequest, cdecl(code,
+   // Character*): a TeamAssist from a pool of 64 (no growth: past it the pool's
+   // free list overruns the heap), 5 s each, its marker and shout. Its manager,
+   // TeamAssistManager::sInstance, made by GameLoop::PostLoad (offline too): the
+   // list of live requests at +0x18, each's next at +0.
+   constexpr uintptr_t net_display_message          = 0x0070C490;
+   constexpr uintptr_t team_assist_add_request      = 0x00687440;
+   constexpr uintptr_t team_assist_instance         = 0x00BA37F4;
+   // RepairHelper::CalcMyAidTypes, thiscall(uint* healthMask, uint* ammoMask), RET 8:
+   // the aid a unit's weapons give, a bit per recipient health type (GameObject
+   // +0x1FC & 7); it reads only its +4, a UnitAgent (whose mCtrl +0xC, whose owner
+   // +4, the Controllable with the weapons).
+   constexpr uintptr_t repair_calc_aid_types        = 0x005BBD20;
+   // ControllerManager::Update, cdecl(float dt), and the global holding
+   // sAICtrls, its ordered list of every UnitController (+4 the first node; a
+   // node's +4 the next, +0xC the controller; a null controller ends it), the
+   // list its decision budget and its low-level loop walk. Its first loop walks
+   // sPlayerCtrls (0x00B8EE6C) instead: player controllers only. AI squads
+   // detour it for their tick (ai/ai_squads.cpp).
+   constexpr uintptr_t controller_manager_update    = 0x005997A0;
+   constexpr uintptr_t ai_controller_list           = 0x00B8EE70;
    // EntityHover::CollisionCallback: thiscall(CollisionResult*, CollisionObject*
    // other, Restrictor*), RET 0xC, bool in AL; `this` is the hover + 0xC, its
    // CollisionObject part. Slot 6 (+0x18) of the CollisionObject vtable of
@@ -2552,6 +2750,9 @@ namespace steam {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f842d;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067a2b9;
+   // Lua_Callbacks::SetClassProperty (0x0058ECC0): MOV EDX,[EDI] / MOV ECX,EDI /
+   // PUSH ESI / PUSH [EAX] / CALL [EDX+0x18], this=EDI hash=[EAX] value=ESI.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0058ed36;
    constexpr uintptr_t zephyr_pose_dyn_set_anim = 0x0072d430;
    constexpr uintptr_t zephyr_pose_static_ctor  = 0x0072da90;
    constexpr uintptr_t zephyr_pose_static_open  = 0x0072df20;
@@ -2799,6 +3000,34 @@ namespace steam {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntitySoldier::UpdateIndirect, as on modtools; reached only through the
+   // soldier's Controllable vtable (slot +0xC4 at 0x0079CF2C).
+   constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
+   // The follow agent's CALL to ReserveManager::ReserveOffset, as on modtools;
+   // here ECX = out, EDX = leader, follower and type on the stack, caller pops.
+   constexpr uintptr_t follow_reserve_offset_call   = 0x006687BC;
+   constexpr uintptr_t reserve_offset               = 0x0062FA70;
+   // UpdateTarget's CALL [IAT] to d3dx9_43!D3DXVec3TransformCoord, as on
+   // modtools.
+   constexpr uintptr_t follow_target_transform_call = 0x005ACC31;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x0076B54C;
+   // CheckForAutoFollow's two calls, as on modtools; here the count takes
+   // ECX = obj, EDX = team and the type pushed, the caller popping.
+   constexpr uintptr_t auto_follow_count_call       = 0x0061C1B2;
+   constexpr uintptr_t reservation_count_for_object = 0x0062F760;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0061C3E1;
+   constexpr uintptr_t unit_controller_send_event   = 0x006640D0;
+   // EventInfo's constructor, as on modtools. ControllerManager::Update takes
+   // its delta in XMM0 here, no stack argument; sAICtrls, as on modtools
+   // (sPlayerCtrls is 0x01E30930).
+   constexpr uintptr_t event_info_ctor              = 0x0043EDF0;
+   // The follow agent's CALL to SetNavigator_FollowTarget and SetNavigator_Goto,
+   // as on modtools.
+   constexpr uintptr_t follow_set_navigator_call    = 0x0066880C;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x0043C240;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x0043BF30;
+   constexpr uintptr_t controller_manager_update    = 0x00486370;
+   constexpr uintptr_t ai_controller_list           = 0x01E30934;
    // EntityHover::CollisionCallback, as on modtools: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079BC98) and CommandHover
    // (0x0079834C).
@@ -3503,6 +3732,24 @@ namespace gog {
    constexpr uintptr_t walker_update_state          = 0x00502890;
    constexpr uintptr_t walker_stomp_drop_site       = 0x00500888;
    constexpr uintptr_t walker_stomp_drop_site2      = 0x0050089D;
+   // EntitySoldier::UpdateIndirect, at Steam's address.
+   constexpr uintptr_t entity_soldier_update_indirect = 0x004F0110;
+   // The follow agent's CALL to ReserveOffset, UpdateTarget's turn and
+   // CheckForAutoFollow's two calls, as on Steam.
+   constexpr uintptr_t follow_reserve_offset_call   = 0x0066985C;
+   constexpr uintptr_t reserve_offset               = 0x00630B10;
+   constexpr uintptr_t follow_target_transform_call = 0x005ADBE1;
+   constexpr uintptr_t follow_target_transform_ptr  = 0x0076C548;
+   constexpr uintptr_t auto_follow_count_call       = 0x0061D222;
+   constexpr uintptr_t reservation_count_for_object = 0x00630800;
+   constexpr uintptr_t auto_follow_recruit_call     = 0x0061D451;
+   constexpr uintptr_t unit_controller_send_event   = 0x00665170;
+   constexpr uintptr_t event_info_ctor              = 0x0043EDE0;
+   constexpr uintptr_t follow_set_navigator_call    = 0x006698AC;
+   constexpr uintptr_t ai_set_navigator_follow_target = 0x0043C230;
+   constexpr uintptr_t ai_set_navigator_goto        = 0x0043BF20;
+   constexpr uintptr_t controller_manager_update    = 0x00486370;
+   constexpr uintptr_t ai_controller_list           = 0x01E31DCC;
    // EntityHover::CollisionCallback, at Steam's address: slot 6 of the
    // CollisionObject vtable of EntityHover (0x0079CC38) and CommandHover
    // (0x007992EC).
@@ -3920,6 +4167,8 @@ namespace gog {
    constexpr uintptr_t explosion_class_read_prop_site = 0x0051cf2d;
    constexpr uintptr_t ordnance_class_read_prop_site  = 0x005f94cd;
    constexpr uintptr_t weapon_class_read_prop_site    = 0x0067b359;
+   // Lua_Callbacks::SetClassProperty (0x0058FC60), the same bytes as Steam's.
+   constexpr uintptr_t lua_set_class_property_site    = 0x0058fcd6;
    constexpr uintptr_t zephyr_pose_dyn_set_anim       = 0x0072e500;
    constexpr uintptr_t zephyr_pose_static_ctor        = 0x0072eb60;
    constexpr uintptr_t zephyr_pose_static_open        = 0x0072eff0;
