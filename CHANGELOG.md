@@ -10,6 +10,13 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **HUD text that follows the screen** - `AuthoredHeight(N)` in a `.hud` file's `FileInfo`
+  names the screen height its text was sized for; every `Text` and `MultilineText` element
+  of the file is drawn at the screen's height over `N`, glyphs and text box together, at any
+  resolution and Shader Patch UI scale. The HUD editor saves the line.
+- **Weapon reticule textures** - `player1.weapon1.reticuleTexture` and
+  `player1.weapon2.reticuleTexture` (with `Disable` twins) carry each weapon ODF's
+  `ReticuleTexture`, from the same weapon as the icon events.
 - **GameExt class properties from scripts** - The stock Lua `SetClassProperty` sets the properties
   BF2GameExt adds to entity classes too (the squad, wingmen, comm key, camera shake and directional
   roll and jet properties), as if the line were in the class's ODF; `RemoveOnDeath` stays ODF-only.

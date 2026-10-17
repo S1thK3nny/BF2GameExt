@@ -148,6 +148,13 @@ void authored_ratios()
    assert(valid_ratio(1.0f) && valid_ratio(kFourThree) && valid_ratio(r219) && valid_ratio(32.0f / 9.0f));
    assert(!valid_ratio(0.5f) && !valid_ratio(4.5f) && !valid_ratio(0.0f));
 
+   // AuthoredHeight: text follows the screen's height.
+   assert(near(text_scale(2160, 2160), 1) && near(text_scale(1080, 2160), 0.5f) && near(text_scale(960, 720), 4.0f / 3));
+   assert(near(text_scale(720, 720), 1) && near(text_scale(1440, 720), 2));
+   assert(valid_text_height(120) && valid_text_height(8640) && !valid_text_height(119) && !valid_text_height(8641));
+   assert(near(text_scale(1080, 0), 1) && near(text_scale(1080, 50), 1) && near(text_scale(0, 720), 1));
+   assert(near(text_scale(-5, 720), 1));
+
    // Which screens lay a file out.
    assert(laid_out_on(1280, 720, kFourThree) && laid_out_on(2560, 1080, kFourThree));
    assert(!laid_out_on(1024, 768, kFourThree) && !laid_out_on(1280, 1024, kFourThree));
@@ -353,7 +360,7 @@ int main()
    placements();
    made_set();
    std::printf("hud true widescreen: layout, anchors, tracking, parent matrix, the stock mapping, authored "
-               "ratios on wider and narrower screens, ScreenAnchor, placement on load and in the editor, and the "
-               "elements opted-in files made\n");
+               "ratios on wider and narrower screens, AuthoredHeight's text scale, ScreenAnchor, placement on load "
+               "and in the editor, and the elements opted-in files made\n");
    return 0;
 }

@@ -156,6 +156,7 @@ using Data = hud_number_math::Data;
 constexpr uint32_t kTrueWidescreen = pbl_hash("TrueWidescreen");
 constexpr uint32_t kAuthoredRatio  = pbl_hash("AuthoredRatio");
 constexpr uint32_t kScreenAnchor   = pbl_hash("ScreenAnchor");
+constexpr uint32_t kAuthoredHeight = pbl_hash("AuthoredHeight");
 
 constexpr uint32_t kRed         = 0xB0;
 constexpr uint32_t kNode        = 0xB4;
@@ -227,6 +228,8 @@ const void* const*    s_configFiles = nullptr;  // gConfigFiles: the loaded file
 const int*            s_configCount = nullptr;
 uint32_t              s_fileInfoVtable = 0;
 uint32_t              s_targetVtable   = 0;
+uint32_t              s_textVtable      = 0;   // ElementText, for AuthoredHeight
+uint32_t              s_multilineVtable = 0;   // ElementMultilineText
 float*                s_viewportWidth  = nullptr;   // HUD::Element::sViewportWidth
 bool                  s_viewportLent   = false;     // holds the layout width while a file loads
 float                 s_viewportOwn    = 0.0f;      // what it held before
@@ -238,6 +241,7 @@ struct OptedFile {
    bool        trueWidescreen;   // read TrueWidescreen(1)
    float       ratioW;           // read AuthoredRatio(ratioW, ratioH); 0 for none
    float       ratioH;
+   float       textHeight;       // read AuthoredHeight(textHeight); 0 for none
 };
 OptedFile s_optedFiles[kMaxFiles];
 int       s_optedFileCount = 0;
@@ -285,9 +289,11 @@ float s_loadWidth    = 0.0f;    // the screen when this file began loading, 0 if
 float s_loadHeight   = 0.0f;    //   or with more than one viewport
 bool  s_fileTrueWidescreen = false;   // this file's FileInfo has TrueWidescreen(1)
 float s_fileRatio    = 0.0f;    // its AuthoredRatio, 0 for none
+float s_fileTextHeight = 0.0f;  // its AuthoredHeight, 0 for none
 float s_loadingRatio = 0.0f;    // the ratio this file's elements are laid out for, 0 when they are not
 bool  s_warnedFlag   = false;
 bool  s_warnedRatio  = false;
+bool  s_warnedHeight = false;
 
 // The authored ratios of the files laid out, for screen_for.
 float s_ratios[kMaxRatios];
@@ -824,16 +830,30 @@ bool read_ratio(const Data* data, float& w, float& h)
 
 bool __fastcall hooked_ReadData(void* self, void* edx, void* config, const Data* data)
 {
-   if (!data || (data->id != kTrueWidescreen && data->id != kAuthoredRatio))
+   if (!data || (data->id != kTrueWidescreen && data->id != kAuthoredRatio && data->id != kAuthoredHeight))
       return s_readData(self, edx, config, data);
    __try {
       OptedFile* entry = nullptr;
       if (s_configFiles) {   // for the editor's writer: modtools
          if (s_loading && s_loadingInfo != self) {
             s_loadingInfo = self;
-            if ((entry = file_entry(self, false))) *entry = { self, false, 0.0f, 0.0f };
+            if ((entry = file_entry(self, false))) *entry = { self, false, 0.0f, 0.0f, 0.0f };
          }
          entry = file_entry(self, true);
+      }
+      if (data->id == kAuthoredHeight) {
+         float h = 0.0f;
+         if (data->arguments() != 1 || !data->number(0, h) || !valid_text_height(h)) {
+            h = 0.0f;
+            if (!s_warnedHeight) {
+               install_log("[TrueWidescreen] AuthoredHeight takes the screen height the text was sized for, "
+                           "such as AuthoredHeight(2160), from 120 to 8640; that line is ignored");
+               s_warnedHeight = true;
+            }
+         }
+         if (entry) entry->textHeight = h;
+         if (s_loading) s_fileTextHeight = h;
+         return true;
       }
       if (data->id == kTrueWidescreen) {
          bool on = false;
@@ -886,6 +906,10 @@ void __fastcall hooked_WriteData(void* self, void* edx, void* file, int indent)
    if (lines.ratioW > 0.0f) {
       s_indent(file, nullptr, indent);
       s_format(file, "AuthoredRatio(%g, %g)\n", lines.ratioW, lines.ratioH);
+   }
+   if (lines.textHeight > 0.0f) {
+      s_indent(file, nullptr, indent);
+      s_format(file, "AuthoredHeight(%g)\n", lines.textHeight);
    }
 }
 
@@ -1054,6 +1078,45 @@ void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, fl
    }
 }
 
+// AuthoredHeight(N): each text element the file made is drawn at the screen's
+// height over N through its own matrix, as the stock HUD scale does (Scalable,
+// ScriptCB_SetHUDScale), so the glyphs and the text box grow or shrink about
+// its position and the lines break the same on every screen. The draw hands a
+// text element's glyphs local x parent (RedGlyphCacheElement::RenderUsingContext);
+// position events set only the translation. Once, at load.
+int scale_made_text(uintptr_t tail, float s)
+{
+   int scaled = 0;
+   for_each_made(tail, [&](const uint8_t* element) {
+      const uint32_t vtable = *reinterpret_cast<const uint32_t*>(element);
+      if (vtable != s_textVtable && vtable != s_multilineVtable) return;
+      const uint8_t* red = red_of(element);
+      if (!red) return;
+      float* local = reinterpret_cast<float*>(const_cast<uint8_t*>(red) + kRedLocal);
+      for (int axis = 0; axis < 3; ++axis)
+         for (int i = 0; i < 3; ++i) local[axis * 4 + i] *= s;
+      ++scaled;
+   });
+   return scaled;
+}
+
+void scale_text(uintptr_t tail, float screenHeight, float authoredHeight)
+{
+   const float s = text_scale(screenHeight, authoredHeight);
+   if (!s_textVtable || !s_multilineVtable || std::fabs(s - 1.0f) < 1e-4f) return;
+   int scaled = -1;
+   __try {
+      scaled = scale_made_text(tail, s);
+   } __except (EXCEPTION_EXECUTE_HANDLER) {
+   }
+   if (auto log = get_gamelog()) {
+      if (scaled < 0) log("[TrueWidescreen] AuthoredHeight(%g): a fault scaling the text; some kept their size\n",
+                          authoredHeight);
+      else log("[TrueWidescreen] AuthoredHeight(%g): %d text elements drawn at %.3g on a %g-high screen\n",
+               authoredHeight, scaled, s, screenHeight);
+   }
+}
+
 // Around each HUD::Manager::Load: which elements the file makes and, if it
 // opted in and is laid out on this screen, where its pieces go.
 struct Loading {
@@ -1079,6 +1142,7 @@ Loading begin_load()
    s_loadHeight = l.height;
    s_fileTrueWidescreen = false;
    s_fileRatio = 0.0f;
+   s_fileTextHeight = 0.0f;
    s_loadingRatio = 0.0f;
    s_loadingInfo = nullptr;
    return l;
@@ -1088,6 +1152,7 @@ void end_load(const Loading& l)
 {
    return_viewport_width();
    const float ratio = s_loadingRatio;
+   const float textHeight = s_fileTextHeight;
    const bool readLines = s_loadingInfo != nullptr;
    if (s_anchorsRead && s_fileRatio <= 0.0f && !s_fileTrueWidescreen && !s_warnedAnchorsUnused) {
       install_log("[TrueWidescreen] a .hud file has ScreenAnchor lines but neither AuthoredRatio nor "
@@ -1098,6 +1163,7 @@ void end_load(const Loading& l)
    s_loading = false;
    s_fileTrueWidescreen = false;
    s_fileRatio = 0.0f;
+   s_fileTextHeight = 0.0f;
    s_loadingRatio = 0.0f;
    s_loadingInfo = nullptr;
    if (!readLines) forget_new_files(l.files);
@@ -1106,6 +1172,7 @@ void end_load(const Loading& l)
       place(l.tail, l.width, l.height, ratio);
       note_made(l.tail, ratio);
    }
+   if (textHeight > 0.0f) scale_text(l.tail, l.height, textHeight);   // l.height 0: split screen, kept as written
 }
 
 void __cdecl hooked_Load(void* config)
@@ -1802,6 +1869,10 @@ void hud_true_widescreen_install(uintptr_t base)
    s_aspect     = reinterpret_cast<AspectFn>(resolve(base, a.renderer_screen_aspect));
    s_fileInfoVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_file_info_vtable);
    s_targetVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_target_vtable);
+   if (a.hud_element_text_vtable && a.hud_element_multiline_text_vtable) {
+      s_textVtable      = (uint32_t)(uintptr_t)resolve(base, a.hud_element_text_vtable);
+      s_multilineVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_element_multiline_text_vtable);
+   }
    s_viewportWidth = static_cast<float*>(resolve(base, a.hud_viewport_width));
    name_hashes();
 
@@ -1888,5 +1959,5 @@ void hud_true_widescreen_install(uintptr_t base)
    memcpy(readCall + 1, &rel, sizeof(rel));
    install_log("[TrueWidescreen] installed: .hud files with AuthoredRatio(w, h) or TrueWidescreen(1) (4:3) in "
                "their FileInfo are laid out at that ratio and the screen's height, each piece kept to its "
-               "ScreenAnchor or nearest edge");
+               "ScreenAnchor or nearest edge; with AuthoredHeight(N) a file's text follows the screen's height");
 }

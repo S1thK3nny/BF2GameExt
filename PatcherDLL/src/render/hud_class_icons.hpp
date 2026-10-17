@@ -15,6 +15,8 @@
 //   player1.vehicle.healthTextureDisable    Bool  on foot, or the vehicle has none
 //   player1.weaponN.iconTexture             Uint  weapon 1 or 2's IconTexture
 //   player1.weaponN.iconTextureDisable      Bool  no weapon there, or it has none
+//   player1.weaponN.reticuleTexture         Uint  weapon 1 or 2's ReticuleTexture
+//   player1.weaponN.reticuleTextureDisable  Bool  no weapon there, or it has none
 //
 // Bind a texture with EventBitmap and EventEnable and its Disable twin with
 // EventDisable, as the stock team icons are bound. The icon is the class's stock

@@ -355,11 +355,20 @@ for build, filename in builds:
         if not mt:
             # Retail keeps RTTI: the vtables' complete object locators name the classes.
             for vtable, name in (("hud_file_info_vtable", b".?AVConfigFile@Manager@HUD@@"),
-                                 ("hud_target_vtable", b".?AVElementTarget@HUD@@")):
+                                 ("hud_target_vtable", b".?AVElementTarget@HUD@@"),
+                                 ("hud_element_text_vtable", b".?AVElementText@HUD@@"),
+                                 ("hud_element_multiline_text_vtable", b".?AVElementMultilineText@HUD@@")):
                 col = u32(table[vtable] - 4)
                 assert u32(col) == 0 and u32(col + 4) == 0, (build, vtable, "the primary vtable")
                 descriptor = u32(col + 12)
                 assert at(descriptor + 8, len(name) + 1) == name + b"\0", (build, vtable)
+        else:
+            # No RTTI on modtools: the constructors store the text vtables (MOV [ESI], imm32),
+            # ElementText's after its base constructor, ElementMultilineText's last.
+            for site, vtable in ((0x006AA8F0, "hud_element_text_vtable"),
+                                 (0x006A5EAF, "hud_element_multiline_text_vtable")):
+                want = b"\xC7\x06" + table[vtable].to_bytes(4, "little")
+                assert at(site, len(want)) == want, (build, vtable, at(site, len(want)).hex())
         read_data = until_ret(table["hud_file_info_read_data"])
         assert read_data[-1].bytes == b("C2 08 00"), (build, "ReadData returns with RET 8")
 

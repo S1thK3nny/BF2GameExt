@@ -343,6 +343,8 @@ clients, where Lua callbacks never run.
 | `player1.vehicle.healthTextureDisable` | Bool | Sent instead on foot, or when the vehicle has no loaded icon |
 | `player1.weapon1.iconTexture` | Uint | The icon of the weapon in slot 1; `weapon2` for slot 2 |
 | `player1.weapon1.iconTextureDisable` | Bool | Sent instead for an empty slot or a weapon with no loaded icon |
+| `player1.weapon1.reticuleTexture` | Uint | The reticule of the weapon in slot 1; `weapon2` for slot 2 |
+| `player1.weapon1.reticuleTextureDisable` | Bool | Sent instead for an empty slot or a weapon with no loaded reticule |
 
 Bind a texture the way the stock team icons are bound:
 
@@ -378,6 +380,11 @@ its own texture first and falls back:
 | Droideka, fully balled | `<name>_ball`, `<name>` |
 
 ### Weapon icons
+
+`player1.weaponN.reticuleTexture` carries the weapon ODF's `ReticuleTexture` exactly as
+`iconTexture`, below, carries its `IconTexture`: bind it with `EventBitmap` to draw each
+weapon's own reticule, and `reticuleTextureDisable` to hide the element when the slot is
+empty or the texture is not loaded.
 
 `player1.weaponN.iconTexture` carries the stock `IconTexture` of the weapon that the
 stock `player1.weaponN.*` events are showing: the soldier's weapons on foot, the
@@ -788,6 +795,32 @@ Some rules make a file hold up on every shape:
 - Leave room between the groups if the file should fit screens narrower than its ratio.
 - `BitmapRect` takes `"Pixels"`, `"Screen"` or `"Viewport"`. The game reads `"Frame"`
   there as `"Viewport"`.
+
+#### Text that follows the screen
+
+Text is drawn at its font's pixel size times `TextScale`, whatever the resolution, so
+on a bigger screen it shrinks against everything else. `AuthoredHeight(N)` in the
+`FileInfo` names the screen height the file's text was sized for:
+
+```
+FileInfo("myhud")
+{
+    AuthoredRatio(16, 9)
+    AuthoredHeight(2160)
+}
+```
+
+Every `Text` and `MultilineText` element of the file is then drawn at the screen's
+height over `N`, glyphs and text box together, so lines break the same on every
+screen. The height that counts is the one the game renders at, which already includes
+Shader Patch's UI scale, so one number covers every resolution and UI scale.
+
+For sharp text, draw each font at the size its text should be on the biggest screen
+you target and use `TextScale(1)`: with `AuthoredHeight(2160)` the glyphs land one to
+one on a 4K screen, and smaller screens shrink them. Font textures have no mipmaps,
+so text stays clean down to about half size; check the smallest resolution you
+support. It works with or without `AuthoredRatio`; with split screen the text keeps
+its size as written. The modtools HUD editor saves the line.
 
 To bring over a file tuned for the stock 16:9 look as `AuthoredRatio(16, 9)`, so that
 it looks the same at 16:9, change its `"Viewport"` and `"Screen"` values like this

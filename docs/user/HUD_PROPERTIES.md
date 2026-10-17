@@ -58,6 +58,10 @@ Bitmap("player1classicon")
 | `player1.weapon1.iconTextureDisable` | Bool | Sent instead for an empty slot, or a weapon with no loaded icon. | 1.2.0 |
 | `player1.weapon2.iconTexture` | Uint texture | The same for slot 2. | 1.2.0 |
 | `player1.weapon2.iconTextureDisable` | Bool | The same for slot 2. | 1.2.0 |
+| `player1.weapon1.reticuleTexture` | Uint texture | The stock `ReticuleTexture` of the weapon in slot 1, from the same weapon as `iconTexture`. | 1.2.0 |
+| `player1.weapon1.reticuleTextureDisable` | Bool | Sent instead for an empty slot, or a weapon with no loaded reticule. | 1.2.0 |
+| `player1.weapon2.reticuleTexture` | Uint texture | The same for slot 2. | 1.2.0 |
+| `player1.weapon2.reticuleTextureDisable` | Bool | The same for slot 2. | 1.2.0 |
 
 `IconTexture` goes in the weapon ODF's `[WeaponClass]` section. Weapons have no stance variants.
 
@@ -171,6 +175,7 @@ Markers for what the comm keys send the AI after on foot ([Comm key orders](FEAT
 |----------|---------|-------|-------------|-------|
 | `FillFrom` | `BarBitmap` | `"Left"`, `"Right"`, `"Bottom"` or `"Top"` | Which end of the bar stays put while its value changes. `"Left"` is the stock fill and the default. `"Right"` keeps the right end and grows to the left, `"Bottom"` keeps the bottom edge and grows upward, and `"Top"` keeps the top edge and grows downward. | 1.2.0 |
 | `AuthoredRatio` | `FileInfo` | width, height | The screen shape the file's numbers were written for, such as `16, 9`. The file's elements are laid out as on a screen of that shape and the real height and drawn one to one, with no stretching, each piece kept to its nearest screen edge or its `ScreenAnchor`, with one player. On a screen of that shape the file draws exactly as written. Other files draw as before. From 1:1 to 4:1. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
+| `AuthoredHeight` | `FileInfo` | a screen height from 120 to 8640 | The screen height the file's text was sized for, such as `2160`. Every `Text` and `MultilineText` element the file makes is drawn at the screen's height over it, glyphs and text box together, so text keeps its size against the HUD at any resolution and any Shader Patch UI scale and its lines break the same everywhere. Works with or without `AuthoredRatio`; split screen keeps the text as written. See [Text that follows the screen](HUD.md#text-that-follows-the-screen). | 1.2.0 |
 | `TrueWidescreen` | `FileInfo` | `1` or `0` | `1` is `AuthoredRatio(4, 3)`, except that the file keeps the stock layout on screens no wider than 4:3, which already show it as written. `AuthoredRatio` wins if a file has both. `0` is the default. See [TrueWidescreen](HUD.md#truewidescreen). | 1.2.0 |
 | `ScreenAnchor` | any, on a piece | `"Left"`, `"Center"`, `"Right"` or a number from 0 to 1 | In a file with `AuthoredRatio` or `TrueWidescreen(1)`, how the piece moves on a screen of another shape, wherever it sits: it keeps its distance from that edge, or with a number moves by that share of the width the screen gains or loses (0 is `"Left"`, 0.5 `"Center"`, 1 `"Right"`). A piece without one keeps to the edge of the third it sits in. A piece is a top-level item, or a child of a top-level group at (0, 0); such a group with an anchor moves as a whole. See [ScreenAnchor](HUD.md#screenanchor). | 1.2.0 |
 

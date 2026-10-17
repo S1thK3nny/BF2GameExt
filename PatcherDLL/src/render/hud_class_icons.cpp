@@ -32,6 +32,9 @@
 //   WeaponClass::mIconTexture   +0x6C              +0x6C              +0x6C
 //     (a PblHash; WeaponClass::SetProperty's store)
 //                               0x0061F754         0x0067B084         0x0067C124
+//   WeaponClass::mReticuleTexture +0x70            +0x70              +0x70
+//     (a PblHash; the store after the ReticuleTexture hash 0x617E2F93)
+//                               0x0061F340         0x0067ACD5         0x0067BD75
 //   Weapon per channel, as HUD::GameEvents::UpdateWeaponEvents picks it: the
 //     controlled object's GetWeaponIndex(channel) (primary slot +0x3C) and
 //     GetWeapon(index) (+0x40), both thiscall RET 4, then Weapon::mClass (+0x64)
@@ -67,6 +70,7 @@ constexpr uint32_t kVt_GetEntityClass  = 0x28;  // GameObject primary vptr
 constexpr uint32_t kVt_GetWeaponIndex  = 0x3C;  // Controllable primary vptr
 constexpr uint32_t kVt_GetWeapon       = 0x40;
 constexpr uint32_t kWeaponClassIcon    = 0x6C;  // WeaponClass::mIconTexture, every build
+constexpr uint32_t kWeaponClassReticule = 0x70; // WeaponClass::mReticuleTexture, every build
 constexpr int      kWeaponChannels     = 2;
 constexpr uint32_t kEC_Type            = 0x04;
 constexpr uint32_t kEC_HandlerList     = 0x08;  // self-linked when nobody listens
@@ -97,6 +101,7 @@ using IsMeleeFn    = bool(__thiscall*)(void* self);
 // Each weapon channel's pair must stay texture then Disable, weapon1 then weapon2.
 enum EventId { kUnitTexture, kUnitDisable, kUnitStance, kVehicleTexture, kVehicleDisable,
                kWeapon1Texture, kWeapon1Disable, kWeapon2Texture, kWeapon2Disable,
+               kReticule1Texture, kReticule1Disable, kReticule2Texture, kReticule2Disable,
                kEventCount };
 const char* const kNames[kEventCount] = {
    "player1.unit.healthTexture",
@@ -108,8 +113,13 @@ const char* const kNames[kEventCount] = {
    "player1.weapon1.iconTextureDisable",
    "player1.weapon2.iconTexture",
    "player1.weapon2.iconTextureDisable",
+   "player1.weapon1.reticuleTexture",
+   "player1.weapon1.reticuleTextureDisable",
+   "player1.weapon2.reticuleTexture",
+   "player1.weapon2.reticuleTextureDisable",
 };
 constexpr int kTypes[kEventCount] = { kTypeUint, kTypeBool, kTypeUint, kTypeUint, kTypeBool,
+                                      kTypeUint, kTypeBool, kTypeUint, kTypeBool,
                                       kTypeUint, kTypeBool, kTypeUint, kTypeBool };
 
 constexpr uint32_t kVt_IsMelee = 21 * 4;       // Weapon primary vptr, thiscall(), bool in AL
@@ -137,6 +147,8 @@ Published s_sentWeaponState[kWeaponChannels][kWeaponStates];
 Landing   s_landing;
 Shots     s_shots[kWeaponChannels];
 Pick      s_unitPick, s_vehiclePick, s_weaponPick[kWeaponChannels];
+Published s_sentReticule[kWeaponChannels];
+Pick      s_reticulePick[kWeaponChannels];
 bool      s_announced = false;
 
 void invalidate()
@@ -151,6 +163,8 @@ void invalidate()
    for (int ch = 0; ch < kWeaponChannels; ++ch) {
       s_sentWeapon[ch].invalidate();
       s_weaponPick[ch].invalidate();
+      s_sentReticule[ch].invalidate();
+      s_reticulePick[ch].invalidate();
       for (Published& p : s_sentWeaponState[ch]) p.invalidate();
       s_shots[ch].reset();
    }
@@ -320,7 +334,7 @@ void hud_class_icons_resolve(uintptr_t base)
    s_active = true;
    install_log("[HudClassIcons] available: player1.unit.healthTexture, player1.unit.stance, "
                "player1.unit.state.*, player1.vehicle.healthTexture, player1.weaponN.iconTexture, "
-               "player1.weaponN.state.*; inert without a binding");
+               "player1.weaponN.reticuleTexture, player1.weaponN.state.*; inert without a binding");
 }
 
 // HUD::Manager::Open runs GameEvents::Open before any .lvl is read, and a .hud
@@ -423,6 +437,10 @@ void hud_class_icons_update()
             *(const uint32_t*)(cls + kWeaponClassIcon), kStand, texture_loaded) : 0;
          publish_texture(s_sentWeapon[ch], EventId(kWeapon1Texture + 2 * ch),
                          EventId(kWeapon1Disable + 2 * ch), icon);
+         const uint32_t reticule = cls ? s_reticulePick[ch].get(
+            *(const uint32_t*)(cls + kWeaponClassReticule), kStand, texture_loaded) : 0;
+         publish_texture(s_sentReticule[ch], EventId(kReticule1Texture + 2 * ch),
+                         EventId(kReticule1Disable + 2 * ch), reticule);
       }
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       // A torn-down object must not escape into the game's HUD update.

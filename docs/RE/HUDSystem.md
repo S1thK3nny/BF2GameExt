@@ -2908,6 +2908,30 @@ offset does not move on retail:
 |---|---|---|---|
 | `WeaponClass::SetProperty` | `0x0061E6C0` (`this` in ESI) | `0x0067A450` (`this` in EDI) | same code as Steam |
 | `IconTexture` store at `+0x6C` | `0x0061F754` | `0x0067B084` | `0x0067C124` |
+| `ReticuleTexture` store at `+0x70` (after `cmp 0x617E2F93`) | `0x0061F340` | `0x0067ACD5` | `0x0067BD75` |
+
+`player1.weaponN.reticuleTexture` reads `WeaponClass+0x70` the same way (the scope
+texture is `+0x74`).
+
+#### AuthoredHeight and the stock HUD scale
+
+The engine has a runtime HUD scale no shipped HUD uses: a `.hud` property `Scalable`
+(Element `+0xE0` bit 5) and Lua `ScriptCB_SetHUDScale` (P `0065FB00`) ->
+`HUD::Element::SetRuntimeScaleAll` (P `005F5700`) -> `SetRuntimeScale` (P `005F5400`),
+which multiplies the axes of the element's `RedInterfaceElement` local matrix (`+0x30`)
+by new over old (`mRuntimeScale`, 1.0 from the constructor P `005F1E70`). The stored
+`sRuntimeScale` is never applied to elements made later. Text follows the matrix: the
+element draw (M `00816FA0`) hands local × parent to vtable `+0x40`, and ElementText's
+(M `00834600`) submits the cached glyph quads with it through
+`RedGlyphCacheElement::RenderUsingContext` (M `00828050`); `EventPosition` (P `005FB930`)
+sets only the translation. The stock video options have the slider hidden
+(`ifs_opt_pcvideo.lua`: `hudscale`, 0.25 to 1).
+
+`AuthoredHeight(N)` scales the same axes once, at load, for the `ElementText` and
+`ElementMultilineText` elements a file made (vtables: modtools `0x00A5E2B4` and
+`0x00A5DAA4`, stored by the constructors at `0x006AA8F0` and `0x006A5EAF`; Steam
+`0x007A1B00` / `0x007A14F4`, GOG `0x007A295C` / `0x007A2350`, by RTTI), without the
+`Scalable` bit, so the hidden slider's re-apply never touches them.
 | `UpdateWeaponEvents`: `GetWeaponIndex`, `GetWeapon`, `Weapon::mClass +0x64` | `0x006B2F0A` | `0x00560ADE` | `0x0056185E` |
 
 The weapon per slot is picked exactly as `HUD::GameEvents::UpdateWeaponEvents`

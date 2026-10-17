@@ -32,6 +32,21 @@ inline bool valid_ratio(float ratio)
    return ratio >= 1.0f && ratio <= 4.0f;
 }
 
+// AuthoredHeight(N): the screen height a file's text was sized for, from 120
+// to 8640.
+inline bool valid_text_height(float height)
+{
+   return height >= 120.0f && height <= 8640.0f;
+}
+
+// What a file's text is drawn at on a screen this high: the screen over the
+// authored height, 1 when either is unusable.
+inline float text_scale(float screenHeight, float authoredHeight)
+{
+   if (!(screenHeight > 0.0f) || !valid_text_height(authoredHeight)) return 1.0f;
+   return screenHeight / authoredHeight;
+}
+
 // An opted-in file is laid out on a screen of its authored ratio at the real
 // height.
 inline float layout_width(float height, float ratio = kFourThree)

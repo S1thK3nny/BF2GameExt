@@ -1240,6 +1240,10 @@ namespace modtools {
    constexpr uintptr_t hud_text_write_data          = 0x006A9A90;
    constexpr uintptr_t hud_target_vtable            = 0x00A5E000;
    constexpr uintptr_t hud_target_update            = 0x006A9170;   // its +0x2C
+   // AuthoredHeight: the text elements' vtables, stored by ElementText's
+   // constructor at 0x006AA8F0 and ElementMultilineText's at 0x006A5EAF.
+   constexpr uintptr_t hud_element_text_vtable      = 0x00A5E2B4;
+   constexpr uintptr_t hud_element_multiline_text_vtable = 0x00A5DAA4;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x00696B97;
    // ScreenAnchor: HUD::Element::ReadData, thiscall(PblConfig*,
    // PblConfig::Data*) -> bool, RET 8, where every element type's reader ends
@@ -2956,6 +2960,10 @@ namespace steam {
    constexpr uintptr_t hud_viewport_width           = 0x01E56C34;
    constexpr uintptr_t hud_target_vtable            = 0x007A17FC;
    constexpr uintptr_t hud_target_update            = 0x0055A340;   // its +0x2C
+   // AuthoredHeight: the text elements' vtables (RTTI .?AVElementText@HUD@@,
+   // .?AVElementMultilineText@HUD@@).
+   constexpr uintptr_t hud_element_text_vtable      = 0x007A1B00;
+   constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A14F4;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054C24C;
    // ScreenAnchor: HUD::Element::ReadData keeps its contract here
    // (thiscall, RET 8); its four callers return what it returns.
@@ -3697,6 +3705,10 @@ namespace gog {
    constexpr uintptr_t hud_viewport_width           = 0x01E580E4;
    constexpr uintptr_t hud_target_vtable            = 0x007A2658;
    constexpr uintptr_t hud_target_update            = 0x0055B0B0;   // its +0x2C
+   // AuthoredHeight: the text elements' vtables (RTTI .?AVElementText@HUD@@,
+   // .?AVElementMultilineText@HUD@@).
+   constexpr uintptr_t hud_element_text_vtable      = 0x007A295C;
+   constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A2350;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054CF9C;
    constexpr uintptr_t hud_element_read_data        = 0x00549FA0;
    // Command post strip (render/hud_command_posts.cpp) also reads the

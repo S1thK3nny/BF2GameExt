@@ -35,6 +35,7 @@ assert const("kCtrl_Trackable") == 0x18
 assert const("kVt_GetWeaponIndex") == 0x3C
 assert const("kVt_GetWeapon") == 0x40
 assert const("kWeaponClassIcon") == 0x6C
+assert const("kWeaponClassReticule") == 0x70
 weapon_layout = (ROOT / "PatcherDLL/src/game/Battlefront2/Source/Weapon.h").read_text()
 assert re.search(r"\bkClass\s*=\s*0x064\b", weapon_layout), "Weapon::mClass"
 health = {"modtools": layout("kModtools"), "steam": layout("kRelease"), "gog": layout("kRelease")}
@@ -62,6 +63,9 @@ sites = {
         (0x006B2F0A, "FF 50 3C 33 FF 3B C7 7C 1B 8B 16 50 8B CE FF 52 40"
                      "8B D8 3B DF 89 5C 24 34 74 0F 8B 43 64"),
         (0x0061C8EF, "89 8E 1C 01 00 00"),                 # SignalFire: mLastFireTime
+        # WeaponClass::SetProperty: the ReticuleTexture hash's case, PblHash(value), store +0x70
+        (0x0061F2D2, "81 FF 93 2F 7E 61 74 52"),
+        (0x0061F340, "89 4E 70"),
     ],
     "steam": [
         (0x00561D86, "8B 41 18 83 C1 18 FF 50 1C"),
@@ -72,6 +76,8 @@ sites = {
         (0x00560ADE, "8B 40 3C FF D0 8B D0 85 D2 78 1B 8B 06 8B CE 52 8B 40 40"
                      "FF D0 8B F0 89 75 F0 85 F6 74 0D 8B 46 64"),
         (0x006796A5, "F3 0F 11 8E F8 00 00 00"),           # SignalFire: mLastFireTime
+        (0x0067ACBE, "81 FE 93 2F 7E 61"),                 # the ReticuleTexture hash's compare
+        (0x0067ACD5, "89 47 70"),
     ],
     "gog": [
         (0x00562B06, "8B 41 18 83 C1 18 FF 50 1C"),
@@ -82,6 +88,8 @@ sites = {
         (0x0056185E, "8B 40 3C FF D0 8B D0 85 D2 78 1B 8B 06 8B CE 52 8B 40 40"
                      "FF D0 8B F0 89 75 F0 85 F6 74 0D 8B 46 64"),
         (0x0067A745, "F3 0F 11 8E F8 00 00 00"),
+        (0x0067BD5E, "81 FE 93 2F 7E 61"),
+        (0x0067BD75, "89 47 70"),
     ],
 }
 # The state flags read Weapon::mState and mLastFireTime from layout::Weapon.
@@ -102,6 +110,8 @@ for build, entries in sites.items():
     assert entries[0][1].endswith(" 1C"), build        # CALL [reg+0x1C]
     assert entries[4][1].endswith(" 6C"), build        # WeaponClass +0x6C
     assert entries[5][1].endswith(" 64"), build        # Weapon::mClass +0x64
+    assert "93 2F 7E 61" in entries[7][1], build       # PblHash("ReticuleTexture")
+    assert entries[8][1].endswith(" 70"), build        # WeaponClass +0x70
 
 builds = [
     ("modtools", "BF2_modtools_NoDVD_NoConsole.exe"),
