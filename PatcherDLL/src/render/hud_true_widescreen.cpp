@@ -1100,7 +1100,8 @@ void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, fl
 // (mNumLines, +0x204) unchanged, so no line is freed or made (zeroing it first,
 // as PostReadSetup does, freed line elements the layout had already noted and
 // crashed the HUD update), and only sizes the line boxes and formats them, with
-// its size divided by the scale for that call; then its matrix is scaled. The base
+// its size divided by the scale, where it stays (it measures its lines against
+// it while it plays); then its matrix is scaled. The base
 // PostReadSetup is not repeated: it applies the alignment once. Once, at load.
 constexpr uint32_t kTextBoxW    = 0x92;    // RedTextElement, uint16 each
 constexpr uint32_t kTextBoxH    = 0x94;
@@ -1145,13 +1146,13 @@ int scale_made_text(uintptr_t tail, float s)
          float& height = *reinterpret_cast<float*>(multiline + kGroupHeight);
          const float w = width, h = height;
          const uint32_t count = *reinterpret_cast<const uint32_t*>(multiline + kMultilineNumLines);
+         // Its size stays in the authored height's pixels: it measures its lines against it while
+         // it plays too, and with the screen's size back only the first line fitted.
          width = w / s;
          height = h / s;
          // The same count: SetupLines then frees and makes no lines (its line elements, already
          // in sList and noted by the layout, stay), and only sizes their boxes and formats them.
          s_setupLines(multiline, nullptr, count);
-         width = w;
-         height = h;
          if (uint8_t* red = const_cast<uint8_t*>(red_of(element))) scale_axes(red, s);
          ++scaled;
       }
