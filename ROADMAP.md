@@ -244,6 +244,16 @@ Research and addresses for these are in
 [the HUD editor](docs/RE/HUDSystem.md#controls-and-what-the-panel-shows-read-in-phantom-2026-10-08) and
 [docs/RE/HUDElementProperties.md](docs/RE/HUDElementProperties.md).
 
+**Relative units for every HUD size** - Several stock HUD elements fix sizes to pixels
+with no way to use another unit, so a HUD cannot keep its look across resolutions:
+VehicleSeating reads its `Position` as pixels whatever mode it names; the map's view
+cones are drawn at a pixel size and its post numbers 5 pixels above each post; `Model3D`
+`Scale` is in pixels; `BorderedBox`'s `Border` is drawn that many pixels wide;
+`ObjectiveList` uses fixed pixel insets and spacing and a fixed font. Give each one the
+optional unit `Position` and `BitmapRect` take (`"Pixels"` by default, `"Viewport"`,
+`"Screen"`, `"Frame"`), after a full audit of the stock HUD code for every such value,
+with VisualHUD reading and previewing each.
+
 **HUD shake** - The HUD stays still while the camera shakes, so a strong shake leaves the
 reticle off the true aim point. Publish the camera shake's screen offset as a HUD event so a
 reticle can follow it. Details in [docs/RE/CameraShake.md](docs/RE/CameraShake.md).
@@ -586,6 +596,14 @@ record the confirmed no-ops so others stop trying to use them.
 entries are inferred rather than verified. Needs a pass that actually exercises the
 commands, corrects the inferred descriptions, and marks the ones confirmed to be dead
 no-ops.
+
+## Maintenance
+
+**Codebase cleanup** - Much of the code was written quickly, feature by feature, and AI-written
+code drifts toward repetition and machinery nobody needs. Go through the whole codebase for
+maintenance and readability: remove over-engineering and duplicated helpers, prefer plain,
+efficient code, and keep every behaviour exactly as it is (the unit tests, the per-build
+audits and a play pass on each build before and after).
 
 ## Will not do
 
