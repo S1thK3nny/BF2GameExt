@@ -1096,9 +1096,11 @@ void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, fl
 // its real size. A MultilineText lays its lines out in SetupLines from its
 // Format (an ElementText member at +0x220, made after it: left alone) and its
 // own size (ElementGroupBase +0x100 / +0x104, converted to pixels by
-// GetWidthPixels / GetHeightPixels); it is set up again as its PostReadSetup
-// does, mNumLines (+0x204) to 0 then SetupLines(the count), with its size
-// divided by the scale for that call, and its matrix scaled. The base
+// GetWidthPixels / GetHeightPixels); SetupLines runs again with its count
+// (mNumLines, +0x204) unchanged, so no line is freed or made (zeroing it first,
+// as PostReadSetup does, freed line elements the layout had already noted and
+// crashed the HUD update), and only sizes the line boxes and formats them, with
+// its size divided by the scale for that call; then its matrix is scaled. The base
 // PostReadSetup is not repeated: it applies the alignment once. Once, at load.
 constexpr uint32_t kTextBoxW    = 0x92;    // RedTextElement, uint16 each
 constexpr uint32_t kTextBoxH    = 0x94;
@@ -1141,12 +1143,12 @@ int scale_made_text(uintptr_t tail, float s)
          format = multiline + kMultilineFormat;
          float& width = *reinterpret_cast<float*>(multiline + kGroupWidth);
          float& height = *reinterpret_cast<float*>(multiline + kGroupHeight);
-         uint32_t& numLines = *reinterpret_cast<uint32_t*>(multiline + kMultilineNumLines);
          const float w = width, h = height;
-         const uint32_t count = numLines;
+         const uint32_t count = *reinterpret_cast<const uint32_t*>(multiline + kMultilineNumLines);
          width = w / s;
          height = h / s;
-         numLines = 0;
+         // The same count: SetupLines then frees and makes no lines (its line elements, already
+         // in sList and noted by the layout, stay), and only sizes their boxes and formats them.
          s_setupLines(multiline, nullptr, count);
          width = w;
          height = h;
