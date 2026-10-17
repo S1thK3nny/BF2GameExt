@@ -11,9 +11,9 @@ Scripts can check the running version through `GameExt.version`.
 ### Added
 
 - **HUD text that follows the screen** - `AuthoredHeight(N)` in a `.hud` file's `FileInfo`
-  names the screen height its text was sized for; every `Text` element of the
-  file, and each `MultilineText`'s `Format`, has its `TextScale` multiplied by the screen's
-  height over `N`, at any resolution and Shader Patch UI scale; text boxes keep their size. The HUD editor saves the line.
+  names the screen height its text was sized for; every `Text` and `MultilineText`
+  element of the file is laid out as on a screen `N` high and drawn at the screen's height
+  over `N`, at any resolution and Shader Patch UI scale. The HUD editor saves the line.
 - **Weapon reticule textures** - `player1.weapon1.reticuleTexture` and
   `player1.weapon2.reticuleTexture` (with `Disable` twins) carry each weapon ODF's
   `ReticuleTexture`, from the same weapon as the icon events.

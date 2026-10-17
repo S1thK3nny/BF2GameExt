@@ -2930,16 +2930,22 @@ sets only the translation. The stock video options have the slider hidden
 `AuthoredHeight(N)` first scaled those axes, and that broke text away from height N: a
 text box is sized at load from the real view, so the matrix shrank it a second time,
 and 4K-sized glyphs no longer fit it (lines dropped, `MultilineText` showed fewer).
-It now multiplies `TextScale` instead, once, at load: each `ElementText` a file made
-through `RedTextElement::SetTextScale` (thiscall RET 8; M `00832F60`, S `006D8570`,
-G `006D9610`; X `+0x98`, Y `+0x9C`, sets the re-layout bit), which covers each
-`ElementMultilineText`'s `mFormat` too (an `ElementText` member at `+0x220`, its text
-`+0x320`, made after its owner). Each `ElementMultilineText` is then set up again as its
-`PostReadSetup` (vtable slot 9) does: `mNumLines` (`+0x204`) to 0, then `SetupLines`
-(M `006A6640`, S `00557F10`, G `00558C80`), which measures the line height from
-`mFormat`, sizes the line boxes from the real view and copies the format into the lines.
-The base `PostReadSetup` is not called again: it applies the group's alignment once and
-clears it. Vtables: modtools `0x00A5E2B4` and `0x00A5DAA4`, stored by the constructors
+Multiplying `TextScale` instead (the second version) kept the box but hit the layout's
+rounding: `RedTextElement::WriteCache` (P `008C6A20`) lays a string out in whole pixels
+of the text's own units, `(int)(glyph width x scale + 0.5)` per advance, an integer
+pen, a glyph that would cross the box's width dropped, so a big font at a third of its
+size staggered and lost its last glyphs (HudSubPixel only moves whole elements).
+Now, once, at load, text is laid out as at height N and drawn scaled: each
+`ElementText` keeps its `TextScale`, gets its box (`+0x92`, `+0x94`, uint16) divided by
+the scale through `RedTextElement::SetTextBox` (thiscall RET 8; M `00832DC0`,
+S `006D8460`, G `006D9500`; sets the re-layout bit) and its axes multiplied. Each
+`ElementMultilineText` is set up again as its `PostReadSetup` (vtable slot 9) does,
+`mNumLines` (`+0x204`) to 0 then `SetupLines` (M `006A6640`, S `00557F10`,
+G `00558C80`), with its size (`ElementGroupBase +0x100 / +0x104`, which
+`GetWidthPixels` / `GetHeightPixels` convert) divided by the scale for that call, then
+its axes multiplied; its `mFormat` (an `ElementText` member at `+0x220`, made after it)
+is left as written. The base `PostReadSetup` is not called again: it applies the
+group's alignment once and clears it. Vtables: modtools `0x00A5E2B4` and `0x00A5DAA4`, stored by the constructors
 at `0x006AA8F0` and `0x006A5EAF`; Steam `0x007A1B00` / `0x007A14F4`, GOG `0x007A295C` /
 `0x007A2350`, by RTTI. Map labels copy their template at `ElementMap::Read`, before the
 pass, and are not covered.

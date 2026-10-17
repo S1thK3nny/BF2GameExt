@@ -369,16 +369,18 @@ for build, filename in builds:
                                  (0x006A5EAF, "hud_element_multiline_text_vtable")):
                 want = b"\xC7\x06" + table[vtable].to_bytes(4, "little")
                 assert at(site, len(want)) == want, (build, vtable, at(site, len(want)).hex())
-        # AuthoredHeight: RedTextElement::SetTextScale stores X +0x98 and Y +0x9C and sets the
+        # AuthoredHeight: RedTextElement::SetTextBox stores the box (+0x92, +0x94) and sets the
         # re-layout bit (+0xAF bit 0 / +0xAE 0x100); ElementMultilineText's PostReadSetup (vtable
-        # slot 9) sets mNumLines (+0x204) to 0 and calls SetupLines with the old count.
-        scale_body = {
-            True: "8B 44 24 04 8B 54 24 08 80 89 AF 00 00 00 01 89 81 98 00 00 00 89 91 9C 00 00 00 C2 08 00",
-            False: "55 8B EC F3 0F 10 45 08 B8 00 01 00 00 66 09 81 AE 00 00 00 F3 0F 11 81 98 00 00 00"
-                   " F3 0F 10 45 0C F3 0F 11 81 9C 00 00 00 5D C2 08 00",
+        # slot 9) sets mNumLines (+0x204) to 0 and calls SetupLines with the old count; the group's
+        # size it converts to pixels is +0x100 / +0x104 (GetWidthPixels / GetHeightPixels).
+        box_body = {
+            True: "66 8B 44 24 04 66 8B 54 24 08 80 89 AF 00 00 00 01 66 89 81 92 00 00 00"
+                  " 66 89 91 94 00 00 00 C2 08 00",
+            False: "55 8B EC B8 00 01 00 00 66 09 81 AE 00 00 00 66 8B 45 08 66 89 81 92 00 00 00"
+                   " 66 8B 45 0C 66 89 81 94 00 00 00 5D C2 08 00",
         }[mt]
-        want = bytes.fromhex(scale_body.replace(" ", ""))
-        assert at(table["hud_red_text_set_text_scale"], len(want)) == want, (build, "SetTextScale")
+        want = bytes.fromhex(box_body.replace(" ", ""))
+        assert at(table["hud_red_text_set_text_box"], len(want)) == want, (build, "SetTextBox")
         post_read = u32(table["hud_element_multiline_text_vtable"] + 0x24)
         if mt:
             assert at(post_read, 1) == b"\xE9", (build, "slot 9 thunk")

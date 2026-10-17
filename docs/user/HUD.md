@@ -810,9 +810,10 @@ FileInfo("myhud")
 }
 ```
 
-Every `Text` element of the file, and each `MultilineText`'s `Format`, then has its
-`TextScale` multiplied by the screen's height over `N` at load. Text boxes keep their
-size on the screen, so lines break as they did at height `N`. The height that counts is the one the game renders at, which already includes
+Every `Text` and `MultilineText` element of the file is then laid out as on a screen
+`N` high, with its text box and lines in that height's pixels and `TextScale` as
+written, and drawn at the screen's height over `N`: each screen shows the layout you
+made at height `N`, scaled, with the same line breaks and spacing. The height that counts is the one the game renders at, which already includes
 Shader Patch's UI scale, so one number covers every resolution and UI scale.
 
 For sharp text, draw each font at the size its text should be on the biggest screen

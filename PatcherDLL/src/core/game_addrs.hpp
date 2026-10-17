@@ -1244,8 +1244,8 @@ namespace modtools {
    // constructor at 0x006AA8F0 and ElementMultilineText's at 0x006A5EAF.
    constexpr uintptr_t hud_element_text_vtable      = 0x00A5E2B4;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x00A5DAA4;
-   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
-   constexpr uintptr_t hud_red_text_set_text_scale  = 0x00832F60;
+   // RedTextElement::SetTextBox(w, h), thiscall RET 8: +0x92, +0x94 (uint16).
+   constexpr uintptr_t hud_red_text_set_text_box    = 0x00832DC0;
    // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
    // PostReadSetup calls it with mNumLines (+0x204) set to 0.
    constexpr uintptr_t hud_multiline_setup_lines    = 0x006A6640;
@@ -2969,8 +2969,8 @@ namespace steam {
    // .?AVElementMultilineText@HUD@@).
    constexpr uintptr_t hud_element_text_vtable      = 0x007A1B00;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A14F4;
-   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
-   constexpr uintptr_t hud_red_text_set_text_scale  = 0x006D8570;
+   // RedTextElement::SetTextBox(w, h), thiscall RET 8: +0x92, +0x94 (uint16).
+   constexpr uintptr_t hud_red_text_set_text_box    = 0x006D8460;
    // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
    // PostReadSetup calls it with mNumLines (+0x204) set to 0.
    constexpr uintptr_t hud_multiline_setup_lines    = 0x00557F10;
@@ -3719,8 +3719,8 @@ namespace gog {
    // .?AVElementMultilineText@HUD@@).
    constexpr uintptr_t hud_element_text_vtable      = 0x007A295C;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A2350;
-   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
-   constexpr uintptr_t hud_red_text_set_text_scale  = 0x006D9610;
+   // RedTextElement::SetTextBox(w, h), thiscall RET 8: +0x92, +0x94 (uint16).
+   constexpr uintptr_t hud_red_text_set_text_box    = 0x006D9500;
    // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
    // PostReadSetup calls it with mNumLines (+0x204) set to 0.
    constexpr uintptr_t hud_multiline_setup_lines    = 0x00558C80;
