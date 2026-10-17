@@ -230,6 +230,10 @@ uint32_t              s_fileInfoVtable = 0;
 uint32_t              s_targetVtable   = 0;
 uint32_t              s_textVtable      = 0;   // ElementText, for AuthoredHeight
 uint32_t              s_multilineVtable = 0;   // ElementMultilineText
+using SetTextScaleFn = void(__fastcall*)(void* text, void* edx, float x, float y);   // thiscall, RET 8
+using SetupLinesFn   = void(__fastcall*)(void* multiline, void* edx, uint32_t count); // thiscall, RET 4
+SetTextScaleFn        s_setTextScale = nullptr;   // RedTextElement::SetTextScale
+SetupLinesFn          s_setupLines   = nullptr;   // HUD::ElementMultilineText::SetupLines
 float*                s_viewportWidth  = nullptr;   // HUD::Element::sViewportWidth
 bool                  s_viewportLent   = false;     // holds the layout width while a file loads
 float                 s_viewportOwn    = 0.0f;      // what it held before
@@ -1078,24 +1082,42 @@ void __fastcall hooked_EditorUpdate(uint8_t* editor, void* edx, void* inputs, fl
    }
 }
 
-// AuthoredHeight(N): each text element the file made is drawn at the screen's
-// height over N through its own matrix, as the stock HUD scale does (Scalable,
-// ScriptCB_SetHUDScale), so the glyphs and the text box grow or shrink about
-// its position and the lines break the same on every screen. The draw hands a
-// text element's glyphs local x parent (RedGlyphCacheElement::RenderUsingContext);
-// position events set only the translation. Once, at load.
+// AuthoredHeight(N): the file's text is laid out at the screen's height over N
+// through its own TextScale. Each text box was sized at load from the real
+// view, so it keeps its size on the screen, and the glyphs shrink or grow to
+// match: the lines break as they did at N. (Scaling the drawing matrix
+// instead shrank the box a second time and broke 4K-sized glyphs into lines
+// that did not fit.) RedTextElement::SetTextScale(x, y), thiscall RET 8 on
+// every build, stores X +0x98 and Y +0x9C and sets the re-layout bit; an
+// ElementText's RedTextElement is the one it draws with (+0xB0). A
+// MultilineText lays its lines out from its Format, an ElementText member at
+// +0x220 (its text +0x320, constructed after it, so later in sList), in
+// SetupLines while it loads; it is set up again as its PostReadSetup does,
+// mNumLines (+0x204) to 0, then SetupLines(the count), without the base
+// PostReadSetup, which applies the alignment once. Once, at load.
+constexpr uint32_t kTextScaleX  = 0x98;
+constexpr uint32_t kTextScaleY  = 0x9C;
+constexpr uint32_t kMultilineNumLines = 0x204;
+
 int scale_made_text(uintptr_t tail, float s)
 {
    int scaled = 0;
    for_each_made(tail, [&](const uint8_t* element) {
-      const uint32_t vtable = *reinterpret_cast<const uint32_t*>(element);
-      if (vtable != s_textVtable && vtable != s_multilineVtable) return;
-      const uint8_t* red = red_of(element);
-      if (!red) return;
-      float* local = reinterpret_cast<float*>(const_cast<uint8_t*>(red) + kRedLocal);
-      for (int axis = 0; axis < 3; ++axis)
-         for (int i = 0; i < 3; ++i) local[axis * 4 + i] *= s;
+      if (*reinterpret_cast<const uint32_t*>(element) != s_textVtable) return;
+      uint8_t* text = const_cast<uint8_t*>(red_of(element));
+      if (!text) return;
+      const float x = *reinterpret_cast<const float*>(text + kTextScaleX);
+      const float y = *reinterpret_cast<const float*>(text + kTextScaleY);
+      s_setTextScale(text, nullptr, x * s, y * s);
       ++scaled;
+   });
+   for_each_made(tail, [&](const uint8_t* element) {
+      if (*reinterpret_cast<const uint32_t*>(element) != s_multilineVtable) return;
+      uint8_t* multiline = const_cast<uint8_t*>(element);
+      uint32_t& numLines = *reinterpret_cast<uint32_t*>(multiline + kMultilineNumLines);
+      const uint32_t count = numLines;
+      numLines = 0;
+      s_setupLines(multiline, nullptr, count);
    });
    return scaled;
 }
@@ -1103,7 +1125,7 @@ int scale_made_text(uintptr_t tail, float s)
 void scale_text(uintptr_t tail, float screenHeight, float authoredHeight)
 {
    const float s = text_scale(screenHeight, authoredHeight);
-   if (!s_textVtable || !s_multilineVtable || std::fabs(s - 1.0f) < 1e-4f) return;
+   if (!s_setTextScale || !s_setupLines || std::fabs(s - 1.0f) < 1e-4f) return;
    int scaled = -1;
    __try {
       scaled = scale_made_text(tail, s);
@@ -1112,7 +1134,7 @@ void scale_text(uintptr_t tail, float screenHeight, float authoredHeight)
    if (auto log = get_gamelog()) {
       if (scaled < 0) log("[TrueWidescreen] AuthoredHeight(%g): a fault scaling the text; some kept their size\n",
                           authoredHeight);
-      else log("[TrueWidescreen] AuthoredHeight(%g): %d text elements drawn at %.3g on a %g-high screen\n",
+      else log("[TrueWidescreen] AuthoredHeight(%g): %d text elements' TextScale times %.3g on a %g-high screen\n",
                authoredHeight, scaled, s, screenHeight);
    }
 }
@@ -1869,9 +1891,27 @@ void hud_true_widescreen_install(uintptr_t base)
    s_aspect     = reinterpret_cast<AspectFn>(resolve(base, a.renderer_screen_aspect));
    s_fileInfoVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_file_info_vtable);
    s_targetVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_target_vtable);
-   if (a.hud_element_text_vtable && a.hud_element_multiline_text_vtable) {
-      s_textVtable      = (uint32_t)(uintptr_t)resolve(base, a.hud_element_text_vtable);
-      s_multilineVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_element_multiline_text_vtable);
+   if (a.hud_element_text_vtable && a.hud_element_multiline_text_vtable && a.hud_red_text_set_text_scale &&
+       a.hud_multiline_setup_lines) {
+      // AuthoredHeight's two calls, checked where no relocated address sits.
+      static const unsigned char kScaleM[] = { 0x8B, 0x44, 0x24, 0x04, 0x8B, 0x54, 0x24, 0x08, 0x80, 0x89, 0xAF,
+                                               0x00, 0x00, 0x00, 0x01, 0x89, 0x81, 0x98, 0x00, 0x00, 0x00 };
+      static const unsigned char kScaleR[] = { 0x55, 0x8B, 0xEC, 0xF3, 0x0F, 0x10, 0x45, 0x08, 0xB8, 0x00, 0x01,
+                                               0x00, 0x00, 0x66, 0x09, 0x81, 0xAE, 0x00, 0x00, 0x00 };
+      static const unsigned char kLinesM[] = { 0x83, 0xEC, 0x08, 0x53, 0x55, 0x56 };
+      static const unsigned char kLinesR[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68 };
+      void* scale = resolve(base, a.hud_red_text_set_text_scale);
+      void* lines = resolve(base, a.hud_multiline_setup_lines);
+      const bool ok = modtools ? !memcmp(scale, kScaleM, sizeof(kScaleM)) && !memcmp(lines, kLinesM, sizeof(kLinesM))
+                               : !memcmp(scale, kScaleR, sizeof(kScaleR)) && !memcmp(lines, kLinesR, sizeof(kLinesR));
+      if (ok) {
+         s_textVtable      = (uint32_t)(uintptr_t)resolve(base, a.hud_element_text_vtable);
+         s_multilineVtable = (uint32_t)(uintptr_t)resolve(base, a.hud_element_multiline_text_vtable);
+         s_setTextScale    = (SetTextScaleFn)scale;
+         s_setupLines      = (SetupLinesFn)lines;
+      } else {
+         install_log("[TrueWidescreen] AuthoredHeight off: unexpected code at SetTextScale or SetupLines");
+      }
    }
    s_viewportWidth = static_cast<float*>(resolve(base, a.hud_viewport_width));
    name_hashes();

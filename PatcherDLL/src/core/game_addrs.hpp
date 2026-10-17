@@ -1244,6 +1244,11 @@ namespace modtools {
    // constructor at 0x006AA8F0 and ElementMultilineText's at 0x006A5EAF.
    constexpr uintptr_t hud_element_text_vtable      = 0x00A5E2B4;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x00A5DAA4;
+   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
+   constexpr uintptr_t hud_red_text_set_text_scale  = 0x00832F60;
+   // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
+   // PostReadSetup calls it with mNumLines (+0x204) set to 0.
+   constexpr uintptr_t hud_multiline_setup_lines    = 0x006A6640;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x00696B97;
    // ScreenAnchor: HUD::Element::ReadData, thiscall(PblConfig*,
    // PblConfig::Data*) -> bool, RET 8, where every element type's reader ends
@@ -2964,6 +2969,11 @@ namespace steam {
    // .?AVElementMultilineText@HUD@@).
    constexpr uintptr_t hud_element_text_vtable      = 0x007A1B00;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A14F4;
+   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
+   constexpr uintptr_t hud_red_text_set_text_scale  = 0x006D8570;
+   // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
+   // PostReadSetup calls it with mNumLines (+0x204) set to 0.
+   constexpr uintptr_t hud_multiline_setup_lines    = 0x00557F10;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054C24C;
    // ScreenAnchor: HUD::Element::ReadData keeps its contract here
    // (thiscall, RET 8); its four callers return what it returns.
@@ -3709,6 +3719,11 @@ namespace gog {
    // .?AVElementMultilineText@HUD@@).
    constexpr uintptr_t hud_element_text_vtable      = 0x007A295C;
    constexpr uintptr_t hud_element_multiline_text_vtable = 0x007A2350;
+   // RedTextElement::SetTextScale(x, y), thiscall RET 8: X +0x98, Y +0x9C.
+   constexpr uintptr_t hud_red_text_set_text_scale  = 0x006D9610;
+   // HUD::ElementMultilineText::SetupLines(count), thiscall RET 4, as its
+   // PostReadSetup calls it with mNumLines (+0x204) set to 0.
+   constexpr uintptr_t hud_multiline_setup_lines    = 0x00558C80;
    constexpr uintptr_t hud_bar_segmented_aspect_call = 0x0054CF9C;
    constexpr uintptr_t hud_element_read_data        = 0x00549FA0;
    // Command post strip (render/hud_command_posts.cpp) also reads the

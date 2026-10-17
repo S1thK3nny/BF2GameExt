@@ -810,9 +810,9 @@ FileInfo("myhud")
 }
 ```
 
-Every `Text` and `MultilineText` element of the file is then drawn at the screen's
-height over `N`, glyphs and text box together, so lines break the same on every
-screen. The height that counts is the one the game renders at, which already includes
+Every `Text` element of the file, and each `MultilineText`'s `Format`, then has its
+`TextScale` multiplied by the screen's height over `N` at load. Text boxes keep their
+size on the screen, so lines break as they did at height `N`. The height that counts is the one the game renders at, which already includes
 Shader Patch's UI scale, so one number covers every resolution and UI scale.
 
 For sharp text, draw each font at the size its text should be on the biggest screen
