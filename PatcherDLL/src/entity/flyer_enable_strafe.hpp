@@ -10,9 +10,8 @@
 //   StrafeRollAngle = 0.2    // stock property: lean while strafing (0 = none)
 //
 // Off by default; omitting the property (or setting 0) keeps stock behaviour.
-// With it on, the strafe axis (left stick X, A/D) no longer rolls the flyer;
-// roll stays available through the alternate control mode, which rolls on the
-// turn axis. See the .cpp header for how the engine's cut strafe path is fed.
+// With it on, the strafe axis (left stick X, A/D) no longer rolls the flyer.
+// See the .cpp header for how the engine's cut strafe path is fed.
 //
 // Build-aware (modtools + Steam + GOG): install from dllmain's build-aware
 // section, NOT from lua_hooks_install (that one is modtools-only).

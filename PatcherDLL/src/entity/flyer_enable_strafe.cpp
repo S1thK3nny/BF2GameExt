@@ -4,6 +4,7 @@
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
 #include "core/x86_emit.hpp"
+#include "game/Battlefront2/Source/EntityFlyer.h"
 #include "util/install_log.hpp"
 
 #include <cmath>
@@ -47,15 +48,17 @@
 // 0 and the ramp input 0 while Update runs, so steps 2 and 3 are exactly stock),
 // and the strafe is added the BF1 way at the head of step 4: a small cave there
 // adds s_lat = -strafe * F.right (* mFlightRatio in TAKEOFF/LANDING) into
-// mVelocity right before the engine integrates it.  In FLYING the next Update
-// takes that vector back out first, so the engine's momentum never inherits it.
+// mVelocity right before the engine integrates it.  The next Update takes that
+// vector back out first, so the engine's momentum never inherits it.  That
+// includes TAKEOFF, which can turn into FLYING inside one Update.  When Update
+// returns before any flight code (net-skipped turns), the hook undoes its edits.
 // The strafe itself ramps like BF1: toward input * StrafeSpeed by
 // Acceleration * dt.  Nothing of the engine's own flight is changed.
 //
 // The strafe axis, Controllable::mControlStrafe (+0x84), is otherwise read once
 // in Update as the ROLL input; a flagged class gets 0 there, so that axis no
-// longer rolls.  The alternate control mode (+0x54 bit 0) takes roll from the
-// turn axis through a different load, so it still rolls.  The lean sites
+// longer rolls.  (While bit 0 of the trigger at +0x54 is set the engine reads
+// roll from the turn axis instead; that load is left alone.)  The lean sites
 // (StrafeRollAngle * <strafe input>, in every state) get the real stick, so the
 // flyer banks into the strafe; the bank is cosmetic and never tilts the strafe.
 //
@@ -91,53 +94,36 @@
 //             call is safe.  integrate_hook finds the flyer through s_in.
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// Per-build layout (offsets from the Controllable subobject Update runs on)
-// ---------------------------------------------------------------------------
-// Every offset is read at that build's strafe ramp, flight-frame build or
-// FLYING velocity code.  The world matrix rows (object +0xF0/+0x100/+0x110)
-// are the same on every build.
-struct FlyerLayout {
-   int mClass;        // EntityFlyerClass*
-   int mVelocity;     // PblVector3, world space
-   int mSetSpeed;     // float, the throttle's target forward speed
-   int mSetStrafe;    // float
-   int mState;        // EntityFlyer::State
-   int mFlightRatio;  // float, 0..1 through TAKEOFF / LANDING
-   int mBankPitch;    // float, mBankPitchAngle
-   int mBankRoll;     // float, mBankRollAngle
-   int mSideRollX;    // float, mSideRoll.x (y follows)
-   // EntityFlyerClass
-   int clsAcceleration;
-   int clsMaxSpeed;
-   int clsBoostSpeed;
-   int clsStrafeSpeed;
-   int clsTrickSideRollStrafeSpeed;
-   // Integration site, `LEA EAX,[ESP+disp32]`
-   uint8_t leaOrig[7];
-   // FLYING rescale site: the first instruction(s) of `v *= mSetSpeed / d`
+// Per-build fields and their read sites live in game/Battlefront2/Source/EntityFlyer.h.
+namespace ef  = layout::EntityFlyer;
+namespace efc = layout::EntityFlyerClass;
+
+// Build-invariant offsets.
+static constexpr uintptr_t kControllable  = 0x240; // Update's `this`
+static constexpr uintptr_t kMatrix        = 0xF0;  // PblMatrix rows: right, up, forward, position
+static constexpr uintptr_t kControlStrafe = 0x84;  // strafe axis, on the Controllable
+
+// Original bytes at the integration and rescale sites, checked before patching.
+struct SiteBytes {
+   uint8_t lea[7];       // `LEA EAX,[ESP+disp32]` at the head of the integration
    uint8_t rescaleLen;
-   uint8_t rescaleOrig[8];
+   uint8_t rescale[8];   // first instruction(s) of FLYING's `v *= mSetSpeed / d`
 };
-static constexpr FlyerLayout kLayoutModtools = {
-   0x42C, 0x340, 0x358, 0x35C, 0x364, 0x368, 0x36C, 0x374, 0x398,
-   0x884, 0x894, 0x898, 0x89C, 0xDA4,
+static constexpr SiteBytes kSitesModtools = {
    {0x8D, 0x84, 0x24, 0x90, 0x00, 0x00, 0x00},
    6, {0xD9, 0x83, 0x58, 0x03, 0x00, 0x00} };              // FLD [ebx+0x358]
-static constexpr FlyerLayout kLayoutRelease = {
-   0x3EC, 0x300, 0x318, 0x31C, 0x324, 0x328, 0x32C, 0x334, 0x358,
-   0x7BC, 0x7CC, 0x7D0, 0x7D4, 0xCDC,
+static constexpr SiteBytes kSitesRelease = {
    {0x8D, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00},
    8, {0xF3, 0x0F, 0x5E, 0xCA, 0xF3, 0x0F, 0x10, 0x01} };  // DIVSS xmm1,xmm2 ; MOVSS xmm0,[ecx]
 
-static constexpr int kControlStrafe = 0x84;   // mControlStrafe, every build
-static constexpr int kWorldRight    = -0x150; // object +0xF0
-static constexpr int kWorldUp       = -0x140; // object +0x100
-static constexpr int kWorldFwd      = -0x130; // object +0x110
+static const SiteBytes* s_sites = &kSitesModtools;
 
-enum : int { kStateTakeoff = 1, kStateFlying = 2, kStateLanding = 3 };
+static char* flyer_object(void* controllable) { return (char*)controllable - kControllable; }
 
-static FlyerLayout s_layout = kLayoutModtools;
+static const float* matrix_row(const char* obj, int row)
+{
+   return (const float*)(obj + kMatrix) + row * 4;
+}
 
 // ---------------------------------------------------------------------------
 // Values the patched sites read
@@ -148,7 +134,7 @@ struct StrafeInputs {
    float   ramp;        // StrafeSpeed * ramp at the engine's strafe ramp
    float   lean;        // StrafeRollAngle * lean at the four lean sites
    float   roll;        // replaces the mControlStrafe roll load
-   void*   flyer;       // flagged flyer being updated, else null
+   char*   flyer;       // flagged flyer being updated (object start), else null
    float   lat[3];      // added into mVelocity before integration
    uint8_t latActive;   // integrate_hook adds lat only when set
    uint8_t latApplied;  // integrate_hook sets it once it has added lat
@@ -226,10 +212,10 @@ static void setEnabled(void* cls, bool on)
 // ---------------------------------------------------------------------------
 // FLYING blends the new velocity into the previous one, so the vector added
 // before last frame's integration has to come back out before the engine sees
-// mVelocity again.  Keyed by the Controllable pointer.  A record is only
-// trusted while the flyer's mSetStrafe still holds exactly what we wrote: a
-// new flyer at a reused address, a network update or anything else that
-// touched it simply gets adopted fresh instead.
+// mVelocity again.  Keyed by the flyer object.  A record is only trusted while
+// the flyer's mSetStrafe still holds exactly what we wrote: a new flyer at a
+// reused address, a network update or anything else that touched it simply
+// gets adopted fresh instead.
 
 static constexpr int kMaxFlyers = 128;
 
@@ -307,11 +293,6 @@ static void* __fastcall hooked_Derive(void* ecx, void* /*edx*/, unsigned int has
 // Hook: EntityFlyer::Update
 // ---------------------------------------------------------------------------
 
-template<class T> static T& field(void* base, int off)
-{
-   return *(T*)((uintptr_t)base + off);
-}
-
 static float move_toward(float cur, float target, float maxStep)
 {
    if (target > cur) return (cur + maxStep < target) ? cur + maxStep : target;
@@ -320,16 +301,16 @@ static float move_toward(float cur, float target, float maxStep)
 
 // Right axis of the flight frame F = RotZ(-bankRoll) * RotX(-bankPitch) * World,
 // i.e. row 0 of that product: cos(r)*R - sin(r)cos(p)*U + sin(r)sin(p)*F.
-static void flight_right(void* ecx, float out[3])
+static void flight_right(const char* obj, float out[3])
 {
-   const float r = field<float>(ecx, s_layout.mBankRoll);
-   const float p = field<float>(ecx, s_layout.mBankPitch);
+   const float r = ef::mBankRollAngle(obj);
+   const float p = ef::mBankPitchAngle(obj);
    const float a = std::cos(r);
    const float b = -std::sin(r) * std::cos(p);
    const float c = std::sin(r) * std::sin(p);
-   const float* R = &field<float>(ecx, kWorldRight);
-   const float* U = &field<float>(ecx, kWorldUp);
-   const float* F = &field<float>(ecx, kWorldFwd);
+   const float* R = matrix_row(obj, 0);
+   const float* U = matrix_row(obj, 1);
+   const float* F = matrix_row(obj, 2);
    for (int i = 0; i < 3; i++) out[i] = a * R[i] + b * U[i] + c * F[i];
 }
 
@@ -341,100 +322,115 @@ static bool same_bits(float a, float b)
    return x == y;
 }
 
-static bool update_flagged(void* ecx, float dt, uintptr_t cls, float axis)
+static bool same_vec(const float* a, const float* b)
 {
-   const float input = axis < -1.0f ? -1.0f : (axis > 1.0f ? 1.0f : axis);
-   const int   state = field<int>(ecx, s_layout.mState);
-   const bool  trick = field<float>(ecx, s_layout.mSideRollX) != 0.0f ||
-                       field<float>(ecx, s_layout.mSideRollX + 4) != 0.0f;
+   return same_bits(a[0], b[0]) && same_bits(a[1], b[1]) && same_bits(a[2], b[2]);
+}
 
-   s_in.roll    = 0.0f; // the strafe axis never rolls a flagged class
-   s_in.flyer   = ecx;
+static bool update_flagged(void* ctrl, float dt, const void* cls, float axis)
+{
+   char*       obj   = flyer_object(ctrl);
+   const float input = axis < -1.0f ? -1.0f : (axis > 1.0f ? 1.0f : axis);
+   const int   state = ef::mState(obj);
+   const PblVector3& sideRoll = ef::mSideRoll(obj);
+   const bool  trick = sideRoll.x != 0.0f || sideRoll.y != 0.0f;
+
+   // Start clean so nothing leaks in from an outer flyer's Update.  roll stays
+   // 0: the strafe axis never rolls a flagged class.
+   s_in = {};
+   s_in.flyer   = obj;
    s_in.fwdLock = 1;    // symmetric reverse, see the header
 
    const bool ours = !trick && dt > 0.0f &&
-                     (state == kStateTakeoff || state == kStateFlying ||
-                      state == kStateLanding);
+                     (state == ef::kTakeoff || state == ef::kFlying ||
+                      state == ef::kLanding);
    if (!ours) {
       // Side roll / flip: the engine does the trick with the stick as its strafe
       // input.  LANDED / CRASHING: stock.  Either way the engine now owns
       // whatever sideways motion there is, so drop our record.
       s_in.ramp = trick ? input : 0.0f;
       s_in.lean = trick ? input : 0.0f;
-      lat_forget(ecx);
-      return original_Update(ecx, nullptr, dt);
+      lat_forget(obj);
+      return original_Update(ctrl, nullptr, dt);
    }
 
-   LatRecord* rec   = lat_record(ecx);
-   float*     v     = &field<float>(ecx, s_layout.mVelocity);
-   float&     fieldStrafe = field<float>(ecx, s_layout.mSetStrafe);
+   LatRecord* rec       = lat_record(obj);
+   float*     v         = reinterpret_cast<float*>(&ef::mVelocity(obj));
+   float&     setStrafe = ef::mSetStrafe(obj);
    float      right[3];
-   flight_right(ecx, right);
+   flight_right(obj, right);
 
-   const float strafeSpeed = field<float>((void*)cls, s_layout.clsStrafeSpeed);
+   const float strafeSpeed = efc::mStrafeSpeed(cls);
    const float strafeLimit = std::fabs(strafeSpeed) +
-                             std::fabs(field<float>((void*)cls, s_layout.clsTrickSideRollStrafeSpeed));
+                             std::fabs(efc::mTrickSideRollStrafeSpeed(cls));
 
-   float prev = fieldStrafe;
-   s_in.adopt   = 0;
-   s_in.adopted = 0.0f;
-   if (state == kStateFlying) {
-      if (rec->applied && same_bits(rec->strafe, prev)) {
-         // Take last frame's strafe back out so the engine blends only its own
-         // velocity.  Only take out what is still there: if a collision since
-         // then stopped or reversed that motion, subtracting the full vector
-         // would leave the engine a phantom velocity the other way.
-         const float mag = std::sqrt(rec->lat[0] * rec->lat[0] + rec->lat[1] * rec->lat[1] +
-                                     rec->lat[2] * rec->lat[2]);
-         if (mag > 1e-4f) {
-            const float inv  = 1.0f / mag;
-            const float cur  = (v[0] * rec->lat[0] + v[1] * rec->lat[1] + v[2] * rec->lat[2]) * inv;
-            const float take = cur < 0.0f ? 0.0f : (cur > mag ? mag : cur);
-            for (int i = 0; i < 3; i++) v[i] -= rec->lat[i] * inv * take;
-         }
-      }
-      else {
-         // First frame, or coming back from a trick: adopt the sideways motion
-         // already there as the starting strafe, so nothing jumps.  Clamped to
-         // what a strafe can reach; anything beyond stays the engine's own.
-         const float lat = v[0] * right[0] + v[1] * right[1] + v[2] * right[2];
-         float adopted = -lat;
-         if (adopted >  strafeLimit) adopted =  strafeLimit;
-         if (adopted < -strafeLimit) adopted = -strafeLimit;
-         for (int i = 0; i < 3; i++) v[i] += right[i] * adopted; // v -= right * (-adopted)
-         prev = adopted;
-         s_in.adopt   = 1;
-         s_in.adopted = adopted;
+   const float vBefore[3]   = {v[0], v[1], v[2]};
+   const float strafeBefore = setStrafe;
+
+   float prev = setStrafe;
+   if (rec->applied && same_bits(rec->strafe, prev)) {
+      // Take last frame's strafe back out so the engine blends only its own
+      // velocity.  Needed in TAKEOFF too: it can turn into FLYING inside this
+      // Update.  Only take out what is still there: if a collision since then
+      // stopped or reversed that motion, subtracting the full vector would leave
+      // the engine a phantom velocity the other way.
+      const float mag = std::sqrt(rec->lat[0] * rec->lat[0] + rec->lat[1] * rec->lat[1] +
+                                  rec->lat[2] * rec->lat[2]);
+      if (mag > 1e-4f) {
+         const float inv  = 1.0f / mag;
+         const float cur  = (v[0] * rec->lat[0] + v[1] * rec->lat[1] + v[2] * rec->lat[2]) * inv;
+         const float take = cur < 0.0f ? 0.0f : (cur > mag ? mag : cur);
+         for (int i = 0; i < 3; i++) v[i] -= rec->lat[i] * inv * take;
       }
    }
+   else if (state == ef::kFlying) {
+      // First frame, or back from a trick or a network update: adopt the
+      // sideways motion already there as the starting strafe, so nothing jumps.
+      // Clamped to what a strafe can reach; anything beyond stays the engine's own.
+      const float lat = v[0] * right[0] + v[1] * right[1] + v[2] * right[2];
+      float adopted = -lat;
+      if (adopted >  strafeLimit) adopted =  strafeLimit;
+      if (adopted < -strafeLimit) adopted = -strafeLimit;
+      for (int i = 0; i < 3; i++) v[i] += right[i] * adopted; // v -= right * (-adopted)
+      prev = adopted;
+      s_in.adopt   = 1;
+      s_in.adopted = adopted;
+   }
+   const float vEdited[3] = {v[0], v[1], v[2]};
 
-   const float accel       = field<float>((void*)cls, s_layout.clsAcceleration);
-   const float strafe      = move_toward(prev, input * strafeSpeed, accel * dt);
-   const float scale       = (state == kStateFlying)
-                                ? 1.0f : field<float>(ecx, s_layout.mFlightRatio);
+   const float accel  = efc::mAcceleration(cls);
+   const float strafe = move_toward(prev, input * strafeSpeed, accel * dt);
+   const float scale  = (state == ef::kFlying) ? 1.0f : ef::mFlightRatio(obj);
 
    // The engine's own term is `- F.right * mSetStrafe`; keep its sign.
    for (int i = 0; i < 3; i++) s_in.lat[i] = -strafe * scale * right[i];
-   s_in.ramp       = 0.0f;  // engine blind to strafe...
-   s_in.lean       = input; // ...but the bank still leans into it
-   s_in.latActive  = 1;
-   s_in.latApplied = 0;
-   s_in.rec        = rec;
-   s_in.dt         = dt;
-   s_in.input      = input;
-   s_in.strafe     = strafe;
-   fieldStrafe     = 0.0f;
+   s_in.ramp      = 0.0f;  // engine blind to strafe...
+   s_in.lean      = input; // ...but the bank still leans into it
+   s_in.latActive = 1;
+   s_in.rec       = rec;
+   s_in.dt        = dt;
+   s_in.input     = input;
+   s_in.strafe    = strafe;
+   setStrafe      = 0.0f;
 
-   const bool alive = original_Update(ecx, nullptr, dt);
+   const bool alive = original_Update(ctrl, nullptr, dt);
    s_in.latActive = 0;
 
    // A false return means the flyer is being removed; leave it alone.
    if (!alive) {
-      lat_forget(ecx);
+      lat_forget(obj);
       return false;
    }
 
-   fieldStrafe  = strafe; // network, and next frame's ramp
+   // Net-skipped turns (late turns on the host, remote flyers on clients) return
+   // before any flight code; undo our edits so they stay no-ops.
+   if (!s_in.latApplied && same_vec(v, vEdited)) {
+      for (int i = 0; i < 3; i++) v[i] = vBefore[i];
+      setStrafe = strafeBefore;
+      return true;
+   }
+
+   setStrafe    = strafe; // network, and next frame's ramp
    rec->applied = s_in.latApplied != 0;
    rec->strafe  = strafe;
    rec->stamp   = ++g_latStamp;
@@ -442,26 +438,26 @@ static bool update_flagged(void* ecx, float dt, uintptr_t cls, float axis)
    return true;
 }
 
-static bool __fastcall hooked_Update(void* ecx, void* /*edx*/, float dt)
+static bool __fastcall hooked_Update(void* ctrl, void* /*edx*/, float dt)
 {
    const StrafeInputs saved = s_in; // re-entrancy guard
 
-   const float axis = ecx ? field<float>(ecx, kControlStrafe) : 0.0f;
+   const float axis = ctrl ? *(const float*)((const char*)ctrl + kControlStrafe) : 0.0f;
 
-   uintptr_t cls = 0;
-   if (g_enabledCount > 0 && ecx) {
-      cls = field<uintptr_t>(ecx, s_layout.mClass);
-      if (cls && !isEnabled((void*)cls)) cls = 0;
+   const void* cls = nullptr;
+   if (g_enabledCount > 0 && ctrl) {
+      cls = ef::mClass(flyer_object(ctrl));
+      if (cls && !isEnabled(cls)) cls = nullptr;
    }
 
    bool result;
    if (!cls) {
       s_in = {};
       s_in.roll = axis; // the stock load; ramp/lean stay the stock constant 0
-      result = original_Update(ecx, nullptr, dt);
+      result = original_Update(ctrl, nullptr, dt);
    }
    else {
-      result = update_flagged(ecx, dt, cls, axis);
+      result = update_flagged(ctrl, dt, cls, axis);
    }
 
    s_in = saved;
@@ -533,22 +529,21 @@ static uint32_t abs32(const void* p) { return (uint32_t)(uintptr_t)p; }
 static bool integrate_site_ok(uintptr_t exe_base)
 {
    const uint8_t* site = (const uint8_t*)resolve(exe_base, g_addr->flyer_strafe_integrate);
-   return std::memcmp(site, s_layout.leaOrig, sizeof(s_layout.leaOrig)) == 0;
+   return std::memcmp(site, s_sites->lea, sizeof(s_sites->lea)) == 0;
 }
 
 // Rare-event report: if a flagged flyer's velocity goes far past anything its
 // class can reach, or jumps by an absurd amount in one frame, log what this
 // frame looked like.  Rate-limited; costs nothing while flight is sane.
-static void report_anomaly(void* f, const float* v, float S, float d)
+static void report_anomaly(const char* f, const float* v, float S, float d)
 {
    LatRecord* rec = s_in.rec;
    if (!rec || !s_in.latActive || !(s_in.dt > 0.0f)) return;
 
-   const uintptr_t cls = field<uintptr_t>(f, s_layout.mClass);
-   const float maxSpeed  = std::fmax(field<float>((void*)cls, s_layout.clsMaxSpeed),
-                                     field<float>((void*)cls, s_layout.clsBoostSpeed));
-   const float strafeCap = std::fabs(field<float>((void*)cls, s_layout.clsStrafeSpeed)) +
-                           std::fabs(field<float>((void*)cls, s_layout.clsTrickSideRollStrafeSpeed));
+   const void* cls = ef::mClass(f);
+   const float maxSpeed  = std::fmax(efc::mMaxFlyerSpeed(cls), efc::mBoostFlyerSpeed(cls));
+   const float strafeCap = std::fabs(efc::mStrafeSpeed(cls)) +
+                           std::fabs(efc::mTrickSideRollStrafeSpeed(cls));
    const float cap = (std::fabs(maxSpeed) + strafeCap + 5.0f) * 1.25f;
 
    const float speed = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
@@ -570,7 +565,7 @@ static void report_anomaly(void* f, const float* v, float S, float d)
 
    get_gamelog()("[EnableStrafe] anomaly: speed %.1f (cap %.1f) jump %.1f | state %d dt %.4f "
                  "S %.2f d %.2f | input %.2f strafe %.2f lat %.2f %.2f %.2f | %s %.2f\n",
-                 speed, cap, jump, field<int>(f, s_layout.mState), s_in.dt, S, d,
+                 speed, cap, jump, ef::mState(f), s_in.dt, S, d,
                  s_in.input, s_in.strafe, s_in.lat[0], s_in.lat[1], s_in.lat[2],
                  s_in.adopt ? "adopted" : "subtracted", s_in.adopted);
 }
@@ -579,10 +574,10 @@ static void report_anomaly(void* f, const float* v, float S, float d)
 // code (and FLYING's rescale) and before `position += dt * mVelocity`.
 static void __cdecl integrate_hook()
 {
-   void* f = s_in.flyer;
+   char* f = s_in.flyer;
    if (!f) return; // not a flagged flyer: stock
 
-   float* v = &field<float>(f, s_layout.mVelocity);
+   float* v = reinterpret_cast<float*>(&ef::mVelocity(f));
 
    if (s_in.latActive) {
       for (int i = 0; i < 3; i++) v[i] += s_in.lat[i];
@@ -591,12 +586,11 @@ static void __cdecl integrate_hook()
 
    // Pin the forward component to the throttle target.  Where the engine's
    // rescale already ran it is already there; this only acts when braking out
-   // of reverse.  The strafe above lies along the flight frame's right axis,
-   // which is perpendicular to World.fwd, so it does not change d.
-   const float S = field<float>(f, s_layout.mSetSpeed);
+   // of reverse.
+   const float S = ef::mSetSpeed(f);
    float d = 0.0f;
-   if (s_in.fwdLock && field<int>(f, s_layout.mState) == kStateFlying) {
-      const float* fwd = &field<float>(f, kWorldFwd);
+   if (s_in.fwdLock && ef::mState(f) == ef::kFlying) {
+      const float* fwd = matrix_row(f, 2);
       d = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2];
       const float dS = S - d;
       for (int i = 0; i < 3; i++) v[i] += fwd[i] * dS;
@@ -620,14 +614,14 @@ static void __cdecl integrate_hook()
 static bool rescale_site_ok(uintptr_t exe_base)
 {
    const uint8_t* site = (const uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale);
-   return std::memcmp(site, s_layout.rescaleOrig, s_layout.rescaleLen) == 0;
+   return std::memcmp(site, s_sites->rescale, s_sites->rescaleLen) == 0;
 }
 
 static bool patch_rescale(uintptr_t exe_base)
 {
    uint8_t*  site = (uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale);
    uint8_t*  end  = (uint8_t*)resolve(exe_base, g_addr->flyer_strafe_rescale_end);
-   const int len  = s_layout.rescaleLen;
+   const int len  = s_sites->rescaleLen;
    uint8_t*  c    = cave_alloc(32);
    if (!c) return false;
 
@@ -758,9 +752,9 @@ static bool patch_release(uintptr_t exe_base)
 void flyer_enable_strafe_install(uintptr_t exe_base)
 {
    switch (g_build) {
-   case GameBuild::Modtools: s_layout = kLayoutModtools; break;
+   case GameBuild::Modtools: s_sites = &kSitesModtools; break;
    case GameBuild::Steam:
-   case GameBuild::GOG:      s_layout = kLayoutRelease;  break;
+   case GameBuild::GOG:      s_sites = &kSitesRelease;  break;
    default: return; // unknown build
    }
 
