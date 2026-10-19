@@ -184,9 +184,12 @@
     <ClInclude Include="src\entity\combo_anim_layout.hpp" />
     <ClInclude Include="src\entity\odf_gameext_props.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
+    <ClInclude Include="src\controller\menu_navigation.hpp" />
+    <None Include="src\controller\menu_navigation_shell.inc" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
     <ClInclude Include="src\controller\aim_assist.hpp" />
     <ClInclude Include="src\util\ini_registry.hpp" />
+    <ClInclude Include="src\util\ini_state.hpp" />
     <ClInclude Include="src\util\audio_stream_limit.hpp" />
     <ClInclude Include="src\util\snd_engine_open_fix.hpp" />
     <ClInclude Include="src\util\matrix_basis_fix.hpp" />
@@ -242,6 +245,7 @@
     <ClCompile Include="src\ai\ai_decision_rate.cpp" />
     <ClCompile Include="src\ai\reservation_pool.cpp" />
     <ClCompile Include="src\util\content_census.cpp" />
+    <ClCompile Include="src\util\ini_state.cpp" />
     <ClCompile Include="src\util\game_log_lock.cpp" />
     <ClCompile Include="src\ai\ai_update_budget.cpp" />
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp" />
@@ -315,6 +319,7 @@
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
     <ClCompile Include="src\shell\ingame_movie_path.cpp" />
     <ClCompile Include="src\controller\controller_support.cpp" />
+    <ClCompile Include="src\controller\menu_navigation.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
     <ClCompile Include="src\controller\aim_assist.cpp" />
     <ClCompile Include="src\util\error_dialog_fix.cpp" />

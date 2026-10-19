@@ -23,12 +23,6 @@ bool  g_rumbleEnabled = false;
 float g_rumbleScale   = 1.0f;
 
 // ---------------------------------------------------------------------------
-// GameLog
-// ---------------------------------------------------------------------------
-
-static GameLog_t g_log = nullptr;
-
-// ---------------------------------------------------------------------------
 // Weapon / Controllable raw offset constants (replaces game type headers)
 // ---------------------------------------------------------------------------
 
@@ -70,14 +64,14 @@ static bool load_xinput()
       if (s_xinputDll) {
          s_XInputSetState = (PFN_XInputSetState)GetProcAddress(s_xinputDll, "XInputSetState");
          if (s_XInputSetState) {
-            if (g_log) g_log("[Rumble] Loaded %s\n", name);
+            get_gamelog()("[Rumble] Loaded %s\n", name);
             return true;
          }
          FreeLibrary(s_xinputDll);
          s_xinputDll = nullptr;
       }
    }
-   if (g_log) g_log("[Rumble] No XInput DLL found\n");
+   get_gamelog()("[Rumble] No XInput DLL found\n");
    return false;
 }
 
@@ -673,8 +667,6 @@ void rumble_init(uintptr_t exe_base)
    if (!g_rumbleEnabled) return;
    if (s_rumble_initialized) return;
 
-   g_log = get_gamelog();
-
    if (!load_xinput()) {
       g_rumbleEnabled = false;
       return;
@@ -698,14 +690,14 @@ void rumble_init(uintptr_t exe_base)
       LONG error = DetourTransactionCommit();
 
       if (error != NO_ERROR) {
-         if (g_log) g_log("[Rumble] Detours hook failed: %ld\n", error);
+         get_gamelog()("[Rumble] Detours hook failed: %ld\n", error);
          original_light_output = nullptr;
          original_heavy_output = nullptr;
       } else {
-         if (g_log) g_log("[Rumble] Hooked vanilla output stubs\n");
+         get_gamelog()("[Rumble] Hooked vanilla output stubs\n");
       }
    } else {
-      if (g_log) g_log("[Rumble] No vanilla output stub addresses\n");
+      get_gamelog()("[Rumble] No vanilla output stub addresses\n");
    }
 
    // Hook the state setup stub (dispatch calls this to populate rumble from regions)
@@ -718,10 +710,10 @@ void rumble_init(uintptr_t exe_base)
       LONG error = DetourTransactionCommit();
 
       if (error != NO_ERROR) {
-         if (g_log) g_log("[Rumble] State setup hook failed: %ld\n", error);
+         get_gamelog()("[Rumble] State setup hook failed: %ld\n", error);
          original_state_setup = nullptr;
       } else {
-         if (g_log) g_log("[Rumble] Hooked vanilla state setup\n");
+         get_gamelog()("[Rumble] Hooked vanilla state setup\n");
       }
    }
 
@@ -735,10 +727,10 @@ void rumble_init(uintptr_t exe_base)
       LONG error = DetourTransactionCommit();
 
       if (error != NO_ERROR) {
-         if (g_log) g_log("[Rumble] SignalFire hook failed: %ld\n", error);
+         get_gamelog()("[Rumble] SignalFire hook failed: %ld\n", error);
          original_signal_fire = nullptr;
       } else {
-         if (g_log) g_log("[Rumble] Hooked Weapon::SignalFire\n");
+         get_gamelog()("[Rumble] Hooked Weapon::SignalFire\n");
       }
    }
 
@@ -752,10 +744,10 @@ void rumble_init(uintptr_t exe_base)
       LONG error = DetourTransactionCommit();
 
       if (error != NO_ERROR) {
-         if (g_log) g_log("[Rumble] Weapon::Update hook failed: %ld\n", error);
+         get_gamelog()("[Rumble] Weapon::Update hook failed: %ld\n", error);
          original_weapon_update = nullptr;
       } else {
-         if (g_log) g_log("[Rumble] Hooked Weapon::Update\n");
+         get_gamelog()("[Rumble] Hooked Weapon::Update\n");
       }
    }
 
@@ -794,7 +786,7 @@ void rumble_init(uintptr_t exe_base)
    s_prevLeft = s_prevRight = 0;
 
    s_rumble_initialized = true;
-   if (g_log) g_log("[Rumble] Initialized (scale=%.2f)\n", g_rumbleScale);
+   get_gamelog()("[Rumble] Initialized (scale=%.2f)\n", g_rumbleScale);
 }
 
 void rumble_shutdown()

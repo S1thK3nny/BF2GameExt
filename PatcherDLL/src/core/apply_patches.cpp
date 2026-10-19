@@ -6,6 +6,7 @@
 #include "util/cfile.hpp"
 #include "util/ini_config.hpp"
 #include "util/ini_registry.hpp"
+#include "util/ini_state.hpp"
 #include "patch_table.hpp"
 #include "version.h"
 
@@ -246,6 +247,7 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
    if (ini_path && ini_path[0]) WritePrivateProfileStringA(nullptr, nullptr, nullptr, ini_path);
 
    ini_config cfg{ini_path};
+   ini_state_capture(cfg);
 
    // Which DLL is actually running. Without this line a stale copy in the game
    // folder is indistinguishable from a feature that did not fire, which has
@@ -319,6 +321,7 @@ bool apply_patches(const uintptr_t exe_base, const slim_vector<section_info>& se
          for (const patch& patch : set.patches) {
             write_patch(patch, exe_base, sections);
          }
+         ini_state_mark_patch_set(set.name);
       }
 
       // Initialize the sentinel value at the end of the relocated EntityEx::mIdMap.

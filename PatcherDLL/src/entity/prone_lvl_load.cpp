@@ -119,7 +119,7 @@ static int __cdecl hooked_lua_read_data_file(lua_State* L)
 // 256 value slots), keyed by the hash of the fully composed name.  Inserting
 // there never touches SoldierAnimatorClass::mAnimBankOld[], so it costs no
 // animation-bank array slot (the 18 to 128 raise) and no distinct bank name
-// (the hard 16-name cap in SetupBodyMasks).
+// (the 16-name registry).
 //
 // Engine pieces:
 //   SoldierAnimatorLowResClass::PostLoad (mt 0x00586E60 / steam 0x00647D40)
@@ -195,8 +195,6 @@ static bool table_has_room(void* table)
 
 static void graft_prone_pose()
 {
-   auto fn_log = get_gamelog();
-
    void* target = find_bank(kTargetBank);
    if (!target) return;                     // no human low-res bank this mission
 
@@ -215,9 +213,8 @@ static void graft_prone_pose()
 
    void* donor = find_bank(kDonorBank);
    if (!donor) {
-      if (fn_log)
-         fn_log("[Prone] low-res bank '%s' not found in %s, so distant prone "
-                "soldiers will use the CROUCH pose\n", kDonorBank, kProneLvl);
+      get_gamelog()("[Prone] low-res bank '%s' not found in %s, so distant prone "
+                    "soldiers will use the CROUCH pose\n", kDonorBank, kProneLvl);
       return;
    }
 
@@ -230,8 +227,7 @@ static void graft_prone_pose()
 
    void* anim = fn_hashFind(donorTable, kZAB_TableSize, fn_tempHash(donorName));
    if (!anim) {
-      if (fn_log)
-         fn_log("[Prone] '%s' missing from low-res bank '%s'\n", donorName, kDonorBank);
+      get_gamelog()("[Prone] '%s' missing from low-res bank '%s'\n", donorName, kDonorBank);
       return;
    }
 
@@ -242,18 +238,16 @@ static void graft_prone_pose()
    const uint32_t donorJoints  = joint_count(donor);
    const uint32_t targetJoints = joint_count(target);
    if (donorJoints == 0 || donorJoints != targetJoints) {
-      if (fn_log)
-         fn_log("[Prone] low-res skeleton mismatch: '%s' has %u joints and '%s' has %u, "
-                "so the graft was refused.  Re-munge %s against the %s skeleton\n",
-                kDonorBank, donorJoints, kTargetBank, targetJoints,
-                kDonorBank, kTargetBank);
+      get_gamelog()("[Prone] low-res skeleton mismatch: '%s' has %u joints and '%s' has %u, "
+                    "so the graft was refused.  Re-munge %s against the %s skeleton\n",
+                    kDonorBank, donorJoints, kTargetBank, targetJoints,
+                    kDonorBank, kTargetBank);
       return;
    }
 
    if (!table_has_room(targetTable)) {
-      if (fn_log)
-         fn_log("[Prone] animation table for '%s' is full, so %s could not be grafted\n",
-                kTargetBank, targetName);
+      get_gamelog()("[Prone] animation table for '%s' is full, so %s could not be grafted\n",
+                    kTargetBank, targetName);
       return;
    }
 

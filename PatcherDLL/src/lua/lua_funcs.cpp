@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "util/content_census.hpp"
+#include "util/ini_state.hpp"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
@@ -47,6 +48,22 @@ static int lua_ReadTextFile(lua_State* L)
 }
 #endif
 
+// Opens the WinINet session every Http* call uses. The default timeouts let a
+// server that never answers hold the call far longer, and the synchronous
+// calls hold the game thread with it.
+static constexpr DWORD kHttpTimeoutMs = 5000;
+
+static HINTERNET http_open_session()
+{
+   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   if (!hNet) return nullptr;
+   DWORD ms = kHttpTimeoutMs;
+   InternetSetOptionA(hNet, INTERNET_OPTION_CONNECT_TIMEOUT, &ms, sizeof(ms));
+   InternetSetOptionA(hNet, INTERNET_OPTION_SEND_TIMEOUT,    &ms, sizeof(ms));
+   InternetSetOptionA(hNet, INTERNET_OPTION_RECEIVE_TIMEOUT, &ms, sizeof(ms));
+   return hNet;
+}
+
 // HttpGet(url) - performs a synchronous HTTP GET, returns response body as a string.
 // Returns nil on failure. Supports http and https.
 // Example: local body = HttpGet("http://example.com/data.txt")
@@ -55,11 +72,11 @@ static int lua_HttpGet(lua_State* L)
    const char* url = g_lua.tolstring(L, 1, nullptr);
    if (!url) { g_lua.pushnil(L); return 1; }
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hUrl = InternetOpenUrlA(hNet, url, nullptr, 0,
-                                     INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE |
+                                     INTERNET_FLAG_RELOAD |
                                      INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
                                      INTERNET_FLAG_IGNORE_CERT_DATE_INVALID, 0);
    if (!hUrl) { InternetCloseHandle(hNet); g_lua.pushnil(L); return 1; }
@@ -125,7 +142,7 @@ static int lua_HttpPut(lua_State* L)
                             : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                        : INTERNET_DEFAULT_HTTP_PORT);
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
@@ -201,7 +218,7 @@ static int lua_HttpPost(lua_State* L)
                             : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                        : INTERNET_DEFAULT_HTTP_PORT);
 
-   HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+   HINTERNET hNet = http_open_session();
    if (!hNet) { g_lua.pushnil(L); return 1; }
 
    HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
@@ -252,7 +269,7 @@ static int lua_HttpPost(lua_State* L)
 // currently selected weapon in a given weapon channel.
 //
 // @param #int  charIndex   Integer character unit index (0-based)
-// @param #int  channel     Weapon channel (default 0).
+// @param #int  channel     Weapon channel (default 0), nil outside 0-1.
 //                          0 = primary weapon channel (key 1)
 //                          1 = secondary weapon channel (key 2)
 // @return #string          ODF name (e.g. "rep_weap_dc-15s_blaster_carbine"), or nil.
@@ -287,9 +304,10 @@ static int lua_GetCharacterWeapon(lua_State* L)
    const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) { g_lua.pushnil(L); return 1; }
 
+   // mWeaponIndex has two entries; higher channels would read the bytes after it.
    const int channel = (g_lua.gettop(L) >= 2 && g_lua.isnumber(L, 2))
                        ? g_lua.tointeger(L, 2) : 0;
-   if (channel < 0 || channel > 7) { g_lua.pushnil(L); return 1; }
+   if (channel < 0 || channel > 1) { g_lua.pushnil(L); return 1; }
 
    __try {
       char* charSlot = (char*)arrayBase + charIndex * layout::Character::kSize;
@@ -851,7 +869,7 @@ static uintptr_t resolve_active_weapon(int charIndex, int channel)
 
    const int maxChars = *(int*)res(g_addr->max_chars);
    if (charIndex < 0 || charIndex >= maxChars) return 0;
-   if (channel < 0 || channel > 7) return 0;
+   if (channel < 0 || channel > 1) return 0;   // mWeaponIndex has two entries
 
    const uintptr_t arrayBase = *(uintptr_t*)res(g_addr->char_array_base);
    if (!arrayBase) return 0;
@@ -1017,6 +1035,10 @@ static int lua_RemoveUnitClass(lua_State* L)
    // Get team pointer from g_ppTeams[teamIndex].
    // 0xAD5D64 is a pointer variable whose value is the team array base — two dereferences needed.
    const uintptr_t teamArrayBase = *(uintptr_t*)res(g_addr->team_array_base);
+   if (!teamArrayBase) {
+      fn_GameLog("RemoveUnitClass(): teams are not set up yet\n");
+      return 0;
+   }
    void* teamPtr = *(void**)(teamArrayBase + (uintptr_t)teamIndex * 4);
    if (!teamPtr) {
       fn_GameLog("RemoveUnitClass(): team %d is null\n", teamIndex);
@@ -1025,6 +1047,12 @@ static int lua_RemoveUnitClass(lua_State* L)
 
    const int classCount = *(int*)((char*)teamPtr + 0x48);
    void** classDefArr   = *(void***)((char*)teamPtr + 0x50);
+   int*   minArr        = *(int**)((char*)teamPtr + 0x54);
+   int*   maxArr        = *(int**)((char*)teamPtr + 0x58);
+   if (classCount <= 0 || !classDefArr || !minArr || !maxArr) {
+      fn_GameLog("RemoveUnitClass(): team %d has no classes\n", teamIndex);
+      return 0;
+   }
 
    int foundSlot = -1;
 
@@ -1052,7 +1080,7 @@ static int lua_RemoveUnitClass(lua_State* L)
 
       uintptr_t node = *(uintptr_t*)res(g_addr->class_def_list);
       void* classDef = nullptr;
-      for (int guard = 0; guard < 1024; ++guard) {
+      for (int guard = 0; node && guard < 1024; ++guard) {
          void* element = *(void**)(node + 0x0c);
          if (!element) break;
          if (*(int*)((char*)element + 0x18) == targetHash) { classDef = element; break; }
@@ -1083,8 +1111,6 @@ static int lua_RemoveUnitClass(lua_State* L)
    // character is skipped for that spawn tick and respawns normally on the next
    // cycle. The warning is harmless and the alternative (tombstoning) prevents
    // slot reuse, breaking the add/remove cycle.
-   int* minArr = *(int**)((char*)teamPtr + 0x54);
-   int* maxArr = *(int**)((char*)teamPtr + 0x58);
    const int lastSlot = classCount - 1;
 
    for (int i = foundSlot; i < lastSlot; ++i) {
@@ -1137,10 +1163,10 @@ static DWORD WINAPI http_async_worker(LPVOID param)
 
    if (strcmp(w->method, "GET") == 0) {
       // High-level path: InternetOpenUrlA is fine for GET.
-      HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+      HINTERNET hNet = http_open_session();
       if (hNet) {
          HINTERNET hUrl = InternetOpenUrlA(hNet, w->url, nullptr, 0,
-                                           INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE |
+                                           INTERNET_FLAG_RELOAD |
                                            INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
                                            INTERNET_FLAG_IGNORE_CERT_DATE_INVALID, 0);
          if (hUrl) {
@@ -1168,7 +1194,7 @@ static DWORD WINAPI http_async_worker(LPVOID param)
                                   : (isHttps ? INTERNET_DEFAULT_HTTPS_PORT
                                              : INTERNET_DEFAULT_HTTP_PORT);
 
-         HINTERNET hNet = InternetOpenA("BF2GameExt", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+         HINTERNET hNet = http_open_session();
          if (hNet) {
             HINTERNET hConn = InternetConnectA(hNet, hostBuf, port,
                                                nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
@@ -1370,7 +1396,9 @@ static int lua_SetFogRange(lua_State* L)
 // Example: SetFogEnable(1) -- enable fog, SetFogEnable(0) -- disable
 static int lua_SetFogEnable(lua_State* L)
 {
-   bool enable = g_lua.tonumber(L, 1) != 0;
+   // Lua 5.0's tonumber reads a boolean as 0, so true/false go through toboolean.
+   const bool enable = g_lua.isnumber(L, 1) ? g_lua.tonumber(L, 1) != 0
+                                            : g_lua.toboolean(L, 1) != 0;
 
    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
    auto res = [=](uintptr_t a) -> uintptr_t { return a - kUnrelocatedBase + base; };
@@ -1389,12 +1417,13 @@ static int lua_SetFogEnable(lua_State* L)
 // these, so vehicles spawned via it have no team / damage owner and weapons
 // silently no-op.
 //
-//   1. ctrl = entity->vtable[9]()        — get controllable
-//   2. ctrl->vtable[36](team)            — Controllable::SetTeam (+0x234 low 4 bits)
+//   1. ctrl = entity->vtable[9]()        — Entity::GetGameObject (null for a plain Entity)
+//   2. ctrl->vtable[36](team)            — GameObject::SetTeam (+0x234 low 4 bits)
 //   3. patch +0x234 bits 4-7  = team     — spawner-team
 //   4. patch +0x234 bits 8-11 = team     — group/owner bits
-//   5. ctrl->vtable[5]()                 — activate
+//   5. ctrl->vtable[5]()                 — GameObject::Init
 //
+// Slots confirmed against the Phantom PDB vtables of Entity and GameObject.
 // Returns true on success.
 static bool apply_vehicle_fixup(void* entity, int team)
 {
@@ -1436,23 +1465,21 @@ static bool apply_vehicle_fixup(void* entity, int team)
 // Extended signature:     CreateEntity(className, matrix, name [, team]) -> entity|nil
 //
 // After the original call returns (top of Lua stack = entity lightuserdata or
-// nil), runs the vehicle fixup so weapons work. Team defaults to 0 if omitted.
-// Non-vehicle entities are tolerated — apply_vehicle_fixup is SEH-guarded and
-// for entities without the expected vtable layout it'll either no-op or fail
-// cleanly without affecting the returned entity.
+// nil), runs the vehicle fixup so weapons work. Only when a team is passed: the
+// fixup re-inits any GameObject, not just vehicles, so a three-argument call
+// stays exactly stock.
 typedef int (__cdecl* fn_lua_create_entity_t)(void* L);
 static fn_lua_create_entity_t original_lua_create_entity = nullptr;
 
 static int __cdecl hooked_lua_create_entity(void* L)
 {
-   int team = 0;
    const bool haveTeam = g_lua.gettop && g_lua.isnumber &&
                          g_lua.gettop((lua_State*)L) >= 4 &&
                          g_lua.isnumber((lua_State*)L, 4);
-   if (haveTeam) team = g_lua.tointeger((lua_State*)L, 4);
+   const int team = haveTeam ? g_lua.tointeger((lua_State*)L, 4) : 0;
 
    const int ret = original_lua_create_entity(L);
-   if (ret <= 0) return ret;
+   if (ret <= 0 || !haveTeam) return ret;
 
    void* entity = g_lua.touserdata((lua_State*)L, -1);
    if (entity) apply_vehicle_fixup(entity, team);
@@ -1485,6 +1512,67 @@ static int lua_ContentCensus(lua_State* L)
    (void)L;
    content_census_report();
    return 0;
+}
+
+// Whether version `have` is `want` or newer, part by part.
+constexpr bool version_at_least(int haveMajor, int haveMinor, int havePatch,
+                                int wantMajor, int wantMinor, int wantPatch)
+{
+   return haveMajor != wantMajor ? haveMajor > wantMajor
+        : haveMinor != wantMinor ? haveMinor > wantMinor
+        : havePatch >= wantPatch;
+}
+static_assert(version_at_least(1, 2, 0, 1, 2, 0) && version_at_least(1, 2, 0, 1, 1, 9) &&
+              version_at_least(2, 0, 0, 1, 9, 9) && version_at_least(1, 10, 0, 1, 9, 0));
+static_assert(!version_at_least(1, 2, 0, 1, 2, 1) && !version_at_least(1, 2, 0, 1, 3, 0) &&
+              !version_at_least(1, 9, 9, 2, 0, 0) && !version_at_least(1, 1, 5, 1, 2, 0));
+
+// GameExt.TestVersion(major [, minor [, patch]]): true if this BF2GameExt is that
+// version or newer. A missing part counts as 0. Older builds have no field, so
+// `GameExt and GameExt.TestVersion and GameExt.TestVersion(1, 1, 0)` is false there.
+static int lua_TestVersion(lua_State* L)
+{
+   if (!g_lua.gettop || !g_lua.isnumber || !g_lua.tonumber || !g_lua.pushboolean) return 0;
+   int want[3] = { 0, 0, 0 };
+   const int count = g_lua.gettop(L);
+   bool valid = count >= 1;
+   for (int i = 0; valid && i < 3 && i < count; ++i) {
+      if (g_lua.isnumber(L, i + 1)) want[i] = (int)g_lua.tonumber(L, i + 1);
+      else valid = false;
+   }
+   static bool warned = false;
+   if (!valid && !warned) {
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "GameExt.TestVersion takes version numbers, as in "
+                   "GameExt.TestVersion(1, 1, 0); answering false.\n");
+      warned = true;
+   }
+   g_lua.pushboolean(L, valid && version_at_least(GAMEEXT_VERSION_MAJOR, GAMEEXT_VERSION_MINOR,
+                                                  GAMEEXT_VERSION_PATCH, want[0], want[1], want[2]));
+   return 1;
+}
+
+// GameExt.IsPatchActive(section, key): true if that BF2GameExt.ini setting is on
+// and running. A patch set that failed to install on this exe answers false.
+static int lua_IsPatchActive(lua_State* L)
+{
+   if (!g_lua.gettop || !g_lua.tolstring || !g_lua.pushboolean) return 0;
+   const bool two = g_lua.gettop(L) >= 2;
+   const char* section = two ? g_lua.tolstring(L, 1, nullptr) : nullptr;
+   const char* key     = two ? g_lua.tolstring(L, 2, nullptr) : nullptr;
+   bool active = false;
+   const bool known = section && key && ini_state_find(section, key, &active);
+   static bool warned = false;
+   if (!known && !warned) {
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "GameExt.IsPatchActive(\"%s\", \"%s\") names no BF2GameExt.ini setting; "
+                   "it takes the section and key, as in "
+                   "GameExt.IsPatchActive(\"Features\", \"Prone\"). Answering false.\n",
+                   section ? section : "?", key ? key : "?");
+      warned = true;
+   }
+   g_lua.pushboolean(L, active);
+   return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1702,6 +1790,8 @@ void register_lua_functions(lua_State* L)
    //   print(GameExt.version)              -- "1.0.0"
    //   if GameExt.build == "steam" then    -- which exe we're patching
    //   GameExt.disable = true              -- opt out of intrusive features
+   //   if GameExt.TestVersion(1, 1, 0) then -- this version or newer
+   //   GameExt.IsPatchActive("Features", "Prone") -- INI setting on and running
    const char* buildName = "unknown";
    switch (g_build) {
       case GameBuild::Modtools: buildName = "modtools"; break;
@@ -1742,6 +1832,14 @@ void register_lua_functions(lua_State* L)
          };
          set_field("version", GAMEEXT_VERSION_STRING);
          set_field("build",   buildName);
+         auto set_func = [&](const char* key, lua_CFunction func) {
+            if (!g_lua.pushcclosure) return;
+            g_lua.pushlstring(L, key, strlen(key));
+            g_lua.pushcclosure(L, func, 0);
+            g_lua.settable(L, -3);
+         };
+         set_func("TestVersion",   lua_TestVersion);
+         set_func("IsPatchActive", lua_IsPatchActive);
          g_lua.settable(L, -10001);                 // _G.GameExt = T
          s_gameExtTableBuilt = true;                // enables gameext_is_disabled()
       } else if (g_lua.settop) {

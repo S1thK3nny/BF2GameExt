@@ -104,6 +104,18 @@ The engine's own `SoldierAnimation` property on the same class is worth knowing 
 | `DisableBallMode` | `1` | Removes the droideka's roll outright, for the AI as well as the player, turning the chassis into a plain walking unit. The spawn screen follows suit and previews the unit standing and idling instead of curled into a ball. Set on a `walkerdroid` class. Off by default, and inherits through `ClassParent` like a stock property, so `DisableBallMode = 0` on a child restores the roll. | 1.0.0 |
 | `EnableStrafe` | `1` | The strafe controls (left stick sideways, A and D) slide the flyer sideways instead of rolling it. `StrafeSpeed` sets the sideways speed at full input, `Acceleration` how quickly it gets there and stops again, and `StrafeRollAngle` how far the flyer leans while doing it. Coming out of reverse also takes as long as going into it, where a stock flyer takes several times longer to recover from reverse than to brake into it. AI pilots strafe as well, so an AI flyer whose class also sets `StrafeSpeed` strafes rather than rolls, except on maps with flyer paths, where AI flyers follow those as before. Set on a `flyer` class. Off by default. | 1.1.0 |
 
+## Building Classes
+
+| Property | Value | Description | Since |
+|----------|-------|-------------|-------|
+| `AttachRemoveOnDeath` | `1` | Switches the light attached with the `AttachOdf` lines above it off when the building is destroyed, and back on when it respawns. Without it the light keeps shining over the wreck, as in the stock game. Put it after `AttachToHardPoint`; one line covers every hardpoint that light is attached to. Works in multiplayer. | 1.1.0 |
+
+```
+AttachOdf           = "com_light_red"
+AttachToHardPoint   = "hp_light"
+AttachRemoveOnDeath = 1
+```
+
 ## Animation Naming Conventions
 
 Not properties, but ODF-adjacent: these are picked up by name out of an animation bank, with nothing to declare anywhere.

@@ -6,6 +6,7 @@
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
 #include "controller/controller_rumble.hpp"
+#include "controller/menu_navigation.hpp"
 #include "controller/aim_assist.hpp"
 #include "entity/anim_bank_append.hpp"
 #include "weapon/disguise_model_override.hpp"
@@ -76,6 +77,7 @@
 #include "shell/map_queue_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
+#include "util/ini_state.hpp"
 #include "util/audio_stream_limit.hpp"
 #include "util/enable_sound_warnings.hpp"
 #include "util/error_dialog_fix.hpp"
@@ -315,7 +317,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_rumbleEnabled = g_controllerEnabled && cfg.get_bool("Controller", "Rumble", true);
       disableDeadBody     = cfg.get_bool("Features", "DisableDeadBodyShooting", true);
       deadBodyAllFactions = cfg.get_bool("Features", "DeadBodyShootingAllFactions", false);
-      controller_set_ini_path(ini_path);
       aim_assist_load_config(ini_path);
    } else {
       g_useBarrelFireOrigin = true;
@@ -323,6 +324,11 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_controllerEnabled = true;
       g_rumbleEnabled = true;
    }
+
+   // Features that can switch off after startup answer IsPatchActive from their flag.
+   ini_state_bind_live("Features", "Prone", &g_proneEnabled);
+   ini_state_bind_live("Controller", "Enabled", &g_controllerEnabled);
+   ini_state_bind_live("Controller", "Rumble", &g_rumbleEnabled);
 
    // Sections are still RW here (re-protected below) — safe to apply byte patches.
    apply_deadbody_check_patches(exe_base, disableDeadBody, deadBodyAllFactions);
@@ -384,6 +390,8 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
+   controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
+   menu_navigation_install(exe_base);        // Detours + a .data table - needs the RW window
    command_post_overflow_fix_install(exe_base);
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);

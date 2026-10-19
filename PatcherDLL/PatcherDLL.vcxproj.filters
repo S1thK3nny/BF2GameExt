@@ -226,6 +226,12 @@
     <ClInclude Include="src\controller\controller_support.hpp">
       <Filter>controller</Filter>
     </ClInclude>
+    <ClInclude Include="src\controller\menu_navigation.hpp">
+      <Filter>controller</Filter>
+    </ClInclude>
+    <None Include="src\controller\menu_navigation_shell.inc">
+      <Filter>controller</Filter>
+    </None>
     <ClInclude Include="src\controller\controller_rumble.hpp">
       <Filter>controller</Filter>
     </ClInclude>
@@ -340,6 +346,9 @@
     <ClInclude Include="src\util\ini_registry.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\ini_state.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -432,6 +441,9 @@
     <ClCompile Include="src\util\cfile.cpp">
       <Filter>util</Filter>
     </ClCompile>
+    <ClCompile Include="src\util\ini_state.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
     <ClCompile Include="src\loading_screen\config_parser.cpp">
       <Filter>loading_screen</Filter>
     </ClCompile>
@@ -502,6 +514,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">
+      <Filter>controller</Filter>
+    </ClCompile>
+    <ClCompile Include="src\controller\menu_navigation.cpp">
       <Filter>controller</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_rumble.cpp">

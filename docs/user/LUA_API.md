@@ -11,6 +11,8 @@ Set alongside the function registrations, so scripts can degrade gracefully when
 | `GameExt` | A table when BF2GameExt is loaded; `nil` otherwise. |
 | `GameExt.version` | Version string, e.g. `"1.0.0"`. |
 | `GameExt.build` | Which executable is being patched: `"modtools"`, `"steam"`, `"gog"` or `"unknown"`. |
+| `GameExt.TestVersion(major [, minor [, patch]])` | `true` if the running BF2GameExt is that version or newer. Missing parts count as 0. Since 1.1.0. |
+| `GameExt.IsPatchActive(section, key)` | `true` if that `BF2GameExt.ini` setting is on and running this session (see below). Since 1.1.0. |
 | `GameExt.disable` | Write-only opt-out. Set it truthy to disable BF2GameExt's intrusive gameplay features for a mission (see below). |
 
 ```lua
@@ -19,6 +21,35 @@ if GameExt then
     SetFogEnable(1)
 end
 ```
+
+`GameExt.TestVersion` is `nil` on builds older than 1.1.0, so check that it exists before calling it:
+
+```lua
+if GameExt and GameExt.TestVersion and GameExt.TestVersion(1, 1, 0) then
+    -- use something added in 1.1.0
+end
+```
+
+**Checking a setting (`GameExt.IsPatchActive`)** - Pass the `[Section]` and key exactly as they appear in `BF2GameExt.ini`, so a mod can load content that needs a raised limit only when the player has it:
+
+```lua
+local function PatchActive(section, key)
+    return GameExt and GameExt.IsPatchActive and GameExt.IsPatchActive(section, key)
+end
+
+if PatchActive("LimitIncreases", "ComboAnimIncrease") then
+    -- load the full hero roster
+else
+    -- stay under the stock combo animation limits
+end
+```
+
+- It answers for this session. Settings are read when the game starts, so editing the INI while playing changes nothing until a restart.
+- A setting that is on but could not be installed on this game version answers `false`.
+- `Features, Prone` is decided per mission when `ingame.lvl` is read (it needs `prone.lvl`, and `GameExt.disable` turns it off), so ask after that `ReadDataFile` call.
+- Number settings answer `true` when they are not 0.
+- A section and key that are not in the INI answer `false` and log a warning.
+- Every player has their own INI. In multiplayer, use it only for things that stay on your machine, such as hints or messages, never to choose what loads or how the game plays.
 
 **Opting out (`GameExt.disable`)** - A mod that wants the extension's fixes and Lua API but *not* its gameplay-altering features can set `GameExt.disable = true`. Set it in your mission's `ScriptPreInit` or `ScriptInit`, but before the `ReadDataFile("ingame.lvl")` call, so it takes effect for that mission:
 
@@ -34,7 +65,7 @@ Currently this gates the **Prone** feature (the only feature that modifies mod c
 
 | Function | Description | Since |
 |----------|-------------|-------|
-| `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary, ...). Returns nil if the slot is empty. | 1.0.0 |
+| `GetCharacterWeapon(charIndex, channel)` | Returns the ODF name of the weapon currently held in the given channel (0 = primary, 1 = secondary). Returns nil if the slot is empty or the channel is anything else. | 1.0.0 |
 | `SetCharacterWeapon(charIndex, odfName [, channel])` | Replaces the active weapon in a channel (0 = primary, 1 = secondary) with another already-loaded weapon ODF. Pass the full ODF name, exactly as the file is named; partial names are not matched. Builds a real Weapon through the engine's own factory and destroys the old one , ammo, animation stance, and aimer all come out correct. Singleplayer only; slots using `WeaponShareAmmo`/`WeaponShareEnergy` are refused, as are weapons the unit's animation bank has no animmap for (e.g. giving a jedi-bank unit a rifle). The old weapon is kept in that case. Works in first person. Melee-family weapons (sabers, saber throw) are untested and unsupported. Returns 1 on success, nil on failure. | 1.0.0 |
 | `GetWeaponAmmo(charIndex [, channel])` | Returns four numbers: `curClip, numClips, maxClips, roundsPerClip` for the active weapon in the channel (default 0). Ammo is tracked in **clips**, with `curClip` being a fractional 0.0-1.0 of one loaded clip. | 1.0.0 |
 | `SetWeaponAmmo(charIndex, curClip [, numClips [, channel]])` | Writes `curClip` (fractional 0.0-1.0) and optionally `numClips` (spare clips) on the active weapon. Pass nil for `numClips` to leave it untouched. | 1.0.0 |
@@ -171,12 +202,14 @@ a mission is actually live and reports nil when one is not.
 
 | Function | Description | Since |
 |----------|-------------|-------|
-| `SetFogEnable(0/1)` | Toggles the D3D fog render state. | 1.0.0 |
+| `SetFogEnable(enable)` | Toggles the D3D fog render state. Takes `1`/`0` or `true`/`false`. | 1.0.0 |
 | `SetFogRange(start, end)` | Sets near/far fog distances. | 1.0.0 |
 
 ## HTTP
 
 Make HTTP requests directly from Lua. Useful for telemetry, live configuration, or external API integration in either singleplayer or multiplayer missions.
+
+The synchronous calls pause the game until the server answers. A request gives up and returns nil when the server does not connect or respond within 5 seconds.
 
 | Function | Description | Since |
 |----------|-------------|-------|

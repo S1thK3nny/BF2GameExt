@@ -4,12 +4,43 @@ What changed in each release of BF2GameExt. Version numbers follow the rules in
 `version.h`: a major release can break existing scripts, ODFs or INI files, a minor
 release only adds, and a patch release only fixes.
 
-Scripts can check the running version through `GameExt.version`.
+Scripts can check the running version through `GameExt.version` or
+`GameExt.TestVersion`.
 
-## Unreleased
+## 1.1.0
 
 ### Added
 
+- **`GameExt.TestVersion(major, minor, patch)`** - True when the running
+  BF2GameExt is that version or newer, so a script can check for a feature in one
+  line instead of comparing `GameExt.version` strings. See the
+  [Lua API](docs/user/LUA_API.md#detection).
+- **`GameExt.IsPatchActive(section, key)`** - True when that `BF2GameExt.ini`
+  setting is on and actually running, so a mod can load content that needs a raised
+  limit only for players who have it. A setting that could not be installed on the
+  player's game version answers false. See the
+  [Lua API](docs/user/LUA_API.md#detection).
+- **`GetMissionName()`** - Returns the mission-script name the match was launched
+  from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
+  script, so a mission could not tell which map or mode it was running as without
+  the name being hardcoded. See the
+  [Lua API](docs/user/LUA_API.md#match-info).
+- **`SetInstanceProperty(name, property, value)`** - Changes a world object's
+  instance properties after the map has loaded. Works on vehicle spawners, which no
+  stock Lua function could reach, so a script can now change which vehicle a
+  spawner produces or how quickly it respawns. See the
+  [Lua API](docs/user/LUA_API.md#world-objects).
+- **`@GameExt` ODF suffix** - A property written as `Name@GameExt` replaces the
+  plain `Name` line only when BF2GameExt is installed, so one ODF serves both stock
+  and extended players. See [ODF Properties](docs/user/ODF_PROPERTIES.md).
+- **`HeldOrdnanceEffectBone`** - A cannon weapon can show its projectile trail at a
+  soldier bone while preparing to fire, then carry it into flight. INI:
+  `[Fixes] HeldOrdnanceEffect`.
+- **`ExtendedBladeBase`** - The visible lightsaber blade extends 8% behind its base
+  instead of 4%, matching the Classic Collection. Combat reach is unchanged. INI:
+  `[Lightsaber] ExtendedBladeBase`.
+- A `Since` column in the Lua API and ODF property references, naming the version
+  each entry first appeared in.
 - **Command post strip** - `player1.commandPostN.icon`, `.color`, `.capture`,
   `.captureColor` and `.disable` for slots 1 to 16, plus `player1.commandPosts.count`,
   so a `.hud` can show every command post's owner and capture progress in a row.
@@ -103,70 +134,34 @@ Scripts can check the running version through `GameExt.version`.
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
-
-### Fixed
-
-- A light attached to a building with `AttachOdf` kept shining after the building
-  was destroyed. It now goes out with the building and comes back on when it respawns.
-- A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
-  nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
-  on every build.
-- Carriers (vehicle pads with `SetCarrierClass`):
-  - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
-  - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.
-  - Every carrier after the first from the same pad now descends with its cargo bay closed.
-  - Extra vehicles on multi-cargo carriers now get their team back when dropped.
-  - Carriers no longer look skewed while climbing away.
-  - Carrier turrets keep cooling down and reloading while searching for a target.
-  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
-    hovering over the pad.
-  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
-    longer crashes the game.
-  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
-    ceiling.
-  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
-  - A carrier shot down in the air now explodes on the spot instead of spinning all the
-    way to the ground.
-- Floating target bars keep their last screen position when a target dies or is
-  removed, allowing the existing HUD fade to finish without dropping onto the
-  corpse. Living targets still track normally; new targets reset the cached anchor.
-- A map rotation no longer crashes when a map with `foleyfx` regions follows another
-  map that has them.
-- The game no longer crashes, usually on the first spawn, on a map whose terrain
-  paints a foliage layer its props do not define when a map that did define that
-  layer was played earlier in the session.
-- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
-  has no `ExplosionDestruct` is removed.
-- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
-  fired from a weapon that is not a grappling hook weapon.
-
-## 1.1.0
-
-### Added
-
-- **`GetMissionName()`** - Returns the mission-script name the match was launched
-  from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
-  script, so a mission could not tell which map or mode it was running as without
-  the name being hardcoded. See the
-  [Lua API](docs/user/LUA_API.md#match-info).
-- **`SetInstanceProperty(name, property, value)`** - Changes a world object's
-  instance properties after the map has loaded. Works on vehicle spawners, which no
-  stock Lua function could reach, so a script can now change which vehicle a
-  spawner produces or how quickly it respawns. See the
-  [Lua API](docs/user/LUA_API.md#world-objects).
-- **`@GameExt` ODF suffix** - A property written as `Name@GameExt` replaces the
-  plain `Name` line only when BF2GameExt is installed, so one ODF serves both stock
-  and extended players. See [ODF Properties](docs/user/ODF_PROPERTIES.md).
-- **`HeldOrdnanceEffectBone`** - A cannon weapon can show its projectile trail at a
-  soldier bone while preparing to fire, then carry it into flight. INI:
-  `[Fixes] HeldOrdnanceEffect`.
-- **`ExtendedBladeBase`** - The visible lightsaber blade extends 8% behind its base
-  instead of 4%, matching the Classic Collection. Combat reach is unchanged. INI:
-  `[Lightsaber] ExtendedBladeBase`.
-- A `Since` column in the Lua API and ODF property references, naming the version
-  each entry first appeared in.
+- **Menu navigation with a pad** - The menus, Instant Action, the profile screen,
+  the options screens, the spawn screen and Galactic Conquest can be driven with a
+  gamepad. LB/RB and LT/RT switch the two tab rows, X and Y reset or confirm the
+  options screens, left/right pick the command post on the spawn screen, and the stick picks
+  planets in Galactic Conquest. See [Controller](docs/user/CONTROLLER.md#menus).
+- **Soldier animation limits are logged when hit** - A level can hold 16 different
+  soldier `AnimationName` banks and 30 animation maps, one per different pairing of a
+  unit's `AnimationName` with a weapon's `AnimationBank` (64 and 90 with
+  `ComboAnimIncrease`). Past either limit the game silently turned the next one away,
+  and soldiers using it crashed the game when they spawned; a bank whose parent bank
+  had not loaded yet did the same. The log now names what was turned away as an error
+  and says how to fix it.
 
 ### Changed
+
+- **Pad bindings moved out of `BF2GameExt.ini`.** Pad buttons now have their own
+  binding slot, so they no longer take a keyboard key, and they are rebound on the
+  game's own Options -> Controls screen like any key. Each profile keeps them in
+  `SaveGames\<profile>.padbinds`. The `[Controller.Unit]` to `[Controller.Turret]`
+  sections are no longer read; copy any custom lines into the new file (same
+  `Input=Action` format, sections named `[Unit]` to `[Turret]`). Older versions left
+  pad buttons in the normal key slots, so press Restore Defaults once per mode to
+  get the stock keys back. In the default layout Start only opens the pause menu and Back (View)
+  opens the map.
+- **`CreateEntity` only changes the new object when you pass a team.** 1.0.0 ran its
+  vehicle fix on everything `CreateEntity` made, setting team 0 when no team was
+  given. A three-argument call is now exactly stock; pass the team as the fourth
+  argument to get a vehicle with working weapons.
 
 - **`OnCharacterExitVehicle` now runs on the engine's own event manager.** The
   callback names, arguments and handles are unchanged, but registration, filtering,
@@ -196,10 +191,37 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Fixed
 
+- A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
+  nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
+  on every build.
+- With a pad connected, every map load reset part of your controls: second keys and
+  pad buttons bound in Options -> Controls were replaced by the pad layout. Your
+  keyboard bindings now stay as you set them.
+- In a long session, the soldier animation bank limit could stop working and
+  `Out of space for soldier animation banks (max 18)` come back, because each map
+  load could take up one of 64 buffers and never return it. One buffer now serves
+  every map, so the 128 file limit holds for the whole session.
+- With the unofficial v1.3 patch installed, mod maps past the first 499 were still
+  missing from the map list, because the patch's own addme kept its 500 mission
+  cap after the DLC Mission Limit raised the game's to 4096. Its cap now follows
+  the raised limit, and its "too many missions" warning only shows once you really
+  pass 4096. Nothing changes without the v1.3 patch.
 - **The `OnCharacterExitVehicle*` filter arguments were documented in the wrong
   order.** The 1.0.0 Lua API reference listed `OnCharacterExitVehicleName(name, fn)`;
   the functions have always taken `(fn, name)`, matching the stock `On*` events, and
   a script written from the old docs silently registered nothing.
+- **`HttpGet` and `HttpGetAsync` failed on every `http://` URL.** They always tried a
+  secure connection, which a plain HTTP server refuses, so `HttpGet` returned nil.
+  Both now work with `http://` and `https://`.
+- A server that never answered froze the game for about 30 seconds on every
+  `HttpGet`, `HttpPut` or `HttpPost`. Requests now give up after 5 seconds and
+  return nil.
+- **`GetCharacterWeapon`, `GetWeaponAmmo` and `SetWeaponAmmo` returned the wrong
+  weapon for channels above 1.** There are only two channels; any other channel now
+  returns nil, and `SetWeaponAmmo` no longer writes to an unrelated weapon.
+- `RemoveUnitClass` could crash the game when called before the teams were set up.
+  It now logs the problem and does nothing.
+- `SetFogEnable(true)` turned fog off. It now takes `true`/`false` as well as `1`/`0`.
 
 - A map could die at the very end of loading, after the loading screen, with a
   stack overflow. The engine's world splitter recursed forever on objects it
@@ -232,6 +254,37 @@ Scripts can check the running version through `GameExt.version`.
   cannot start at all, the game runs without sound instead of crashing.
 - While looking through a scope, shots left the barrel instead of the centre of the
   scope, so they visibly angled in towards the target.
+- A light attached to a building with `AttachOdf` kept shining after the building
+  was destroyed. With `AttachRemoveOnDeath = 1` after its `AttachToHardPoint` line it
+  now goes out with the building and comes back on when it respawns.
+- Carriers (vehicle pads with `SetCarrierClass`):
+  - A pad no longer stops spawning forever when its vehicle is destroyed while still being carried.
+  - A carrier whose landing fails (slope, water) now drops its vehicle instead of flying off with it.
+  - Every carrier after the first from the same pad now descends with its cargo bay closed.
+  - Extra vehicles on multi-cargo carriers now get their team back when dropped.
+  - Carriers no longer look skewed while climbing away.
+  - Carrier turrets keep cooling down and reloading while searching for a target.
+  - A carrier bringing a tall vehicle such as an AT-AT now lands and drops it instead of
+    hovering over the pad.
+  - Shooting down a carrier that is still carrying an AT-AT or another command walker no
+    longer crashes the game.
+  - Carriers no longer set their vehicle down short of the pad on maps with a low flight
+    ceiling.
+  - Hosting a multiplayer match on a map with carriers no longer crashes the game.
+  - A carrier shot down in the air now explodes on the spot instead of spinning all the
+    way to the ground.
+- Floating target bars keep their last screen position when a target dies or is
+  removed, allowing the existing HUD fade to finish without dropping onto the
+  corpse. Living targets still track normally; new targets reset the cached anchor.
+- A map rotation no longer crashes when a map with `foleyfx` regions follows another
+  map that has them.
+- The game no longer crashes, usually on the first spawn, on a map whose terrain
+  paints a foliage layer its props do not define when a map that did define that
+  layer was played earlier in the session.
+- A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
+  has no `ExplosionDestruct` is removed.
+- A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
+  fired from a weapon that is not a grappling hook weapon.
 
 ## 1.0.0
 

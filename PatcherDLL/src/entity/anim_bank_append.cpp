@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "anim_bank_append.hpp"
+#include "soldier_anim_tables.hpp"
 #include "core/resolve.hpp"
+#include "util/install_log.hpp"
 
 #pragma warning(disable: 4996) // strncpy, _snprintf deprecation
 
@@ -55,27 +57,42 @@
 //   sub-bank cannot be appended (the NULL guard means first-loaded wins); new
 //   animations must go in a NEW numbered sub-bank.
 //
-// PART B — per-class bank array capacity raise (18 -> kBigBankMax):
+// PART B — bank array capacity raise (18 -> kBigBankMax):
 //   `SoldierAnimatorClass::mAnimBankOld[18]` (the inline array of loaded .zaabin
 //   sub-bank pointers) is hardcoded to 18 and can't grow in place (mJetPackMatrix
-//   follows it).  It is load-time staging only: _AddBank fills it, the
+//   follows it).  SoldierAnimatorClass is a singleton, so these 18 slots hold
+//   every .zaabin the level's soldiers use: one pass at level load walks every
+//   registered bank name against every weapon type, adding "<bank>" and
+//   "<bank>_<weapon>", or "<name>_0", "<name>_1", ... when no unnumbered one
+//   exists, each numbered sub-bank taking its own slot.  The constructor adds
+//   "human" first.  The array is load-time staging only: _AddBank fills it, the
 //   AnimationFinder resolves each (bank,weapon) into direct SoldierAnimation*
 //   pointers stored in mMapOld/mMapNew, and the runtime plays from the MAP and
 //   never re-reads the array (confirmed via hardware-breakpoint tracing).  So we
-//   relocate it to a larger per-class heap buffer and redirect EVERY consumer to
-//   that buffer:
+//   relocate it to a larger heap buffer and redirect EVERY consumer to that
+//   buffer:
 //     - finders, via the mAnimBank pointer (hooked_AddBank/raise_finder_capacity,
 //       hooked_Resolve);
 //     - the skeleton-shared inline writer FUN_0057dec0 (hooked_AddSkel);
 //     - the inline search loop FUN_0057de40 (hooked_FindInBanks).
 //   The count int stays inline — it's used only as an index value.
 //
-//   Distinct bank NAMES are a separate registry, stock cap 16. ComboAnimIncrease
+//   Distinct bank NAMES (each unit's AnimationName, counted once per level) are
+//   a separate registry, stock cap 16. ComboAnimIncrease
 //   raises it to 64 and relocates the bank-order and bank/weapon scratch arrays
 //   in SoldierAnimatorClass initialization. That storage belongs to the combo
 //   module; increasing only AddBank's comparison would overflow it. Weapon
 //   types remain capped at 20. This module expands loaded .zaabin pointers,
 //   including numbered sub-banks, without consuming extra bank-name IDs.
+//
+// PART C — refused banks and maps:
+//   SoldierAnimationBank::AddBank registers an ODF's AnimationName, and AddMap
+//   each pair of that bank with a carried weapon's AnimationBank type. Both
+//   return -1 without a word when full (16 names / 30 maps stock), AddBank also
+//   when the named parent is not registered yet. The weapon then has no map,
+//   and its soldiers animate from map -1, a read before the map table that
+//   crashes on the first frame (0x0057906D / 0x005789E8 modtools). We log the
+//   refusal so the crash is explained before it happens.
 // =============================================================================
 
 // ---------------------------------------------------------------------------
@@ -90,7 +107,6 @@ using fn_RedFind_t   = int (__fastcall*)(void* bank, void* edx, unsigned hash, c
 using fn_ZephyrFind_t= int (__fastcall*)(void* zephyrBank, void* edx, unsigned hash);
 using fn_PblHash_t   = void(__thiscall*)(uint32_t* outHash, const char* str);
 using fn_HashFind_t  = void*(__cdecl*)(void* table, int size, uint32_t hash);
-using fn_GameLog_t   = void(__cdecl*)(const char* fmt, ...);
 
 // ---------------------------------------------------------------------------
 // Resolved pointers
@@ -104,7 +120,6 @@ static fn_RedFind_t     fn_RedFindAnimation  = nullptr;   // RedAnimation::FindA
 static fn_ZephyrFind_t  fn_ZephyrBankFind    = nullptr;   // ZephyrAnimBank find — Steam path (thiscall(bank, hash))
 static fn_PblHash_t     fn_pblHash           = nullptr;
 static fn_HashFind_t    fn_hashFind          = nullptr;
-static fn_GameLog_t     fn_log               = nullptr;
 static void*            g_animHashTable      = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -135,49 +150,62 @@ static constexpr int kRA_MBFind         = 0x24;
 // Max sub-bank index to search
 static constexpr int kMaxSubBankSearch  = 32;
 
-// SoldierAnimatorClass layout (the per-class object the finder points into)
+// SoldierAnimatorClass layout (the singleton the finder points into)
 static constexpr int kSAC_AnimBankOld   = 0xF72C;  // RedAnimation*[18] inline slab
 static constexpr int kSAC_AnimBankCount = 0xF774;  // int, immediately after the 18 slots
 
 // ---------------------------------------------------------------------------
-// Per-class bank-array relocation (raises the inline 18-slot cap).
+// Bank-array relocation (raises the inline 18-slot cap).
 //
-//   We keep ONE persistent heap buffer per SoldierAnimatorClass, keyed by the
-//   address of its inline mAnimBankOld slab. Every consumer (finders + the two
-//   inline accessors) is redirected to this buffer. The inline count int is
-//   shared and used only as an index value, so it can exceed 18 safely.
+//   SoldierAnimatorClass is a singleton: EntitySoldierClass creates it on first
+//   use, GameState::PostStateCleanup deletes it after every mission, and the
+//   next mission builds a new one, maybe at another address. So there is one
+//   heap buffer, keyed by the inline mAnimBankOld slab of the instance it
+//   serves, and a new instance takes it over. Every consumer (finders + the
+//   two inline accessors) is redirected to it. The inline count int is used
+//   only as an index value, so it can exceed 18 safely.
 // ---------------------------------------------------------------------------
 
 static constexpr int kBigBankMax = 128;  // generous; the inline cap was 18
 
-struct BankBufEntry { void** inlineArr; void** heap; };
-static BankBufEntry g_bankBufs[64] = {};
-static int          g_nBankBufs    = 0;
+static void* const* g_animClassCell = nullptr;   // SoldierAnimatorClass::sInstance
+static void**       g_bigBankKey    = nullptr;   // inline slab of the instance served
+static void**       g_bigBankHeap   = nullptr;
 
+// Only for a slab known to be a SoldierAnimatorClass's.
 static void** find_or_make_big_array(void** inlineArr, int* pCount)
 {
-    for (int i = 0; i < g_nBankBufs; i++)
-        if (g_bankBufs[i].inlineArr == inlineArr)
-            return g_bankBufs[i].heap;
+    if (inlineArr == g_bigBankKey) return g_bigBankHeap;
 
-    if (g_nBankBufs >= 64) return nullptr;
+    if (!g_bigBankHeap) {
+        g_bigBankHeap = (void**)HeapAlloc(
+            GetProcessHeap(), HEAP_ZERO_MEMORY, kBigBankMax * sizeof(void*));
+        if (!g_bigBankHeap) return nullptr;
+    }
 
-    void** heap = (void**)HeapAlloc(
-        GetProcessHeap(), HEAP_ZERO_MEMORY, kBigBankMax * sizeof(void*));
-    if (!heap) return nullptr;
-
-    // Copy whatever the engine has already placed in the inline slab (<=18).
+    // A new instance: drop the last mission's banks and copy whatever the
+    // engine already placed in the inline slab (<=18).
+    memset(g_bigBankHeap, 0, kBigBankMax * sizeof(void*));
     int n = pCount ? *pCount : 0;
     if (n > 18) n = 18;
-    if (n > 0) memcpy(heap, inlineArr, n * sizeof(void*));
+    if (n > 0) memcpy(g_bigBankHeap, inlineArr, n * sizeof(void*));
 
-    g_bankBufs[g_nBankBufs++] = { inlineArr, heap };
-    return heap;
+    g_bigBankKey = inlineArr;
+    return g_bigBankHeap;
 }
 
-// Repoint this finder's bank array to the class's big heap buffer and raise the
-// cap, BEFORE the engine fills it.  No-op if the finder doesn't have the
-// expected SoldierAnimatorClass layout (safety guard).
+// Whether a slab is the live instance's. Finders only reach the class through
+// their count pointer, so they are checked against sInstance; the class
+// methods pass their own this.
+static bool is_live_class_slab(void** inlineArr)
+{
+    void* cls = g_animClassCell ? *g_animClassCell : nullptr;
+    return cls && inlineArr == (void**)((char*)cls + kSAC_AnimBankOld);
+}
+
+// Repoint this finder's bank array to the big heap buffer and raise the cap,
+// BEFORE the engine fills it.  No-op for a finder that doesn't point into the
+// SoldierAnimatorClass (safety guard).
 static void raise_finder_capacity(void* self)
 {
     int*   pCount  = *(int**)((char*)self + kAF_AnimBankCount);
@@ -190,12 +218,12 @@ static void raise_finder_capacity(void* self)
     void** heap = nullptr;
     if (curArr == inlineArr) {
         // Fresh finder still pointing at the inline slab — adopt/seed the heap.
+        if (inlineArr != g_bigBankKey && !is_live_class_slab(inlineArr)) return;
         heap = find_or_make_big_array(inlineArr, pCount);
+    } else if (curArr == g_bigBankHeap) {
+        heap = curArr;  // already repointed by us
     } else {
-        // Already repointed by us on a previous call? Confirm it's our buffer.
-        for (int i = 0; i < g_nBankBufs; i++)
-            if (g_bankBufs[i].heap == curArr) { heap = curArr; break; }
-        if (!heap) return;  // unknown layout — leave it alone
+        return;         // unknown layout — leave it alone
     }
     if (!heap) return;
 
@@ -294,8 +322,7 @@ static bool try_append_sub_banks(char* self, const char* rootName)
             void** newArray = (void**)HeapAlloc(
                 GetProcessHeap(), HEAP_ZERO_MEMORY, newMax * sizeof(void*));
             if (!newArray) {
-                if (fn_log)
-                    fn_log("[AnimBankAppend] HeapAlloc failed\n");
+                get_gamelog()("[AnimBankAppend] HeapAlloc failed\n");
                 break;
             }
             memcpy(newArray, bankArray, count * sizeof(void*));
@@ -320,7 +347,7 @@ static bool try_append_sub_banks(char* self, const char* rootName)
 
 
 // ---------------------------------------------------------------------------
-// hooked_AddBank — repoint the finder to the per-class heap buffer + raise the
+// hooked_AddBank — repoint the finder to the heap buffer + raise the
 // cap BEFORE the engine fills it (so the _AddBank loop never trips the max-18
 // check), run the original, then append any late-arriving sub-banks.
 // ---------------------------------------------------------------------------
@@ -364,8 +391,8 @@ static bool __fastcall hooked_AddBank(void* ecx, void* edx, char* name)
 // inline mAnimBankOld slab via fixed offsets (this+0xF72C / count this+0xF774)
 // with a hardcoded <18 cap — bypassing the finder pointer entirely.  That makes
 // it the one consumer that desyncs when we redirect the finders to the heap.
-// We redirect it to the SAME per-class heap buffer (keyed by the inline array
-// address, exactly like raise_finder_capacity) and use the raised cap, while
+// We redirect it to the SAME heap buffer (keyed by the inline array address,
+// exactly like raise_finder_capacity) and use the raised cap, while
 // preserving the original's mZephyrSkeletonShared bookkeeping and guards.
 //
 // Original logic (verified against disassembly at 0x0057DEC0):
@@ -392,8 +419,8 @@ static bool __fastcall hooked_AddSkel(void* ecx, void* /*edx*/, void* skel)
     int*   pCount    = (int*)(self + kSAC_AnimBankCount);
 
     // Same heap buffer the finders use (identical key). Fall back to the inline
-    // slab if allocation ever fails — that reverts to stock behaviour for this
-    // class rather than risking a bad pointer.
+    // slab if allocation ever fails — that reverts to stock behaviour rather
+    // than risking a bad pointer.
     void** arr = find_or_make_big_array(inlineArr, pCount);
     if (!arr) { arr = inlineArr; }
 
@@ -431,7 +458,7 @@ static int __fastcall hooked_Resolve(void* ecx, void* edx, void* a2, int a3, uns
 // this->mAnimBankOld[0..mAnimBankCount) looking each bank up, returning the
 // first hit. It reads the inline slab by fixed offset (not via a finder), so
 // once we move the banks to the heap it reads the empty slab and crashes.
-// Reimplement over the same per-class heap buffer; the count int stays inline
+// Reimplement over the same heap buffer; the count int stays inline
 // (shared, correct).
 //
 // Signature is identical on both builds (Steam still RETs 8 — the name arg is
@@ -468,12 +495,282 @@ static int __fastcall hooked_FindInBanks(void* ecx, void* /*edx*/, unsigned hash
 
 
 // ---------------------------------------------------------------------------
+// PART C — log the banks and maps SoldierAnimationBank refuses.
+// AddBank(name, parent) and AddMap(bank, weapon) are cdecl on modtools; Steam
+// and GOG pass both arguments in ECX and EDX.
+// ---------------------------------------------------------------------------
+using fn_AddBankCdecl_t = int(__cdecl*)(const char* name, const char* parent);
+using fn_AddMapCdecl_t  = int(__cdecl*)(int bank, int weapon);
+
+static void*      original_AddBankName = nullptr;
+static void*      original_AddMap      = nullptr;
+static const int* g_bankNameCount      = nullptr;
+static const int* g_mapCount           = nullptr;
+static bool       g_haveAnimNames      = false;
+
+// What was already reported this level. A level load resets the registry,
+// which shows up as its count going down.
+struct RefusalList {
+    char keys[16][68];
+    int  used      = 0;
+    int  lastCount = 0;
+
+    bool seen(const char* key, int count)
+    {
+        if (count < lastCount) used = 0;
+        lastCount = count;
+        for (int i = 0; i < used; i++)
+            if (_stricmp(keys[i], key) == 0) return true;
+        if (used < 16) {
+            strncpy(keys[used], key, sizeof(keys[used]) - 1);
+            keys[used][sizeof(keys[used]) - 1] = '\0';
+            used++;
+        }
+        return false;
+    }
+};
+
+static RefusalList g_refusedBanks;
+static RefusalList g_refusedMaps;
+
+static void __cdecl report_refused_bank(const char* name, const char* parent)
+{
+    if (!name) name = "";
+    if (!parent) parent = "";
+    const int count = *g_bankNameCount;
+    if (g_refusedBanks.seen(name, count)) return;
+
+    const int cap = soldier_anim_tables::max_banks();
+    if (count >= cap) {
+        install_log("[AnimBank] AddBank(\"%s\") refused: %d of %d bank names in use "
+                    "(ComboAnimIncrease %s)", name, count, cap,
+                    soldier_anim_tables::expanded() ? "on" : "off");
+        if (soldier_anim_tables::expanded())
+            warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                "Soldier animation bank \"%s\" could not be added: all %d animation bank "
+                "names are in use. Units with AnimationName \"%s\" have no animations and "
+                "will crash the game when they spawn. Give fewer units their own "
+                "AnimationName.\n", name, cap, name);
+        else
+            warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                "Soldier animation bank \"%s\" could not be added: all %d animation bank "
+                "names are in use. Units with AnimationName \"%s\" have no animations and "
+                "will crash the game when they spawn. Turn on [LimitIncreases] "
+                "ComboAnimIncrease in BF2GameExt.ini to allow %d, or give fewer units their "
+                "own AnimationName.\n", name, cap, name, soldier_anim_tables::kMaxBanksAny);
+        return;
+    }
+
+    // The only other refusal: the second AnimationName word names a bank that
+    // no loaded unit has registered yet.
+    install_log("[AnimBank] AddBank(\"%s\", \"%s\") refused: parent not registered "
+                "(%d of %d bank names in use)", name, parent, count, cap);
+    warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+        "Soldier animation bank \"%s\" could not be added: its parent bank \"%s\" does not "
+        "exist yet. A bank exists once a unit with that AnimationName has loaded. Units with "
+        "AnimationName \"%s %s\" have no animations and will crash the game when they "
+        "spawn.\n", name, parent, name, parent);
+}
+
+// AddMap only refuses when the maps are full.
+static void __cdecl report_refused_map(int bank, int weapon)
+{
+    char bankName[soldier_anim_tables::kNameBuffer] = "?";
+    char weaponName[soldier_anim_tables::kNameBuffer] = "?";
+    if (g_haveAnimNames) {
+        if (bank >= 0) soldier_anim_tables::bank_name(bank, bankName);
+        soldier_anim_tables::weapon_name(weapon, weaponName);
+    }
+    char key[68];
+    _snprintf(key, sizeof(key), "%s_%s", bankName, weaponName);
+    key[sizeof(key) - 1] = '\0';
+
+    const int count = *g_mapCount;
+    if (g_refusedMaps.seen(key, count)) return;
+
+    const int cap = soldier_anim_tables::max_maps();
+    install_log("[AnimBank] AddMap(%s, bank %d, weapon %d) refused: %d of %d maps in use "
+                "(ComboAnimIncrease %s)", key, bank, weapon, count, cap,
+                soldier_anim_tables::expanded() ? "on" : "off");
+    if (soldier_anim_tables::expanded())
+        warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+            "Soldier animation map \"%s\" could not be added: all %d maps are in use. Every "
+            "different pairing of a unit's AnimationName with a weapon's AnimationBank needs "
+            "one. Soldiers with AnimationName \"%s\" holding a \"%s\" weapon have no "
+            "animations and will crash the game. Use fewer different pairings.\n",
+            key, cap, bankName, weaponName);
+    else
+        warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+            "Soldier animation map \"%s\" could not be added: all %d maps are in use. Every "
+            "different pairing of a unit's AnimationName with a weapon's AnimationBank needs "
+            "one. Soldiers with AnimationName \"%s\" holding a \"%s\" weapon have no "
+            "animations and will crash the game. Turn on [LimitIncreases] ComboAnimIncrease "
+            "in BF2GameExt.ini to allow %d, or use fewer different pairings.\n",
+            key, cap, bankName, weaponName, soldier_anim_tables::kMaxMapsAny);
+}
+
+static int __cdecl hooked_AddBankNameCdecl(const char* name, const char* parent)
+{
+    const int bank = ((fn_AddBankCdecl_t)original_AddBankName)(name, parent);
+    if (bank == -1) report_refused_bank(name, parent);
+    return bank;
+}
+
+static int __cdecl hooked_AddMapCdecl(int bank, int weapon)
+{
+    const int map = ((fn_AddMapCdecl_t)original_AddMap)(bank, weapon);
+    if (map == -1) report_refused_map(bank, weapon);
+    return map;
+}
+
+// Steam and GOG are LTCG builds, whose callers may keep values in registers the
+// original leaves alone (AddMap keeps EDX). So these hand ECX and EDX through
+// untouched, change only EAX on the normal path, and save everything around the
+// report. The two arguments stay on the stack for it: after the saves, the
+// first (ECX) is at +168 and the second (EDX) at +164.
+static __declspec(naked) void hooked_AddBankNameFast()
+{
+    __asm {
+        push ecx
+        push edx
+        call dword ptr [original_AddBankName]
+        cmp  eax, -1
+        jne  done
+        pushfd
+        pushad
+        sub  esp, 128
+        movdqu [esp], xmm0
+        movdqu [esp + 16], xmm1
+        movdqu [esp + 32], xmm2
+        movdqu [esp + 48], xmm3
+        movdqu [esp + 64], xmm4
+        movdqu [esp + 80], xmm5
+        movdqu [esp + 96], xmm6
+        movdqu [esp + 112], xmm7
+        push dword ptr [esp + 164]
+        push dword ptr [esp + 172]
+        call report_refused_bank
+        add  esp, 8
+        movdqu xmm0, [esp]
+        movdqu xmm1, [esp + 16]
+        movdqu xmm2, [esp + 32]
+        movdqu xmm3, [esp + 48]
+        movdqu xmm4, [esp + 64]
+        movdqu xmm5, [esp + 80]
+        movdqu xmm6, [esp + 96]
+        movdqu xmm7, [esp + 112]
+        add  esp, 128
+        popad
+        popfd
+    done:
+        add  esp, 8
+        ret
+    }
+}
+
+static __declspec(naked) void hooked_AddMapFast()
+{
+    __asm {
+        push ecx
+        push edx
+        call dword ptr [original_AddMap]
+        cmp  eax, -1
+        jne  done
+        pushfd
+        pushad
+        sub  esp, 128
+        movdqu [esp], xmm0
+        movdqu [esp + 16], xmm1
+        movdqu [esp + 32], xmm2
+        movdqu [esp + 48], xmm3
+        movdqu [esp + 64], xmm4
+        movdqu [esp + 80], xmm5
+        movdqu [esp + 96], xmm6
+        movdqu [esp + 112], xmm7
+        push dword ptr [esp + 164]
+        push dword ptr [esp + 172]
+        call report_refused_map
+        add  esp, 8
+        movdqu xmm0, [esp]
+        movdqu xmm1, [esp + 16]
+        movdqu xmm2, [esp + 32]
+        movdqu xmm3, [esp + 48]
+        movdqu xmm4, [esp + 64]
+        movdqu xmm5, [esp + 80]
+        movdqu xmm6, [esp + 96]
+        movdqu xmm7, [esp + 112]
+        add  esp, 128
+        popad
+        popfd
+    done:
+        add  esp, 8
+        ret
+    }
+}
+
+// Detours one refusal hook after checking the function starts as expected.
+static bool attach_refusal_hook(uintptr_t exe_base, uintptr_t va, const uint8_t* expected,
+                                size_t length, void*& original, void* hook, const char* what)
+{
+    void* target = resolve(exe_base, va);
+    if (memcmp(target, expected, length) != 0) {
+        install_log("[AnimBank] %s log NOT installed: unexpected code at 0x%08X", what, (unsigned)va);
+        return false;
+    }
+    original = target;
+    DetourTransactionBegin();
+    DetourUpdateThread(GetCurrentThread());
+    DetourAttach(&original, hook);
+    if (DetourTransactionCommit() != NO_ERROR) {
+        original = nullptr;
+        install_log("[AnimBank] %s log NOT installed: Detours commit failed", what);
+        return false;
+    }
+    return true;
+}
+
+static void install_refusal_logs(uintptr_t exe_base)
+{
+    const auto* a = g_addr;
+    if (!a->soldier_anim_add_bank || !a->soldier_anim_bank_count ||
+        !a->soldier_anim_add_map || !a->soldier_anim_map_count)
+        return;
+
+    g_bankNameCount = (const int*)resolve(exe_base, a->soldier_anim_bank_count);
+    g_mapCount      = (const int*)resolve(exe_base, a->soldier_anim_map_count);
+    g_haveAnimNames = soldier_anim_tables::init(exe_base);
+
+    // Prologues up to the first call; Detours moves the first 5 bytes, and
+    // relocates the retail AddMap's call.
+    static const uint8_t kBankCdecl[] = {0x51, 0x8B, 0x44, 0x24, 0x08, 0x53, 0x50, 0x8D, 0x4C, 0x24, 0x08};
+    static const uint8_t kBankFast[]  = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C, 0x56, 0x8B, 0xC1, 0x8B, 0xF2, 0x57};
+    static const uint8_t kMapCdecl[]  = {0x56, 0x8B, 0x74, 0x24, 0x0C, 0x57, 0x8B, 0x7C, 0x24, 0x0C, 0x56, 0x57};
+    static const uint8_t kMapFast[]   = {0x56, 0x8B, 0xF1, 0xE8, 0xC8, 0xFF, 0xFF, 0xFF, 0x83, 0xF8, 0xFF};
+
+    if (g_build == GameBuild::Modtools) {
+        attach_refusal_hook(exe_base, a->soldier_anim_add_bank, kBankCdecl, sizeof(kBankCdecl),
+                            original_AddBankName, (void*)hooked_AddBankNameCdecl, "refused bank");
+        attach_refusal_hook(exe_base, a->soldier_anim_add_map, kMapCdecl, sizeof(kMapCdecl),
+                            original_AddMap, (void*)hooked_AddMapCdecl, "refused map");
+    } else {
+        attach_refusal_hook(exe_base, a->soldier_anim_add_bank, kBankFast, sizeof(kBankFast),
+                            original_AddBankName, (void*)hooked_AddBankNameFast, "refused bank");
+        attach_refusal_hook(exe_base, a->soldier_anim_add_map, kMapFast, sizeof(kMapFast),
+                            original_AddMap, (void*)hooked_AddMapFast, "refused map");
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // Install / Uninstall
 // ---------------------------------------------------------------------------
 
 void anim_bank_append_install(uintptr_t exe_base)
 {
     if (g_build == GameBuild::Unknown) return;
+
+    // Independent of parts A and B, which GOG skips.
+    install_refusal_logs(exe_base);
 
     // Everything the hooks need; a build with any of these unmapped (GOG)
     // skips cleanly.  red_find_animation / zephyr_anim_bank_find are the
@@ -499,7 +796,9 @@ void anim_bank_append_install(uintptr_t exe_base)
     fn_pblHash           = (fn_PblHash_t)resolve(exe_base, g_addr->hash_string_thiscall);
     fn_hashFind          = (fn_HashFind_t)resolve(exe_base, g_addr->pbl_hash_table_find);
     g_animHashTable      = (void*)resolve(exe_base, g_addr->anim_hash_table);
-    fn_log               = get_gamelog();
+    g_animClassCell      = g_addr->soldier_animator_class_instance
+                              ? (void* const*)resolve(exe_base, g_addr->soldier_animator_class_instance)
+                              : nullptr;
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
@@ -518,5 +817,12 @@ void anim_bank_append_uninstall()
     if (original_AddSkel)     DetourDetach(&(PVOID&)original_AddSkel, hooked_AddSkel);
     if (original_Resolve)     DetourDetach(&(PVOID&)original_Resolve, hooked_Resolve);
     if (original_FindInBanks) DetourDetach(&(PVOID&)original_FindInBanks, hooked_FindInBanks);
+    const bool cdecl_build = g_build == GameBuild::Modtools;
+    if (original_AddBankName)
+        DetourDetach(&original_AddBankName, cdecl_build ? (void*)hooked_AddBankNameCdecl
+                                                        : (void*)hooked_AddBankNameFast);
+    if (original_AddMap)
+        DetourDetach(&original_AddMap, cdecl_build ? (void*)hooked_AddMapCdecl
+                                                   : (void*)hooked_AddMapFast);
     DetourTransactionCommit();
 }

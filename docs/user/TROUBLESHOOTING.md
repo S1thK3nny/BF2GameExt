@@ -170,6 +170,14 @@ When reporting a crash:
 - Only the first 16 faults per session are logged, so a crash loop will not
   produce an endless file.
 
+If soldiers of one side crash the game shortly after they spawn, search
+`BF2GameExt.log` for `[AnimBank]`. A `refused` line names an animation bank or
+animation map the game turned away because the level uses more than it allows:
+16 `AnimationName` banks and 30 maps, one map per different pairing of a unit's
+`AnimationName` with a weapon's `AnimationBank` (64 and 90 with
+`[LimitIncreases] ComboAnimIncrease`). Turn that key on, or use fewer different
+banks and pairings.
+
 Before filing, try reproducing with a default `BF2GameExt.ini`. If it stops,
 bisect your settings and tell us which key did it. That turns a hard bug into
 an easy one.
@@ -269,18 +277,21 @@ only been verified in play on Modtools.
 ## Gamepad problems
 
 - The pad needs `[Controller] Enabled=1`.
-- Bindings are per mode and do not inherit. Rebinding jump under
-  `[Controller.Unit]` does not change it for `[Controller.Hero]`.
-- In the shipped INI every default is commented out with a leading `;`.
-  Uncomment a line to override it.
+- Rebind pad buttons in **Options -> Controls**. Bindings are per mode and do
+  not inherit, so rebinding jump on foot does not change it for heroes.
+- **Pad buttons sitting in your normal key slots after updating?** Older
+  versions put them there. Press **Restore Defaults** once per mode on the
+  controls screen; it resets the mode the screen is showing.
+- Pad bindings are kept per profile in `SaveGames\<profile>.padbinds`. Delete
+  that file to start the profile over from the default pad layout.
 - Aim assist is off by default. It needs `[AimAssist] Enabled=1` of its own,
   separately from `[Controller] Enabled=1`, and it is singleplayer only and
   controller only.
 - **Stick drifting, twitchy, too slow, or moving you when you are not touching
   it?** That is sensitivity and deadzone, and BF2GameExt does not set either.
   Change them in the game's own **Options -> Controls** screen. Nothing in
-  `BF2GameExt.ini` affects stick feel; the `[Controller.*]` sections only decide
-  which button does what.
+  `BF2GameExt.ini` affects stick feel, and pad bindings only decide which
+  button does what.
 
 Full reference: [CONTROLLER.md](CONTROLLER.md).
 
