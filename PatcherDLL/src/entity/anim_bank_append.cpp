@@ -57,22 +57,28 @@
 //   sub-bank cannot be appended (the NULL guard means first-loaded wins); new
 //   animations must go in a NEW numbered sub-bank.
 //
-// PART B — per-class bank array capacity raise (18 -> kBigBankMax):
+// PART B — bank array capacity raise (18 -> kBigBankMax):
 //   `SoldierAnimatorClass::mAnimBankOld[18]` (the inline array of loaded .zaabin
 //   sub-bank pointers) is hardcoded to 18 and can't grow in place (mJetPackMatrix
-//   follows it).  It is load-time staging only: _AddBank fills it, the
+//   follows it).  SoldierAnimatorClass is a singleton, so these 18 slots hold
+//   every .zaabin the level's soldiers use: one pass at level load walks every
+//   registered bank name against every weapon type, adding "<bank>" and
+//   "<bank>_<weapon>", or "<name>_0", "<name>_1", ... when no unnumbered one
+//   exists, each numbered sub-bank taking its own slot.  The constructor adds
+//   "human" first.  The array is load-time staging only: _AddBank fills it, the
 //   AnimationFinder resolves each (bank,weapon) into direct SoldierAnimation*
 //   pointers stored in mMapOld/mMapNew, and the runtime plays from the MAP and
 //   never re-reads the array (confirmed via hardware-breakpoint tracing).  So we
-//   relocate it to a larger per-class heap buffer and redirect EVERY consumer to
-//   that buffer:
+//   relocate it to a larger heap buffer and redirect EVERY consumer to that
+//   buffer:
 //     - finders, via the mAnimBank pointer (hooked_AddBank/raise_finder_capacity,
 //       hooked_Resolve);
 //     - the skeleton-shared inline writer FUN_0057dec0 (hooked_AddSkel);
 //     - the inline search loop FUN_0057de40 (hooked_FindInBanks).
 //   The count int stays inline — it's used only as an index value.
 //
-//   Distinct bank NAMES are a separate registry, stock cap 16. ComboAnimIncrease
+//   Distinct bank NAMES (each unit's AnimationName, counted once per level) are
+//   a separate registry, stock cap 16. ComboAnimIncrease
 //   raises it to 64 and relocates the bank-order and bank/weapon scratch arrays
 //   in SoldierAnimatorClass initialization. That storage belongs to the combo
 //   module; increasing only AddBank's comparison would overflow it. Weapon
@@ -144,49 +150,62 @@ static constexpr int kRA_MBFind         = 0x24;
 // Max sub-bank index to search
 static constexpr int kMaxSubBankSearch  = 32;
 
-// SoldierAnimatorClass layout (the per-class object the finder points into)
+// SoldierAnimatorClass layout (the singleton the finder points into)
 static constexpr int kSAC_AnimBankOld   = 0xF72C;  // RedAnimation*[18] inline slab
 static constexpr int kSAC_AnimBankCount = 0xF774;  // int, immediately after the 18 slots
 
 // ---------------------------------------------------------------------------
-// Per-class bank-array relocation (raises the inline 18-slot cap).
+// Bank-array relocation (raises the inline 18-slot cap).
 //
-//   We keep ONE persistent heap buffer per SoldierAnimatorClass, keyed by the
-//   address of its inline mAnimBankOld slab. Every consumer (finders + the two
-//   inline accessors) is redirected to this buffer. The inline count int is
-//   shared and used only as an index value, so it can exceed 18 safely.
+//   SoldierAnimatorClass is a singleton: EntitySoldierClass creates it on first
+//   use, GameState::PostStateCleanup deletes it after every mission, and the
+//   next mission builds a new one, maybe at another address. So there is one
+//   heap buffer, keyed by the inline mAnimBankOld slab of the instance it
+//   serves, and a new instance takes it over. Every consumer (finders + the
+//   two inline accessors) is redirected to it. The inline count int is used
+//   only as an index value, so it can exceed 18 safely.
 // ---------------------------------------------------------------------------
 
 static constexpr int kBigBankMax = 128;  // generous; the inline cap was 18
 
-struct BankBufEntry { void** inlineArr; void** heap; };
-static BankBufEntry g_bankBufs[64] = {};
-static int          g_nBankBufs    = 0;
+static void* const* g_animClassCell = nullptr;   // SoldierAnimatorClass::sInstance
+static void**       g_bigBankKey    = nullptr;   // inline slab of the instance served
+static void**       g_bigBankHeap   = nullptr;
 
+// Only for a slab known to be a SoldierAnimatorClass's.
 static void** find_or_make_big_array(void** inlineArr, int* pCount)
 {
-    for (int i = 0; i < g_nBankBufs; i++)
-        if (g_bankBufs[i].inlineArr == inlineArr)
-            return g_bankBufs[i].heap;
+    if (inlineArr == g_bigBankKey) return g_bigBankHeap;
 
-    if (g_nBankBufs >= 64) return nullptr;
+    if (!g_bigBankHeap) {
+        g_bigBankHeap = (void**)HeapAlloc(
+            GetProcessHeap(), HEAP_ZERO_MEMORY, kBigBankMax * sizeof(void*));
+        if (!g_bigBankHeap) return nullptr;
+    }
 
-    void** heap = (void**)HeapAlloc(
-        GetProcessHeap(), HEAP_ZERO_MEMORY, kBigBankMax * sizeof(void*));
-    if (!heap) return nullptr;
-
-    // Copy whatever the engine has already placed in the inline slab (<=18).
+    // A new instance: drop the last mission's banks and copy whatever the
+    // engine already placed in the inline slab (<=18).
+    memset(g_bigBankHeap, 0, kBigBankMax * sizeof(void*));
     int n = pCount ? *pCount : 0;
     if (n > 18) n = 18;
-    if (n > 0) memcpy(heap, inlineArr, n * sizeof(void*));
+    if (n > 0) memcpy(g_bigBankHeap, inlineArr, n * sizeof(void*));
 
-    g_bankBufs[g_nBankBufs++] = { inlineArr, heap };
-    return heap;
+    g_bigBankKey = inlineArr;
+    return g_bigBankHeap;
 }
 
-// Repoint this finder's bank array to the class's big heap buffer and raise the
-// cap, BEFORE the engine fills it.  No-op if the finder doesn't have the
-// expected SoldierAnimatorClass layout (safety guard).
+// Whether a slab is the live instance's. Finders only reach the class through
+// their count pointer, so they are checked against sInstance; the class
+// methods pass their own this.
+static bool is_live_class_slab(void** inlineArr)
+{
+    void* cls = g_animClassCell ? *g_animClassCell : nullptr;
+    return cls && inlineArr == (void**)((char*)cls + kSAC_AnimBankOld);
+}
+
+// Repoint this finder's bank array to the big heap buffer and raise the cap,
+// BEFORE the engine fills it.  No-op for a finder that doesn't point into the
+// SoldierAnimatorClass (safety guard).
 static void raise_finder_capacity(void* self)
 {
     int*   pCount  = *(int**)((char*)self + kAF_AnimBankCount);
@@ -199,12 +218,12 @@ static void raise_finder_capacity(void* self)
     void** heap = nullptr;
     if (curArr == inlineArr) {
         // Fresh finder still pointing at the inline slab — adopt/seed the heap.
+        if (inlineArr != g_bigBankKey && !is_live_class_slab(inlineArr)) return;
         heap = find_or_make_big_array(inlineArr, pCount);
+    } else if (curArr == g_bigBankHeap) {
+        heap = curArr;  // already repointed by us
     } else {
-        // Already repointed by us on a previous call? Confirm it's our buffer.
-        for (int i = 0; i < g_nBankBufs; i++)
-            if (g_bankBufs[i].heap == curArr) { heap = curArr; break; }
-        if (!heap) return;  // unknown layout — leave it alone
+        return;         // unknown layout — leave it alone
     }
     if (!heap) return;
 
@@ -328,7 +347,7 @@ static bool try_append_sub_banks(char* self, const char* rootName)
 
 
 // ---------------------------------------------------------------------------
-// hooked_AddBank — repoint the finder to the per-class heap buffer + raise the
+// hooked_AddBank — repoint the finder to the heap buffer + raise the
 // cap BEFORE the engine fills it (so the _AddBank loop never trips the max-18
 // check), run the original, then append any late-arriving sub-banks.
 // ---------------------------------------------------------------------------
@@ -372,8 +391,8 @@ static bool __fastcall hooked_AddBank(void* ecx, void* edx, char* name)
 // inline mAnimBankOld slab via fixed offsets (this+0xF72C / count this+0xF774)
 // with a hardcoded <18 cap — bypassing the finder pointer entirely.  That makes
 // it the one consumer that desyncs when we redirect the finders to the heap.
-// We redirect it to the SAME per-class heap buffer (keyed by the inline array
-// address, exactly like raise_finder_capacity) and use the raised cap, while
+// We redirect it to the SAME heap buffer (keyed by the inline array address,
+// exactly like raise_finder_capacity) and use the raised cap, while
 // preserving the original's mZephyrSkeletonShared bookkeeping and guards.
 //
 // Original logic (verified against disassembly at 0x0057DEC0):
@@ -400,8 +419,8 @@ static bool __fastcall hooked_AddSkel(void* ecx, void* /*edx*/, void* skel)
     int*   pCount    = (int*)(self + kSAC_AnimBankCount);
 
     // Same heap buffer the finders use (identical key). Fall back to the inline
-    // slab if allocation ever fails — that reverts to stock behaviour for this
-    // class rather than risking a bad pointer.
+    // slab if allocation ever fails — that reverts to stock behaviour rather
+    // than risking a bad pointer.
     void** arr = find_or_make_big_array(inlineArr, pCount);
     if (!arr) { arr = inlineArr; }
 
@@ -439,7 +458,7 @@ static int __fastcall hooked_Resolve(void* ecx, void* edx, void* a2, int a3, uns
 // this->mAnimBankOld[0..mAnimBankCount) looking each bank up, returning the
 // first hit. It reads the inline slab by fixed offset (not via a finder), so
 // once we move the banks to the heap it reads the empty slab and crashes.
-// Reimplement over the same per-class heap buffer; the count int stays inline
+// Reimplement over the same heap buffer; the count int stays inline
 // (shared, correct).
 //
 // Signature is identical on both builds (Steam still RETs 8 — the name arg is
@@ -777,6 +796,9 @@ void anim_bank_append_install(uintptr_t exe_base)
     fn_pblHash           = (fn_PblHash_t)resolve(exe_base, g_addr->hash_string_thiscall);
     fn_hashFind          = (fn_HashFind_t)resolve(exe_base, g_addr->pbl_hash_table_find);
     g_animHashTable      = (void*)resolve(exe_base, g_addr->anim_hash_table);
+    g_animClassCell      = g_addr->soldier_animator_class_instance
+                              ? (void* const*)resolve(exe_base, g_addr->soldier_animator_class_instance)
+                              : nullptr;
 
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());

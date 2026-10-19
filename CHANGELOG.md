@@ -192,6 +192,10 @@ Scripts can check the running version through `GameExt.version` or
 - With a pad connected, every map load reset part of your controls: second keys and
   pad buttons bound in Options -> Controls were replaced by the pad layout. Your
   keyboard bindings now stay as you set them.
+- In a long session, the soldier animation bank limit could stop working and
+  `Out of space for soldier animation banks (max 18)` come back, because each map
+  load could take up one of 64 buffers and never return it. One buffer now serves
+  every map, so the 128 file limit holds for the whole session.
 - With the unofficial v1.3 patch installed, mod maps past the first 499 were still
   missing from the map list, because the patch's own addme kept its 500 mission
   cap after the DLC Mission Limit raised the game's to 4096. Its cap now follows

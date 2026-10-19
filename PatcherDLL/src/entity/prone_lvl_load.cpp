@@ -119,7 +119,7 @@ static int __cdecl hooked_lua_read_data_file(lua_State* L)
 // 256 value slots), keyed by the hash of the fully composed name.  Inserting
 // there never touches SoldierAnimatorClass::mAnimBankOld[], so it costs no
 // animation-bank array slot (the 18 to 128 raise) and no distinct bank name
-// (the hard 16-name cap in SetupBodyMasks).
+// (the 16-name registry).
 //
 // Engine pieces:
 //   SoldierAnimatorLowResClass::PostLoad (mt 0x00586E60 / steam 0x00647D40)

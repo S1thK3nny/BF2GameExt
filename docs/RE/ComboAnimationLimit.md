@@ -144,7 +144,9 @@ it can be lengthened without moving the other three. That is what makes this tra
 
 `SoldierAnimatorClass` holds `AnimationMap mMap[30]` at `+0x24`, followed by
 `m_aOrdCollTable[30]` (900 each), `mAnimBank[18]`, `mAnimBankCount`, `mJetPackMatrix`,
-totalling `0xF7C0`.
+totalling `0xF7C0`. It is a singleton (`sInstance`), deleted after every mission and built
+again for the next, so `mAnimBank[18]` holds every loaded `.zaabin` of the level, not one
+class's.
 
 ## Target
 
