@@ -246,13 +246,14 @@ Research and addresses for these are in
 
 **Relative units for every HUD size** - Several stock HUD elements fix sizes to pixels
 with no way to use another unit, so a HUD cannot keep its look across resolutions:
-VehicleSeating reads its `Position` as pixels whatever mode it names; the map's view
-cones are drawn at a pixel size and its post numbers 5 pixels above each post; `Model3D`
-`Scale` is in pixels; `BorderedBox`'s `Border` is drawn that many pixels wide;
-`ObjectiveList` uses fixed pixel insets and spacing and a fixed font. Give each one the
-optional unit `Position` and `BitmapRect` take (`"Pixels"` by default, `"Viewport"`,
-`"Screen"`, `"Frame"`), after a full audit of the stock HUD code for every such value,
-with VisualHUD reading and previewing each.
+VehicleSeating reads its `Position` as pixels whatever mode it names and stacks its seats
+by font height; `BorderedBox`'s `Border` is drawn that many pixels wide; `ObjectiveList`
+uses fixed pixel insets and spacing and a fixed font; the map's post numbers sit 5 pixels
+above each post; `FlashyScale`, `TextCharacterSpacing`, `TextTabSpacing`, the ViewPort
+offsets and ProceduralBarBitmap's glow are pixels. Give each one the optional unit
+`Position` and `BitmapRect` take (`"Pixels"` by default, `"Viewport"`, `"Screen"`,
+`"Frame"`), with VisualHUD reading and previewing each. The audit (2026-10-20) is in
+[docs/RE/HUDRelativeUnits.md](docs/RE/HUDRelativeUnits.md).
 
 **HUD shake** - The HUD stays still while the camera shakes, so a strong shake leaves the
 reticle off the true aim point. Publish the camera shake's screen offset as a HUD event so a
