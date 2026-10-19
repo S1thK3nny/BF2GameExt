@@ -11,6 +11,8 @@ Set alongside the function registrations, so scripts can degrade gracefully when
 | `GameExt` | A table when BF2GameExt is loaded; `nil` otherwise. |
 | `GameExt.version` | Version string, e.g. `"1.0.0"`. |
 | `GameExt.build` | Which executable is being patched: `"modtools"`, `"steam"`, `"gog"` or `"unknown"`. |
+| `GameExt.TestVersion(major [, minor [, patch]])` | `true` if the running BF2GameExt is that version or newer. Missing parts count as 0. Since 1.1.0. |
+| `GameExt.IsPatchActive(section, key)` | `true` if that `BF2GameExt.ini` setting is on and running this session (see below). Since 1.1.0. |
 | `GameExt.disable` | Write-only opt-out. Set it truthy to disable BF2GameExt's intrusive gameplay features for a mission (see below). |
 
 ```lua
@@ -19,6 +21,35 @@ if GameExt then
     SetFogEnable(1)
 end
 ```
+
+`GameExt.TestVersion` is `nil` on builds older than 1.1.0, so check that it exists before calling it:
+
+```lua
+if GameExt and GameExt.TestVersion and GameExt.TestVersion(1, 1, 0) then
+    -- use something added in 1.1.0
+end
+```
+
+**Checking a setting (`GameExt.IsPatchActive`)** - Pass the `[Section]` and key exactly as they appear in `BF2GameExt.ini`, so a mod can load content that needs a raised limit only when the player has it:
+
+```lua
+local function PatchActive(section, key)
+    return GameExt and GameExt.IsPatchActive and GameExt.IsPatchActive(section, key)
+end
+
+if PatchActive("LimitIncreases", "ComboAnimIncrease") then
+    -- load the full hero roster
+else
+    -- stay under the stock combo animation limits
+end
+```
+
+- It answers for this session. Settings are read when the game starts, so editing the INI while playing changes nothing until a restart.
+- A setting that is on but could not be installed on this game version answers `false`.
+- `Features, Prone` is decided per mission when `ingame.lvl` is read (it needs `prone.lvl`, and `GameExt.disable` turns it off), so ask after that `ReadDataFile` call.
+- Number settings answer `true` when they are not 0.
+- A section and key that are not in the INI answer `false` and log a warning.
+- Every player has their own INI. In multiplayer, use it only for things that stay on your machine, such as hints or messages, never to choose what loads or how the game plays.
 
 **Opting out (`GameExt.disable`)** - A mod that wants the extension's fixes and Lua API but *not* its gameplay-altering features can set `GameExt.disable = true`. Set it in your mission's `ScriptPreInit` or `ScriptInit`, but before the `ReadDataFile("ingame.lvl")` call, so it takes effect for that mission:
 

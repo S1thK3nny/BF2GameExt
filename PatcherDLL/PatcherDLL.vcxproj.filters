@@ -343,6 +343,9 @@
     <ClInclude Include="src\util\ini_registry.hpp">
       <Filter>util</Filter>
     </ClInclude>
+    <ClInclude Include="src\util\ini_state.hpp">
+      <Filter>util</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -433,6 +436,9 @@
       <Filter>debug_commands</Filter>
     </ClCompile>
     <ClCompile Include="src\util\cfile.cpp">
+      <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\ini_state.cpp">
       <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\loading_screen\config_parser.cpp">

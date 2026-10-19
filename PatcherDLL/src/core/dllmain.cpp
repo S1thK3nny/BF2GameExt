@@ -76,6 +76,7 @@
 #include "shell/map_queue_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
+#include "util/ini_state.hpp"
 #include "util/audio_stream_limit.hpp"
 #include "util/enable_sound_warnings.hpp"
 #include "util/error_dialog_fix.hpp"
@@ -322,6 +323,11 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_controllerEnabled = true;
       g_rumbleEnabled = true;
    }
+
+   // Features that can switch off after startup answer IsPatchActive from their flag.
+   ini_state_bind_live("Features", "Prone", &g_proneEnabled);
+   ini_state_bind_live("Controller", "Enabled", &g_controllerEnabled);
+   ini_state_bind_live("Controller", "Rumble", &g_rumbleEnabled);
 
    // Sections are still RW here (re-protected below) — safe to apply byte patches.
    apply_deadbody_check_patches(exe_base, disableDeadBody, deadBodyAllFactions);

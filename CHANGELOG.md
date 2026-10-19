@@ -4,12 +4,22 @@ What changed in each release of BF2GameExt. Version numbers follow the rules in
 `version.h`: a major release can break existing scripts, ODFs or INI files, a minor
 release only adds, and a patch release only fixes.
 
-Scripts can check the running version through `GameExt.version`.
+Scripts can check the running version through `GameExt.version` or
+`GameExt.TestVersion`.
 
 ## 1.1.0
 
 ### Added
 
+- **`GameExt.TestVersion(major, minor, patch)`** - True when the running
+  BF2GameExt is that version or newer, so a script can check for a feature in one
+  line instead of comparing `GameExt.version` strings. See the
+  [Lua API](docs/user/LUA_API.md#detection).
+- **`GameExt.IsPatchActive(section, key)`** - True when that `BF2GameExt.ini`
+  setting is on and actually running, so a mod can load content that needs a raised
+  limit only for players who have it. A setting that could not be installed on the
+  player's game version answers false. See the
+  [Lua API](docs/user/LUA_API.md#detection).
 - **`GetMissionName()`** - Returns the mission-script name the match was launched
   from, such as `"cor1l_con"`. Stock Lua exposed the world file but never the
   script, so a mission could not tell which map or mode it was running as without

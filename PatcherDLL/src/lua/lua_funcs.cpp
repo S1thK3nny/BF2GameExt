@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "util/content_census.hpp"
+#include "util/ini_state.hpp"
 #include "lua_funcs.hpp"
 #include "lua_hooks.hpp"
 #include "core/resolve.hpp"
@@ -1513,6 +1514,67 @@ static int lua_ContentCensus(lua_State* L)
    return 0;
 }
 
+// Whether version `have` is `want` or newer, part by part.
+constexpr bool version_at_least(int haveMajor, int haveMinor, int havePatch,
+                                int wantMajor, int wantMinor, int wantPatch)
+{
+   return haveMajor != wantMajor ? haveMajor > wantMajor
+        : haveMinor != wantMinor ? haveMinor > wantMinor
+        : havePatch >= wantPatch;
+}
+static_assert(version_at_least(1, 2, 0, 1, 2, 0) && version_at_least(1, 2, 0, 1, 1, 9) &&
+              version_at_least(2, 0, 0, 1, 9, 9) && version_at_least(1, 10, 0, 1, 9, 0));
+static_assert(!version_at_least(1, 2, 0, 1, 2, 1) && !version_at_least(1, 2, 0, 1, 3, 0) &&
+              !version_at_least(1, 9, 9, 2, 0, 0) && !version_at_least(1, 1, 5, 1, 2, 0));
+
+// GameExt.TestVersion(major [, minor [, patch]]): true if this BF2GameExt is that
+// version or newer. A missing part counts as 0. Older builds have no field, so
+// `GameExt and GameExt.TestVersion and GameExt.TestVersion(1, 1, 0)` is false there.
+static int lua_TestVersion(lua_State* L)
+{
+   if (!g_lua.gettop || !g_lua.isnumber || !g_lua.tonumber || !g_lua.pushboolean) return 0;
+   int want[3] = { 0, 0, 0 };
+   const int count = g_lua.gettop(L);
+   bool valid = count >= 1;
+   for (int i = 0; valid && i < 3 && i < count; ++i) {
+      if (g_lua.isnumber(L, i + 1)) want[i] = (int)g_lua.tonumber(L, i + 1);
+      else valid = false;
+   }
+   static bool warned = false;
+   if (!valid && !warned) {
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "GameExt.TestVersion takes version numbers, as in "
+                   "GameExt.TestVersion(1, 1, 0); answering false.\n");
+      warned = true;
+   }
+   g_lua.pushboolean(L, valid && version_at_least(GAMEEXT_VERSION_MAJOR, GAMEEXT_VERSION_MINOR,
+                                                  GAMEEXT_VERSION_PATCH, want[0], want[1], want[2]));
+   return 1;
+}
+
+// GameExt.IsPatchActive(section, key): true if that BF2GameExt.ini setting is on
+// and running. A patch set that failed to install on this exe answers false.
+static int lua_IsPatchActive(lua_State* L)
+{
+   if (!g_lua.gettop || !g_lua.tolstring || !g_lua.pushboolean) return 0;
+   const bool two = g_lua.gettop(L) >= 2;
+   const char* section = two ? g_lua.tolstring(L, 1, nullptr) : nullptr;
+   const char* key     = two ? g_lua.tolstring(L, 2, nullptr) : nullptr;
+   bool active = false;
+   const bool known = section && key && ini_state_find(section, key, &active);
+   static bool warned = false;
+   if (!known && !warned) {
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "GameExt.IsPatchActive(\"%s\", \"%s\") names no BF2GameExt.ini setting; "
+                   "it takes the section and key, as in "
+                   "GameExt.IsPatchActive(\"Features\", \"Prone\"). Answering false.\n",
+                   section ? section : "?", key ? key : "?");
+      warned = true;
+   }
+   g_lua.pushboolean(L, active);
+   return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Mission-script name validity
 //
@@ -1728,6 +1790,8 @@ void register_lua_functions(lua_State* L)
    //   print(GameExt.version)              -- "1.0.0"
    //   if GameExt.build == "steam" then    -- which exe we're patching
    //   GameExt.disable = true              -- opt out of intrusive features
+   //   if GameExt.TestVersion(1, 1, 0) then -- this version or newer
+   //   GameExt.IsPatchActive("Features", "Prone") -- INI setting on and running
    const char* buildName = "unknown";
    switch (g_build) {
       case GameBuild::Modtools: buildName = "modtools"; break;
@@ -1768,6 +1832,14 @@ void register_lua_functions(lua_State* L)
          };
          set_field("version", GAMEEXT_VERSION_STRING);
          set_field("build",   buildName);
+         auto set_func = [&](const char* key, lua_CFunction func) {
+            if (!g_lua.pushcclosure) return;
+            g_lua.pushlstring(L, key, strlen(key));
+            g_lua.pushcclosure(L, func, 0);
+            g_lua.settable(L, -3);
+         };
+         set_func("TestVersion",   lua_TestVersion);
+         set_func("IsPatchActive", lua_IsPatchActive);
          g_lua.settable(L, -10001);                 // _G.GameExt = T
          s_gameExtTableBuilt = true;                // enables gameext_is_disabled()
       } else if (g_lua.settop) {
