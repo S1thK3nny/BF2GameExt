@@ -68,6 +68,7 @@ constexpr uint32_t kHashSize      = pbl_hash("SquadSize");
 constexpr uint32_t kHashFormation = pbl_hash("SquadFormation");
 constexpr uint32_t kHashSpacing   = pbl_hash("SquadSpacing");
 constexpr uint32_t kHashFollower  = pbl_hash("SquadFollower");
+constexpr uint32_t kHashAutoFollow = pbl_hash("SquadAutoFollow");
 constexpr uint32_t kHashCommandAny = pbl_hash("CommandAnyFriendly");   // the comm keys' (ai/comm_orders.hpp)
 
 using fn_reserve_offset_t = float*(__cdecl*)(float* out, void* leader, void* follower, int type);
@@ -293,6 +294,7 @@ bool on_property(void* cls, uint32_t hash, const char* value)
    case kHashSpacing:   key = Key::Spacing;   break;
    case kHashFollower:  key = Key::Follower;  break;
    case kHashCommandAny: key = Key::CommandAny; break;
+   case kHashAutoFollow: key = Key::AutoFollow; break;
    default:             return false;
    }
    if (cls) squad_formation::set_key(s_classes[cls], key, value);
@@ -649,8 +651,8 @@ int __cdecl follow_count(uint8_t* obj, int team, int type)
    const int count = call_count(obj, team, type);
    __try {
       const ClassKeys* keys = soldier_keys(obj);
-      return squad_formation::capped_count(count, squad_formation::forms_up_for(keys, s_defaults),
-                                           squad_formation::size_for(keys, s_defaults));
+      return squad_formation::follow_stop_count(keys, count, squad_formation::forms_up_for(keys, s_defaults),
+                                                squad_formation::size_for(keys, s_defaults));
    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return count;
    }

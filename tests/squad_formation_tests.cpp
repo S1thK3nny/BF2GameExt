@@ -273,6 +273,13 @@ void the_tag_along_stop()
    assert(capped_count(0, true, 4) == 0);
    assert(capped_count(3, true, 4) == 0);
    assert(capped_count(4, true, 4) == 2);
+   // SquadAutoFollow: 0 stops every tag-along; 1 or unset leaves the stop as it was.
+   ClassKeys off, on;
+   assert(set_key(off, Key::AutoFollow, "0") && off.hasAutoFollow && !off.autoFollow);
+   assert(set_key(on, Key::AutoFollow, "1") && on.autoFollow);
+   assert(follow_stop_count(&off, 0, true, 4) == 2 && follow_stop_count(&off, 0, false, 4) == 2);
+   assert(follow_stop_count(&on, 0, true, 4) == 0 && follow_stop_count(&on, 4, true, 4) == 2);
+   assert(follow_stop_count(nullptr, 1, false, 4) == 1 && follow_stop_count(&on, 1, false, 4) == 1);
    assert(capped_count(7, true, 4) == 2);
    assert(capped_count(0, true, 1) == 0 && capped_count(1, true, 1) == 2);
 }

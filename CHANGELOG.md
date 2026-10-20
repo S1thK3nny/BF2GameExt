@@ -10,6 +10,9 @@ Scripts can check the running version through `GameExt.version`.
 
 ### Added
 
+- **SquadAutoFollow** - an ODF key on the class you play: `0` stops friendlies starting to follow
+  you on their own, so a follower you send away is no longer replaced by the next one nearby. A
+  mission script can set it with `SetClassProperty`.
 - **HUD text that follows the screen** - `AuthoredHeight(N)` in a `.hud` file's `FileInfo`
   names the screen height its text was sized for; every `Text` and `MultilineText`
   element of the file is laid out as on a screen `N` high and drawn at the screen's height
