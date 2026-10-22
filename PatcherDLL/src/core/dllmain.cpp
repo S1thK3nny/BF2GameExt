@@ -5,6 +5,7 @@
 #include "resolve.hpp"
 #include "lua/lua_hooks.hpp"
 #include "controller/controller_support.hpp"
+#include "controller/gamepad_sdl.hpp"
 #include "controller/controller_rumble.hpp"
 #include "controller/menu_navigation.hpp"
 #include "controller/aim_assist.hpp"
@@ -390,6 +391,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
+   gamepad_sdl_install(exe_base);             // Detours the DirectInput8Create the game imports
    controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
    menu_navigation_install(exe_base);        // Detours + a .data table - needs the RW window
    command_post_overflow_fix_install(exe_base);

@@ -18,7 +18,8 @@
 enum eRAWINPUTS_CONTROLLER : int {
    eCONTROLLERINPUT_NONE = -1,
 
-   // DirectInput joystick buttons (0-31)
+   // DirectInput joystick buttons (0-31). The labels are the Xbox ones; SDL
+   // pads (gamepad_sdl.hpp) use this order for every controller family.
    eCONTROLLERINPUT_BUTTON0  = 0,   // Xbox: A
    eCONTROLLERINPUT_BUTTON1  = 1,   // Xbox: B
    eCONTROLLERINPUT_BUTTON2  = 2,   // Xbox: X
@@ -29,12 +30,13 @@ enum eRAWINPUTS_CONTROLLER : int {
    eCONTROLLERINPUT_BUTTON7  = 7,   // Xbox: Start/Menu
    eCONTROLLERINPUT_BUTTON8  = 8,   // Xbox: L3 (left stick click)
    eCONTROLLERINPUT_BUTTON9  = 9,   // Xbox: R3 (right stick click)
-   eCONTROLLERINPUT_BUTTON10 = 10,
-   eCONTROLLERINPUT_BUTTON11 = 11,
-   eCONTROLLERINPUT_BUTTON12 = 12,
-   eCONTROLLERINPUT_BUTTON13 = 13,
-   eCONTROLLERINPUT_BUTTON14 = 14,
-   eCONTROLLERINPUT_BUTTON15 = 15,
+   eCONTROLLERINPUT_BUTTON10 = 10,  // SDL pads: Guide
+   eCONTROLLERINPUT_BUTTON11 = 11,  // SDL pads: Misc (Share, mic, capture)
+   eCONTROLLERINPUT_BUTTON12 = 12,  // SDL pads: right paddle 1
+   eCONTROLLERINPUT_BUTTON13 = 13,  // SDL pads: left paddle 1
+   eCONTROLLERINPUT_BUTTON14 = 14,  // SDL pads: right paddle 2
+   eCONTROLLERINPUT_BUTTON15 = 15,  // SDL pads: left paddle 2
+   eCONTROLLERINPUT_BUTTON16 = 16,  // SDL pads: touchpad click
 
    // POV hat directions (d-pad via DirectInput)
    eCONTROLLERINPUT_HAT0_UP    = 32,
@@ -45,10 +47,10 @@ enum eRAWINPUTS_CONTROLLER : int {
    // DI axes as positive/negative half-axes
    eCONTROLLERINPUT_X_POS  = 48,  eCONTROLLERINPUT_X_NEG  = 49,  // L stick X
    eCONTROLLERINPUT_Y_POS  = 50,  eCONTROLLERINPUT_Y_NEG  = 51,  // L stick Y
-   eCONTROLLERINPUT_Z_POS  = 52,  eCONTROLLERINPUT_Z_NEG  = 53,  // Triggers (combined on DI)
+   eCONTROLLERINPUT_Z_POS  = 52,  eCONTROLLERINPUT_Z_NEG  = 53,  // LT. Plain DI: both triggers, RT negative
    eCONTROLLERINPUT_RX_POS = 54,  eCONTROLLERINPUT_RX_NEG = 55,  // R stick X
    eCONTROLLERINPUT_RY_POS = 56,  eCONTROLLERINPUT_RY_NEG = 57,  // R stick Y
-   eCONTROLLERINPUT_RZ_POS = 58,  eCONTROLLERINPUT_RZ_NEG = 59,  // R trigger (some drivers)
+   eCONTROLLERINPUT_RZ_POS = 58,  eCONTROLLERINPUT_RZ_NEG = 59,  // RT on SDL pads
 
    eCONTROLLERINPUT_MAX = 76,
 };

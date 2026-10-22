@@ -134,6 +134,12 @@ Scripts can check the running version through `GameExt.version` or
 - A [HUD properties](docs/user/HUD_PROPERTIES.md) reference listing every event,
   property and transform parameter BF2GameExt adds to `.hud` files, with the version
   each first appeared in.
+- **PlayStation, Switch and other pads** - Gamepads are read through SDL 3
+  (`SDL3.dll`, shipped next to `BF2GameExt.dll`), so Xbox, DualShock 4, DualSense,
+  Switch Pro and most other pads share one layout by button position, and rumble
+  works on all of them. The Guide, Share/mute/capture, back paddle and touchpad
+  buttons can be bound too. Without `SDL3.dll` pads work as before. See
+  [Controller](docs/user/CONTROLLER.md#supported-controllers).
 - **Menu navigation with a pad** - The menus, Instant Action, the profile screen,
   the options screens, the spawn screen and Galactic Conquest can be driven with a
   gamepad. LB/RB and LT/RT switch the two tab rows, X and Y reset or confirm the
@@ -191,6 +197,15 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Fixed
 
+- Primary and secondary fire could not be held together on an Xbox pad, because
+  both triggers shared one axis and cancelled each other out. Each trigger now has
+  its own, so the secondary fires the moment it is ready while you keep firing the
+  primary, as on console.
+- Pad vibration kept going while the game was paused or showed an objective, and
+  if it was running when the battle ended it carried on through the menus until the
+  next battle. It now stops as soon as the battle does.
+- A pad that was unplugged and plugged back in was never picked up again until the
+  game restarted. It now carries on where it left off.
 - A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
   nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
   on every build.

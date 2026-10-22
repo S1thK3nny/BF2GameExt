@@ -226,6 +226,9 @@
     <ClInclude Include="src\controller\controller_support.hpp">
       <Filter>controller</Filter>
     </ClInclude>
+    <ClInclude Include="src\controller\gamepad_sdl.hpp">
+      <Filter>controller</Filter>
+    </ClInclude>
     <ClInclude Include="src\controller\menu_navigation.hpp">
       <Filter>controller</Filter>
     </ClInclude>
@@ -514,6 +517,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\controller_support.cpp">
+      <Filter>controller</Filter>
+    </ClCompile>
+    <ClCompile Include="src\controller\gamepad_sdl.cpp">
       <Filter>controller</Filter>
     </ClCompile>
     <ClCompile Include="src\controller\menu_navigation.cpp">

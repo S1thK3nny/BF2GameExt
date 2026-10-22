@@ -122,6 +122,13 @@ INPUT_DESCRIPTIONS = {
     "Start": "Start / Menu",
     "L3": "Left stick click",
     "R3": "Right stick click",
+    "Guide": "Xbox, PS or Home button. On Windows the Xbox button also opens the Game Bar",
+    "Misc": "Share on Xbox Series pads, mute on a DualSense, capture on Switch pads",
+    "PaddleR1": "Upper right back paddle (Xbox Elite P1, DualSense Edge right back button)",
+    "PaddleL1": "Upper left back paddle (Xbox Elite P3, DualSense Edge left back button)",
+    "PaddleR2": "Lower right back paddle (Xbox Elite P2, DualSense Edge right Fn)",
+    "PaddleL2": "Lower left back paddle (Xbox Elite P4, DualSense Edge left Fn)",
+    "Touchpad": "DualShock 4 or DualSense touchpad click",
     "DPadUp": "D-pad up",
     "DPadRight": "D-pad right",
     "DPadDown": "D-pad down",
@@ -130,15 +137,15 @@ INPUT_DESCRIPTIONS = {
     "LX-": "Left stick left",
     "LY+": "Left stick down",
     "LY-": "Left stick up",
-    "ZPos": "DirectInput Z axis, positive. Usually the left trigger, see the note below",
-    "ZNeg": "DirectInput Z axis, negative. Usually the right trigger, see the note below",
+    "ZPos": "Left trigger. Same as `LT`",
+    "ZNeg": "Nothing on SDL pads. Without SDL, usually the right trigger, see the note below",
     "RX+": "Right stick right",
     "RX-": "Right stick left",
     "RY+": "Right stick down",
     "RY-": "Right stick up",
-    "RZPos": "DirectInput RZ axis, positive. Varies by controller",
-    "RZNeg": "DirectInput RZ axis, negative. Varies by controller",
-    "RT": "Right trigger. Alias for `ZNeg`",
+    "RZPos": "Right trigger on SDL pads. Without SDL it varies by controller",
+    "RZNeg": "Nothing on SDL pads. Without SDL it varies by controller",
+    "RT": "Right trigger. `RZPos` on SDL pads, `ZNeg` without SDL",
     "LT": "Left trigger. Alias for `ZPos`",
 }
 
@@ -437,6 +444,32 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     )
     L.append("")
 
+    L.append("## Supported controllers")
+    L.append("")
+    L.append(
+        "Xbox, PlayStation (DualShock 4, DualSense), Switch Pro and most other "
+        "pads work the same way, through `SDL3.dll` next to `BF2GameExt.dll`. "
+        "Every pad uses the button names on this page by position, so `A` is the "
+        "bottom face button whether it says A, Cross or B. Both triggers can be "
+        "held at once, and rumble works on all of them."
+    )
+    L.append("")
+    L.append(
+        "Connect the pad before starting the game. A pad that drops out and "
+        "comes back, or a different pad plugged in instead, takes over the same "
+        "slot; a pad added on top of the ones the game started with needs a "
+        "restart."
+    )
+    L.append("")
+    L.append(
+        "> **Without `SDL3.dll`**, or for a pad SDL does not recognise, the "
+        "game reads the pad through DirectInput as before: the buttons come in "
+        "the controller's own order, so a PlayStation pad's face buttons land on "
+        "the wrong names, and an Xbox pad cannot hold both triggers at once. "
+        "`BF2GameExt.log` lists each pad SDL took over under `[Gamepad]`."
+    )
+    L.append("")
+
     L.append("## Where pad bindings live")
     L.append("")
     L.append(
@@ -574,12 +607,12 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
         L.append(f"| `{name}` | {md_cell(INPUT_DESCRIPTIONS[name])} |")
     L.append("")
     L.append(
-        "> **Triggers.** Both triggers sit on the single DirectInput Z axis on "
-        "most pads, with the left trigger reading positive and the right negative. "
-        "`LT` and `RT` are aliases for `ZPos` and `ZNeg`, so binding both a trigger "
-        "alias and its Z axis name to different actions will not do what you want. "
-        "Which physical control lands on `RZPos`/`RZNeg` varies between controllers "
-        "and drivers, so those two are worth testing rather than assuming."
+        "> **Triggers.** On SDL pads each trigger has its own axis, `LT` on "
+        "`ZPos` and `RT` on `RZPos`, so both can be held at once. Without SDL, "
+        "most pads put both triggers on the single DirectInput Z axis, the left "
+        "reading positive and the right negative, so holding both reads as "
+        "neither; `RT` then means `ZNeg`, and which physical control lands on "
+        "`RZPos`/`RZNeg` varies between controllers."
     )
     L.append("")
 

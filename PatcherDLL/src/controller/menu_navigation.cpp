@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "menu_navigation.hpp"
 #include "controller_support.hpp"
+#include "gamepad_sdl.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
 #include "core/resolve.hpp"
@@ -128,8 +129,9 @@ static float pad(int raw)
    return v;
 }
 
-// XInput reports LT and RT separately. DirectInput folds them into one Z axis,
-// whose sign differs between drivers, so it is only the fallback.
+// SDL pads report LT on Z and RT on RZ. Without them, XInput reports the two
+// separately, and plain DirectInput folds them into one Z axis whose sign
+// differs between drivers, so that is only the last resort.
 struct XIGamepad { WORD buttons; BYTE lt, rt; SHORT lx, ly, rx, ry; };
 struct XIState   { DWORD packet; XIGamepad pad; };
 using fn_XInputGetState = DWORD(WINAPI*)(DWORD, XIState*);
@@ -173,9 +175,15 @@ static int __cdecl lua_pad_triggers(lua_State* L)
 {
    static bool ltOn = false, rtOn = false;
    float lt = 0.0f, rt = 0.0f;
-   if (!xinput_triggers(lt, rt) && s_raw) {
-      lt = fmaxf(pad(eCONTROLLERINPUT_BUTTON10), pad(eCONTROLLERINPUT_Z_POS));
-      rt = fmaxf(pad(eCONTROLLERINPUT_BUTTON11), pad(eCONTROLLERINPUT_Z_NEG));
+   if (gamepad_sdl_active()) {
+      if (s_raw) {
+         lt = pad(eCONTROLLERINPUT_Z_POS);
+         rt = pad(eCONTROLLERINPUT_RZ_POS);
+      }
+   }
+   else if (!xinput_triggers(lt, rt) && s_raw) {
+      lt = pad(eCONTROLLERINPUT_Z_POS);
+      rt = pad(eCONTROLLERINPUT_Z_NEG);
    }
    ltOn = ltOn ? lt > 0.2f : lt > 0.5f;
    rtOn = rtOn ? rt > 0.2f : rt > 0.5f;

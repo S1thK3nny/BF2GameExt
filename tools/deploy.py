@@ -66,6 +66,16 @@ def main():
         sys.exit("DLL is locked - close the game and re-run")
     print("dll: deployed %d bytes" % os.path.getsize(os.path.join(GAMEDATA, "BF2GameExt.dll")))
 
+    # SDL3.dll only changes when third_party/SDL3 is updated; skip identical copies.
+    sdl_src = os.path.join(ROOT, "third_party", "SDL3", "SDL3.dll")
+    sdl_dst = os.path.join(GAMEDATA, "SDL3.dll")
+    if not os.path.exists(sdl_dst) or open(sdl_src, "rb").read() != open(sdl_dst, "rb").read():
+        try:
+            shutil.copy2(sdl_src, sdl_dst)
+        except PermissionError:
+            sys.exit("SDL3.dll is locked - close the game and re-run")
+        print("sdl: deployed SDL3.dll")
+
 
 if __name__ == "__main__":
     main()

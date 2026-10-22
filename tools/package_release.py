@@ -62,6 +62,9 @@ EXTRA = [
     # zip root beside README.txt rather than inside GameData. .txt so it opens
     # on a double click on Windows.
     (REPO / "LICENSE", "LICENSE.txt"),
+    # SDL3 reads the gamepads. Official x86 build, see third_party/SDL3/README.md.
+    (REPO / "third_party" / "SDL3" / "SDL3.dll", "GameData/SDL3.dll"),
+    (REPO / "third_party" / "SDL3" / "LICENSE.txt", "LICENSE-SDL3.txt"),
 ]
 
 README_TXT = """\
@@ -98,6 +101,7 @@ merge. That puts these files in place:
 
     GameData/dinput8.dll              the proxy, loaded by the game
     GameData/BF2GameExt.dll           the extension
+    GameData/SDL3.dll                 gamepad support (SDL 3)
     GameData/BF2GameExt.ini           settings
     GameData/data/_lvl_pc/prone.lvl   animation assets for the Prone feature
 
@@ -146,6 +150,7 @@ To remove it properly, delete:
 
     GameData\\dinput8.dll
     GameData\\BF2GameExt.dll
+    GameData\\SDL3.dll
     GameData\\BF2GameExt.ini
     GameData\\data\\_lvl_pc\\prone.lvl     (optional)
 

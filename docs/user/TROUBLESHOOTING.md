@@ -12,6 +12,7 @@ All of these sit next to the game executable, in `GameData`:
 |------|-----------|
 | `dinput8.dll` | The proxy. This is what the game loads first. |
 | `BF2GameExt.dll` | The extension itself. |
+| `SDL3.dll` | Reads gamepads. Without it pads still work, but only as plain DirectInput pads. |
 | `BF2GameExt.ini` | Your settings. Optional; without it every key uses its built-in default. |
 | `BF2GameExt.log` | Which patches applied. **Rewritten from scratch every launch.** |
 | `BF2GameExt_crash.log` | Crash reports. **Appended forever**, so the newest is at the bottom. |

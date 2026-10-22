@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "controller_support.hpp"
+#include "gamepad_sdl.hpp"
 #include "core/resolve.hpp"
 #include "lua/lua_hooks.hpp"
 #include "util/install_log.hpp"
@@ -181,6 +182,13 @@ static const NamedValue s_rawInputNames[] = {
    { "Start",     eCONTROLLERINPUT_BUTTON7 },
    { "L3",        eCONTROLLERINPUT_BUTTON8 },
    { "R3",        eCONTROLLERINPUT_BUTTON9 },
+   { "Guide",     eCONTROLLERINPUT_BUTTON10 },
+   { "Misc",      eCONTROLLERINPUT_BUTTON11 },
+   { "PaddleR1",  eCONTROLLERINPUT_BUTTON12 },
+   { "PaddleL1",  eCONTROLLERINPUT_BUTTON13 },
+   { "PaddleR2",  eCONTROLLERINPUT_BUTTON14 },
+   { "PaddleL2",  eCONTROLLERINPUT_BUTTON15 },
+   { "Touchpad",  eCONTROLLERINPUT_BUTTON16 },
    { "DPadUp",    eCONTROLLERINPUT_HAT0_UP },
    { "DPadRight", eCONTROLLERINPUT_HAT0_RIGHT },
    { "DPadDown",  eCONTROLLERINPUT_HAT0_DOWN },
@@ -197,8 +205,9 @@ static const NamedValue s_rawInputNames[] = {
    { "RY-",       eCONTROLLERINPUT_RY_NEG },
    { "RZPos",     eCONTROLLERINPUT_RZ_POS },
    { "RZNeg",     eCONTROLLERINPUT_RZ_NEG },
-   // User-friendly trigger aliases (DI Z axis: LT=Z+, RT=Z-)
-   { "RT",        eCONTROLLERINPUT_Z_NEG },
+   // Trigger aliases. SDL pads put RT on its own axis, so both triggers can
+   // be held at once; plain DirectInput folds RT into ZNeg (see rt_raw_input).
+   { "RT",        eCONTROLLERINPUT_RZ_POS },
    { "LT",        eCONTROLLERINPUT_Z_POS },
    // Positional aliases for the four face buttons. A/B/X/Y are the Xbox
    // labels; DualShock and Nintendo pads print the same four differently, and
@@ -264,8 +273,16 @@ static const NamedValue s_actionNames[] = {
 // String lookup helpers
 // ---------------------------------------------------------------------------
 
+// Where RT is: its own axis on SDL pads, the negative half of the shared Z
+// axis on a pad DirectInput reads directly.
+static int rt_raw_input()
+{
+   return gamepad_sdl_active() ? eCONTROLLERINPUT_RZ_POS : eCONTROLLERINPUT_Z_NEG;
+}
+
 int controller_raw_input_from_name(const char* name)
 {
+   if (_stricmp(name, "RT") == 0) return rt_raw_input();
    for (const auto* p = s_rawInputNames; p->name; ++p)
       if (_stricmp(p->name, name) == 0) return p->value;
    return -2; // unknown
@@ -350,7 +367,7 @@ static bool is_pad_key(unsigned short key)
 static const char* input_name(int raw, char* buf, size_t size)
 {
    if (raw == eCONTROLLERINPUT_Z_POS) return "LT";
-   if (raw == eCONTROLLERINPUT_Z_NEG) return "RT";
+   if (raw == rt_raw_input()) return "RT";
    for (const NamedValue* p = s_rawInputNames; p->name; ++p)
       if (p->value == raw) return p->name;
    sprintf_s(buf, size, "Raw%d", raw);

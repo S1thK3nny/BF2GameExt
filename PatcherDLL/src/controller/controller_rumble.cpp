@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "controller_rumble.hpp"
+#include "gamepad_sdl.hpp"
 #include "core/resolve.hpp"
 #include "core/game_addrs.hpp"
 #include "core/game_build.hpp"
@@ -73,6 +74,16 @@ static bool load_xinput()
    }
    get_gamelog()("[Rumble] No XInput DLL found\n");
    return false;
+}
+
+// SDL pads take the rumble when they are in use, XInput otherwise.
+static bool can_rumble() { return gamepad_sdl_active() || s_XInputSetState; }
+
+static void set_motors(WORD left, WORD right)
+{
+   if (gamepad_sdl_rumble(left, right) || !s_XInputSetState) return;
+   XINPUT_VIBRATION vib = { left, right };
+   s_XInputSetState(0, &vib);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +251,7 @@ static void rumble_on_damage(float damage, float maxHealth)
 
 static void output_vibration()
 {
-   if (!s_XInputSetState) return;
+   if (!can_rumble()) return;
 
 
    // --- Recoil: one-shot pulse with ODF delay + decay ---
@@ -334,10 +345,7 @@ static void output_vibration()
    if (wLeft == 0 && wRight == 0 && s_prevLeft == 0 && s_prevRight == 0)
       return;
 
-   XINPUT_VIBRATION vib;
-   vib.wLeftMotorSpeed  = wLeft;
-   vib.wRightMotorSpeed = wRight;
-   s_XInputSetState(0, &vib);
+   set_motors(wLeft, wRight);
    s_prevLeft  = wLeft;
    s_prevRight = wRight;
    QueryPerformanceCounter(&s_lastOutputTime);
@@ -409,7 +417,7 @@ static void* original_dispatch = nullptr;
 
 void rumble_on_signal_fire(void* weapon)
 {
-   if (!g_rumbleEnabled || !s_XInputSetState) return;
+   if (!g_rumbleEnabled || !can_rumble()) return;
 
    __try {
       // Read owner Controllable* from weapon
@@ -481,7 +489,7 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
 {
    bool result = original_weapon_update(weapon, dt);
 
-   if (!g_rumbleEnabled || !s_XInputSetState) return result;
+   if (!g_rumbleEnabled || !can_rumble()) return result;
 
    // Game-over decay: smoothly ramp motors to zero over GAMEOVER_DECAY_SECS.
    // Checked before dt guard so it runs even if game pauses time.
@@ -503,16 +511,14 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
       if (t >= 1.0f) {
          // Decay complete -- zero motors
          if (s_prevLeft != 0 || s_prevRight != 0) {
-            XINPUT_VIBRATION vib = { 0, 0 };
-            s_XInputSetState(0, &vib);
+            set_motors(0, 0);
             s_prevLeft = s_prevRight = 0;
          }
       } else {
          float scale = 1.0f - t;
          WORD wL = (WORD)(s_gameOverDecayLeft  * scale * 65535.0f);
          WORD wR = (WORD)(s_gameOverDecayRight * scale * 65535.0f);
-         XINPUT_VIBRATION vib = { wL, wR };
-         s_XInputSetState(0, &vib);
+         set_motors(wL, wR);
          s_prevLeft = wL;
          s_prevRight = wR;
       }
@@ -531,8 +537,7 @@ static bool __fastcall hooked_weapon_update(void* weapon, void* /*edx*/, float d
    // Safety: if motors are stuck on but output_vibration stopped being called
    // (e.g. player died, weapons destroyed), force zero after 300ms.
    if ((s_prevLeft != 0 || s_prevRight != 0) && seconds_since(s_lastOutputTime) > 0.3f) {
-      XINPUT_VIBRATION vib = { 0, 0 };
-      s_XInputSetState(0, &vib);
+      set_motors(0, 0);
       s_prevLeft = s_prevRight = 0;
       s_damageActive = false;
       s_recoilActive = false;
@@ -667,7 +672,7 @@ void rumble_init(uintptr_t exe_base)
    if (!g_rumbleEnabled) return;
    if (s_rumble_initialized) return;
 
-   if (!load_xinput()) {
+   if (!gamepad_sdl_active() && !load_xinput()) {
       g_rumbleEnabled = false;
       return;
    }
@@ -811,10 +816,7 @@ void rumble_shutdown()
    original_dispatch = nullptr;
    original_weapon_update = nullptr;
 
-   if (s_XInputSetState) {
-      XINPUT_VIBRATION vib = { 0, 0 };
-      s_XInputSetState(0, &vib);
-   }
+   if (can_rumble()) set_motors(0, 0);
    if (s_xinputDll) {
       FreeLibrary(s_xinputDll);
       s_xinputDll = nullptr;

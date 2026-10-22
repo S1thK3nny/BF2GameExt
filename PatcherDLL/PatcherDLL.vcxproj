@@ -184,6 +184,7 @@
     <ClInclude Include="src\entity\combo_anim_layout.hpp" />
     <ClInclude Include="src\entity\odf_gameext_props.hpp" />
     <ClInclude Include="src\controller\controller_support.hpp" />
+    <ClInclude Include="src\controller\gamepad_sdl.hpp" />
     <ClInclude Include="src\controller\menu_navigation.hpp" />
     <None Include="src\controller\menu_navigation_shell.inc" />
     <ClInclude Include="src\controller\controller_rumble.hpp" />
@@ -319,6 +320,7 @@
     <ClCompile Include="src\shell\gc_visual_limits.cpp" />
     <ClCompile Include="src\shell\ingame_movie_path.cpp" />
     <ClCompile Include="src\controller\controller_support.cpp" />
+    <ClCompile Include="src\controller\gamepad_sdl.cpp" />
     <ClCompile Include="src\controller\menu_navigation.cpp" />
     <ClCompile Include="src\controller\controller_rumble.cpp" />
     <ClCompile Include="src\controller\aim_assist.cpp" />
