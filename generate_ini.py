@@ -515,6 +515,15 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
     L.append("| B on an options screen | Cancel: your changes on that screen are undone, the same as the Cancel button |")
     L.append("")
     L.append(
+        "> **A pad read through plain DirectInput** (no `SDL3.dll`, or a pad SDL does "
+        "not recognise, other than an Xbox pad) numbers its buttons its own way, so a "
+        "PS2 adapter's R1 would land on Start and pause the game. On such a pad only "
+        "the d-pad and left stick drive the menus, any of the first four face buttons "
+        "accepts, and Start, Back, LB/RB, X and Y do nothing in menus. "
+        "`BF2GameExt.log` says which applies under `[MenuNav] pad buttons`."
+    )
+    L.append("")
+    L.append(
         "In **Instant Action**, left and right move between the columns (settings, "
         "maps, mode and era, playlist, buttons) and up and down move inside one. In the "
         "buttons under the lists, the d-pad moves to the nearest button in that direction. A clicks "
@@ -524,7 +533,9 @@ def write_controller_md(modes, inputs, actions, version, path: Path):
         "setting reaches the buttons under the list. On the settings pages, B steps back "
         "to the page list on the left, and LT and RT step through the pages. On the "
         "**Controls** screen the bindings list sits between the settings and the buttons; "
-        "A on a binding waits for the next key or pad button, like a click does."
+        "A on a binding waits for the next key or pad button, like a click does. "
+        "The pad button you bind does not also act in the menu: the pad leaves "
+        "the menu alone until you let go of it."
     )
     L.append("")
     L.append(

@@ -29,5 +29,10 @@ void gamepad_sdl_install(uintptr_t exe_base);
 // True once the engine was handed SDL pads.
 bool gamepad_sdl_active();
 
+// Called each time the game creates DirectInput, with true when its pad
+// buttons come in Xbox order: SDL pads, or an XInput pad read directly.
+// Other DirectInput pads number their buttons however they like.
+void gamepad_set_layout_listener(void (*fn)(bool xbox));
+
 // Rumble the first pad, motors 0..65535. False when SDL pads are not in use.
 bool gamepad_sdl_rumble(uint16_t low, uint16_t high);

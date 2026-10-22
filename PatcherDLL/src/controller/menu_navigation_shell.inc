@@ -1046,6 +1046,32 @@ PadShortcuts(ifs_opt_pcsound, RESET, OK, CANCEL)
 -- Pad presses are bindings on the controls screen, so only B here.
 PadShortcuts(ifs_opt_pccontrols, nil, nil, CANCEL)
 
+-- The press-a-key prompt reads the raw pad, so the press that binds must not
+-- reach the menu too: the pad is muted while the prompt is up and until it is
+-- let go after it.
+local KeyPress = ifs_opt_pckeyboard_Popup_KeyPress
+if ((type(KeyPress) == "table") and (type(ifs_opt_pccontrols) == "table") and GameExt_PadMute) then
+	local muted = nil
+	local enter = KeyPress.Enter
+	KeyPress.Enter = function(this, a)
+		GameExt_PadMute(1)
+		muted = 1
+		if (enter) then return enter(this, a) end
+	end
+	local update, exit = ifs_opt_pccontrols.Update, ifs_opt_pccontrols.Exit
+	ifs_opt_pccontrols.Update = function(this, fDt)
+		if (muted and (gCurPopup ~= KeyPress) and (GameExt_PadMute(0) == 1)) then muted = nil end
+		if (update) then return update(this, fDt) end
+	end
+	ifs_opt_pccontrols.Exit = function(this, a)
+		if (muted) then
+			GameExt_PadMute(0, 1)
+			muted = nil
+		end
+		if (exit) then return exit(this, a) end
+	end
+end
+
 ---------------------------------------------------------------------------
 -- Galactic Conquest. Every GC screen on PC only acts on Accept when the mouse
 -- is on its _accept button, so a pad A is that button, as on console. The

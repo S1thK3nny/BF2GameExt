@@ -710,16 +710,9 @@ static bool product_vid_pid(const GUID& g, uint16_t* vid, uint16_t* pid)
    return true;
 }
 
-static bool sdl_reads(IDirectInput8A* real, LPCDIDEVICEINSTANCEA inst)
+// An XInput pad has "IG_" in its device path.
+static bool is_xinput(IDirectInput8A* real, LPCDIDEVICEINSTANCEA inst)
 {
-   uint16_t vid, pid;
-   if (product_vid_pid(inst->guidProduct, &vid, &pid)) {
-      for (int i = 0; i < s_slotCount; ++i)
-         if (s_slots[i].vid == vid && s_slots[i].pid == pid) return true;
-   }
-
-   // An XInput pad ("IG_" in its path) is always one of SDL's, even when the
-   // ids SDL reports for it differ from DirectInput's.
    IDirectInputDevice8A* dev = nullptr;
    if (FAILED(real->CreateDevice(inst->guidInstance, &dev, nullptr)) || !dev) return false;
    DIPROPGUIDANDPATH path = {};
@@ -730,6 +723,38 @@ static bool sdl_reads(IDirectInput8A* real, LPCDIDEVICEINSTANCEA inst)
                        (wcsstr(path.wszPath, L"IG_") || wcsstr(path.wszPath, L"ig_"));
    dev->Release();
    return xinput;
+}
+
+static bool sdl_reads(IDirectInput8A* real, LPCDIDEVICEINSTANCEA inst)
+{
+   uint16_t vid, pid;
+   if (product_vid_pid(inst->guidProduct, &vid, &pid)) {
+      for (int i = 0; i < s_slotCount; ++i)
+         if (s_slots[i].vid == vid && s_slots[i].pid == pid) return true;
+   }
+
+   // An XInput pad is always one of SDL's, even when the ids SDL reports for
+   // it differ from DirectInput's.
+   return is_xinput(real, inst);
+}
+
+struct XInputProbe {
+   IDirectInput8A* real;
+   bool            found;
+};
+
+static BOOL CALLBACK probe_xinput(LPCDIDEVICEINSTANCEA inst, LPVOID ctx)
+{
+   XInputProbe* p = (XInputProbe*)ctx;
+   p->found = is_xinput(p->real, inst);
+   return p->found ? DIENUM_STOP : DIENUM_CONTINUE;
+}
+
+static bool xinput_attached(IDirectInput8A* real)
+{
+   XInputProbe probe = {real, false};
+   real->EnumDevices(DI8DEVCLASS_GAMECTRL, probe_xinput, &probe, DIEDFL_ATTACHEDONLY);
+   return probe.found;
 }
 
 struct EnumFilter {
@@ -834,6 +859,9 @@ private:
 
 using fn_di8_create_t = HRESULT(WINAPI*)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 static fn_di8_create_t s_origCreate = nullptr;
+static void (*s_layoutListener)(bool xbox) = nullptr;
+
+void gamepad_set_layout_listener(void (*fn)(bool xbox)) { s_layoutListener = fn; }
 
 static bool called_by_sdl(void* ret)
 {
@@ -850,8 +878,11 @@ static HRESULT WINAPI hooked_DirectInput8Create(HINSTANCE inst, DWORD version, R
    if (FAILED(hr) || !out || !*out || outer || !IsEqualIID(riid, kIID_IDirectInput8A)) return hr;
    // SDL's own DirectInput backend gets the real thing.
    if (called_by_sdl(ret)) return hr;
-   if (!g_controllerEnabled || !sdl_start()) return hr;
-   *out = static_cast<IDirectInput8A*>(new DirectInputWrapper((IDirectInput8A*)*out));
+   if (!g_controllerEnabled) return hr;
+   IDirectInput8A* const real = (IDirectInput8A*)*out;
+   const bool sdl = sdl_start();
+   if (sdl) *out = static_cast<IDirectInput8A*>(new DirectInputWrapper(real));
+   if (s_layoutListener) s_layoutListener(sdl || xinput_attached(real));
    return hr;
 }
 

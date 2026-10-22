@@ -85,8 +85,32 @@ static void build_stock_table(UIBindingRow* out)
    out[0x4B].keyA = eGUIINPUT_Down;        // wheel down
 }
 
+// Buttons, hats and axes: every row a pad can drive.
+static constexpr int kPadRows = 64;
+
 static UIBindingRow* s_table = nullptr;
 static UIBindingRow  s_tableOrig[kNumRows] = {};
+static bool          s_xboxPad = false;
+static bool          s_padMuted = false;
+static UIBindingRow  s_unmutedRows[kPadRows] = {};
+
+static bool is_button(int raw) { return raw < eCONTROLLERINPUT_HAT0_UP; }
+
+// The button rows only mean A, B, Start... on a pad in Xbox order. A PS2
+// adapter reports R1 as button 7, so other pads keep the stock button rows.
+static void apply_pad_layout(bool xbox)
+{
+   s_xboxPad = xbox;
+   if (!s_table) return;
+   for (const auto& b : kMenuNav) {
+      if (!is_button(b.raw)) continue;
+      const UIBindingRow row = xbox ? UIBindingRow{ b.gui, eGUIINPUT_NONE } : s_tableOrig[b.raw];
+      if (s_padMuted) s_unmutedRows[b.raw] = row;
+      else            protected_write(&s_table[b.raw], &row, sizeof(row));
+   }
+   install_log("[MenuNav] pad buttons %s", xbox ? "in Xbox order, menu buttons on"
+                                                : "in an unknown order, menu buttons left stock");
+}
 
 static void install_ui_table(uintptr_t exe_base)
 {
@@ -103,7 +127,9 @@ static void install_ui_table(uintptr_t exe_base)
 
    memcpy(s_tableOrig, table, kTableSize);
    s_table = table;
-   for (const auto& b : kMenuNav) table[b.raw] = { b.gui, eGUIINPUT_NONE };
+   for (const auto& b : kMenuNav)
+      if (!is_button(b.raw)) table[b.raw] = { b.gui, eGUIINPUT_NONE };
+   gamepad_set_layout_listener(apply_pad_layout);
 }
 
 
@@ -119,7 +145,7 @@ constexpr int      kNumDevices   = 10;
 
 static const float* s_raw = nullptr;
 
-static float pad(int raw)
+static float pad_raw(int raw)
 {
    float v = 0.0f;
    for (int d = 0; d < kNumDevices; ++d) {
@@ -128,6 +154,9 @@ static float pad(int raw)
    }
    return v;
 }
+
+// What the menus see of the pad: nothing while it is muted for rebinding.
+static float pad(int raw) { return s_padMuted ? 0.0f : pad_raw(raw); }
 
 // SDL pads report LT on Z and RT on RZ. Without them, XInput reports the two
 // separately, and plain DirectInput folds them into one Z axis whose sign
@@ -169,22 +198,74 @@ static bool xinput_triggers(float& lt, float& rt)
    return true;
 }
 
+static void read_triggers(float& lt, float& rt)
+{
+   if (gamepad_sdl_active()) {
+      if (s_raw) {
+         lt = pad_raw(eCONTROLLERINPUT_Z_POS);
+         rt = pad_raw(eCONTROLLERINPUT_RZ_POS);
+      }
+   }
+   else if (!xinput_triggers(lt, rt) && s_raw) {
+      lt = pad_raw(eCONTROLLERINPUT_Z_POS);
+      rt = pad_raw(eCONTROLLERINPUT_Z_NEG);
+   }
+}
+
+// =============================================================================
+// Rebinding
+//
+// The Controls screen's press-a-key prompt reads the raw pad, and the menu
+// read the same press: binding B also pressed Cancel, LT switched the tab, A
+// reopened the prompt. While the prompt is up, and until the pad is let go
+// after it, the pad drives no menu.
+// =============================================================================
+
+static bool pad_idle()
+{
+   if (s_raw)
+      for (int raw = 0; raw < kPadRows; ++raw)
+         if (pad_raw(raw) >= 0.5f) return false;
+   float lt = 0.0f, rt = 0.0f;
+   read_triggers(lt, rt);
+   return lt <= 0.2f && rt <= 0.2f;
+}
+
+static void pad_mute(bool on)
+{
+   if (on == s_padMuted) return;
+   s_padMuted = on;
+   if (!s_table) return;
+   if (on) {
+      memcpy(s_unmutedRows, s_table, sizeof(s_unmutedRows));
+      UIBindingRow none[kPadRows];
+      for (auto& r : none) r = { eGUIINPUT_NONE, eGUIINPUT_NONE };
+      protected_write(s_table, none, sizeof(none));
+   }
+   else {
+      protected_write(s_table, s_unmutedRows, sizeof(s_unmutedRows));
+   }
+}
+
+// GameExt_PadMute(1) mutes the pad. GameExt_PadMute(0) unmutes it once every
+// input is let go, GameExt_PadMute(0, 1) at once. Returns 1 when unmuted.
+static int __cdecl lua_pad_mute(lua_State* L)
+{
+   const bool on = g_lua.tonumber && g_lua.tonumber(L, 1) != 0.0f;
+   const bool force = g_lua.gettop && g_lua.gettop(L) >= 2 && g_lua.tonumber(L, 2) != 0.0f;
+   if (on) pad_mute(true);
+   else if (force || pad_idle()) pad_mute(false);
+   g_lua.pushnumber(L, s_padMuted ? 0.0f : 1.0f);
+   return 1;
+}
+
 // GameExt_PadTriggers() -> lt, rt as 1/0, with hysteresis so a resting finger
 // does not chatter.
 static int __cdecl lua_pad_triggers(lua_State* L)
 {
    static bool ltOn = false, rtOn = false;
    float lt = 0.0f, rt = 0.0f;
-   if (gamepad_sdl_active()) {
-      if (s_raw) {
-         lt = pad(eCONTROLLERINPUT_Z_POS);
-         rt = pad(eCONTROLLERINPUT_RZ_POS);
-      }
-   }
-   else if (!xinput_triggers(lt, rt) && s_raw) {
-      lt = pad(eCONTROLLERINPUT_Z_POS);
-      rt = pad(eCONTROLLERINPUT_Z_NEG);
-   }
+   if (!s_padMuted) read_triggers(lt, rt);
    ltOn = ltOn ? lt > 0.2f : lt > 0.5f;
    rtOn = rtOn ? rt > 0.2f : rt > 0.5f;
    g_lua.pushnumber(L, ltOn ? 1.0f : 0.0f);
@@ -212,7 +293,7 @@ static int __cdecl lua_pad_dir(lua_State* L)
 static int __cdecl lua_pad_button(lua_State* L)
 {
    const int n = g_lua.tonumber ? (int)g_lua.tonumber(L, 1) : -1;
-   const bool down = s_raw && n >= 0 && n < 16 && pad(eCONTROLLERINPUT_BUTTON0 + n) >= 0.5f;
+   const bool down = s_raw && s_xboxPad && n >= 0 && n < 16 && pad(eCONTROLLERINPUT_BUTTON0 + n) >= 0.5f;
    g_lua.pushnumber(L, down ? 1.0f : 0.0f);
    return 1;
 }
@@ -292,7 +373,10 @@ static lua_State**        s_luaStatePtr       = nullptr;
 static void run_pad_script(lua_State* L)
 {
    if (!L) return;
+   // A fresh state: nothing is left to unmute the pad from the old one.
+   pad_mute(false);
    lua_register_func(L, "GameExt_PadTriggers", lua_pad_triggers);
+   lua_register_func(L, "GameExt_PadMute", lua_pad_mute);
    lua_register_func(L, "GameExt_PadDir", lua_pad_dir);
    lua_register_func(L, "GameExt_PadButton", lua_pad_button);
    lua_register_func(L, "GameExt_PadStick", lua_pad_stick);
@@ -485,8 +569,8 @@ static void __fastcall hooked_update_input(uint8_t* self, void* /*edx*/)
    const bool dDown  = pad(eCONTROLLERINPUT_HAT0_DOWN)  >= 0.5f || pad(eCONTROLLERINPUT_Y_POS) >= 0.5f;
    const bool dLeft  = pad(eCONTROLLERINPUT_HAT0_LEFT)  >= 0.5f || pad(eCONTROLLERINPUT_X_NEG) >= 0.5f;
    const bool dRight = pad(eCONTROLLERINPUT_HAT0_RIGHT) >= 0.5f || pad(eCONTROLLERINPUT_X_POS) >= 0.5f;
-   const bool dLB    = pad(eCONTROLLERINPUT_BUTTON4) >= 0.5f;
-   const bool dRB    = pad(eCONTROLLERINPUT_BUTTON5) >= 0.5f;
+   const bool dLB    = s_xboxPad && pad(eCONTROLLERINPUT_BUTTON4) >= 0.5f;
+   const bool dRB    = s_xboxPad && pad(eCONTROLLERINPUT_BUTTON5) >= 0.5f;
 
    // Re-entering the screen: anything still held from before is not a press.
    if (now - lastCall > 0.25) {
@@ -500,8 +584,11 @@ static void __fastcall hooked_update_input(uint8_t* self, void* /*edx*/)
    const bool goTeam = fire(lb, dLB, now, false) | fire(rb, dRB, now, false);
    const bool goPrev = fire(left, dLeft, now), goNext = fire(right, dRight, now);
    const bool canSwitch = *(int*)(self + spawn::kMode) != spawn::kModeChangeClass;
-   const bool padAccept = ((float*)(s_gui + kGuiProcessed))[eGUIINPUT_Accept] >= 0.125f &&
-                          pad(eCONTROLLERINPUT_BUTTON0) >= 0.5f;
+   // The stock rows make the first four buttons Accept.
+   bool padButton = pad(eCONTROLLERINPUT_BUTTON0) >= 0.5f;
+   for (int b = eCONTROLLERINPUT_BUTTON1; b <= eCONTROLLERINPUT_BUTTON3 && !s_xboxPad; ++b)
+      padButton = padButton || pad(b) >= 0.5f;
+   const bool padAccept = ((float*)(s_gui + kGuiProcessed))[eGUIINPUT_Accept] >= 0.125f && padButton;
 
    void* target = nullptr;
    if (padAccept)
@@ -577,6 +664,8 @@ void menu_navigation_install(uintptr_t exe_base)
 
 void menu_navigation_uninstall()
 {
+   gamepad_set_layout_listener(nullptr);
+   s_padMuted = false;
    if (s_table) {
       protected_write(s_table, s_tableOrig, kTableSize);
       s_table = nullptr;
