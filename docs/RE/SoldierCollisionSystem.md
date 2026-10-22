@@ -19,7 +19,8 @@ The engine already has everything a riot shield needs:
 - collision models hold up to **64 bodies** with **8 independent per-body masks**, so a body
   can block ordnance without being targetable;
 - soldiers get a **per-instance dynamic collision model** whose bodies from index 2 upward are
-  copied straight out of a per-stance class collision model;
+  copied straight out of a per-stance class collision model (six engine-built bodies per
+  stance today, eight when prone, see [Infantry collision shapes](#infantry-collision-shapes));
 - damage is already resolved **per body** through a multiplier table, which is how headshots
   work.
 
@@ -170,30 +171,128 @@ viable "blocks, but is not hittable" tag.
 `EntitySoldier::SetCollisionStance(stance)` (`0x57A1C0`) builds the per-instance model:
 
 ```c
-if (this->mAcklayData) return;                       // acklay skips the capsule system
-// bodies 0 and 1 = head and torso, sized procedurally from mClass->mCollisionRootScale
+if (this->mAcklayData) return;                       // acklay skips the stance system
+// bodies 0 and 1 = head and torso; only their positions are rewritten per stance
 for (i = 2; i < GetNumBodies(&this->mDynamicCollisionModel); i++)
     SetBody(&this->mDynamicCollisionModel, i,
             GetBody((CollisionModel*)((char*)mClass + stanceOffset), i));
 CollisionObject::SetCollisionModel(&this->CollisionObject, &this->mDynamicCollisionModel);
 ```
 
-Per-stance constants (all scaled by `EntitySoldierClass::mCollisionRootScale` except the bare
-head radii; the decompiler collapses the individual field stores, so the mapping of each
-constant to head-radius / torso-height / vertical-offset is inferred from the ordering and is
-not certain):
+The head and torso writes are the translation rows of instance bodies 0 and 1. With
+`s = mCollisionRootScale`:
 
-| Stance | Constants |
+| Stance | Head (x, y, z) | Torso (x, y, z) |
+|---|---|---|
+| 0 stand | `(0, s * 1.65, 0.16)` | `(0, s * 1.15, 0)` |
+| 1 crouch | `(0, s * 1.2, 0.25)` | `(0, s * 0.7, 0)` |
+| 2 prone | `(0, s * 0.28, s * 0.75)` | `(0, 0, 0)` |
+
+These match the positions `PostReadSetup` gives the same bodies (below), except prone, where
+`PostReadSetup` also offsets the head by `x = -0.07`. The sizes come from the class model and
+are never changed here.
+
+**Bodies 0 and 1 are the head and torso. Everything from index 2 upward is copied verbatim
+from the class's per-stance model into every instance, per stance.** Every non-acklay soldier
+class already has four or six bodies at index 2+ (next section). Extra attached geometry would
+be appended after them and gets per-stance shapes for free.
+
+### Infantry collision shapes
+
+`EntitySoldierClass::PostReadSetup` (modtools `0x531880`) builds every body procedurally. No
+ODF or mesh data is involved apart from three scale fields, all defaulting to `1.0` in the
+class constructor:
+
+| Field | Modtools offset | Symbol |
+|---|---|---|
+| `s` | `class+0x136C` | `mCollisionRootScale` |
+| `H` | `class+0x11F8` | `m_fCollisionHeadScale` |
+| `T` | `class+0x11FC` | `m_fCollisionTorsoScale` |
+
+Stance models on modtools are at `class+0xCB0` / `+0xDFC` / `+0xF48` (stride `0x14C`), and the
+dead-body model is at `+0x1094`.
+
+Primitive conventions, from `CollisionPrimitive::SetAACylinder` / `SetBox` and
+`CollideAACylinder`:
+
+- **Cylinders** are upright (axis aligned). The second argument is the **full height**, centred
+  on the body position. `CollideBoxCylinder` is passed `height * 0.5` as the half height.
+- **Boxes** take **half extents** `(width, height, depth)`. The bounding radius is
+  `sqrt(w*w + h*h + d*d)`.
+- Positions below are body centres `(x, y, z)` relative to the unit origin. +Z is probably
+  forward (prone head sits at `+0.75`), not verified.
+
+Head radius = `0.17 * max(s, 1) * H`. Torso radius = `0.4 * s * T`. **No other radius is
+scaled**: `s` stretches heights and Y positions only, so a large `CollisionRootScale` makes a
+unit taller, not wider.
+
+**Stand** (`s = 1` values in brackets)
+
+| Body | Shape | Size | Centre |
+|---|---|---|---|
+| `coll_head` | sphere | r `0.17` | `(0, 1.65s, 0.16)` |
+| `coll_torso` | sphere | r `0.40` | `(0, 1.15s, 0)` |
+| `coll_body` | cylinder | r `0.35`, h `1.1s` | `(0, 0.55s, 0)` (spans 0 to 1.10) |
+| `main_body` | cylinder | r `0.57`, h `1.65s` | `(0, 0.9s, 0)` (spans 0.075 to 1.725) |
+| `coll_body_lower` | sphere | r `0.57` | `(0, 0.57, 0.15)` |
+| `coll_body_upper` | sphere | r `0.57` | `(0, 1.9s - 0.42, 0.15)` [1.48] |
+
+**Crouch**
+
+| Body | Shape | Size | Centre |
+|---|---|---|---|
+| `coll_head` | sphere | r `0.17` | `(0, 1.2s, 0.25)` |
+| `coll_torso` | sphere | r `0.40` | `(0, 0.7s, 0)` |
+| `coll_body` | cylinder | r `0.35`, h `0.7s` | `(0, 0.35s, 0)` (spans 0 to 0.70) |
+| `main_body` | cylinder | r `0.45`, h `1.45s` | `(0, 0.65s, 0)` |
+| `coll_body_lower` | sphere | r `0.57` | `(0, 0.57, 0.15)` |
+| `coll_body_upper` | sphere | r `0.57` | `(0, 1.6s - 0.42, 0.15)` [1.18] |
+
+`coll_body_upper` falls back to `(0, 0.627, 0.15)` (lower sphere plus `0.057`) when
+`1.9s - 0.57` (stand) or `1.6s - 0.57` (crouch) is `<= 0.57`. Its final position is also
+copied into the camera safe point of the stance's camera settings.
+
+**Prone** (`k = 0.8s - 0.1925`, `0.6075` at `s = 1`)
+
+| Body | Shape | Size | Centre |
+|---|---|---|---|
+| `coll_head` | sphere | r `0.17` | `(-0.07, 0.28s, 0.75s)` |
+| `coll_torso` | sphere | r `0.01` (effectively off) | `(0, 0, 0)` |
+| `coll_body` | box | half `(0.25, 0.2, 0.87s)` = 0.5 x 0.4 x 1.74 | `(0, 0.2, -0.25s)` |
+| `main_body` | cylinder | r `0.8`, h `0.45s` | `(0, 0.25s, 0)` |
+| `coll_body_medium` | sphere | r `0.8` | `(0, 0.72, 0.333k)` |
+| `coll_body_upper` | sphere | r `0.385` | `(0, 0.3465, k)` |
+| `coll_body_lower` | sphere | r `0.385` | `(0, 0.3465, -k)` |
+| `coll_body_medium2` | sphere | r `0.385` | `(0, 0.3465, -0.333k)` |
+
+The prone `coll_body_medium` sphere reaches `y = 1.52`, well above a prone unit. That is what
+the code builds.
+
+The **dead-body model** reuses the four prone spheres (`coll_body_medium`, `_upper`,
+`_lower`, `_medium2`) with the same sizes. It collides with terrain and statics only. Soft,
+rigid and ordnance masks are cleared.
+
+**Mask assignment** (per stance, by body name hash):
+
+| Mask | Bodies | Meaning |
+|---|---|---|
+| ordnance (`0x400`) | `coll_head`, `coll_torso`, `coll_body` | what bullets hit |
+| soft (`0x2`) | `main_body` | soldier/vehicle push volume |
+| rigid (`0x8`), static (`0x10`), terrain (`0x80`) | `coll_body_lower`, `coll_body_upper`, `coll_body_medium`, `coll_body_medium2` | world collision |
+
+| Body | PblHash |
 |---|---|
-| 0 stand | `0.16`, `scale * 1.65`, `scale * 1.15` |
-| 1 crouch | `0.25`, `scale * 1.2`, `scale * 0.7` |
-| 2 prone | `scale * 0.28`, `scale * 0.75`, `0.0` |
+| `coll_head` | `0xE8B9E01A` |
+| `coll_torso` | `0xCA25B9F3` |
+| `coll_body` | `0x34FCD074` |
+| `main_body` | `0xFE858165` |
+| `coll_body_lower` | `0x9458FB2E` |
+| `coll_body_upper` | `0x2C31EC5B` |
+| `coll_body_medium` | `0x0DB3CAEA` |
+| `coll_body_medium2` | `0x6A085208` |
 
-**Bodies 0 and 1 are reserved for the engine's head and torso capsules. Everything from index
-2 upward is copied verbatim from the class's per-stance model into every instance, per
-stance.** That loop already exists and already runs; it is a no-op today only because nothing
-ever puts a body at index >= 2 on a soldier class. It is the natural insertion point for
-attached collision geometry, and it gets per-stance shapes for free.
+Body 0 (`coll_head`) is also the body the default `HitLocation` entry points at, which is the
+3x headshot multiplier.
 
 ---
 
@@ -292,9 +391,10 @@ a warning - the collision is not consumed by anything on the soldier path.
 **Can a soldier collision body follow an animated bone?**
 
 `CollisionBody` has `mParentHashName` (`+0x58`) and `CollisionObject` has a
-`mProcedurallyAnimated` bit, so the engine has the concept. But `SetCollisionStance` writes
-identity matrices for the head and torso bodies and copies bodies 2+ verbatim, which reads
-like object-space volumes positioned relative to the entity rather than bone-driven ones.
+`mProcedurallyAnimated` bit, so the engine has the concept. But every stock soldier body is
+built with a fixed matrix relative to the unit origin, and `SetCollisionStance` only moves the
+head and torso between three fixed per-stance positions. So the stock shapes are object-space
+volumes, not bone-driven ones.
 
 If soldier collision bodies do not track the skeleton, a shield volume would be a fixed box
 relative to the unit's origin - acceptable for a unit locked in a shield-block stance, wrong
@@ -321,7 +421,7 @@ Three smaller unknowns:
 | Symbol | Address |
 |---|---|
 | `EntitySoldierClass::SetProperty` | `0x57ABC0` |
-| `EntitySoldierClass::PostReadSetup` | `0x572A90` |
+| `EntitySoldierClass::PostReadSetup` | `0x572A90` (modtools `0x531880`) |
 | `EntitySoldierClass::Build` | `0x56AF70` |
 | `EntitySoldier::EntitySoldier` | `0x565F80` |
 | `EntitySoldier::SetCollisionStance` | `0x57A1C0` |
@@ -334,6 +434,9 @@ Three smaller unknowns:
 | `CollisionModel::GetMaskId` | `0x4B8E80` |
 | `CollisionModel::GetNameFromMaskId` | `0x4B8EC0` |
 | `CollisionModel::AddPrimitive` | `0x4B76A0` (thunk `0x403CC9`) |
+| `CollisionPrimitive::SetAACylinder` | `0x4BFE80` |
+| `CollisionPrimitive::SetBox` | `0x4BFEC0` |
+| `CollisionPrimitive::CollideAACylinder` | `0x4BAAC0` |
 | `SoldierAnimatorClass::SetupBodyMasks` | `0x75D4D0` (thunk `0x407D56`) |
 | collision-primitive registry | `0xABD384` |
 | `"geo_inf_acklay%d"` | `0x9F5504` |
