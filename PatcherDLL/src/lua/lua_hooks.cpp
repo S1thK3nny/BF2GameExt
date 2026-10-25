@@ -27,6 +27,7 @@
 #include "weapon/held_ordnance_effect.hpp"
 #include "weapon/dual_cannon.hpp"
 #include "debug_commands/command_registry.hpp"
+#include "shell/pause_freecam_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
@@ -168,6 +169,7 @@ static void __cdecl hooked_init_state()
    soldier_override_texture_reset();
    held_ordnance_effect_reset(); // old level's effect/weapon pointers are no longer valid
    freecam_light_reset(); // its pool block did not survive the level change
+   pause_freecam_fix_reset(); // pause menu still thinks the last match was in freecam
    foleyfx_region_reset(); // the old map's regions went with its heap
    directional_rolls_reset(); // the old map's animations went with it
    directional_jets_reset();  // and the jets' with them

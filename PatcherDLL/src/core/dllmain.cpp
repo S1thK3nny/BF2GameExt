@@ -76,6 +76,7 @@
 #include "weapon/lightsaber_illumination.hpp"
 #include "shell/dlc_mission_init_fix.hpp"
 #include "shell/map_queue_fix.hpp"
+#include "shell/pause_freecam_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
 #include "util/crash_logger.hpp"
 #include "util/ini_state.hpp"
@@ -430,6 +431,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    // Before the saber lights: its uninstall deactivates our own lights, and those
    // calls should go through the guard.
    red_light_stale_node_fix_install(exe_base);
+   pause_freecam_fix_install(exe_base);
    lightsaber_illumination_install(exe_base);
 
    for (int i = 0; i < file_header.NumberOfSections; ++i) {

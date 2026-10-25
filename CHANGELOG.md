@@ -300,6 +300,10 @@ Scripts can check the running version through `GameExt.version` or
   has no `ExplosionDestruct` is removed.
 - A multiplayer client on Steam or GOG no longer crashes when a grappling hook is
   fired from a weapon that is not a grappling hook weapon.
+- After a match that ended in free camera, the pause menu's Free Camera button did
+  nothing the first time it was pressed in the next match, and only its label
+  changed. It now enters the free camera on the first press, in Modtools and with
+  the v1.3 patch.
 
 ## 1.0.0
 

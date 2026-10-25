@@ -67,6 +67,42 @@ the incoming matrix, which is why entering the free camera does not snap the vie
 `GameLoop::sFreeMode` has exactly three references in the binary and exactly one consumer:
 `SnapCamera`.
 
+### Pause-menu state across missions
+
+`PauseMenu::_SetFreeCamera` (modtools `0x00680B90`, only caller `SetFreeCamera` `0x006819C0`)
+flips `mFreecamSetting` (+0x20). It does something only when that differs from `mFreecamView`
+(+0x19), the state actually applied, and it enters freecam only while the menu is visible:
+pop the screen, clear `mVisible`, `GameLoop::SetFreeMode(new)` (`0x007334E0`, which
+early-outs when `sFreeMode` already matches). `ifs_pausemenu.lua` keeps a third copy,
+`bChaseCam`, which it toggles blind before calling `ScriptCB_Freecamera`.
+
+`PauseMenu::_Init` (`0x00680600`, every mission) clears `mFreecamSetting` but not
+`mFreecamView`. Only the static constructor (`0x00680450`) zeroes that. Nothing ever clears
+`sFreeMode`. The Lua state is rebuilt per mission, so `bChaseCam` starts nil. Leave a match in
+freecam and the next one starts with Setting 0, View 1, `sFreeMode` 1:
+
+1. Setting goes to 1, equal to View: nothing happens, but Lua's label flips to "followcam".
+2. Setting goes to 0: the menu closes and "exits" a freecam that never started.
+3. Works.
+
+Fixed by `pause_freecam_fix_reset` (`PatcherDLL/src/shell/pause_freecam_fix.cpp`), which
+clears `mFreecamView` for every camera and `sFreeMode` from the `init_state` hook. Both writes
+are raw because the `CameraManager` is new by then. Stock retail hides the button through
+`gFinalBuild`; the v1.3 patch shows it again.
+
+Retail has the same bug. The function bodies match modtools field for field:
+
+| | modtools | Steam | GOG |
+|---|---|---|---|
+| `_SetFreeCamera` | `0x00680B90` | `0x006169A0` | `0x00617A40` |
+| `_Init` | `0x00680600` | `0x00616530` | `0x006175D0` |
+| `PauseMenu[]` pointer | `0x00AD6F64` | `0x007E8EEC` | `0x007E9EEC` |
+| `GameLoop::mNumCameras` | `0x00ADB1E8` | `0x007E668C` | `0x007E768C` |
+| `GameLoop::sFreeMode` | `0x00C6AAE9` | `0x01E5600B` | `0x01E574B7` |
+
+On retail `_SetFreeCamera` always toggles (no bool argument), and `sFreeMode` is read only by
+`SetFreeMode` itself, since `SnapCamera` is gone.
+
 ## Per-frame update
 
 `FreeCamera::Update` in order:

@@ -231,6 +231,7 @@
     <ClInclude Include="src\weapon\lightsaber_illumination.hpp" />
     <ClInclude Include="src\shell\dlc_mission_init_fix.hpp" />
     <ClInclude Include="src\shell\map_queue_fix.hpp" />
+    <ClInclude Include="src\shell\pause_freecam_fix.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\core\pch.cpp">
@@ -347,6 +348,7 @@
     <ClCompile Include="src\weapon\lightsaber_illumination.cpp" />
     <ClCompile Include="src\shell\dlc_mission_init_fix.cpp" />
     <ClCompile Include="src\shell\map_queue_fix.cpp" />
+    <ClCompile Include="src\shell\pause_freecam_fix.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Resource.rc" />

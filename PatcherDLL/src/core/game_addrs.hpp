@@ -913,6 +913,13 @@ namespace modtools {
    constexpr uintptr_t freecam_following_tethered   = 0x00B76C37;
    constexpr uintptr_t freecam_follow_this_obj      = 0x00B76C9C;
 
+   // Pause-menu freecam state that survives a mission change.  PauseMenu::_Init
+   // (0x00680600) clears mFreecamSetting (+0x20) but not mFreecamView (+0x19),
+   // and nothing ever clears GameLoop::sFreeMode - see pause_freecam_fix.cpp.
+   constexpr uintptr_t pause_menu_instances_ptr     = 0x00AD6F64;  // -> PauseMenu[], stride 0x64
+   constexpr uintptr_t game_loop_num_cameras        = 0x00ADB1E8;  // GameLoop::mNumCameras
+   constexpr uintptr_t game_loop_free_mode          = 0x00C6AAE9;  // GameLoop::sFreeMode
+
    // ---- Debug Console (RedCommandConsole) ------------------------------------
 
    constexpr uintptr_t console_add_variable        = 0x007ed530;
@@ -2029,6 +2036,12 @@ namespace steam {
    // ---- Debug / Visualization ------------------------------------------------
 
    constexpr uintptr_t freecam_update            = 0x0052D7B0;  // FreeCamera vtable (0x79f304) slot 1
+
+   // Pause-menu freecam state (see modtools).  _SetFreeCamera 0x006169A0 and
+   // _Init 0x00616530 use the same +0x19/+0x20 fields and 0x64 stride.
+   constexpr uintptr_t pause_menu_instances_ptr  = 0x007E8EEC;
+   constexpr uintptr_t game_loop_num_cameras     = 0x007E668C;  // PauseMenu::Reset's loop bound
+   constexpr uintptr_t game_loop_free_mode       = 0x01E5600B;  // only GameLoop::SetFreeMode 0x00533600 reads it
 
    // ---- Vehicle view toggle (FP/TP) ------------------------------------------
 
@@ -3512,6 +3525,12 @@ namespace gog {
    // ---- Debug / Visualization ---------------------------------------------------
 
    constexpr uintptr_t freecam_update                 = 0x0052d7b0;
+
+   // Pause-menu freecam state, ported from Steam (_SetFreeCamera 0x00617A40 and
+   // _Init 0x006175D0 match it instruction for instruction).
+   constexpr uintptr_t pause_menu_instances_ptr       = 0x007E9EEC;
+   constexpr uintptr_t game_loop_num_cameras          = 0x007E768C;
+   constexpr uintptr_t game_loop_free_mode            = 0x01E574B7;
 
    // ---- Vehicle view toggle (FP/TP) ---------------------------------------------
 
