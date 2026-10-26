@@ -6,6 +6,9 @@
 #include "util/install_log.hpp"
 
 #include <windows.h>
+#include <detours.h>
+#include <intrin.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -881,6 +884,133 @@ void report_registries()
    }
 }
 
+// ===========================================================================
+// Effect table freeze warning.
+//
+// The freeze itself stays (see the header), but it no longer happens silently.
+// _Find is detoured; calls on the effect table run a bounded copy of the
+// engine's probe, and when that copy finds the table full with the key absent
+// the reason goes to both logs before the call is handed to the original, which
+// then spins exactly as before.  Other tables pass straight through.
+// ===========================================================================
+
+using fn_find_t = void*(__cdecl*)(const uint32_t* table, int size, uint32_t key);
+
+fn_find_t       s_origFind  = nullptr;
+const uint32_t* s_fxKeys    = nullptr;
+const uint32_t* s_fxCount   = nullptr;
+uintptr_t       s_fxReadRet = 0;
+
+// Return address of FLEffect::Read's duplicate check, the `push 0x200 / push
+// table / call _Find` right before its _Store.  A miss there is a registration;
+// a miss anywhere else is a lookup of an effect that was never loaded.
+uintptr_t fx_read_find_return()
+{
+   switch (g_build) {
+   case GameBuild::Modtools: return 0x00764060;
+   case GameBuild::Steam:
+   case GameBuild::GOG:      return 0x00526EFD;
+   default:                  return 0;
+   }
+}
+
+void* __cdecl hooked_find(const uint32_t* table, int size, uint32_t key)
+{
+   if (table != s_fxKeys || key == 0) return s_origFind(table, size, key);
+
+   const bool registering = (uintptr_t)_ReturnAddress() == s_fxReadRet;
+
+   // Same walk as the engine: backwards from key & (cap - 1), wrapping at 0.
+   const int cap = size >> 1;
+   int slot = (int)(key & (uint32_t)(cap - 1));
+   for (int n = 0; n < cap; ++n) {
+      const uint32_t k = table[slot];
+      if (k == key) return (void*)(uintptr_t)table[slot + cap];
+      if (k == 0) {
+         if (registering && *s_fxCount == kEffectClassSlots - 1) {
+            install_log("[EffectClasses] This map now uses all %u effect slots. The game will freeze"
+                        " if it loads another effect or asks for one that is not loaded.",
+                        kEffectClassSlots);
+            warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                         "[EffectClasses] This map now uses all %u effect slots. The game will"
+                         " freeze if it loads another effect or asks for one that is not loaded.",
+                         kEffectClassSlots);
+         }
+         return nullptr;
+      }
+      slot = slot ? slot - 1 : cap - 1;
+   }
+
+   // Full and absent: the original never returns from here.
+   if (registering) {
+      install_log("[EffectClasses] The game is about to freeze: this map loads more than %u"
+                  " different effects (.fx), the most the engine can hold, and effect %08X does"
+                  " not fit. Use fewer different effects in this map.", kEffectClassSlots, key);
+      warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                   "[EffectClasses] The game is about to freeze: this map loads more than %u"
+                   " different effects (.fx), the most the engine can hold, and effect %08X does"
+                   " not fit. Use fewer different effects in this map.", kEffectClassSlots, key);
+   }
+   else {
+      const uint32_t caller = (uint32_t)((uintptr_t)_ReturnAddress() - s_exeBase + 0x400000);
+      install_log("[EffectClasses] The game is about to freeze: all %u effect slots are in use and"
+                  " the game asked for effect %08X, which is not loaded (lookup at %08X). Use fewer"
+                  " different effects in this map, or fix the effect name if it is misspelled.",
+                  kEffectClassSlots, key, caller);
+      warn_gamelog(RED_SEVERITY_ERROR, SRC_FILE, __LINE__,
+                   "[EffectClasses] The game is about to freeze: all %u effect slots are in use and"
+                   " the game asked for effect %08X, which is not loaded (lookup at %08X). Use"
+                   " fewer different effects in this map, or fix the effect name if it is"
+                   " misspelled.", kEffectClassSlots, key, caller);
+   }
+   return s_origFind(table, size, key);
+}
+
+void install_fx_freeze_warning()
+{
+   if (!g_addr->pbl_hash_table_find || !g_addr->fx_effect_classes_table ||
+       !g_addr->fx_effect_classes_count || !fx_read_find_return())
+      return;
+
+   // modtools: MOV EDX,[ESP+8] / SAR EDX,1; retail: PUSH EBP / MOV EBP,ESP / MOV EDX,[EBP+0C] / SAR EDX,1
+   static const uint8_t kModtools[] = {0x8B, 0x54, 0x24, 0x08, 0xD1, 0xFA};
+   static const uint8_t kRetail[]   = {0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x0C, 0xD1, 0xFA};
+   const bool mt = g_build == GameBuild::Modtools;
+   const uint8_t* const find = (const uint8_t*)resolve(s_exeBase, g_addr->pbl_hash_table_find);
+   if (memcmp(find, mt ? kModtools : kRetail, mt ? sizeof(kModtools) : sizeof(kRetail)) != 0) {
+      install_log("[EffectClasses] freeze warning not installed: _Find at %08X does not match",
+                  (unsigned)g_addr->pbl_hash_table_find);
+      return;
+   }
+
+   s_fxKeys    = (const uint32_t*)resolve(s_exeBase, g_addr->fx_effect_classes_table);
+   s_fxCount   = (const uint32_t*)resolve(s_exeBase, g_addr->fx_effect_classes_count);
+   s_fxReadRet = (uintptr_t)resolve(s_exeBase, fx_read_find_return());
+   s_origFind  = (fn_find_t)find;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   const LONG attach = DetourAttach(reinterpret_cast<PVOID*>(&s_origFind), hooked_find);
+   const LONG commit = DetourTransactionCommit();
+   if (attach != NO_ERROR || commit != NO_ERROR) {
+      install_log("[EffectClasses] freeze warning not installed: DetourAttach=%ld commit=%ld",
+                  attach, commit);
+      s_origFind = nullptr;
+      return;
+   }
+   install_log("[EffectClasses] installed: warns before a full effect table freezes the game");
+}
+
+void uninstall_fx_freeze_warning()
+{
+   if (!s_origFind) return;
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourDetach(reinterpret_cast<PVOID*>(&s_origFind), hooked_find);
+   DetourTransactionCommit();
+   s_origFind = nullptr;
+}
+
 } // namespace
 
 void content_census_report()
@@ -946,6 +1076,7 @@ void content_census_report()
 void content_census_install(uintptr_t exe_base)
 {
    s_exeBase = exe_base;
+   install_fx_freeze_warning(); // always on, independent of the report interval
    if (g_contentCensusInterval <= 0) return;
 
    s_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -964,4 +1095,5 @@ void content_census_uninstall()
       s_thread = nullptr;
    }
    if (s_stop) { CloseHandle(s_stop); s_stop = nullptr; }
+   uninstall_fx_freeze_warning();
 }

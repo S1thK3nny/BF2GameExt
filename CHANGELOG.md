@@ -184,6 +184,10 @@ Scripts can check the running version through `GameExt.version` or
   previously off.
 - Starting the game on the original 2006 executable now names that as the problem,
   instead of a generic failure. That executable is still not supported.
+- A map that loads more than 256 different effects still freezes while loading,
+  because the engine has no room for more, but the log now says why just before it
+  happens. The same goes for a map at exactly 256 that later asks for an effect it
+  never loaded, and the log also warns when a map fills the last slot.
 - **Going prone is now a committed move.** It plays the weapon handling sound,
   and your input is held for the length of the getdown animation instead of
   letting you walk out of it halfway. On the modtools executable it also plays

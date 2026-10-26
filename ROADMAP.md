@@ -324,6 +324,12 @@ pad can already drive, and writes straight to `.padbinds`.
 
 ## Lua API
 
+**User scripts** - Lua that runs in the shell or in every mission without being part of a map,
+loaded from each mod's own folder (`addon\<Mod>\userscripts\` or `userscripts\<Mod>\`). No
+numbering like v1.3's `user_script_<N>` and no ID or in-game registration like Remaster's. The
+entry script is the one named `main`, and helpers load from the same lvl, so internal names
+never collide between mods. Design in [docs/RE/UserScriptSystem.md](docs/RE/UserScriptSystem.md).
+
 **`GetProperty` / `GetClassProperty`** - The read side of the existing `SetProperty` /
 `SetClassProperty` pair. Same entity and class lookup, same property name resolution,
 returning the current value instead of writing one. The sound entity limitation above

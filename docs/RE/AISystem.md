@@ -202,7 +202,39 @@ A global system that scales AI parameters based on difficulty setting. Uses `mPr
 `EnableAutoBalance`, `GetAutoBalanceMode`, `AutoBalanceActive`, `GetAutoBalanceScores`, `UpdateAutoBalance` - dynamic difficulty adjustment during gameplay.
 
 ### Space Assault cheats
-`SpaceAssault_CheatLikeABastard`, `SpaceAssault_RandomFlyerKill`, `SpaceAssault_RandomCritSysDamage` - the AI literally cheats in space assault mode by randomly killing player fighters and damaging critical systems on a timer.
+`SpaceAssault_CheatLikeABastard` is called from the end of `UpdateAutoBalance` (ticked by `ControllerManager::DoPeriodicUpdate`). It does nothing unless all of these hold:
+- `AutoBalanceActive()`: auto-balance is on. `AIDifficulty::Init` enables it every mission; Lua `DisableAIAutoBalance` turns it (and the cheat) off.
+- `GetAutoBalanceMode() == 1`: a `SpaceAssault` instance exists and is enabled, and the gameplay type is not 1-flag, 2-flag or campaign.
+- `IsPlayerTeam(1) != IsPlayerTeam(2)`: single player (or local co-op on one team). `IsPlayerTeam` is always false with networking on, so multiplayer never cheats.
+- Mission time is at least 30 s.
+
+Two independent timers, `mNextFlyerKillTime` and `mNextCritSysDamageTime` (seeded by `SpaceAssault_Init`), each roll `GetRandomInt(0,100)` to pick the team that suffers:
+
+**Flyer kill** (`SpaceAssault_RandomFlyerKill(team)`): picks a victim flyer on `team` and a flyer on the opposing team as the killer, then calls the victim's `Damageable` vtable slot 6, which stores the killer as the last damager and sets health to 0. Instant death, credited to the enemy. `SpaceAssault_GetFlyerKillForPlayerTeam` is a flat 0.4: the player's team loses the fighter 60% of the time, the enemy 40%.
+
+**Critical system damage** (`SpaceAssault_RandomCritSysDamage(team)`): picks a random critical system of `team` via `SpaceAssault::GetRandomCritSys` (`IsOkForRandom`: owned by `team`, marker shown, health > 0) and a flyer on the opposing team as the attacker. It loops over the attacker's weapons and keeps the one with the highest `max(CalcDamagePerSecond, 2 x average damage)` against that system, then applies one `DamageDesc` of `min(5 x that DPS, 15000, system's current health)` credited to the attacker. That is about five seconds of focused fire in one frame, enough to finish a system outright. The player's team gets the hit `GetCritSysKillForPlayerTeam` = `lerp(0.40, 0.25, skill)` of the time, so its own capital ship takes it 60% to 75% of the time.
+
+Both picks go through `GetRandomFlyer`, which skips any flyer with a human aboard (`CountHumansInVehicle > 0`) and any flyer inside a camera view (`CameraManager::IsInsideAnyCamera`, 100 to 3000). The player is never the victim and never sees it happen; ships vanish off-screen and show up as enemy kills.
+
+**Timing.** `skill` is `GetFloatSkill(nullptr, true)`, the enemy-side skill including `mAutoBalanceEnemyModifier`, mapped to 0..1.
+
+| | skill 0 | skill 1 |
+|---|---|---|
+| Flyer kill interval | 45 to 100 s | 15 to 60 s |
+| Crit system interval | 25 to 45 s | 10 to 12 s |
+| Player team scores the crit hit | 40% | 25% |
+
+The enemy-side skill is `base + script modifier + mAutoBalanceEnemyModifier`, clamped to 1..20 and mapped to 0..1 as `(n - 1) / 19`. Base per difficulty is easy 4, medium 14, hard 17 (the player's team uses 6, 11, 11). The script modifier is the second argument of Lua `SetAIDifficulty(player, enemy[, "easy"|"medium"|"hard"])`. With no script modifier and no auto-balance:
+
+| Difficulty | skill | Flyer kill interval | Crit system interval | Player team scores the crit hit |
+|---|---|---|---|---|
+| Easy | 0.16 | 40 to 94 s | 23 to 40 s | 38% |
+| Medium | 0.68 | 25 to 73 s | 15 to 22 s | 30% |
+| Hard | 0.84 | 20 to 66 s | 12 to 17 s | 27% |
+
+Each new interval is also multiplied by `1 / (1 - mAutoBalancePlayerModifier)` when that modifier is negative, otherwise by 1.
+
+**Rubber-banding.** In mode 1, `GetAutoBalanceScores` compares team points with a 20 point dead zone and a step of 10. The player's lead gets +10 when the enemy team is below 50% reinforcements and +20 below 25%. Past the dead zone, `mAutoBalanceEnemyModifier = (gap - 20) / 10` and the player modifier is its negative, both clamped to +-4. A winning player raises enemy skill (shorter timers, smaller crit share) and gets the timer multiplier, up to 5x faster. A losing player lowers enemy skill, but the multiplier never slows the timers and the odds never favour the player's team.
 
 ---
 
@@ -657,4 +689,4 @@ The AI deliberately misses shots via `DumbDown` (1270 bytes) and `CalculateBubbl
 
 ## Key Insight: Space Assault AI Cheats
 
-`SpaceAssault_CheatLikeABastard` is a real function name from the PDB. It runs on a timer and calls `SpaceAssault_RandomFlyerKill` (picks a random enemy flyer and kills it) and `SpaceAssault_RandomCritSysDamage` (damages a random critical system). The AI doesn't actually outfly you in space - it just rolls dice and destroys things.
+In single player space assault, `SpaceAssault_CheatLikeABastard` runs on two timers: one instantly kills a random off-screen AI fighter, the other deals a burst of damage to a random critical system. The dice favour the enemy (60% fighters, 60% to 75% systems), and the timers speed up the further the player's team leads. It never touches a ship with a human aboard. See [Space Assault cheats](#space-assault-cheats).

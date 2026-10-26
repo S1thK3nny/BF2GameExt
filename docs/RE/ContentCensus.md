@@ -48,6 +48,19 @@ typo'd `AttachEffect` line produces - hangs during level load.
 | Steam | `0x004477DF`, `0x004478E7` | `0x01EBD144` |
 | GOG | `0x004477BF`, `0x004478C7` | `0x01EBE5F4` |
 
+Seen in the wild on modtools: a full dump showed the main thread inside the probe loop, called
+from `FLEffect::Read`'s duplicate check (return `0x00764060`), with the counter at 256 and key
+`0xBC811FD7` (a `ParticleEmitter` class). The class name appears nowhere in memory as a string,
+so the lvl stores only the hash.
+
+The freeze is not prevented, but it is announced. `content_census.cpp` detours `_Find` on every
+build. Calls on `s_EffectClasses` run a bounded copy of the probe. When that copy finds the table
+full and the key absent, it writes to `BF2GameExt.log` and the game log, then hands the call to the
+original. A miss whose return address is the registrar's duplicate check (modtools `0x00764060`,
+Steam/GOG `0x00526EFD`) is reported as a 257th class; any other miss as a lookup of an effect that
+was never loaded, with the caller's address. A registration that takes the last free slot logs
+a warning ahead of time. This is always on and independent of `[Diagnostic] ContentCensus`.
+
 This is a different condition from the 64-entry attachment overflow that
 `[Fixes] AttachedEffectsOverflowFix` handles (see [EngineLimits.md](EngineLimits.md)).
 
