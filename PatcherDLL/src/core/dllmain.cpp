@@ -30,6 +30,7 @@
 #include "entity/prone_lvl_load.hpp"
 #include "entity/terrain_texture_fix.hpp"
 #include "entity/hover_pilot_null_fix.hpp"
+#include "entity/chunk_section_guard.hpp"
 #include "entity/attached_effects_cleanup.hpp"
 #include "entity/soldier_bone_effect_null_fix.hpp"
 #include "entity/ai_squad_order_null_fix.hpp"
@@ -425,6 +426,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    reservation_pool_install(exe_base); // byte-patches .text - needs the RW window
    content_census_install(exe_base);   // read-only; starts its own reporting thread
    scene_tree_depth_guard_install(exe_base); // crash fix, always on
+   chunk_section_guard_install(exe_base);    // crash fix, always on
    prop_generator_fix_install(exe_base);     // rewrites a CALL rel32 - needs the RW window
    ai_update_budget_install(exe_base); // byte-patches .text — needs the RW window
    memory_pool_heap_fix_install(exe_base);

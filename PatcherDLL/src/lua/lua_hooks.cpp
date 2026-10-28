@@ -41,6 +41,7 @@
 #include "ai/ai_decision_rate.hpp"
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
+#include "entity/chunk_section_guard.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
 #include "render/prop_generator_fix.hpp"
@@ -385,6 +386,7 @@ void lua_hooks_uninstall()
    ai_decision_rate_uninstall();
    reservation_pool_uninstall();
    content_census_uninstall();
+   chunk_section_guard_uninstall();
    ai_update_budget_uninstall();
    memory_pool_heap_fix_uninstall();
 

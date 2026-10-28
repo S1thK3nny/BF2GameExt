@@ -201,6 +201,13 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Fixed
 
+- A destruction chunk whose `ChunkGeometryName` was not loaded, or was loaded without
+  any collision, crashed the game while the map loaded, and so did chunk properties
+  that came before their section's `ChunkGeometryName`. Steam and GOG logged nothing,
+  and modtools only a missing model. That chunk is now left out with an error that
+  names the geometry and section, and the same goes for an explosion's chunk. A
+  `CHUNKSECTION` other than `CHUNK1` to `CHUNK9` is now logged instead of silently
+  ignored.
 - Primary and secondary fire could not be held together on an Xbox pad, because
   both triggers shared one axis and cancelled each other out. Each trigger now has
   its own, so the secondary fires the moment it is ready while you keep firing the

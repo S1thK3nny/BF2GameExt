@@ -675,6 +675,20 @@ namespace modtools {
    constexpr uintptr_t disguise_drop               = 0x0062A180;
    constexpr uintptr_t game_model_table            = 0x00B76CC4;
 
+   // ---- Chunk sections (entity/chunk_section_guard.cpp) -------------------------
+   // Both SetProperty are virtual, so plain __thiscall on every build.
+   // EntityGeometryClass keeps CHUNKSECTION's slot in a static int (-1 = none)
+   // and one chunk descriptor pointer per slot in the class.  The two collision
+   // tables are what ChunkGeometryName searches: primitives as "<name><n>"
+   // (CollisionBodyPrimitive::Read, 0x00428BE0), then the collision mesh as
+   // "<name>".  All three tables are _Find(table, 0x800, hash).
+   constexpr uintptr_t entity_geometry_class_set_property = 0x00506580;
+   constexpr uintptr_t explosion_class_set_property       = 0x00600F10;
+   constexpr uintptr_t chunk_section_index                = 0x00ACDD14;
+   constexpr uintptr_t chunk_descriptors_off              = 0x88;
+   constexpr uintptr_t collision_primitive_table          = 0x00AFE19C;
+   constexpr uintptr_t collision_mesh_table               = 0x00B00CAC;
+
    // ---- Entity / Soldier jetpack ------------------------------------------------
    // EntitySoldier::SetFirstPersonView (0x53CC60), the `CALL TurnOffJetEffect`
    // it makes when entering first person.  ECX = the EntitySoldier base
@@ -2504,6 +2518,17 @@ namespace steam {
    constexpr uintptr_t disguise_set_property     = 0x00683430;  // WeaponDisguiseClass::SetProperty (unique hit of key hash 0x8da6fec5 in .text)
    constexpr uintptr_t game_model_table          = 0x01ec1234;  // GameModel hash table (positional _Find call match in building SetProperty; xref count 12 vs 14)
 
+   // ---- Chunk sections (see modtools for docs) ----------------------------------
+   // Found by the ChunkGeometryName/ChunkSection compares (81 FE imm32); both
+   // functions are vtable entries (0x0079B64C, 0x0079E8C8).  Retail has no
+   // "missing chunk geometry" warning at all.
+   constexpr uintptr_t entity_geometry_class_set_property = 0x004BBCE0;
+   constexpr uintptr_t explosion_class_set_property       = 0x0051CFF0;
+   constexpr uintptr_t chunk_section_index                = 0x007E650C;
+   constexpr uintptr_t chunk_descriptors_off              = 0x68;
+   constexpr uintptr_t collision_primitive_table          = 0x01EB136C;
+   constexpr uintptr_t collision_mesh_table               = 0x01EB3394;
+
    // ---- Weapon / Animated Lightsaber Textures (see modtools for docs) ----------
    // Steam/GOG _RenderLightsabre is an LTCG hybrid (ECX=pos, EDX=dir, 5 stack
    // args, caller-clean).  Blade array is at WeaponMeleeClass+0x2C8.
@@ -3779,6 +3804,15 @@ namespace gog {
    constexpr uintptr_t prt_tweak_color_expected       = 0x007df144;
    constexpr uintptr_t disguise_set_property          = 0x006844a0;
    constexpr uintptr_t game_model_table               = 0x01ec26b4;
+
+   // ---- Chunk sections (see modtools for docs) ----------------------------------
+   // Same code addresses as Steam; vtable entries 0x0079C5EC, 0x0079F868.
+   constexpr uintptr_t entity_geometry_class_set_property = 0x004BBCE0;
+   constexpr uintptr_t explosion_class_set_property       = 0x0051CFF0;
+   constexpr uintptr_t chunk_section_index                = 0x007E750C;
+   constexpr uintptr_t chunk_descriptors_off              = 0x68;
+   constexpr uintptr_t collision_primitive_table          = 0x01EB27DC;
+   constexpr uintptr_t collision_mesh_table               = 0x01EB484C;
 
    // ---- Lua core / character system (ported 2026-07-20) -------------------------
 
