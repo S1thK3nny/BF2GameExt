@@ -307,6 +307,9 @@ Scripts can check the running version through `GameExt.version` or
 - The game no longer crashes, usually on the first spawn, on a map whose terrain
   paints a foliage layer its props do not define when a map that did define that
   layer was played earlier in the session.
+- A map whose terrain was munged with foliage but without its terrain info no longer
+  crashes the game when it is restarted or left. Its foliage props stay off and the
+  log names the map and says to use Clear Foliage in WorldEdit and munge again.
 - A multiplayer client no longer crashes when a landed or crashed aircraft whose ODF
   has no `ExplosionDestruct` is removed.
 - A multiplayer client on Steam or GOG no longer crashes when a grappling hook is

@@ -1624,6 +1624,18 @@ namespace modtools {
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0073BBF9;
 
+   // CALL SetupClusters at the end of PropGenerator::Read (prp_ chunk). Guarded so
+   // a map with foliage but no terrain INFO skips it instead of building
+   // 0x80000000 clusters that crash Cleanup.
+   constexpr uintptr_t prop_generator_read_setup_call = 0x0073B858;
+   constexpr uintptr_t prop_generator_setup_clusters  = 0x0073AF50;
+   // RedTerrain::_bEnable (byte): set by the terrain INFO block, cleared per map.
+   constexpr uintptr_t red_terrain_enable             = 0x00CF6FE4;
+   // RedTerrain::_fMetersPerPoint (float), the terrain grid scale from INFO.
+   constexpr uintptr_t red_terrain_meters_per_point   = 0x00CF6F88;
+   // PropGenerator::mLoaded (byte), gates PropGenerator::Update.
+   constexpr uintptr_t prop_generator_loaded          = 0x00C6BAD9;
+
    // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
    //      entity/directional_rolls.cpp) -----------------------------------------
 
@@ -3031,6 +3043,18 @@ namespace steam {
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062A146;
 
+   // CALL SetupClusters at the end of PropGenerator::Read (prp_ chunk). Guarded so
+   // a map with foliage but no terrain INFO skips it instead of building
+   // 0x80000000 clusters that crash Cleanup.
+   constexpr uintptr_t prop_generator_read_setup_call = 0x0062B353;
+   constexpr uintptr_t prop_generator_setup_clusters  = 0x0062B370;
+   // RedTerrain::_bEnable (byte): set by the terrain INFO block, cleared per map.
+   constexpr uintptr_t red_terrain_enable             = 0x0093EAB4;
+   // RedTerrain::_fMetersPerPoint (float), the terrain grid scale from INFO.
+   constexpr uintptr_t red_terrain_meters_per_point   = 0x0093E980;
+   // PropGenerator::mLoaded (byte), gates PropGenerator::Update.
+   constexpr uintptr_t prop_generator_loaded          = 0x01EAEFF4;
+
    // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
    //      entity/directional_rolls.cpp) -----------------------------------------
 
@@ -4139,6 +4163,18 @@ namespace gog {
    // (ECX = layer).  The reset clears the mesh count but not the layer's
    // RedLodData* at +0x90.
    constexpr uintptr_t prop_generator_cleanup_layer_reset_call = 0x0062B1D6;
+
+   // CALL SetupClusters at the end of PropGenerator::Read (prp_ chunk). Guarded so
+   // a map with foliage but no terrain INFO skips it instead of building
+   // 0x80000000 clusters that crash Cleanup.
+   constexpr uintptr_t prop_generator_read_setup_call = 0x0062C3E3;
+   constexpr uintptr_t prop_generator_setup_clusters  = 0x0062C400;
+   // RedTerrain::_bEnable (byte): set by the terrain INFO block, cleared per map.
+   constexpr uintptr_t red_terrain_enable             = 0x0093FF54;
+   // RedTerrain::_fMetersPerPoint (float), the terrain grid scale from INFO.
+   constexpr uintptr_t red_terrain_meters_per_point   = 0x0093FE20;
+   // PropGenerator::mLoaded (byte), gates PropGenerator::Update.
+   constexpr uintptr_t prop_generator_loaded          = 0x01EB047B;
 
    // ---- Soldier animation tables and directional rolls (entity/soldier_anim_tables.cpp,
    //      entity/directional_rolls.cpp) -----------------------------------------

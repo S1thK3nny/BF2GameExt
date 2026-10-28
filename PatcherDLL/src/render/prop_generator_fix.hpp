@@ -13,6 +13,14 @@
 // the renderer crashes in RedLodManager (AV READ 0 at Steam 0x7174A4), usually
 // on the first spawn.
 //
+// Foliage without a terrain grid. PropGenerator::Read sizes the cluster table
+// from RedTerrain::_fMetersPerPoint, which only the terrain INFO block sets. A
+// map munged with FOLG but no INFO leaves it 0 (or stale), 100/0 converts to
+// 0x80000000 clusters, and PropGenerator::Cleanup reads cluster[-1] as NULL
+// when the map is left (AV READ 0x48 at Steam 0x629C14). SetupClusters is now
+// skipped unless this map loaded INFO (RedTerrain::_bEnable) with a positive
+// scale; props are left off, like a map without foliage, and the log says why.
+//
 // Always on. This is a crash fix, not a feature.
 // =============================================================================
 
