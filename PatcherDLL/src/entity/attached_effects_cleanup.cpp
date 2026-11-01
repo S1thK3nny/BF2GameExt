@@ -81,6 +81,11 @@
 //
 // so deregistration from the effect manager is the engine's business, not ours.
 //
+// AttachOdf entries hold an EntityLight instead. StopAndFinish only flags it for
+// removal, and EntityLight::Update (Steam 0x004CD300) never reads the flag and
+// always returns true, so the light would stay lit. Those are turned off through
+// DeactivateEffect (TurnOff) instead; the light object itself is still leaked.
+//
 // Installed by replacing slot 0 of the AttachedEffects vftable rather than by
 // patching code.  The slot is exact - it cannot catch another class - the
 // original pointer is what we chain to, and uninstall is a single dword store.
@@ -99,11 +104,13 @@
 //                          +0x2C  AttachData*           m_aAttachData
 //     AttachedEffectsClass +0x00  AttachClassData*      entries
 //                          +0x04  uint8_t               count
+//     AttachClassData(0x14)+0x08  uint32_t              flags, bit 0 = AttachOdf
 //     AttachData (0xC)     +0x00  FLEffectObject*       effect
 //                          +0x04  uint32_t              savedHandleId
 //                          +0x08  float                 timer
 //     FLEffectObject       +0x1C  uint32_t              handle id
-//                          vftable + 0x20               destroy (__thiscall)
+//                          vftable + 0x1C               DeactivateEffect (__thiscall)
+//                          vftable + 0x20               StopAndFinish (__thiscall)
 //
 // Read off AttachedEffects::Update on each build - modtools 0x004C1FF0,
 // Steam 0x00446F70, GOG 0x00446F50 - which uses every one of these offsets:
@@ -129,12 +136,17 @@ constexpr uint32_t kOffClass      = 0x18;
 constexpr uint32_t kOffAttachData = 0x2C;
 // AttachedEffectsClass
 constexpr uint32_t kOffCount = 0x04;
+// AttachClassData
+constexpr uint32_t kClassEntryStride = 0x14;
+constexpr uint32_t kOffClassFlags    = 0x08;
+constexpr uint32_t kClassFlagOdf     = 0x01;
 // AttachData
 constexpr uint32_t kAttachDataStride = 0x0C;
 constexpr uint32_t kOffSavedId       = 0x04;
 // FLEffectObject
-constexpr uint32_t kOffEffectId  = 0x1C;
-constexpr uint32_t kDestroySlot  = 0x20;
+constexpr uint32_t kOffEffectId    = 0x1C;
+constexpr uint32_t kTurnOffSlot    = 0x1C;
+constexpr uint32_t kDestroySlot    = 0x20;
 
 // The original slot-0 value, resolved. Also the chain target.
 void* s_origDtor = nullptr;
@@ -157,7 +169,8 @@ void __fastcall release_attached_effects(uint8_t* self)
    uint8_t* data = *(uint8_t**)(self + kOffAttachData);
    if (!cls || !data) return;
 
-   const uint32_t count = *(uint8_t*)(cls + kOffCount);
+   const uint32_t count   = *(uint8_t*)(cls + kOffCount);
+   uint8_t* const entries = *(uint8_t**)cls;
 
    for (uint32_t i = 0; i < count; ++i) {
       uint8_t* rec = data + i * kAttachDataStride;
@@ -172,9 +185,13 @@ void __fastcall release_attached_effects(uint8_t* self)
          continue;
       }
 
+      // An AttachOdf light ignores StopAndFinish, so turn it off instead.
+      const bool light = entries &&
+         (*(uint32_t*)(entries + i * kClassEntryStride + kOffClassFlags) & kClassFlagOdf);
+
       void** vtbl = *(void***)fx;
-      typedef void(__thiscall* Destroy_t)(void*);
-      ((Destroy_t)vtbl[kDestroySlot / sizeof(void*)])(fx);
+      typedef void(__thiscall* Release_t)(void*);
+      ((Release_t)vtbl[(light ? kTurnOffSlot : kDestroySlot) / sizeof(void*)])(fx);
 
       *(uint32_t*)rec                 = 0;
       *(uint32_t*)(rec + kOffSavedId) = 0;

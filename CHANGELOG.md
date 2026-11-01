@@ -152,6 +152,13 @@ Scripts can check the running version through `GameExt.version` or
   and soldiers using it crashed the game when they spawned; a bank whose parent bank
   had not loaded yet did the same. The log now names what was turned away as an error
   and says how to fix it.
+- **Bigger Galactic Conquest saves** - `ScriptCB_SaveMetagameState` can store up to
+  16 KB instead of 512 bytes. A state that fits in 512 bytes is still saved as a
+  stock `.gc` file that loads without BF2GameExt. Before, a state over 512 bytes was
+  cut off and saved anyway, and loaded back wrong or crashed the game. Now a state
+  too big to fit is not saved and the log says why. `GetMetagameSaveSize()` reports
+  how much room a state takes. See [Features](docs/user/FEATURES.md) and the
+  [Lua API](docs/user/LUA_API.md#galactic-conquest).
 
 ### Changed
 
@@ -220,6 +227,12 @@ Scripts can check the running version through `GameExt.version` or
 - A weapon whose aimer is locked straight down (`AimerPitchLimits = "-90 -90"`) fired
   nothing visible on Steam and GOG, while the same ODF worked in modtools. It now fires
   on every build.
+- A grenade or sticky ordnance with `AlignVertical = 0`, such as the Ewok spear,
+  disappeared as soon as it stopped bouncing and stayed invisible until it went off.
+  It now stays on the ground, lying the way it landed.
+- AT-AT, AT-TE and spider walker footsteps went quiet at high frame rates, often
+  after just the first step, and only came back while boosting. Walkers now play
+  their footsteps at any frame rate, the way they do at 30 FPS.
 - With a pad connected, every map load reset part of your controls: second keys and
   pad buttons bound in Options -> Controls were replaced by the pad layout. Your
   keyboard bindings now stay as you set them.
@@ -256,7 +269,8 @@ Scripts can check the running version through `GameExt.version` or
   gone deeper than any real map needs, and that group of objects is left as it
   is.
 - An effect attached with `AttachEffect` stayed on screen after the object that
-  carried it was deleted. The effect is now removed along with the object.
+  carried it was deleted. The effect is now removed along with the object, and a
+  light attached with `AttachOdf` now goes out with it.
 - **`SetCharacterWeapon` did nothing on Steam and GOG.** It asked the game whether the
   new weapon had animations for that unit in a way those two builds do not answer, so
   every swap was refused as if the animations were missing. It now works on all three

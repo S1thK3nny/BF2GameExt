@@ -53,10 +53,12 @@
 #include "ai/reservation_pool.hpp"
 #include "util/content_census.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "weapon/grenade_rest_render_fix.hpp"
 #include "entity/foleyfx_region_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
+#include "entity/walker_footstep_fix.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
@@ -79,6 +81,7 @@
 #include "shell/map_queue_fix.hpp"
 #include "shell/pause_freecam_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "shell/gc_save_limit.hpp"
 #include "util/crash_logger.hpp"
 #include "util/ini_state.hpp"
 #include "util/audio_stream_limit.hpp"
@@ -372,6 +375,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    particle_density_install(exe_base);     // byte-patches .text/.rdata
    particle_batch_spill_install(exe_base); // byte-patches .text — needs the RW window
    gc_visual_limits_install(exe_base); // byte-patches .text — needs the RW window
+   gc_save_limit_install(exe_base);    // byte-patches .text, always on
    hud_widescreen_install(exe_base);   // byte-patches .text — needs the RW window
    hud_weapon_icon_fix_install(exe_base);
    spawn_vehicle_list_install(exe_base);
@@ -393,6 +397,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
+   grenade_rest_render_fix_install(exe_base);
    gamepad_sdl_install(exe_base);             // Detours the DirectInput8Create the game imports
    controller_bindings_install(exe_base);     // Detours + a data patch - needs the RW window
    menu_navigation_install(exe_base);        // Detours + a .data table - needs the RW window
@@ -400,6 +405,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    branch_region_fix_install(exe_base);
    branch_region_debug_install(exe_base);
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window
+   walker_footstep_fix_install(exe_base);    // byte-patches .text - needs the RW window
    fp_fire_animation_fix_install(exe_base);  // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);

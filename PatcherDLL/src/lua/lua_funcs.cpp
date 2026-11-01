@@ -9,6 +9,7 @@
 #include "core/lvl_read.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/instance_props.hpp"
+#include "shell/gc_save_limit.hpp"
 #include "core/pbl_hash.hpp"
 #include "game/Battlefront2/Source/Character.h"
 #include "game/Battlefront2/Source/Weapon.h"
@@ -1726,6 +1727,7 @@ static int lua_GetMissionName(lua_State* L)
 static const lua_func_entry custom_functions[] = {
    { "ContentCensus",         lua_ContentCensus },
    { "GetMissionName",        lua_GetMissionName },
+   { "GetMetagameSaveSize",   lua_GetMetagameSaveSize },
    { "HttpGet",               lua_HttpGet },
    { "HttpPut",               lua_HttpPut },
    { "HttpPost",              lua_HttpPost },

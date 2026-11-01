@@ -42,6 +42,29 @@ namespace modtools {
    constexpr uintptr_t lua_settop        = 0x7B7E70;
    constexpr uintptr_t lua_insert        = 0x7B7F20;
    constexpr uintptr_t lua_newtable      = 0x7B8860;
+   // All plain __cdecl(L, idx). 0x7B84D0 is Ghidra's second "lua_touserdata"; its
+   // table/function/thread cases return the object pointer, so it is lua_topointer.
+   constexpr uintptr_t lua_type          = 0x7B7FE0;
+   constexpr uintptr_t lua_next          = 0x7B8DC0;
+   constexpr uintptr_t lua_pushvalue     = 0x7B7FB0;
+   constexpr uintptr_t lua_rawset        = 0x7B89A0;
+   constexpr uintptr_t lua_checkstack    = 0x7B7D50;
+   constexpr uintptr_t lua_topointer     = 0x7B84D0;
+
+   // ---- Galactic Conquest saves (shell/gc_save_limit.cpp) ----------------------
+   // SaveLuaItems(buf, cap) / LoadLuaItems(buf, len), both __cdecl, back
+   // ScriptCB_Save/Load{Metagame,Campaign}State and SaveMissionSetup.
+   // SaveFsm::QueueFile is __thiscall(fsm, name, dest, size, type, op). The four
+   // refs are the PUSH imm32 operands holding the 512 byte metagame buffer, in
+   // StartLoadMetagame, StartSaveMetagame, SaveMetagameState, LoadMetagameState.
+   constexpr uintptr_t save_lua_items                 = 0x00469880;
+   constexpr uintptr_t load_lua_items                 = 0x00469960;
+   constexpr uintptr_t save_fsm_queue_file            = 0x00749050;
+   constexpr uintptr_t metagame_buffer                = 0x00B31810;
+   constexpr uintptr_t metagame_buffer_ref_load       = 0x004678AD;
+   constexpr uintptr_t metagame_buffer_ref_save       = 0x004679A6;
+   constexpr uintptr_t metagame_buffer_ref_save_state = 0x00469AE6;
+   constexpr uintptr_t metagame_buffer_ref_load_state = 0x00469B07;
 
    // Stock Lua callback: CreateEntity(class, matrix, name). Detoured to apply
    // VehicleSpawn-style post-create fixup (team + activate) so vehicles
@@ -902,6 +925,18 @@ namespace modtools {
    // past the end of the 368-byte OrdnanceGrapplingHookClass.
    constexpr uintptr_t ordnance_bullet_render      = 0x00609950;
 
+   // OrdnanceGrenade::Render (displayable vtable 0x00A50E98 slot 19) and the
+   // OrdnanceGrenade ctor.  Ghidra labels both as OrdnanceGrapplingHook; they
+   // are the grenade's (OrdnanceGrenadeClass::Build allocates 0x13C and calls
+   // the ctor).  See weapon/grenade_rest_render_fix.hpp.
+   constexpr uintptr_t ordnance_grenade_render     = 0x0060FB80;
+   constexpr uintptr_t ordnance_grenade_ctor       = 0x0060FAB0;
+
+   // OrdnanceSticky::Render (displayable vtable 0x00A51838 slot 19, via ILT
+   // 0x00413994) and ctor.  Sticky derives from OrdnanceShell, not the grenade.
+   constexpr uintptr_t ordnance_sticky_render      = 0x00616AD0;
+   constexpr uintptr_t ordnance_sticky_ctor        = 0x00616A30;
+
    // Engine cable renderer.  Render() (displayable vtable 0x00A50D40 slot 19 ->
    // 0x006D14D0) draws the cable through sShader, which PlatformInit builds from
    // sTextureHash.  Shipping builds dropped the line that fills sTextureHash in,
@@ -953,6 +988,15 @@ namespace modtools {
    // no-op; see entity/flyer_carrier_fixes.cpp.
    constexpr uintptr_t command_walker_kill          = 0x006508B0;
    constexpr uintptr_t command_walker_post_off      = 0x2000;      // Damageable -> post
+
+   // EntityWalker::UpdateState (vtable thunk 0x004022B1), thiscall RET 0x14, dt
+   // first. It calls DoFootImpactEffects (0x00555B60), whose StompDetectionType 1
+   // branch compares the per-frame foot drop against the shared 0.1 at
+   // 0x00A2C074 with one FCOMP (D8 1D) at 0x00555D0F. ref0 is that operand.
+   // See entity/walker_footstep_fix.cpp.
+   constexpr uintptr_t walker_update_state          = 0x0055B3C0;
+   constexpr uintptr_t walker_step_threshold        = 0x00A2C074;
+   constexpr uintptr_t walker_step_threshold_ref0   = 0x00555D11;
 
    // Net send-list visitor, __cdecl(GameObject* obj, int depth), bare RET.  Passes
    // itself to obj->AddSends (vtable +0x10C).  Detoured to break pilot cycles that
@@ -1713,6 +1757,26 @@ namespace steam {
    constexpr uintptr_t lua_settop        = 0x69c400;
    constexpr uintptr_t lua_insert        = 0x69bc00;
    constexpr uintptr_t lua_newtable      = 0x69bdb0;
+   constexpr uintptr_t lua_type          = 0x69c680;
+   constexpr uintptr_t lua_next          = 0x69be70;
+   constexpr uintptr_t lua_pushvalue     = 0x69c0c0;
+   constexpr uintptr_t lua_rawset        = 0x69c1e0;
+   constexpr uintptr_t lua_checkstack    = 0x69b8e0;
+   constexpr uintptr_t lua_topointer     = 0x69c550;
+
+   // ---- Galactic Conquest saves (see modtools for docs) -------------------------
+   // LTCG: both Lua item functions take the buffer in EDX and the size on the
+   // stack, caller cleaned, and every caller uses only EAX after. QueueFile has
+   // no this here: __stdcall(name, dest, size, type, op), ret 0x14. Refs 0 and 1
+   // are PUSH imm32, refs 2 and 3 MOV EDX,imm32.
+   constexpr uintptr_t save_lua_items                 = 0x0058A8E0;
+   constexpr uintptr_t load_lua_items                 = 0x0058A960;
+   constexpr uintptr_t save_fsm_queue_file            = 0x00631830;
+   constexpr uintptr_t metagame_buffer                = 0x01F9C8D0;
+   constexpr uintptr_t metagame_buffer_ref_load       = 0x0058931D;
+   constexpr uintptr_t metagame_buffer_ref_save       = 0x005893E1;
+   constexpr uintptr_t metagame_buffer_ref_save_state = 0x0058A1A6;
+   constexpr uintptr_t metagame_buffer_ref_load_state = 0x0058A1C7;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ---------------
@@ -2085,6 +2149,14 @@ namespace steam {
    constexpr uintptr_t grapple_dtor              = 0x005ff360;  // ~OrdnanceGrapplingHook
    constexpr uintptr_t grapple_rtti_hash         = 0x01ebc054;  // EntitySoldier RTTI hash
 
+   // OrdnanceGrenade::Render (displayable vtable 0x007ACA80 slot 19) and ctor.
+   constexpr uintptr_t ordnance_grenade_render   = 0x006001A0;
+   constexpr uintptr_t ordnance_grenade_ctor     = 0x00600120;
+
+   // OrdnanceSticky::Render (displayable vtable 0x007AD08C slot 19) and ctor.
+   constexpr uintptr_t ordnance_sticky_render    = 0x006062C0;
+   constexpr uintptr_t ordnance_sticky_ctor      = 0x00605FD0;
+
    // ---- Animation (weapon/soldier) -------------------------------------------
 
    constexpr uintptr_t set_weapon_anim_map       = 0x0063f7b0;  // SetWeaponAnimationMap
@@ -2415,6 +2487,14 @@ namespace steam {
    constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
    constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
 
+   // EntityWalker::UpdateState, RET 0x14 like modtools. DoFootImpactEffects is
+   // FUN_00500710 here and loads the shared 0.1 twice: COMISS (0F 2F 05) at
+   // 0x00500888 and MOVSS (F3 0F 10 0D) at 0x0050089D.
+   constexpr uintptr_t walker_update_state         = 0x00502890;
+   constexpr uintptr_t walker_step_threshold       = 0x007B1F60;
+   constexpr uintptr_t walker_step_threshold_ref0  = 0x0050088B;
+   constexpr uintptr_t walker_step_threshold_ref1  = 0x005008A1;
+
    // Net send-list visitor -- same body as modtools (PUSH 0x005BD590 as its own
    // callback, list at [0x01FA65B4], count 0x01FA87A4 capped at 0x40), bare RET.
    constexpr uintptr_t net_send_visitor            = 0x005BD590;
@@ -2481,8 +2561,8 @@ namespace steam {
 
    constexpr uintptr_t anim_find_animation       = 0x00520f50;  // FindAnimation (name-matched)
    constexpr uintptr_t carrier_detach_cargo      = 0x00497410;  // DetachCargo (name-matched; adjacent to carrier_attach_cargo)
-   constexpr uintptr_t console_add_variable      = 0x0041fe80;  // RedCommandConsole::AddVariable (name-matched)
-   constexpr uintptr_t disguise_raise            = 0x00682f30;  // WhoTwiggedMe (name-matched)
+   constexpr uintptr_t console_add_variable      = 0x006ec9f0;  // RedCommandConsole::AddVariable (decomp)
+   constexpr uintptr_t disguise_raise            = 0x00682f30;  // WeaponDisguise::FinishRaisingDisguise (decomp)
    constexpr uintptr_t load_update_real          = 0x00576c00;  // LoadDisplay Update (adjacent to load_end_real)
    constexpr uintptr_t weapon_signal_fire        = 0x00679610;  // SignalFire (name-matched)
    constexpr uintptr_t snd_sound_play            = 0x0073a430;  // Snd::Play (gate: 7 shared callees + 2-source)
@@ -2496,7 +2576,6 @@ namespace steam {
    // MountedTurret::ActivatePhysics — called per turret by EntityFlyer::
    // ActivatePhysics 0x4b5f70 at 004b5fe6 (modtools 0x00563a90).
    constexpr uintptr_t turret_activate           = 0x005a7b70;
-   constexpr uintptr_t rumble_state_setup        = 0x006b2790;  // rumble state setup (2-source agreement)
 
    // ---- Flyer path following / engine sound --------------------------------
    constexpr uintptr_t path_follower_land_jg     = 0x004D52FD;  // EntityPathFollower::Update — JG gating the LandOnArrival check to node 0 (7F 42)
@@ -3343,6 +3422,24 @@ namespace gog {
    constexpr uintptr_t lua_settop                     = 0x0069d490;
    constexpr uintptr_t lua_insert                     = 0x0069cc90;
    constexpr uintptr_t lua_newtable                   = 0x0069ce40;
+   constexpr uintptr_t lua_type                       = 0x0069d710;
+   constexpr uintptr_t lua_next                       = 0x0069cf00;
+   constexpr uintptr_t lua_pushvalue                  = 0x0069d150;
+   constexpr uintptr_t lua_rawset                     = 0x0069d270;
+   constexpr uintptr_t lua_checkstack                 = 0x0069c970;
+   constexpr uintptr_t lua_topointer                  = 0x0069d5e0;
+
+   // ---- Galactic Conquest saves (see modtools/steam for docs) -------------------
+   // Ported from Steam with tools/port_gog.py, every entry score 1.00; the buffer
+   // came back with 4 agreeing votes and scan_sites finds exactly those 4 refs.
+   constexpr uintptr_t save_lua_items                 = 0x0058B890;
+   constexpr uintptr_t load_lua_items                 = 0x0058B910;
+   constexpr uintptr_t save_fsm_queue_file            = 0x006328D0;
+   constexpr uintptr_t metagame_buffer                = 0x01F9DD80;
+   constexpr uintptr_t metagame_buffer_ref_load       = 0x0058A2CD;
+   constexpr uintptr_t metagame_buffer_ref_save       = 0x0058A391;
+   constexpr uintptr_t metagame_buffer_ref_save_state = 0x0058B156;
+   constexpr uintptr_t metagame_buffer_ref_load_state = 0x0058B177;
 
 
    // ---- Weapon / dualcannon ClassLabel (weapon/dual_cannon.cpp) ------------------
@@ -3600,6 +3697,14 @@ namespace gog {
    constexpr uintptr_t grapple_dtor                   = 0x00600400;
    constexpr uintptr_t grapple_rtti_hash              = 0x01ebd558;
 
+   // OrdnanceGrenade::Render and ctor, Steam +0x10A0 (tools/port_gog.py).
+   constexpr uintptr_t ordnance_grenade_render        = 0x00601240;
+   constexpr uintptr_t ordnance_grenade_ctor          = 0x006011C0;
+
+   // OrdnanceSticky::Render (displayable vtable 0x007ADFF8 slot 19) and ctor.
+   constexpr uintptr_t ordnance_sticky_render         = 0x00607350;
+   constexpr uintptr_t ordnance_sticky_ctor           = 0x00607060;
+
    // ---- Animation (weapon/soldier) ----------------------------------------------
 
    constexpr uintptr_t set_weapon_anim_map            = 0x00640850;
@@ -3726,14 +3831,13 @@ namespace gog {
    constexpr uintptr_t zephyr_skeleton_finalize       = 0x0072cd00;
    constexpr uintptr_t anim_find_animation            = 0x00520f50;
    constexpr uintptr_t carrier_detach_cargo           = 0x00497410;
-   constexpr uintptr_t console_add_variable           = 0x0041fe50;
+   constexpr uintptr_t console_add_variable           = 0x006edaa0;
    constexpr uintptr_t disguise_raise                 = 0x00683fa0;
    constexpr uintptr_t load_update_real               = 0x00577980;
    constexpr uintptr_t weapon_signal_fire             = 0x0067a6b0;
    constexpr uintptr_t snd_sound_play                 = 0x0073b510;
    constexpr uintptr_t passenger_activate             = 0x00610b50;
    constexpr uintptr_t turret_activate                = 0x005a8b20;
-   constexpr uintptr_t rumble_state_setup             = 0x006b3820;
 
    // ---- Flyer path following / engine sound -------------------------------------
 
@@ -3801,6 +3905,13 @@ namespace gog {
    // shift 0), same layout.
    constexpr uintptr_t command_walker_kill         = 0x0047FFE0;
    constexpr uintptr_t command_walker_post_off     = 0x1FC0;      // Damageable -> post
+
+   // Walker footstep threshold: same code VAs as Steam (tools/port_gog.py code/op:
+   // score 1.00, shift 0, bytes identical), only the 0.1 constant moved.
+   constexpr uintptr_t walker_update_state         = 0x00502890;
+   constexpr uintptr_t walker_step_threshold       = 0x007B2ED8;
+   constexpr uintptr_t walker_step_threshold_ref0  = 0x0050088B;
+   constexpr uintptr_t walker_step_threshold_ref1  = 0x005008A1;
 
    // Net send-list visitor -- tools/port_gog.py code: score 1.00, shift +0xFA0.
    constexpr uintptr_t net_send_visitor            = 0x005BE530;

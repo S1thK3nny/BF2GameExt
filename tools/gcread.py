@@ -2,19 +2,21 @@
 """Dump a Galactic Conquest save (.gc) and show how full it is.
 
 File layout (all builds, written by SaveFsm, read back the same way):
-    u32  CRC-32/BZIP2 of the 512 bytes below
+    u32  CRC-32/BZIP2 of the bytes below
     512  zlib stream (level 9), zero padded
 
-ScriptCB_SaveMetagameState deflates its Lua arguments into that fixed 512 byte
-buffer in one shot. A stream that does not fit is cut off and still saved, so
-"TRUNCATED" here means the save already lost data.
+The stock game deflates ScriptCB_SaveMetagameState's Lua arguments into that
+fixed 512 byte buffer in one shot. A stream that does not fit is cut off and
+still saved, so "TRUNCATED" here means the save already lost data. With
+BF2GameExt a state that does not fit 512 bytes is saved as the stream alone,
+up to 16 KB, and only loads with BF2GameExt.
 
 Uncompressed stream: u8 item count, then one tagged item per Lua argument:
     0 nil | 1 bool u8 | 2 lightuserdata u32 | 3 number f32 | 4 string, NUL ended
     5 table: key/value item pairs until a 0 byte | 6 function, global name
     7 userdata, 8 thread: tag only, load back as nil
-Numbers are float32, so integers above 16777216 and most fractions lose
-precision. .rote (campaign) files use the same encoding with a 256 byte buffer.
+Numbers are float32, the same as the game's own Lua numbers. .rote (campaign)
+files use the same encoding with a 256 byte buffer.
 
 Usage: gcread.py [-s] file.gc [...]    (-s: header lines only)
 """
@@ -82,40 +84,60 @@ def fmt(v, indent=0):
     return repr(v)
 
 
-def dump(path, summary):
-    raw = open(path, "rb").read()
-    print("file:  %s (%d bytes)" % (path, len(raw)))
+STOCK_PAYLOAD = 512
+MAX_PAYLOAD = 16 * 1024
+
+
+def decode(raw):
+    """Parse a whole .gc file. Raises ValueError for what cannot be read."""
     if len(raw) < 5:
-        print("too short\n")
-        return
+        raise ValueError("too short")
     (stored,) = struct.unpack_from("<I", raw, 0)
     payload = raw[4:]
-    calc = crc32_bzip2(payload)
-    print("crc:   %08X stored, %08X computed, %s" % (stored, calc, "OK" if stored == calc else "MISMATCH"))
-
+    info = {"stored_crc": stored, "crc": crc32_bzip2(payload), "payload": len(payload)}
     d = zlib.decompressobj()
     try:
         plain = d.decompress(payload)
     except zlib.error as e:
-        print("inflate failed: %s\n" % e)
+        raise ValueError("inflate failed: %s" % e)
+    info.update(used=len(payload) - len(d.unused_data), complete=d.eof, plain=plain, items=[])
+    if plain and d.eof:
+        pos = 1
+        for _ in range(plain[0]):
+            start = pos
+            v, pos = read_item(plain, pos)
+            info["items"].append((v, pos - start))
+    return info
+
+
+def dump(path, summary):
+    raw = open(path, "rb").read()
+    print("file:  %s (%d bytes)" % (path, len(raw)))
+    try:
+        info = decode(raw)
+    except ValueError as e:
+        print("%s\n" % e)
         return
-    used = len(payload) - len(d.unused_data)
-    print("zlib:  %d of %d bytes (%d free, %.0f%% full), %s"
-          % (used, len(payload), len(payload) - used, 100.0 * used / len(payload),
-             "complete" if d.eof else "TRUNCATED, the save did not fit"))
+    print("crc:   %08X stored, %08X computed, %s" % (info["stored_crc"], info["crc"],
+          "OK" if info["stored_crc"] == info["crc"] else "MISMATCH"))
+
+    used, payload, plain = info["used"], info["payload"], info["plain"]
+    if payload == STOCK_PAYLOAD:
+        room = "%d free of the stock %d, %.0f%% full" % (payload - used, payload, 100.0 * used / payload)
+    else:
+        room = "%d byte save, needs BF2GameExt; %d of %d free" % (payload, MAX_PAYLOAD - used, MAX_PAYLOAD)
+    print("zlib:  %d bytes (%s), %s" % (used, room,
+          "complete" if info["complete"] else "TRUNCATED, the save did not fit"))
     print("raw:   %d bytes (%.1f:1)" % (len(plain), len(plain) / max(used, 1)))
     if not plain:
         print()
         return
     print("items: %d\n" % plain[0])
-    if summary or not d.eof:
+    if summary or not info["complete"]:
         return
 
-    pos = 1
-    for i in range(1, plain[0] + 1):
-        start = pos
-        v, pos = read_item(plain, pos)
-        print("-- item %d (%d raw bytes) --" % (i, pos - start))
+    for i, (v, size) in enumerate(info["items"], 1):
+        print("-- item %d (%d raw bytes) --" % (i, size))
         print(fmt(v) + "\n")
 
 

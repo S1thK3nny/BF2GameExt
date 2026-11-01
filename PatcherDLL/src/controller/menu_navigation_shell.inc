@@ -1164,11 +1164,17 @@ if ((type(ifs_freeform_main) == "table") and GameExt_PadStick) then
 	local scr = ifs_freeform_fleet
 	if ((type(scr) == "table") and ifs_freeform_main.UpdateNextPlanet) then
 		GCScreen(scr, function(this) Activate(this, "_next") end)
-		-- The d-pad picks planets here; LB/RB zoom.
+		-- The d-pad picks planets here; LB/RB zoom. The mouse wheel sends
+		-- DPadUp/Down too, so it keeps zooming.
 		scr.Input_GeneralLeft = none
 		scr.Input_GeneralRight = none
-		scr.Input_DPadUp = none
-		scr.Input_DPadDown = none
+		local function wheelOnly(orig)
+			return function(this, j)
+				if (orig and (GameExt_PadDir() ~= 1)) then return orig(this, j) end
+			end
+		end
+		scr.Input_DPadUp = wheelOnly(scr.Input_DPadUp)
+		scr.Input_DPadDown = wheelOnly(scr.Input_DPadDown)
 		local origUpdate = scr.Update
 		scr.Update = function(this, fDt)
 			if (gcEndTurn) then

@@ -29,6 +29,7 @@
 #include "debug_commands/command_registry.hpp"
 #include "shell/pause_freecam_fix.hpp"
 #include "shell/gc_visual_limits.hpp"
+#include "shell/gc_save_limit.hpp"
 #include "render/particle_batch_spill.hpp"
 #include "render/particle_density.hpp"
 #include "entity/command_post_null_fix.hpp"
@@ -44,6 +45,8 @@
 #include "entity/chunk_section_guard.hpp"
 #include "util/game_log_lock.hpp"
 #include "weapon/impact_sound_water_fix.hpp"
+#include "weapon/grenade_rest_render_fix.hpp"
+#include "entity/walker_footstep_fix.hpp"
 #include "render/prop_generator_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
@@ -343,9 +346,12 @@ void lua_hooks_uninstall()
    grapple_uninstall();
    DebugCommandRegistry::uninstall();
    gc_visual_limits_uninstall();
+   gc_save_limit_uninstall();
    particle_batch_spill_uninstall();
    particle_density_uninstall();
    command_post_null_fix_uninstall();
+   grenade_rest_render_fix_uninstall();
+   walker_footstep_fix_uninstall();
    matrix_basis_fix_uninstall();
    controller_bindings_uninstall();
    menu_navigation_uninstall();

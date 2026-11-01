@@ -198,6 +198,25 @@ It returns nil in the shell. The engine never clears the name when a match ends,
 so the raw value would keep naming the last map played; BF2GameExt tracks whether
 a mission is actually live and reports nil when one is not.
 
+## Galactic Conquest
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `GetMetagameSaveSize()` | Returns two numbers: the compressed size in bytes of the Galactic Conquest state last saved with `ScriptCB_SaveMetagameState` or loaded with `ScriptCB_LoadMetagameState`, and the most a save can hold (16384). | 1.1.0 |
+
+A state of up to 512 bytes is saved as a stock `.gc` file that also loads without
+BF2GameExt. A bigger state needs BF2GameExt to load. One that does not fit in
+16384 bytes is not saved: the previous state is kept and the log says why, so the
+size reported stays the previous one.
+
+```lua
+ScriptCB_SaveMetagameState(state)
+if GetMetagameSaveSize then
+    local used, limit = GetMetagameSaveSize()
+    print("GC save uses " .. used .. " of " .. limit .. " bytes")
+end
+```
+
 ## Rendering
 
 | Function | Description | Since |

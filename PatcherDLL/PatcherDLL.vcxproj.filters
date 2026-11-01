@@ -61,6 +61,9 @@
     <ClInclude Include="src\entity\foleyfx_region_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\walker_footstep_fix.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -95,6 +98,9 @@
       <Filter>weapon</Filter>
     </ClInclude>
     <ClInclude Include="src\weapon\grappling_hook.hpp">
+      <Filter>weapon</Filter>
+    </ClInclude>
+    <ClInclude Include="src\weapon\grenade_rest_render_fix.hpp">
       <Filter>weapon</Filter>
     </ClInclude>
     <ClInclude Include="src\weapon\barrel_fire_origin.hpp">
@@ -156,6 +162,15 @@
     </ClInclude>
     <ClInclude Include="src\shell\gc_visual_limits.hpp">
       <Filter>shell</Filter>
+    </ClInclude>
+    <ClInclude Include="src\shell\gc_save_limit.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
+    <ClInclude Include="src\shell\gc_save_codec.hpp">
+      <Filter>shell</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util\miniz_config.h">
+      <Filter>util</Filter>
     </ClInclude>
     <ClInclude Include="src\shell\ingame_movie_path.hpp">
       <Filter>shell</Filter>
@@ -375,6 +390,9 @@
     <ClCompile Include="src\entity\foleyfx_region_fix.cpp">
       <Filter>entity</Filter>
     </ClCompile>
+    <ClCompile Include="src\entity\walker_footstep_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp">
       <Filter>entity</Filter>
     </ClCompile>
@@ -406,6 +424,9 @@
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\grappling_hook.cpp">
+      <Filter>weapon</Filter>
+    </ClCompile>
+    <ClCompile Include="src\weapon\grenade_rest_render_fix.cpp">
       <Filter>weapon</Filter>
     </ClCompile>
     <ClCompile Include="src\weapon\barrel_fire_origin.cpp">
@@ -467,6 +488,15 @@
     </ClCompile>
     <ClCompile Include="src\shell\gc_visual_limits.cpp">
       <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\shell\gc_save_limit.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\shell\gc_save_codec.cpp">
+      <Filter>shell</Filter>
+    </ClCompile>
+    <ClCompile Include="src\util\miniz_impl.c">
+      <Filter>util</Filter>
     </ClCompile>
     <ClCompile Include="src\shell\ingame_movie_path.cpp">
       <Filter>shell</Filter>
