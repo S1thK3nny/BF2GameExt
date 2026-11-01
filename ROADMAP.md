@@ -57,11 +57,6 @@ classes already have the fix, which pins the forward speed to the throttle targe
 flight. Goal is the same fix for every flyer. The stock MAF and the campaign ride gunships are
 the only stock flyers that can reverse.
 
-**AI spawning whilst the CommandFlyer is flying** - Ever noticed when flying a gunship that you suddenly have AI "falling out?".
-This happens when the CommandFlyer is flying and the AI spawns in. The AI spawns in at the CommandFlyers position, despite the fact that the CommandFlyer is flying. 
-The fix is to add an additional check to the AI spawning code to check if the CommandFlyer is flying, and if so, 
-just don't allow them to spawn there.
-
 **ControlsUnit passenger weapons** - Lets a passenger use their own weapon from inside a
 vehicle. Very unlikely to happen: the engine stub is half baked, and it needs a lot more
 than patches. The PassengerSlot entity builds no weapon and no aimer (so there is no

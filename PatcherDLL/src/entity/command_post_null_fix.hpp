@@ -36,6 +36,12 @@
 // guard only tests for a NULL `this`, so no offset enters this code and the same
 // hook serves every build.  Steam and GOG share one address, 0x0047E2B0.
 // =============================================================================
+//
+// Also installs the CommandFlyer spawn guard (see the .cpp): an AI that picked
+// a CommandFlyer while it was landed no longer spawns in mid air after it has
+// taken off.  It boards a free passenger or turret seat, and picks another
+// post when every seat is taken.  All three builds, always on.
+// =============================================================================
 
 
 void command_post_null_fix_install(uintptr_t exe_base);

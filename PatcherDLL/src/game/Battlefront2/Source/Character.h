@@ -23,6 +23,12 @@
 //                                         @00452338
 //   mTeamNumber  Lua GetCharacterTeam     Lua GetCharacterTeam       Lua GetCharacterTeam
 //   0x134      FILD [EAX+0x134] @0046e899 MOVD [EAX+0x134] @0058f85c @005907fc
+//   mPlayerId  Character::Spawn           Character::Spawn           same bytes
+//   0x130      CMP [EBX+0x130],EDI        MOV ESI,[EDI+0x130]        @00451bd1
+//              @0064582c                  @00451bf1
+//   mPost      Character::Spawn           Character::Spawn           same bytes
+//   0x144      MOV EAX,[EBX+0x144]        MOV ECX,[EDI+0x144]        @00451b9d
+//              @00645806                  @00451bbd
 //
 // Steam's SetVehicle also divides by 0x1B0 (0x4BDA12F7 >> 7) @004522a4. GOG was
 // checked by searching its exe for the same instruction bytes as Steam.
@@ -31,7 +37,9 @@
 namespace layout::Character {
 
 constexpr uint32_t kSize     = 0x1B0; // stride of Character::sCharacters
+constexpr uint32_t kPlayerId = 0x130; // int mPlayerId: -1 for AI
 constexpr uint32_t kTeam     = 0x134; // int mTeamNumber
+constexpr uint32_t kPost     = 0x144; // CommandPost* mPost: chosen spawn point
 constexpr uint32_t kUnit     = 0x148; // Controllable* mUnit: the soldier
 constexpr uint32_t kVehicle  = 0x14C; // Controllable* mVehicle: what it boarded
 constexpr uint32_t kRemote   = 0x150; // Controllable* mRemote: deployed remote unit

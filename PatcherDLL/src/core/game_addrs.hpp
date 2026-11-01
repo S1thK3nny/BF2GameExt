@@ -733,6 +733,15 @@ namespace modtools {
    // Patch site is the load; `this` is in EDI.
    constexpr uintptr_t character_change_team_hero_test = 0x00643485;
 
+   // Character::Spawn(const PblMatrix&) thiscall RET 4, and the two calls its
+   // stale-post branch makes: SelectPost(CommandPost*) RET 4, Respawn() RET 0.
+   // Called through ILT thunks 0x408B8E / 0x407B62 at 0x645A58 / 0x645A5F.
+   constexpr uintptr_t character_spawn       = 0x006457A0;
+   constexpr uintptr_t character_select_post = 0x006445B0;
+   constexpr uintptr_t character_respawn     = 0x00644EF0;
+   // CommandFlyer::GetPassengerSlot(int) thiscall RET 4, via ILT 0x40954D.
+   constexpr uintptr_t command_flyer_get_passenger_slot = 0x00648950;
+
    // ---- AI / CombatHelper::DeadBodyCheck (0x5B4EC0) ---------------------------
    // The two branches the [Features] DeadBody* toggles NOP (see dllmain.cpp).
    //   ..._guard_jge : `7D 07` JGE past the `*(mUnit+0x3AC) >= 4` early-out.
@@ -1953,6 +1962,12 @@ namespace steam {
    // `this` in ESI and folds the load into the compare, so the site is 7 bytes
    // where modtools is 6.
    constexpr uintptr_t character_change_team_hero_test = 0x00452338;
+
+   // Character::Spawn / SelectPost / Respawn, same signatures as modtools.
+   constexpr uintptr_t character_spawn       = 0x00451B90;
+   constexpr uintptr_t character_select_post = 0x004524F0;
+   constexpr uintptr_t character_respawn     = 0x00452CC0;
+   constexpr uintptr_t command_flyer_get_passenger_slot = 0x00477F10;
 
    // ---- AI / CombatHelper::DeadBodyCheck (0x46CD50) ---------------------------
    // Sole caller CombatHelper::UpdateState (call @0x46D4C3).  The first guard is
@@ -3540,6 +3555,12 @@ namespace gog {
    // Character::ChangeTeam (0x452310) — same codegen as Steam, shifted -0x20 and
    // byte-identical at the site; see the steam namespace for the full note.
    constexpr uintptr_t character_change_team_hero_test = 0x00452318;
+
+   // Character::Spawn / SelectPost / Respawn, Steam's shifted -0x20.
+   constexpr uintptr_t character_spawn       = 0x00451B70;
+   constexpr uintptr_t character_select_post = 0x004524D0;
+   constexpr uintptr_t character_respawn     = 0x00452CA0;
+   constexpr uintptr_t command_flyer_get_passenger_slot = 0x00477F10; // same VA as Steam
 
    // ---- AI / CombatHelper::DeadBodyCheck (0x46CD50) ---------------------------
    // Same VA and byte-identical to Steam at both sites; see the steam namespace.

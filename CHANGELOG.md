@@ -208,6 +208,10 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Fixed
 
+- AI could drop out of the sky over a CommandFlyer gunship that had taken off, because
+  an AI that chose to spawn at it while it was landed still spawned there once it was
+  in the air. They now board a free passenger or gunner seat, and spawn at another
+  command post when every seat is taken. Players spawning at the gunship are unchanged.
 - A destruction chunk whose `ChunkGeometryName` was not loaded, or was loaded without
   any collision, crashed the game while the map loaded, and so did chunk properties
   that came before their section's `ChunkGeometryName`. Steam and GOG logged nothing,
