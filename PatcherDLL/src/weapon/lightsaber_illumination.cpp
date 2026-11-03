@@ -52,12 +52,17 @@
 //   Lights live in a small fixed pool of our own static storage, constructed
 //   lazily with the engine's ctor so they carry the real RedOmniLight vtable.
 //   Ownership stays with us - the engine never frees a light it did not
-//   allocate, it only ever unlinks one on Deactivate. Each slot records the
-//   frame it was last written; sweep() (driven from Snd::Engine::Update, which
-//   runs every frame whether or not anything is rendering) deactivates any slot
-//   that a blade did not refresh. That is what turns the light off when a saber
-//   is holstered, when its wielder dies, when the weapon is culled, and across
-//   a level change.
+//   allocate, it only ever unlinks one on Deactivate. Each slot belongs to one
+//   blade (weapon + blade call order) and records the sweep tick it was last
+//   written on; sweep() (driven from Snd::Engine::Update, which runs whether or
+//   not anything is rendering) deactivates any slot that its blade did not
+//   refresh. That is what turns the light off when a saber is holstered, when
+//   its wielder dies, when the weapon is culled, and across a level change.
+//
+//   Snd::Engine::Update is NOT once per frame. GameSoundEngine::Update only
+//   calls it once 20 ms have built up, so above 50 fps several frames share a
+//   tick. Slots are therefore matched by blade, never by "not written this
+//   tick", or each frame would take a fresh slot and leave the last one lit.
 //
 // THE 4-LIGHT CEILING
 //   RedLightingState holds pOmniLights[4] and the vs_1_1 constant registers
@@ -156,7 +161,7 @@ using fn_melee_class_render_t = void(__fastcall*)(void* ecx, void* edx, float t,
                                                   void* pose, void* color, unsigned flags,
                                                   int useCollision);
 
-// Snd::Engine::Update — our per-frame heartbeat. __cdecl(float dt, char full):
+// Snd::Engine::Update — our sweep heartbeat. __cdecl(float dt, char full):
 // Ghidra labels it Snd::EngineBase::Update and infers __thiscall, but the body
 // at 0x008827b0 opens `FLD [ESP+4]` / `MOV AL,[ESP+8]` and never touches ECX,
 // so it is a free function and the caller cleans. Same shape the loading screen
@@ -187,17 +192,12 @@ static fn_omni_set_color_t  fn_omni_set_color  = nullptr;
 static fn_light_toggle_t    fn_light_activate  = nullptr;
 static fn_light_toggle_t    fn_light_deactivate = nullptr;
 
-// Per-frame tick.
+// Sweep tick, advanced by the Snd::Engine::Update hook. At most 50 Hz, so a
+// tick can span several rendered frames.
 //
-// This used to read RedRenderer's own frame counter, but the value is never
-// compared against anything the engine owns — the render hook stamps a slot
-// with it and the Snd::Engine::Update hook sweeps against it, and those are
-// both ours. Any monotonic per-frame number does the job, so we keep our own
-// and drop an engine address we would otherwise have to derive per build.
-//
-// Starts at 1 so that a zero-initialised LightSlot::frame can never be mistaken
+// Starts at 1 so that a zero-initialised LightSlot::tick can never be mistaken
 // for "refreshed on tick 0".
-static unsigned g_frameTick = 1;
+static unsigned g_sweepTick = 1;
 
 // ---------------------------------------------------------------------------
 // Light pool
@@ -208,9 +208,11 @@ static unsigned g_frameTick = 1;
 
 struct LightSlot {
    alignas(16) unsigned char obj[kOmniLightSize];
-   bool     constructed;
-   bool     active;
-   unsigned frame;     // frame number this slot was last written
+   bool        constructed;
+   bool        active;
+   unsigned    tick;   // sweep tick this slot was last written on
+   const void* owner;  // weapon (or class, for the spawn preview) of its blade
+   int         blade;  // blade call order inside that owner's Render
 };
 
 static LightSlot g_lights[kMaxLights] = {};
@@ -260,27 +262,28 @@ static void release(LightSlot& s)
    }
 }
 
-// Claim a slot for this frame. A slot already written this frame belongs to
-// another blade; anything else is fair game, and reusing a still-active one in
-// place saves an unlink/relink pair in the common steady state.
-static LightSlot* acquire(unsigned frame)
-{
-   for (int i = 0; i < kMaxLights; i++)
-      if (!g_lights[i].active) return &g_lights[i];
-   for (int i = 0; i < kMaxLights; i++)
-      if (g_lights[i].frame != frame) return &g_lights[i];
-   return nullptr;
-}
-
-// Turn off every light no blade refreshed this frame. Order-independent with
-// respect to the render pass: if the sound update runs first the slots still
-// hold the previous frame's number and get unlinked before being reclaimed, and
-// if it runs last they hold the current one and survive untouched.
-static void sweep(unsigned frame)
+// Find this blade's slot. Its own active slot first, so a blade keeps one light
+// however many frames (or viewports) render it per tick. Then a free slot, then
+// one whose blade missed the current tick and is about to be swept anyway.
+static LightSlot* acquire(const void* owner, int blade, unsigned tick)
 {
    for (int i = 0; i < kMaxLights; i++) {
       LightSlot& s = g_lights[i];
-      if (!s.active || s.frame == frame) continue;
+      if (s.active && s.owner == owner && s.blade == blade) return &s;
+   }
+   for (int i = 0; i < kMaxLights; i++)
+      if (!g_lights[i].active) return &g_lights[i];
+   for (int i = 0; i < kMaxLights; i++)
+      if (g_lights[i].tick != tick) return &g_lights[i];
+   return nullptr;
+}
+
+// Turn off every light its blade did not refresh during the closing tick.
+static void sweep(unsigned tick)
+{
+   for (int i = 0; i < kMaxLights; i++) {
+      LightSlot& s = g_lights[i];
+      if (!s.active || s.tick == tick) continue;
       release(s);
    }
 }
@@ -298,6 +301,12 @@ static void deactivate_all()
 // can hold a WeaponMeleeThrow whose own render nests inside its owner's.
 
 static const unsigned char* g_curClass = nullptr;
+
+// Which blade a _RenderLightSabre call is: the weapon being rendered plus the
+// call's order inside that Render. The texture alone cannot tell two wielders
+// of the same saber apart, nor the two blades of a double saber.
+static const void* g_curOwner = nullptr;
+static int         g_bladeCall = 0;
 
 // Find the blade this _RenderLightSabre call is drawing. The texture handle is
 // the only per-blade value passed down, and two blades sharing a texture share
@@ -329,6 +338,8 @@ static const unsigned char* find_blade(const unsigned char* cls, unsigned tex)
 static void __cdecl saber_light_update(const float* base, const float* dir, unsigned tex,
                                        float length, float width)
 {
+   const int bladeCall = g_bladeCall++;
+
    // Mirror the original's own early-out: no texture or a zero-size blade means
    // nothing is drawn, so there is nothing to light either.
    if (g_lightsaberIlluminationEnabled && base && dir && tex &&
@@ -350,8 +361,8 @@ static void __cdecl saber_light_update(const float* base, const float* dir, unsi
 
             const float radius = g_lightsaberLightRadius * factor;
             if (radius > 0.0f) {
-               const unsigned frame = g_frameTick;
-               if (LightSlot* s = acquire(frame)) {
+               const unsigned tick = g_sweepTick;
+               if (LightSlot* s = acquire(g_curOwner, bladeCall, tick)) {
                   const float pos[3] = {
                      base[0] + dir[0] * length * kBladeLightFraction,
                      base[1] + dir[1] * length * kBladeLightFraction,
@@ -403,7 +414,9 @@ static void __cdecl saber_light_update(const float* base, const float* dir, unsi
                      fn_light_activate(s->obj, nullptr);
                      s->active = true;
                   }
-                  s->frame = frame;
+                  s->tick  = tick;
+                  s->owner = g_curOwner;
+                  s->blade = bladeCall;
                }
             }
          }
@@ -428,24 +441,36 @@ static void __cdecl hooked_RenderLightSabre(const float* base, const float* dir,
 static void __fastcall hooked_MeleeRender(void* ecx, void* /*edx*/, void* mtx, void* pose,
                                           void* color, unsigned flags, int useCollision)
 {
-   const unsigned char* prev = g_curClass;
+   const unsigned char* prev      = g_curClass;
+   const void*          prevOwner = g_curOwner;
+   const int            prevCall  = g_bladeCall;
    if (ecx) g_curClass = *(const unsigned char* const*)((const unsigned char*)ecx + kMelee_mClass);
+   g_curOwner  = ecx;
+   g_bladeCall = 0;
 
    original_MeleeRender(ecx, nullptr, mtx, pose, color, flags, useCollision);
 
-   g_curClass = prev;
+   g_curClass  = prev;
+   g_curOwner  = prevOwner;
+   g_bladeCall = prevCall;
 }
 
 static void __fastcall hooked_MeleeClassRender(void* ecx, void* /*edx*/, float t, void* mtx,
                                                void* pose, void* color, unsigned flags,
                                                int useCollision)
 {
-   const unsigned char* prev = g_curClass;
-   g_curClass = (const unsigned char*)ecx;   // ECX is already the class here
+   const unsigned char* prev      = g_curClass;
+   const void*          prevOwner = g_curOwner;
+   const int            prevCall  = g_bladeCall;
+   g_curClass  = (const unsigned char*)ecx;   // ECX is already the class here
+   g_curOwner  = ecx;                         // spawn preview has no weapon
+   g_bladeCall = 0;
 
    original_MeleeClassRender(ecx, nullptr, t, mtx, pose, color, flags, useCollision);
 
-   g_curClass = prev;
+   g_curClass  = prev;
+   g_curOwner  = prevOwner;
+   g_bladeCall = prevCall;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,12 +501,15 @@ static void* original_MeleeClassRender_raw = nullptr;
 // we never have to know what is in the other registers.
 //
 // Nothing is restored afterwards, and that is deliberate: _RenderLightSabre is
-// only ever reached from inside one of the two Render functions, so a stale
-// g_curClass is always overwritten on the way in before anything can read it.
+// only ever reached from inside one of the two Render functions, so stale
+// values are always overwritten on the way in before anything can read them.
+// Its only caller is the spawn screen preview, never a WeaponMelee::Render.
 static __declspec(naked) void hooked_MeleeClassRender_ltcg()
 {
    __asm {
       mov  g_curClass, ecx
+      mov  g_curOwner, ecx
+      mov  g_bladeCall, 0
       jmp  dword ptr [original_MeleeClassRender_raw]
    }
 }
@@ -545,9 +573,10 @@ static __declspec(naked) void hooked_RenderLightSabre_ltcg()
 }
 
 // ---------------------------------------------------------------------------
-// Hook: Snd::Engine::Update — per-frame heartbeat for the sweep
+// Hook: Snd::Engine::Update — heartbeat for the sweep
 // ---------------------------------------------------------------------------
-// Chosen because it runs every frame regardless of what is on screen, which is
+// Chosen because it runs regardless of what is on screen (every 20 ms at most,
+// see the LIFETIME note up top), which is
 // exactly the case a render-driven sweep cannot cover: the frame a saber's
 // wielder dies, no Render call happens and the light would otherwise stay lit
 // at its last position forever. It is also pumped by hand during loading, where
@@ -569,8 +598,8 @@ static void __cdecl hooked_SndUpdate(float dt, char full)
    // Sweep on the tick that is closing, THEN advance. Doing it the other way
    // round would retire everything drawn during the interval that just ended,
    // because those slots carry the old tick.
-   sweep(g_frameTick);
-   ++g_frameTick;
+   sweep(g_sweepTick);
+   ++g_sweepTick;
 
    original_SndUpdate(dt, full);
 }

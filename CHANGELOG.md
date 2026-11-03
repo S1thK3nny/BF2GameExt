@@ -208,6 +208,10 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Fixed
 
+- Lightsaber Illumination flickered above 50 fps, lighting the area around a blade
+  with several stale copies of its light at once, and with four or more blades lit
+  some blades stopped casting light. Each blade now keeps one steady light at any
+  frame rate.
 - AI could drop out of the sky over a CommandFlyer gunship that had taken off, because
   an AI that chose to spawn at it while it was landed still spawned there once it was
   in the air. They now board a free passenger or gunner seat, and spawn at another
