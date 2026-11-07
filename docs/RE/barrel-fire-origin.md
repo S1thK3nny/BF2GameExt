@@ -644,6 +644,35 @@ weapon in the level. At 1x it is far below what anyone can see.
 
 ---
 
+## Wall clip (2026-11-07)
+
+Moving the origin to `hp_fire` lets a barrel that pokes through a wall fire from the
+far side. Vanilla never had this because its origin (`Aimer::mRootPos`) is inside the
+soldier. `clipToWall` traces from `mRootPos` to the barrel and, on a hit, puts the
+origin 5 cm in front of the surface. Both the main muzzle and dual_cannon's second
+muzzle (`barrel_fire_origin_aim_from`) go through it. The direction is then
+re-aimed from the clipped point like any other origin.
+
+- **Outward, not back from the muzzle.** Mesh polygons are one-sided:
+  `RayConvexPoly_intersect` (Steam `0x00460B10`) returns no hit when
+  `dot(dir, normal) > -EPSILON`. A ray cast back from a muzzle already past a thin
+  wall meets its back face and passes through.
+- **Mask and exclude copied from the bolt.** `Ordnance::CheckCollision` (Steam
+  `0x005F7CB0`) sweeps with `0x13BE` (`0x132E` without `mCheckStaticCollision`) and
+  excludes `GetOwner()`. The clip uses `0x13BE & ~0x100`, so it blocks what a bolt
+  would hit. Water is dropped so a muzzle under a shallow surface is not clipped to it.
+- **Self exclude is required.** The ray starts inside the shooter, so without the
+  exclude it hits at 0 every time. The GameObject comes from the Trackable vptr at
+  Controllable+0x18, slot +0x20 (all builds, same as `target_bar_latch.cpp`). No
+  GameObject means no clip, not a clip to the root.
+- **The muzzle flash follows.** `MuzzleFlash` reads `Aimer::mFirePos`, so the flash
+  sits on the near side of the wall too.
+- **Cost.** One ray about 1 m long per soldier per turn, AI included, since
+  OverrideAimer runs from `UpdateWeaponAndAimer` every turn whether or not the
+  weapon fires.
+
+---
+
 ## Lua API
 
 Control is INI-only (`[Fixes] BarrelFireOriginFix`). The old `SetBarrelFireOrigin`

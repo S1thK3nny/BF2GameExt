@@ -474,6 +474,56 @@ static const float* trustedBarrelPoint(void* weapon, const void* owner,
 }
 
 // ---------------------------------------------------------------------------
+// Wall clip.  A barrel poking through a wall would fire from the far side, so trace
+// from the vanilla origin (inside the shooter) out to the muzzle and stop at the first
+// surface.  Outward because mesh polys are one-sided (RayConvexPoly_intersect,
+// Steam 0x00460B10, rejects dot(dir, normal) > -eps), so a ray cast back from the
+// muzzle would pass through a thin wall.
+//
+// Mask and exclude match Ordnance::CheckCollision (Steam 0x005F7CB0): 0x13BE, shooter
+// excluded.  Water (0x100) is dropped so wading does not clip the muzzle to the
+// surface.  GameObject comes off the Trackable vptr at Controllable+0x18, slot +0x20,
+// same on all builds (see target_bar_latch.cpp).
+// ---------------------------------------------------------------------------
+static const int   kClipMask     = 0x13BE & ~0x100;
+static const float kClipPullback = 0.05f;   // keep the origin this far in front of the hit
+
+typedef void*(__thiscall* GetGameObject_t)(void* self);
+
+static void* ownerGameObject(void* owner)
+{
+   void* trackable = (char*)owner + 0x18;
+   void** vt = *(void***)trackable;
+   if (!vt) return nullptr;
+   return ((GetGameObject_t)vt[0x20 / 4])(trackable);
+}
+
+// Writes the origin to use into `out`: `muzzle` when the path from `rootPos` is clear,
+// else the first surface pulled back toward the shooter.
+static void clipToWall(void* owner, const float* rootPos, const float* muzzle, float out[3])
+{
+   out[0] = muzzle[0]; out[1] = muzzle[1]; out[2] = muzzle[2];
+   if (!s_rayHit) return;
+
+   float d[3] = { muzzle[0] - rootPos[0], muzzle[1] - rootPos[1], muzzle[2] - rootPos[2] };
+   const float len = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+   if (!(len > 0.01f)) return;
+   d[0] /= len; d[1] /= len; d[2] /= len;
+
+   // Without the exclude the ray starts inside the shooter and always hits at 0.
+   void* self = ownerGameObject(owner);
+   if (!self) return;
+
+   void* hitObj = nullptr;
+   const float frac = s_rayHit(rootPos, d, len, &hitObj, nullptr, &self, 1, kClipMask, 1);
+   if (!hitObj || !(frac >= 0.0f && frac < 1.0f)) return;   // clear, also rejects NaN
+
+   float t = frac * len - kClipPullback;
+   if (t < 0.0f) t = 0.0f;
+   out[0] = rootPos[0] + d[0]*t; out[1] = rootPos[1] + d[1]*t; out[2] = rootPos[2] + d[2]*t;
+}
+
+// ---------------------------------------------------------------------------
 // Replacement for WeaponCannon::OverrideAimer (vtable slot 0x70).
 //
 // WeaponCannon::Fire builds the OrdnanceDesc from Aimer::mFirePos and
@@ -525,8 +575,10 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
       float newDir[3];
       if (!aimAt(rootPos, P, dir, newDir)) return false;
 
-      const float* B = trustedBarrelPoint(weapon, owner, rootPos, P);
-      if (B) {
+      const float* barrel = trustedBarrelPoint(weapon, owner, rootPos, P);
+      if (barrel) {
+         float B[3];
+         clipToWall(owner, rootPos, barrel, B);
          float d2[3];
          if (aimAt(B, P, dir, d2)) {
             // The origin move is unconditional once B is trusted -- it is purely
@@ -562,7 +614,7 @@ static bool __fastcall hooked_cannon_OverrideAimer(void* weapon, void* /*edx*/)
    }
 }
 
-bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outDir[3])
+bool barrel_fire_origin_aim_from(void* weapon, float muzzle[3], float outDir[3])
 {
    if (!g_useBarrelFireOrigin || !weapon || !muzzle || !outDir) return false;
 
@@ -579,6 +631,10 @@ bool barrel_fire_origin_aim_from(void* weapon, const float muzzle[3], float outD
       const float d = muzzle[i] - rootPos[i];
       if (!(d > -5.0f && d < 5.0f)) return false;   // also rejects NaN
    }
+
+   float clipped[3];
+   clipToWall(owner, rootPos, muzzle, clipped);
+   muzzle[0] = clipped[0]; muzzle[1] = clipped[1]; muzzle[2] = clipped[2];
 
    // mDirection already holds this turn's main-muzzle direction, which is within the
    // AI budget of vanilla, so it is the reference for this muzzle's budget too.

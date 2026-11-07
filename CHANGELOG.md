@@ -302,6 +302,11 @@ Scripts can check the running version through `GameExt.version` or
   cannot start at all, the game runs without sound instead of crashing.
 - While looking through a scope, shots left the barrel instead of the centre of the
   scope, so they visibly angled in towards the target.
+- With the Barrel Fire Origin Fix on, a weapon whose barrel poked through a wall
+  fired from the other side of it. Shots now hit the wall instead, for players and
+  AI alike, with no setup per weapon.
+- A random crash in the menus, or when an in-game movie starts, when a movie could
+  not be read. The movie is skipped and the reason is written to the log.
 - A light attached to a building with `AttachOdf` kept shining after the building
   was destroyed. With `AttachRemoveOnDeath = 1` after its `AttachToHardPoint` line it
   now goes out with the building and comes back on when it respawns.

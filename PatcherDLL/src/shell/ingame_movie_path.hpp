@@ -38,6 +38,9 @@
 // "Unable to open movie file" prints the *unresolved* name and never says which
 // of those it hit.
 //
+// Also guards RedMoviePlayer::CreateBinkDecoder: a movie Bink fails to open
+// (shell or in-game) is logged and skipped instead of crashing on a NULL BINK.
+//
 // Installed for all three builds; no-ops where the addresses are unknown.
 
 void ingame_movie_path_install(uintptr_t exe_base);

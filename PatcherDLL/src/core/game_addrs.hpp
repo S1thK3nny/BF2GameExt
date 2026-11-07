@@ -498,6 +498,10 @@ namespace modtools {
    constexpr uintptr_t ingame_movie_filename       = 0x00B30290;
    // GameMovie::sInGameMoviePlayerState — 0 idle, 1 requested, 2 opening, 3 playing.
    constexpr uintptr_t ingame_movie_player_state   = 0x00B30280;
+   // RedMoviePlayer::CreateBinkDecoder — __thiscall bool(void). Reads
+   // mBink(+0x200)->Width/Height with no NULL check; its only caller
+   // (RedMoviePlayer::Update, 0x0082009C) calls it right after an unchecked BinkOpen.
+   constexpr uintptr_t red_movie_player_create_bink_decoder = 0x0081F970;
 
    // ---- Debug Drawing (RedCommandConsole / 3D overlay) -----------------------
 
@@ -2257,6 +2261,7 @@ namespace steam {
    constexpr uintptr_t scriptcb_play_ingame_movie  = 0x00585790;
    constexpr uintptr_t ingame_movie_filename       = 0x01E56288;
    constexpr uintptr_t ingame_movie_player_state   = 0x01E5616C;
+   constexpr uintptr_t red_movie_player_create_bink_decoder = 0x006F46C0; // caller 0x006F4BEE
 
    // Logging enablement (port of PrismaticFlower's upstream 3664782): retail
    // builds ship RedWarning file logging compiled but disabled.  After
@@ -3773,6 +3778,7 @@ namespace gog {
    constexpr uintptr_t scriptcb_play_ingame_movie     = 0x00586520;
    constexpr uintptr_t ingame_movie_filename          = 0x01E57738;
    constexpr uintptr_t ingame_movie_player_state      = 0x01E5761C;
+   constexpr uintptr_t red_movie_player_create_bink_decoder = 0x006F5790; // caller 0x006F5CBE
 
    // ---- Shell / GC Visual Limits ------------------------------------------------
 

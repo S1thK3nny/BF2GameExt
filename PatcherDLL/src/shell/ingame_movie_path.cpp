@@ -407,10 +407,91 @@ int __cdecl hooked_play_ingame_movie(lua_State* L)
    return ret;
 }
 
+// =============================================================================
+// Failed BinkOpen guard (shell and in-game movies)
+// =============================================================================
+//
+// RedMoviePlayer::Update, once the read buffer is full:
+//
+//     BinkSetIO(BinkFileOpen);
+//     mBink = BinkOpen("", 0x0B000000);   // reads the header from the .mvs stream
+//     mFlags |= 1;
+//     CreateBinkDecoder();                // CreateTextures(mBink->Width, mBink->Height, ...)
+//
+// BinkOpen returns NULL when the stream does not hold a valid Bink header, and
+// CreateBinkDecoder dereferences it anyway: AV reading 0x00000004. Every other
+// mBink use in Update already tests for NULL, so refusing here is enough; the
+// player retries BinkOpen on later frames like it does before the buffer fills.
+// Same 6-byte prologue and +0x200 offset on all three builds.
+
+constexpr size_t kMoviePlayer_Bink = 0x200;
+
+typedef bool (__fastcall* fn_create_bink_decoder_t)(void* self, void* edx);
+fn_create_bink_decoder_t original_create_bink_decoder = nullptr;
+
+typedef const char* (__stdcall* fn_bink_get_error_t)();
+
+// Logged once per player per failure streak, not once per retry frame.
+void* g_binkFailedPlayer = nullptr;
+
+bool __fastcall hooked_create_bink_decoder(void* self, void* edx)
+{
+   if (*(void**)((char*)self + kMoviePlayer_Bink))
+   {
+      if (g_binkFailedPlayer == self) g_binkFailedPlayer = nullptr;
+      return original_create_bink_decoder(self, edx);
+   }
+
+   if (g_binkFailedPlayer != self)
+   {
+      g_binkFailedPlayer = self;
+
+      const char* reason = nullptr;
+      if (HMODULE bink = GetModuleHandleA("binkw32.dll"))
+         if (auto get_error = (fn_bink_get_error_t)GetProcAddress(bink, "_BinkGetError@0"))
+            reason = get_error();
+
+      warn_gamelog(RED_SEVERITY_WARNING, SRC_FILE, __LINE__,
+                   "[Movie] Bink could not read the movie stream (%s), so the "
+                   "movie is skipped instead of crashing. The .mvs or its segment "
+                   "is probably damaged or not Bink video.\n",
+                   reason && *reason ? reason : "no reason given");
+   }
+   return false;
+}
+
+void bink_open_guard_install(uintptr_t exe_base)
+{
+   if (!g_addr->red_movie_player_create_bink_decoder) return;
+
+   original_create_bink_decoder = (fn_create_bink_decoder_t)resolve(
+      exe_base, g_addr->red_movie_player_create_bink_decoder);
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourAttach(&(PVOID&)original_create_bink_decoder, hooked_create_bink_decoder);
+   if (DetourTransactionCommit() != NO_ERROR)
+      original_create_bink_decoder = nullptr;
+}
+
+void bink_open_guard_uninstall()
+{
+   if (!original_create_bink_decoder) return;
+
+   DetourTransactionBegin();
+   DetourUpdateThread(GetCurrentThread());
+   DetourDetach(&(PVOID&)original_create_bink_decoder, hooked_create_bink_decoder);
+   DetourTransactionCommit();
+   original_create_bink_decoder = nullptr;
+   g_binkFailedPlayer = nullptr;
+}
+
 } // namespace
 
 void ingame_movie_path_install(uintptr_t exe_base)
 {
+   bink_open_guard_install(exe_base);
+
    if (!g_addr->scriptcb_play_ingame_movie) return;
    if (!g_addr->ingame_movie_filename) return;
    if (!g_addr->ingame_movie_player_state) return;
@@ -427,6 +508,8 @@ void ingame_movie_path_install(uintptr_t exe_base)
 
 void ingame_movie_path_uninstall()
 {
+   bink_open_guard_uninstall();
+
    if (!original_play_ingame_movie) return;
 
    DetourTransactionBegin();
