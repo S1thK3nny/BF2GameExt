@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "dlc_mission_init_fix.hpp"
 #include "core/resolve.hpp"
+#include "lua/lua_funcs.hpp"
 #include "lua/lua_hooks.hpp"
 #include "util/install_log.hpp"
 
@@ -28,15 +29,12 @@
 // vtable 0x79FB80, slot1=0x53B980 Enter / slot3=0x53BA50 Exit; no COMDAT
 // folding of either Enter body).
 //
-// STATUS: EXPERIMENTAL, OFF BY DEFAULT.  On the retail Steam exe the
-// mechanics were verified statically (ShellState::Enter -> 0x635d70 ->
-// 0x48E830 addon scan, which resets/refills DownloadableContent::mNumMissions
-// @0x1E30948), but a live /mission <addon mission> launch still failed with
-// "Could not open MISSION\<name>.lvl" and a downstream null-deref @0x65159E
-// (inside the mission-load fn 0x530ee0 called from MissionState::Enter+0x11).
-// Open question: whether the load path needs DownloadableContent::
-// SetCurrentMission(hash) in addition to the populated list.  INI:
-// [Fixes] DLCMissionInitFix=1 to experiment.
+// The populated list is all the mission load needs: PreStateInit(true) calls
+// DownloadableContent::SetCurrentMission(GameLoop::mMissionScriptHash) itself,
+// and LoadUtil then reads mission.lvl from <addon>\Data\_lvl_pc\. The /mission
+// name must match the addme's second AddDownloadableContent argument.
+//
+// Always on. Play tested on modtools with an addon map launched via /mission.
 // =============================================================================
 
 using fn_StateEnter_t = void(__fastcall*)(void* self, void* edx);
@@ -61,22 +59,23 @@ static void __fastcall hooked_ShellStateEnter(void* self, void* edx)
 static void __fastcall hooked_MissionStateEnter(void* self, void* edx)
 {
     if (!g_shellStateEverEntered) {
+        get_gamelog()("[DLC] Mission started without the shell, running the shell once to load the addon mission list\n");
+
         // Call Enter/Exit through the object's vtable — Enter dispatches into
         // our hook above, which sets the flag before running the real thing.
         void** vtable = *(void***)g_shellStateObject;
         ((fn_StateVfn_t)vtable[kVtableSlotEnter])(g_shellStateObject);
         ((fn_StateVfn_t)vtable[kVtableSlotExit])(g_shellStateObject);
+
+        // The shell Enter hook cleared GetMissionName; mMissionScript is intact.
+        script_name_mark_mission_started();
     }
 
     original_MissionStateEnter(self, edx);
 }
 
-// Off unless explicitly enabled — see STATUS above.
-bool g_dlcMissionInitFixEnabled = false;
-
 void dlc_mission_init_fix_install(uintptr_t exe_base)
 {
-    if (!g_dlcMissionInitFixEnabled) return;
     if (g_build == GameBuild::Unknown) return;
     if (g_addr->gamestate_shell_state == 0 ||
         g_addr->gamestate_shell_state_enter == 0 ||
@@ -91,7 +90,13 @@ void dlc_mission_init_fix_install(uintptr_t exe_base)
     DetourUpdateThread(GetCurrentThread());
     DetourAttach(&(PVOID&)original_ShellStateEnter, hooked_ShellStateEnter);
     DetourAttach(&(PVOID&)original_MissionStateEnter, hooked_MissionStateEnter);
-    DetourTransactionCommit();
+    if (DetourTransactionCommit() != NO_ERROR) {
+        install_log("[DLC] Mission init fix NOT installed: detour failed");
+        original_ShellStateEnter = nullptr;
+        original_MissionStateEnter = nullptr;
+        return;
+    }
+    install_log("[DLC] Mission init fix installed");
 }
 
 void dlc_mission_init_fix_uninstall()

@@ -9,8 +9,6 @@
 // immediately exit the shell state first so addon scripts get a full, normal
 // Lua context.
 
-extern bool g_dlcMissionInitFixEnabled;
-
 void dlc_mission_init_fix_install(uintptr_t exe_base);
 void dlc_mission_init_fix_uninstall();
 

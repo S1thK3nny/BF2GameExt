@@ -162,6 +162,11 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Changed
 
+- **Mod maps now launch from the command line, and `DLCMissionInitFix` is gone.** The
+  1.0.0 fix was experimental and off by default. It now always loads the addon map
+  list before a `/mission` launch, so `/mission ABCc_con` starts the mod map instead of
+  failing with `Could not open MISSION\ABCc_con.lvl`. An old INI that still has the
+  key keeps working; the key is ignored.
 - **Pad bindings moved out of `BF2GameExt.ini`.** Pad buttons now have their own
   binding slot, so they no longer take a keyboard key, and they are rebound on the
   game's own Options -> Controls screen like any key. Each profile keeps them in

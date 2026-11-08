@@ -288,7 +288,6 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiPlayerThreatFairness   = cfg.get_bool("AI", "PlayerThreatFairness", false);
       g_aiPlayerAwarenessFairness = cfg.get_bool("AI", "PlayerAwarenessFairness", true);
       g_errorDialogFixEnabled = cfg.get_bool("Fixes", "ErrorDialogFix", true);
-      g_dlcMissionInitFixEnabled = cfg.get_bool("Fixes", "DLCMissionInitFix", false);
       g_heldOrdnanceEffectEnabled = cfg.get_bool("Fixes", "HeldOrdnanceEffect", true);
       g_gcVisualLimitsEnabled = cfg.get_bool("LimitIncreases", "GCVisualLimits", true);
       g_particleBatchSpillEnabled = cfg.get_bool("Particles", "ParticleFixes", true);
