@@ -30,6 +30,13 @@ Scripts can check the running version through `GameExt.version` or
   stock Lua function could reach, so a script can now change which vehicle a
   spawner produces or how quickly it respawns. See the
   [Lua API](docs/user/LUA_API.md#world-objects).
+- **`SetWorldKillBounds(horizontal, bottom, top, fallSpeed)`** - Moves the invisible
+  box that kills soldiers more than 2500 units from the map centre, below -1000 or
+  above 1000, or falling faster than 60 units a second, so a map is no longer stuck
+  in that box whatever its size. Flyers destroyed below -5000, hovers, walkers,
+  detpacks, deployed turrets and powerups below -500, ordnance below -2000 and shots
+  vanishing outside ±5000 follow the new values too. `GetWorldKillBounds()` reads it back. See the
+  [Lua API](docs/user/LUA_API.md#world-bounds).
 - **`@GameExt` ODF suffix** - A property written as `Name@GameExt` replaces the
   plain `Name` line only when BF2GameExt is installed, so one ODF serves both stock
   and extended players. See [ODF Properties](docs/user/ODF_PROPERTIES.md).

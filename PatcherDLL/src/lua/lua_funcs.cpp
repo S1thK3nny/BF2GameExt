@@ -9,6 +9,7 @@
 #include "core/lvl_read.hpp"
 #include "entity/flyer_carrier_fixes.hpp"
 #include "entity/instance_props.hpp"
+#include "entity/world_kill_bounds.hpp"
 #include "shell/gc_save_limit.hpp"
 #include "core/pbl_hash.hpp"
 #include "game/Battlefront2/Source/Character.h"
@@ -1724,6 +1725,41 @@ static int lua_GetMissionName(lua_State* L)
    return 1;
 }
 
+// SetWorldKillBounds(horizontal, bottom, top, fallSpeed) - moves the hardcoded
+// box outside which soldiers die (stock 2500, -1000, 1000, 60). Vehicle,
+// mine and ordnance limits follow it, never tighter than stock. A nil or
+// non-number argument keeps its current value. Resets on every mission load.
+// Returns true when the patch is active.
+// Example: SetWorldKillBounds(10000, -5000, 5000, 1000)
+static int lua_SetWorldKillBounds(lua_State* L)
+{
+   if (!world_kill_bounds_active()) { g_lua.pushboolean(L, 0); return 1; }
+
+   float v[4];
+   world_kill_bounds_get(&v[0], &v[1], &v[2], &v[3]);
+   for (int i = 0; i < 4; ++i) {
+      if (!g_lua.isnumber(L, i + 1)) continue;
+      const float f = (float)g_lua.tonumber(L, i + 1);
+      if (f == f) v[i] = f;   // drop NaN
+   }
+
+   world_kill_bounds_set(v[0], v[1], v[2], v[3]);
+   g_lua.pushboolean(L, 1);
+   return 1;
+}
+
+// GetWorldKillBounds() - returns horizontal, bottom, top, fallSpeed, or nil
+// when the patch is not active.
+static int lua_GetWorldKillBounds(lua_State* L)
+{
+   if (!world_kill_bounds_active()) { g_lua.pushnil(L); return 1; }
+
+   float v[4];
+   world_kill_bounds_get(&v[0], &v[1], &v[2], &v[3]);
+   for (int i = 0; i < 4; ++i) g_lua.pushnumber(L, v[i]);
+   return 4;
+}
+
 static const lua_func_entry custom_functions[] = {
    { "ContentCensus",         lua_ContentCensus },
    { "GetMissionName",        lua_GetMissionName },
@@ -1746,6 +1782,8 @@ static const lua_func_entry custom_functions[] = {
    { "SetInstanceProperty",      lua_SetInstanceProperty },
    { "SetFogRange",              lua_SetFogRange },
    { "SetFogEnable",             lua_SetFogEnable },
+   { "SetWorldKillBounds",       lua_SetWorldKillBounds },
+   { "GetWorldKillBounds",       lua_GetWorldKillBounds },
    { nullptr, nullptr }
 };
 

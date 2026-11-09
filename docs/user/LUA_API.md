@@ -112,6 +112,44 @@ Things to know:
 
 In multiplayer, vehicle spawning only runs on the host, so call it there.
 
+## World Bounds
+
+| Function | Description | Since |
+|----------|-------------|-------|
+| `SetWorldKillBounds(horizontal, bottom, top, fallSpeed)` | Moves the invisible box outside which soldiers die. `horizontal` is the furthest a soldier can go from the map centre along X or Z, `bottom` and `top` are the lowest and highest height, `fallSpeed` is the fastest a soldier can fall. A nil argument keeps its current value. Returns true when it took effect. | 1.1.0 |
+| `GetWorldKillBounds()` | Returns the four current values, or nil when BF2GameExt could not install it on this game version. | 1.1.0 |
+
+Stock is `2500, -1000, 1000, 60`. A soldier past any of them dies on the spot,
+which is what keeps a map inside a 5 km square, 2 km tall, whatever its terrain.
+Dropped pickups below `bottom` are removed. `SetWorldExtents` does not move this box.
+
+Vehicles and ordnance have hardcoded limits of their own. These follow your values
+whenever yours are wider, and stay stock otherwise:
+
+| Limit | Stock | Follows |
+|-------|-------|---------|
+| Flyers are destroyed below | -5000 | `bottom` |
+| Hovers, walkers, droidekas, droids, mines, planted detpacks, deployed turrets and powerups are destroyed below | -500 | `bottom` |
+| Ordnance disappears below | -2000 | `bottom` |
+| Shots, grenades and missiles disappear without hitting anything outside | ±5000 on every axis | `horizontal`, `bottom`, `top` |
+
+Vehicles have no top or side limit, so a flyer can keep going past the box, but
+its shots vanish once they leave it.
+
+```lua
+function ScriptPostLoad()
+    SetWorldKillBounds(10000, -4000, 6000, 300)
+end
+```
+
+Here soldiers and shots can reach 10 km out and 6 km up, hovers, walkers and
+detpacks survive down to -4000, and flyers still die at -5000 because `bottom` is
+above that.
+
+The values go back to stock when the next mission loads. With
+`SoldierHeightCeiling=1` in the INI, `top` has no effect. In multiplayer the host
+decides who died, so call it on the host.
+
 ## Event Callbacks
 
 The engine fires `CharacterEnterVehicle` but never wired up the exit side.

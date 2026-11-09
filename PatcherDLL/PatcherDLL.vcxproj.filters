@@ -64,6 +64,9 @@
     <ClInclude Include="src\entity\walker_footstep_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\world_kill_bounds.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\soldier_prone.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -391,6 +394,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\walker_footstep_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\world_kill_bounds.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_carrier_fixes.cpp">

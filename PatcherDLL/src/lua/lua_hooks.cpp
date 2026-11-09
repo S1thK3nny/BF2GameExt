@@ -47,6 +47,7 @@
 #include "weapon/impact_sound_water_fix.hpp"
 #include "weapon/grenade_rest_render_fix.hpp"
 #include "entity/walker_footstep_fix.hpp"
+#include "entity/world_kill_bounds.hpp"
 #include "render/prop_generator_fix.hpp"
 #include "ai/ai_update_budget.hpp"
 #include "util/memory_pool_heap_fix.hpp"
@@ -177,6 +178,7 @@ static void __cdecl hooked_init_state()
    foleyfx_region_reset(); // the old map's regions went with its heap
    directional_rolls_reset(); // the old map's animations went with it
    directional_jets_reset();  // and the jets' with them
+   world_kill_bounds_reset(); // stock kill box until the new mission asks otherwise
 
    if (g_build == GameBuild::Modtools) {
       // Register debug console commands (engine is fully initialized now).
@@ -352,6 +354,7 @@ void lua_hooks_uninstall()
    command_post_null_fix_uninstall();
    grenade_rest_render_fix_uninstall();
    walker_footstep_fix_uninstall();
+   world_kill_bounds_uninstall();
    matrix_basis_fix_uninstall();
    controller_bindings_uninstall();
    menu_navigation_uninstall();

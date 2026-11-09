@@ -1011,6 +1011,38 @@ namespace modtools {
    constexpr uintptr_t walker_step_threshold        = 0x00A2C074;
    constexpr uintptr_t walker_step_threshold_ref0   = 0x00555D11;
 
+   // Out-of-world kill box, see entity/world_kill_bounds.cpp. EntitySoldier::Update
+   // 0x00545B20 kills on vel.y < -60, y < -1000, |x| > 2500, |z| > 2500, y > 1000
+   // (FCOMP D8 1D at 0x005465E0/F7/0x0054663C/62/79, host only). EntityItem::Update
+   // 0x005191A0 kills below -1000 (FCOMP at 0x005192B5). Each *_ref is the [disp32].
+   constexpr uintptr_t world_kill_fall_ref          = 0x005465E2;
+   constexpr uintptr_t world_kill_bottom_ref        = 0x005465F9;
+   constexpr uintptr_t world_kill_side_ref0         = 0x0054663E;
+   constexpr uintptr_t world_kill_side_ref1         = 0x00546664;
+   constexpr uintptr_t world_kill_top_ref           = 0x0054667B;
+   constexpr uintptr_t world_kill_item_ref          = 0x005192B7;
+   // Other floors SetWorldKillBounds moves, each an FCOMP D8 1D: EntityFlyer::Update
+   // 0x004FC930 (-5000), EntityDroideka::Update 0x004EE5A0, EntityHover::Update
+   // 0x00512D60, EntityWalker::Update 0x00557AF0, EntityMine::Update 0x0051F340 (-500),
+   // Ordnance::Update 0x00604660 (-2000). OrdnanceBullet::Update 0x0060A690 drops
+   // bullets outside a static PblBox at 0x00B919F4 (guard 0x00B91A14, bit 2).
+   // box_ref = [disp32] of the init's first store, guard_ref = the guard load's.
+   constexpr uintptr_t world_kill_flyer_ref         = 0x004FCCC9;
+   constexpr uintptr_t world_kill_droideka_ref      = 0x004EEF35;
+   constexpr uintptr_t world_kill_hover_ref         = 0x00512FE3;
+   constexpr uintptr_t world_kill_walker_ref        = 0x00558079;
+   constexpr uintptr_t world_kill_mine_ref          = 0x0051FA48;
+   constexpr uintptr_t world_kill_ordnance_ref      = 0x00604736;
+   constexpr uintptr_t world_kill_box_ref           = 0x0060A9E7;
+   constexpr uintptr_t world_kill_box_guard_ref     = 0x0060A9D2;
+   // More -500 floors: EntityDroid::Update 0x004DEB80, EntityDefenseGridTurret::Update
+   // 0x004D85C0, EntityPortableTurret::Update 0x00520F60 (two), PowerupItem::Update 0x00659F10.
+   constexpr uintptr_t world_kill_droid_ref         = 0x004DEBF0;
+   constexpr uintptr_t world_kill_defgrid_ref       = 0x004D863E;
+   constexpr uintptr_t world_kill_portable_ref0     = 0x0052100B;
+   constexpr uintptr_t world_kill_portable_ref1     = 0x005212A3;
+   constexpr uintptr_t world_kill_powerup_ref       = 0x00659F46;
+
    // Net send-list visitor, __cdecl(GameObject* obj, int depth), bare RET.  Passes
    // itself to obj->AddSends (vtable +0x10C).  Detoured to break pilot cycles that
    // recurse at constant depth until the stack overflows; see
@@ -2515,6 +2547,35 @@ namespace steam {
    constexpr uintptr_t walker_step_threshold_ref0  = 0x0050088B;
    constexpr uintptr_t walker_step_threshold_ref1  = 0x005008A1;
 
+   // Out-of-world kill box (decomp EntitySoldier::Update 0x004E8920, EntityItem::Update
+   // 0x004CB210). MOVSS -60 at 0x004E9672, MOVSS -1000 at 0x004E968F, MOVSS 2500 into
+   // XMM4 at 0x004E96B0 (x and z share it), COMISS 1000 at 0x004E96D8, item MOVSS
+   // -1000 at 0x004CB340. Each *_ref is the [disp32].
+   constexpr uintptr_t world_kill_fall_ref         = 0x004E9676;
+   constexpr uintptr_t world_kill_bottom_ref       = 0x004E9693;
+   constexpr uintptr_t world_kill_side_ref0        = 0x004E96B4;
+   constexpr uintptr_t world_kill_top_ref          = 0x004E96DB;
+   constexpr uintptr_t world_kill_item_ref         = 0x004CB344;
+   // Other floors, each a MOVSS: decomp EntityFlyer::Update 0x004AC460 (-5000),
+   // EntityDroideka 0x004A3F90, EntityHover 0x004C2230, EntityWalker 0x005043B0,
+   // EntityMine 0x004CF890 (-500), Ordnance::Update 0x005F7BD0 (-2000).
+   // OrdnanceBullet::Update 0x005FAEE0 sWorldBox 0x01FAAB98, guard 0x01FAABB0 bit 1.
+   constexpr uintptr_t world_kill_flyer_ref        = 0x004AC774;
+   constexpr uintptr_t world_kill_droideka_ref     = 0x004A47FD;
+   constexpr uintptr_t world_kill_hover_ref        = 0x004C2462;
+   constexpr uintptr_t world_kill_walker_ref       = 0x005048C9;
+   constexpr uintptr_t world_kill_mine_ref         = 0x004D0085;
+   constexpr uintptr_t world_kill_ordnance_ref     = 0x005F7C57;
+   constexpr uintptr_t world_kill_box_ref          = 0x005FB240;
+   constexpr uintptr_t world_kill_box_guard_ref    = 0x005FB21B;
+   // More -500 floors: decomp EntityDroid::Update 0x0049AC60, EntityDefenseGridTurret
+   // 0x00497B40, EntityPortableTurret 0x004D8230 (two), PowerupItem 0x00623A60.
+   constexpr uintptr_t world_kill_droid_ref        = 0x0049ACD8;
+   constexpr uintptr_t world_kill_defgrid_ref      = 0x00497BB9;
+   constexpr uintptr_t world_kill_portable_ref0    = 0x004D82E5;
+   constexpr uintptr_t world_kill_portable_ref1    = 0x004D8502;
+   constexpr uintptr_t world_kill_powerup_ref      = 0x00623A9C;
+
    // Net send-list visitor -- same body as modtools (PUSH 0x005BD590 as its own
    // callback, list at [0x01FA65B4], count 0x01FA87A4 capped at 0x40), bare RET.
    constexpr uintptr_t net_send_visitor            = 0x005BD590;
@@ -3939,6 +4000,30 @@ namespace gog {
    constexpr uintptr_t walker_step_threshold       = 0x007B2ED8;
    constexpr uintptr_t walker_step_threshold_ref0  = 0x0050088B;
    constexpr uintptr_t walker_step_threshold_ref1  = 0x005008A1;
+
+   // Out-of-world kill box: same code VAs as Steam (tools/port_gog.py code: score
+   // 1.00, shift 0), only the shared constants moved.
+   constexpr uintptr_t world_kill_fall_ref         = 0x004E9676;
+   constexpr uintptr_t world_kill_bottom_ref       = 0x004E9693;
+   constexpr uintptr_t world_kill_side_ref0        = 0x004E96B4;
+   constexpr uintptr_t world_kill_top_ref          = 0x004E96DB;
+   constexpr uintptr_t world_kill_item_ref         = 0x004CB344;
+   // Other floors and the bullet box: port_gog.py score 1.00, shift 0 except
+   // ordnance and box (+0x10A0). sWorldBox 0x01FAC048, guard 0x01FAC060 bit 1.
+   constexpr uintptr_t world_kill_flyer_ref        = 0x004AC774;
+   constexpr uintptr_t world_kill_droideka_ref     = 0x004A47FD;
+   constexpr uintptr_t world_kill_hover_ref        = 0x004C2462;
+   constexpr uintptr_t world_kill_walker_ref       = 0x005048C9;
+   constexpr uintptr_t world_kill_mine_ref         = 0x004D0085;
+   constexpr uintptr_t world_kill_ordnance_ref     = 0x005F8CF7;
+   constexpr uintptr_t world_kill_box_ref          = 0x005FC2E0;
+   constexpr uintptr_t world_kill_box_guard_ref    = 0x005FC2BB;
+   // More -500 floors: score 1.00, shift 0 except powerup (+0x1090).
+   constexpr uintptr_t world_kill_droid_ref        = 0x0049ACD8;
+   constexpr uintptr_t world_kill_defgrid_ref      = 0x00497BB9;
+   constexpr uintptr_t world_kill_portable_ref0    = 0x004D82E5;
+   constexpr uintptr_t world_kill_portable_ref1    = 0x004D8502;
+   constexpr uintptr_t world_kill_powerup_ref      = 0x00624B2C;
 
    // Net send-list visitor -- tools/port_gog.py code: score 1.00, shift +0xFA0.
    constexpr uintptr_t net_send_visitor            = 0x005BE530;

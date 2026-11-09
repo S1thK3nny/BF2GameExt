@@ -59,6 +59,7 @@
 #include "util/memory_pool_heap_fix.hpp"
 #include "entity/jetpack_fp_sound_fix.hpp"
 #include "entity/walker_footstep_fix.hpp"
+#include "entity/world_kill_bounds.hpp"
 #include "render/blur_downsize_clamp.hpp"
 #include "render/screenshot_fix.hpp"
 #include "render/hud_widescreen.hpp"
@@ -405,6 +406,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    branch_region_debug_install(exe_base);
    jetpack_fp_sound_fix_install(exe_base);   // byte-patches .text — needs the RW window
    walker_footstep_fix_install(exe_base);    // byte-patches .text - needs the RW window
+   world_kill_bounds_install(exe_base);      // byte-patches .text - needs the RW window
    fp_fire_animation_fix_install(exe_base);  // byte-patches .text — needs the RW window
    flyer_sound_install(exe_base);
    enable_sound_warnings_install(exe_base);
