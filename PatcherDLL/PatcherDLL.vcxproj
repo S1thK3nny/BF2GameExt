@@ -175,6 +175,7 @@
     <ClInclude Include="src\entity\droideka_death_anim_fix.hpp" />
     <ClInclude Include="src\entity\award_disable.hpp" />
     <ClInclude Include="src\entity\flyer_sound_fix.hpp" />
+    <ClInclude Include="src\entity\damage_effect_requires_pilot.hpp" />
     <ClInclude Include="src\entity\directional_rolls.hpp" />
     <ClInclude Include="src\entity\directional_rolls_core.hpp" />
     <ClInclude Include="src\entity\soldier_anim_tables.hpp" />
@@ -275,6 +276,7 @@
     <ClCompile Include="src\entity\droideka_death_anim_fix.cpp" />
     <ClCompile Include="src\entity\award_disable.cpp" />
     <ClCompile Include="src\entity\flyer_sound_fix.cpp" />
+    <ClCompile Include="src\entity\damage_effect_requires_pilot.cpp" />
     <ClCompile Include="src\entity\directional_rolls.cpp" />
     <ClCompile Include="src\entity\soldier_anim_tables.cpp" />
     <ClCompile Include="src\entity\directional_jets.cpp" />

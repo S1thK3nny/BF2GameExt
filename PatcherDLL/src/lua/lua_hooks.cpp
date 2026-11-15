@@ -16,6 +16,7 @@
 #include "entity/flyer_enable_strafe.hpp"
 #include "entity/directional_rolls.hpp"
 #include "entity/directional_jets.hpp"
+#include "entity/damage_effect_requires_pilot.hpp"
 #include "entity/soldier_override_texture.hpp"
 #include "entity/tentacle_limit.hpp"
 #include "entity/droideka_death_anim_fix.hpp"
@@ -373,6 +374,7 @@ void lua_hooks_uninstall()
    droideka_ball_mode_uninstall();
    flyer_enable_strafe_uninstall();
    droideka_death_anim_uninstall();
+   damage_effect_requires_pilot_uninstall();
    ingame_movie_path_uninstall();
    lua_events_uninstall();
    script_name_tracker_uninstall();

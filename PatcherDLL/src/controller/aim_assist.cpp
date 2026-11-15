@@ -137,6 +137,14 @@ static bool is_joystick_connected()
     return *(int*)resolve(s_addrs->num_joysticks_global) > 0;
 }
 
+// A connected pad is not enough: the count takes in any DirectInput game
+// controller, and a player with a pad plugged in can still be on the mouse.
+// The assist runs only while the pad is the device in use.
+static bool is_pad_aiming()
+{
+    return is_joystick_connected() && controller_pad_in_use();
+}
+
 // ---------------------------------------------------------------------------
 // Resolved addresses
 // ---------------------------------------------------------------------------
@@ -303,6 +311,7 @@ static bool      s_currentWpnIsMelee = false;  // true when holding melee weapon
 
 // Auto-tracking & lock break state
 static uintptr_t s_prevLockedEntity = 0;      // detect new lock
+static bool      s_padAiming = false;  // the assist ran last frame
 static float     s_turnAuto = 0.0f;   // smoothed horizontal auto-correction [-1, 1]
 static float     s_pitchAuto = 0.0f;   // smoothed vertical auto-correction [-1, 1]
 static float     s_lockBreakTimer = 0.0f;   // accumulates when pushing away near edge
@@ -371,7 +380,7 @@ static fn_ApplyDamage6 original_ApplyDamage6 = nullptr;
 
 static void checkAutoLock(void* damageable, void* damageDesc)
 {
-    if (!s_autoLockOnHit || !s_playerEntity || s_currentWpnIsMelee || !is_joystick_connected())
+    if (!s_autoLockOnHit || !s_playerEntity || s_currentWpnIsMelee || !is_pad_aiming())
         return;
 
     // Get shooter Entity* from DamageDesc.DamageOwner.mGameObject.mObject
@@ -415,20 +424,20 @@ static void __fastcall hooked_PCUpdate(void* thisPtr, void* /*edx*/, float dt)
     // Call original — writes mControlTurn/mControlPitch to Controllable
     original_PCUpdate(thisPtr, dt);
 
-    // Base guards
-    if (!s_aimAssistEnabled || !g_controllerEnabled || !is_joystick_connected()) {
-        s_currentWpnIsMelee = false;
-        s_playerEntity = 0;
-        return;
-    }
-
     // Get Controllable* from PlayerController
     uintptr_t ctrl = *(uintptr_t*)((char*)thisPtr + OFF_PC_OWNER);
-    if (!ctrl) {
+
+    // Base guards
+    if (!s_aimAssistEnabled || !g_controllerEnabled || !is_pad_aiming() || !ctrl) {
+        // Handed over to the mouse: let go of the target the assist held.
+        if (s_padAiming && ctrl && s_prevLockedEntity)
+            clear_locked_target(ctrl);
+        s_padAiming = false;
         s_currentWpnIsMelee = false;
-        s_playerEntity = 0;
+        clear_aim_assist_runtime();
         return;
     }
+    s_padAiming = true;
 
     // --------------------------------------------------------------------
     // HARD GATE:
@@ -959,4 +968,5 @@ void aim_assist_uninstall()
     s_pitchAuto = 0.0f;
     s_lockBreakTimer = 0.0f;
     s_currentWpnIsMelee = false;
+    s_padAiming = false;
 }

@@ -1771,6 +1771,16 @@ namespace modtools {
    // animation on the pose (0x0057B2D4).
    constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0082D450;
 
+   // ---- DamageEffectRequiresPilot (entity/damage_effect_requires_pilot.cpp) ----
+
+   // Damageable::HealthChangeCallback(bool, float): thiscall, RET 8; slot 8 of
+   // the base Damageable vftable 0x00A38B7C. Starts and stops the class's
+   // damage effects by health ratio.
+   constexpr uintptr_t damageable_health_change_callback = 0x004CE910;
+   // Damageable::UpdateStatus(float dt): thiscall, RET 4; every vehicle, turret
+   // and soldier Update calls it once (8 callers, through the thunk 0x0040B177).
+   constexpr uintptr_t damageable_update_status          = 0x004CEF40;
+
 } // namespace modtools
 
 // =============================================================================
@@ -3253,6 +3263,15 @@ namespace steam {
    // argument on the stack; UpdateActionAnimation's lower-body call 0x00640B5F.
    constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072DB30;
 
+   // ---- DamageEffectRequiresPilot (entity/damage_effect_requires_pilot.cpp) ----
+
+   // Damageable::HealthChangeCallback(bool, float): thiscall, RET 8; slot 8 of
+   // the Damageable vftable 0x00798DCC.
+   constexpr uintptr_t damageable_health_change_callback = 0x004897D0;
+   // Damageable::UpdateStatus: ECX the Damageable and dt in XMM1, plain RET;
+   // 8 callers.
+   constexpr uintptr_t damageable_update_status          = 0x00488910;
+
 } // namespace steam
 
 // =============================================================================
@@ -4432,6 +4451,13 @@ namespace gog {
    constexpr uintptr_t soldier_animator_apply_procedural      = 0x00643900;
    constexpr uintptr_t soldier_animator_apply_procedural_call = 0x0064177C;
    constexpr uintptr_t zephyr_pose_static_blend_masked        = 0x0072EC00;
+
+   // ---- DamageEffectRequiresPilot (entity/damage_effect_requires_pilot.cpp) ----
+
+   // As on Steam, at the same addresses: HealthChangeCallback (thiscall, RET 8)
+   // and UpdateStatus (ECX, XMM1, plain RET).
+   constexpr uintptr_t damageable_health_change_callback = 0x004897D0;
+   constexpr uintptr_t damageable_update_status          = 0x00488910;
 
 } // namespace gog
 

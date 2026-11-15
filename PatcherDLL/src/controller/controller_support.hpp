@@ -140,5 +140,9 @@ int controller_raw_input_from_name(const char* name);
 int controller_action_from_name(const char* name);
 const char* controller_action_to_name(int action);
 
+// True while the pad is the device player 1 used last: a pad button or stick
+// moved more recently than the mouse did. False until a pad is touched.
+bool controller_pad_in_use();
+
 // Global enable flag (set from INI)
 extern bool g_controllerEnabled;

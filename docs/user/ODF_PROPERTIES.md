@@ -103,6 +103,17 @@ The engine's own `SoldierAnimation` property on the same class is worth knowing 
 |----------|-------|-------------|-------|
 | `DisableBallMode` | `1` | Removes the droideka's roll outright, for the AI as well as the player, turning the chassis into a plain walking unit. The spawn screen follows suit and previews the unit standing and idling instead of curled into a ball. Set on a `walkerdroid` class. Off by default, and inherits through `ClassParent` like a stock property, so `DisableBallMode = 0` on a child restores the roll. | 1.0.0 |
 | `EnableStrafe` | `1` | The strafe controls (left stick sideways, A and D) slide the flyer sideways instead of rolling it. `StrafeSpeed` sets the sideways speed at full input, `Acceleration` how quickly it gets there and stops again, and `StrafeRollAngle` how far the flyer leans while doing it. Coming out of reverse also takes as long as going into it, where a stock flyer takes several times longer to recover from reverse than to brake into it. AI pilots strafe as well, so an AI flyer whose class also sets `StrafeSpeed` strafes rather than rolls, except on maps with flyer paths, where AI flyers follow those as before. Set on a `flyer` class. Off by default. | 1.1.0 |
+| `DamageEffectRequiresPilot` | `1` | The damage effect it is written under plays only while the vehicle has a driver, and stops when the driver gets out. Write it in the effect's block, after its `DamageStartPercent` line; other damage effects on the vehicle are unchanged. The effect's `DamageEffectSound` follows it. Health still decides as before, so an effect that starts at 50% health needs both. A gunner or passenger alone does not count, and a vehicle that drives itself (`PilotType = "self"`) always counts as driven. Set on a hover, walker or flyer class. Off by default, and inherited through `ClassParent` together with the effect. | 1.1.0 |
+
+**Exhaust and thrust on ground vehicles.** A damage effect that starts at 100% health is the usual way to give a hover or walker a permanent effect, and it plays on a parked, empty vehicle too. `DamageEffectRequiresPilot` keeps it off until somebody is driving:
+
+```
+DamageStartPercent        = 100.0
+DamageStopPercent         = 0.0
+DamageEffect              = "car_exhaust"
+DamageAttachPoint         = "hp_exhaust"
+DamageEffectRequiresPilot = 1
+```
 
 ## Building Classes
 

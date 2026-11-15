@@ -78,21 +78,21 @@ Gamepad support. Pad buttons are rebound on the game's own controls screen and k
 
 ## AimAssist
 
-Xbox-style aim assist for gamepad players, singleplayer only. **Off by default** - set `Enabled=1` to turn it on, since it changes how aiming feels and mouse players have no use for it. The tuning values are set to match the console release, so enabling it alone gives you the Xbox feel; they are exposed for anyone who wants it stronger or weaker.
+Xbox-style aim assist for gamepad players, singleplayer only. **Off by default** - set `Enabled=1` to turn it on, since it changes how aiming feels. It only runs while you are on the pad: moving the mouse switches it off, and a pad button or stick switches it back on. The tuning values are set to match the console release, so enabling it alone gives you the Xbox feel; they are exposed for anyone who wants it stronger or weaker.
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `Enabled` | `0` | Enable controller aim assist |
-| `ConeAngle` | `30` | Fallback cone angle in degrees when weapon has no AutoAimSize |
-| `TrackingDeadZone` | `0.5` | Dead zone multiplier for weapon AutoAimSize |
-| `FrictionStrength` | `3.0` | Directional friction scale when aiming away from lock |
-| `PullStrength` | `5.0` | Auto-tracking ramp rate per second toward locked target |
-| `LockBreakTime` | `0.1` | Seconds of pushing away to break target lock |
-| `AutoLockOnHit` | `1` | Automatically lock onto first enemy you damage |
-| `SnapStrength` | `1.0` | Instant correction on first lock frame (0 = ramp only) |
-| `ProximityFriction` | `1` | Slow stick when crosshair is near any enemy |
-| `ProximityFrictionRadius` | `0.5` | Screen-space radius for proximity slowdown |
-| `ProximityFrictionScale` | `0.4` | Min friction at dead center (0 = full stop, 1 = none) |
+| `ConeAngle` | `30` | The angle in degrees that TrackingDeadZone scales, for weapons whose ODF has no AutoAimSize. Larger = weaker pull. It does not widen what you can lock onto |
+| `TrackingDeadZone` | `0.5` | Size of the zone around a locked target where the pull stops, as a fraction of the weapon's AutoAimSize (or ConeAngle). Lower = the pull keeps working closer to the target. 0 = no zone |
+| `FrictionStrength` | `3.0` | How freely the stick moves when you aim away from a locked target. Lower = stickier: at 1 it slows as soon as you leave the target, at 3 only in the outer third. Near 0 you cannot aim away |
+| `PullStrength` | `5.0` | How fast the pull toward a locked target builds up (5 = full pull in 0.2 s). Higher = quicker, not stronger, since the most it pulls is fixed. Only pulls on a stick axis you are not pushing |
+| `LockBreakTime` | `0.1` | Seconds you have to keep pushing away from a locked target before the lock lets go. Higher = harder to shake off. 0 = never lets go this way |
+| `AutoLockOnHit` | `1` | Lock onto what you damage when nothing is locked yet. The pull, the friction and LockBreakTime only work on a locked target, so with this off they rarely do anything |
+| `SnapStrength` | `1.0` | When a lock starts, jump the aim toward the target for one frame, as a fraction of the full pull. 0 = no jump, only the gradual pull |
+| `ProximityFriction` | `1` | Slow the stick while the crosshair is near any enemy, locked or not |
+| `ProximityFrictionRadius` | `0.5` | How far from an enemy the slowdown starts, where the screen is 2.0 across (0.5 = a quarter of the screen). Higher = starts further out |
+| `ProximityFrictionScale` | `0.4` | Stick speed left with the crosshair right on an enemy, back to full at the edge of the radius. Lower = stronger: 0.4 = 40%, 0 = the stick stops |
 
 ## Diagnostic
 
@@ -106,6 +106,7 @@ Read-only instrumentation, all off by default. These only write to `BF2GameExt.l
 | `ContentCensusNames` | `0` | List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers "what did I actually put in this map". Needs ContentCensus to be on, and names are only stored on the modtools build |
 | `AIUpdateDiag` | `0` | Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising |
 | `PoolGrowthDiag` | `0` | Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs |
+| `CarrierDiag` | `0` | Log the flight of every vehicle carrier: each state change, its position, tilt and turn rate, and the ground under it as the landing check sees it. For a carrier that spins, will not land or will not take off. Writes a line every half second per carrier, and every frame while one spins |
 
 ## Fixes
 

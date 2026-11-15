@@ -84,6 +84,12 @@ Scripts can check the running version through `GameExt.version` or
   and lets it come out of reverse as quickly as it brakes into it.
   Off by default.
   See [ODF properties](docs/user/ODF_PROPERTIES.md#vehicle-classes).
+- **`DamageEffectRequiresPilot`** - Vehicle ODF property for a damage effect that
+  should only play while somebody is driving, such as exhaust or thrust on a hover.
+  Written in the effect's `DamageStartPercent` block, it holds that effect and its
+  sound off while the driver seat is empty. Off by default and inherited through
+  `ClassParent`.
+  See [ODF properties](docs/user/ODF_PROPERTIES.md#vehicle-classes).
 - **`DisableProne` / `DisableCrouch`** - Soldier ODF properties that take prone or
   crouch away from a unit, for the AI as well as the player. Off by default and
   inherited through `ClassParent`.
@@ -220,6 +226,10 @@ Scripts can check the running version through `GameExt.version` or
 
 ### Fixed
 
+- Aim Assist slowed and pulled the aim of a mouse player whenever a game controller
+  was connected, including wheels, pedals and other devices that are not a gamepad.
+  It now runs only while the pad is the device in use: moving the mouse switches it
+  off and lets go of its target lock, and a pad button or stick switches it back on.
 - Lightsaber Illumination flickered above 50 fps, lighting the area around a blade
   with several stale copies of its light at once, and with four or more blades lit
   some blades stopped casting light. Each blade now keeps one steady light at any

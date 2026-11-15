@@ -287,7 +287,8 @@ only been verified in play on Modtools.
   that file to start the profile over from the default pad layout.
 - Aim assist is off by default. It needs `[AimAssist] Enabled=1` of its own,
   separately from `[Controller] Enabled=1`, and it is singleplayer only and
-  controller only.
+  controller only. It stops while you aim with the mouse and starts again when
+  you press a pad button or move a stick.
 - **Stick drifting, twitchy, too slow, or moving you when you are not touching
   it?** That is sensitivity and deadzone, and BF2GameExt does not set either.
   Change them in the game's own **Options -> Controls** screen. Nothing in

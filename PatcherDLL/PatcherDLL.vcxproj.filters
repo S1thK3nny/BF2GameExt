@@ -208,6 +208,9 @@
     <ClInclude Include="src\entity\flyer_sound_fix.hpp">
       <Filter>entity</Filter>
     </ClInclude>
+    <ClInclude Include="src\entity\damage_effect_requires_pilot.hpp">
+      <Filter>entity</Filter>
+    </ClInclude>
     <ClInclude Include="src\entity\directional_rolls.hpp">
       <Filter>entity</Filter>
     </ClInclude>
@@ -535,6 +538,9 @@
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\flyer_sound_fix.cpp">
+      <Filter>entity</Filter>
+    </ClCompile>
+    <ClCompile Include="src\entity\damage_effect_requires_pilot.cpp">
       <Filter>entity</Filter>
     </ClCompile>
     <ClCompile Include="src\entity\directional_rolls.cpp">

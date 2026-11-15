@@ -707,6 +707,14 @@ float engine_ray_hit(const float* start, const float* dir, float maxDist, void**
    return s_rayHit(start, dir, maxDist, outHit, nullptr, exclude, excludeCount, mask, 1);
 }
 
+float engine_ray_hit_normal(const float* start, const float* dir, float maxDist, void** outHit,
+                            float* outNormal, void** exclude, int excludeCount, int mask)
+{
+   if (outHit) *outHit = nullptr;
+   if (!s_rayHit || !start || !dir || !outHit || !outNormal || !(maxDist > 0.0f)) return 1.0f;
+   return s_rayHit(start, dir, maxDist, outHit, outNormal, exclude, excludeCount, mask, 0);
+}
+
 void barrel_fire_origin_install(uintptr_t exe_base)
 {
    uintptr_t cannonVA, launcherVA, implVA, thunkVA, rayHitVA, localIdsVA;

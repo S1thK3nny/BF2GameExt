@@ -77,16 +77,16 @@ inline constexpr IniEntry g_ini_registry[] = {
 
    // [AimAssist] — controller aim assist (Xbox-style, singleplayer only)
    INI_ENTRY("AimAssist", "Enabled",                 "0",   "Enable controller aim assist"),
-   INI_ENTRY("AimAssist", "ConeAngle",               "30",  "Fallback cone angle in degrees when weapon has no AutoAimSize"),
-   INI_ENTRY("AimAssist", "TrackingDeadZone",         "0.5", "Dead zone multiplier for weapon AutoAimSize"),
-   INI_ENTRY("AimAssist", "FrictionStrength",          "3.0", "Directional friction scale when aiming away from lock"),
-   INI_ENTRY("AimAssist", "PullStrength",              "5.0", "Auto-tracking ramp rate per second toward locked target"),
-   INI_ENTRY("AimAssist", "LockBreakTime",             "0.1", "Seconds of pushing away to break target lock"),
-   INI_ENTRY("AimAssist", "AutoLockOnHit",             "1",   "Automatically lock onto first enemy you damage"),
-   INI_ENTRY("AimAssist", "SnapStrength",              "1.0", "Instant correction on first lock frame (0 = ramp only)"),
-   INI_ENTRY("AimAssist", "ProximityFriction",         "1",   "Slow stick when crosshair is near any enemy"),
-   INI_ENTRY("AimAssist", "ProximityFrictionRadius",   "0.5", "Screen-space radius for proximity slowdown"),
-   INI_ENTRY("AimAssist", "ProximityFrictionScale",    "0.4", "Min friction at dead center (0 = full stop, 1 = none)"),
+   INI_ENTRY("AimAssist", "ConeAngle",               "30",  "The angle in degrees that TrackingDeadZone scales, for weapons whose ODF has no AutoAimSize. Larger = weaker pull. It does not widen what you can lock onto"),
+   INI_ENTRY("AimAssist", "TrackingDeadZone",         "0.5", "Size of the zone around a locked target where the pull stops, as a fraction of the weapon's AutoAimSize (or ConeAngle). Lower = the pull keeps working closer to the target. 0 = no zone"),
+   INI_ENTRY("AimAssist", "FrictionStrength",          "3.0", "How freely the stick moves when you aim away from a locked target. Lower = stickier: at 1 it slows as soon as you leave the target, at 3 only in the outer third. Near 0 you cannot aim away"),
+   INI_ENTRY("AimAssist", "PullStrength",              "5.0", "How fast the pull toward a locked target builds up (5 = full pull in 0.2 s). Higher = quicker, not stronger, since the most it pulls is fixed. Only pulls on a stick axis you are not pushing"),
+   INI_ENTRY("AimAssist", "LockBreakTime",             "0.1", "Seconds you have to keep pushing away from a locked target before the lock lets go. Higher = harder to shake off. 0 = never lets go this way"),
+   INI_ENTRY("AimAssist", "AutoLockOnHit",             "1",   "Lock onto what you damage when nothing is locked yet. The pull, the friction and LockBreakTime only work on a locked target, so with this off they rarely do anything"),
+   INI_ENTRY("AimAssist", "SnapStrength",              "1.0", "When a lock starts, jump the aim toward the target for one frame, as a fraction of the full pull. 0 = no jump, only the gradual pull"),
+   INI_ENTRY("AimAssist", "ProximityFriction",         "1",   "Slow the stick while the crosshair is near any enemy, locked or not"),
+   INI_ENTRY("AimAssist", "ProximityFrictionRadius",   "0.5", "How far from an enemy the slowdown starts, where the screen is 2.0 across (0.5 = a quarter of the screen). Higher = starts further out"),
+   INI_ENTRY("AimAssist", "ProximityFrictionScale",    "0.4", "Stick speed left with the crosshair right on an enemy, back to full at the edge of the radius. Lower = stronger: 0.4 = 40%, 0 = the stick stops"),
 
    // ---- Diagnostic ---------------------------------------------------------
    // Read-only instrumentation. Each one only writes to BF2GameExt.log; none of
@@ -97,6 +97,7 @@ inline constexpr IniEntry g_ini_registry[] = {
    INI_ENTRY("Diagnostic", "ContentCensusNames", "0", "List every entity class the map loaded by ODF name and base class, once per level load rather than every tick. Turns the census from a count into an inventory, which is what answers \"what did I actually put in this map\". Needs ContentCensus to be on, and names are only stored on the modtools build"),
    INI_ENTRY("Diagnostic", "AIUpdateDiag",      "0", "Report how many AI units are getting a decision each turn against how many want one, and the spread of units across LOD tiers. This is what says whether AIUpdateBudget is worth raising"),
    INI_ENTRY("Diagnostic", "PoolGrowthDiag",    "0", "Log every memory pool growth with the pool name, the heap it was built on and the heap that is live. A captured heap that differs from the live one is the crash the pool heap fix repairs"),
+   INI_ENTRY("Diagnostic", "CarrierDiag",       "0", "Log the flight of every vehicle carrier: each state change, its position, tilt and turn rate, and the ground under it as the landing check sees it. For a carrier that spins, will not land or will not take off. Writes a line every half second per carrier, and every frame while one spins"),
    // [Fixes] — bug-fix patches
    INI_PATCH("Fixes", "ChunkPushFix", "1", "Let explosions push bodies that break into chunks, instead of dropping them where they stood", "Chunk Push Fix"),
    INI_PATCH("Fixes", "PropGeneratorLoopFix", "1", "Fix foliage-update crash at very high FOVs (PrismaticFlower's fix)", "PropGenerator Update Loop Exit Condition"),

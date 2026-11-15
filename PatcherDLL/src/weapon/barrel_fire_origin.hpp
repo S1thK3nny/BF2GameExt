@@ -36,6 +36,12 @@ void barrel_fire_origin_install(uintptr_t exe_base);
 // treats "no hit" as "clear" degrades to always-clear rather than crashing.
 float engine_ray_hit(const float* start, const float* dir, float maxDist, void** outHit,
                      void** exclude, int excludeCount, int mask);
+
+// The same ray with the surface normal at the hit, the way EntityFlyer::Update
+// casts its ground rays (mask 400, last argument false). outNormal is three
+// floats and is left as it was on a miss.
+float engine_ray_hit_normal(const float* start, const float* dir, float maxDist, void** outHit,
+                            float* outNormal, void** exclude, int excludeCount, int mask);
 void barrel_fire_origin_uninstall();
 
 // For weapons with a second muzzle (dual_cannon). True only when this turn's

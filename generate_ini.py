@@ -87,7 +87,8 @@ SECTION_BLURBS = OrderedDict([
     ("AimAssist",
      "Xbox-style aim assist for gamepad players, singleplayer only. **Off by "
      "default** - set `Enabled=1` to turn it on, since it changes how aiming "
-     "feels and mouse players have no use for it. The tuning values are set to "
+     "feels. It only runs while you are on the pad: moving the mouse switches it "
+     "off, and a pad button or stick switches it back on. The tuning values are set to "
      "match the console release, so enabling it alone gives you the Xbox feel; "
      "they are exposed for anyone who wants it stronger or weaker."),
     ("Diagnostic",

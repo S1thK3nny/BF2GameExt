@@ -7,8 +7,12 @@
 #include "game/Battlefront2/Source/EntityFlyer.h"
 #include "game/Battlefront2/Source/VehicleSpawn.h"
 #include "util/crash_logger.hpp"
+#include "util/install_log.hpp"
+#include "weapon/barrel_fire_origin.hpp"
 
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <detours.h>
 
 // =============================================================================
@@ -46,6 +50,7 @@
 //     carrier kills its cargo, and the multiplayer host's send-list recursion
 //     on a carrier that pilots itself.
 //   - EntityFlyer::ClientKill on a flyer class with no ExplosionDestruct.
+//   - [Diagnostic] CarrierDiag: a flight log per carrier (see carrierDiag).
 //
 // Per-carrier state is keyed by (object pointer, PblHandle id at +0x204).
 // Vanilla deletes finished carriers from VehicleSpawn, not from their own
@@ -240,6 +245,200 @@ static void restoreCargoTeam(CarrierTrack& t, int slot, void* cargo)
 static uint8_t* g_pauseMode = nullptr;
 
 // ---------------------------------------------------------------------------
+// [Diagnostic] CarrierDiag
+//
+// Writes each carrier's flight to BF2GameExt.log: every state change, a line
+// every half second, every frame while it spins or tilts, and one line when a
+// state lasts longer than it should.  Each line carries what the landing and
+// takeoff code decides on:
+//
+//   ground / slope / upDotN   a ray straight down from the carrier, as
+//                             EntityFlyer::Update casts it: the distance, the
+//                             terrain's slope there, and the carrier's up axis
+//                             against the terrain normal.  LANDING turns into
+//                             LANDED only when ground < landedHt and
+//                             upDotN > 0.9375, and in TAKEOFF and LANDING the
+//                             carrier is steered level with that normal.
+//   rays                      "off" while this file has the engine's own two
+//                             ground rays neutralised (it then sees no terrain
+//                             and stays level), "live" otherwise.
+//   tilt / rate               the up axis against world up, and how fast the
+//                             carrier turned since the frame before.
+//   land / ascent             the descent onto the pad and the post-drop ascent
+//                             this file drives.
+//
+// Read only: one extra ray per carrier per frame, nothing is changed.
+// ---------------------------------------------------------------------------
+
+bool g_carrierDiag = false;
+
+static void diagLog(const char* fmt, ...)
+{
+   char line[768];
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(line, sizeof(line), fmt, ap);
+   va_end(ap);
+   install_log("[CarrierDiag] %s", line);
+}
+
+static const char* stateName(int state)
+{
+   static const char* const names[] = { "LANDED", "TAKEOFF", "FLYING", "LANDING", "DYING", "CRASHED" };
+   return (state >= 0 && state < 6) ? names[state] : "?";
+}
+
+static constexpr float kDiagLineEvery  = 0.5f;    // seconds between routine lines
+static constexpr float kDiagSpinRate   = 90.0f;   // deg/s
+static constexpr float kDiagSpinTilt   = 30.0f;   // deg from upright
+static constexpr int   kDiagSpinFrames = 20;      // frames logged after the last spin frame
+static constexpr int   kDiagSpinMax    = 900;     // spin lines per carrier
+static constexpr float kDiagRad2Deg    = 57.29578f;
+static constexpr int   kDiagGroundMask = 400;     // EntityFlyer::Update's ground rays
+
+struct CarrierDiag {
+   char* base;              // nullptr = free
+   int   handleId;
+   float clock;             // seconds watched
+   int   state;
+   float stateTime;
+   float up[3], fwd[3];     // the frame before's axes
+   bool  haveAxes;
+   float sinceLine;
+   int   spinFrames;
+   int   spinLines;
+   bool  stalled;           // stall line written for this state
+};
+static CarrierDiag g_diag[kMaxTrackedCarriers] = {};
+
+static CarrierDiag* diagAcquire(char* base)
+{
+   const int id = *(int*)(base + kHandleId);
+   CarrierDiag* slot = nullptr;
+   for (CarrierDiag& d : g_diag) {
+      if (d.base == base && d.handleId == id) return &d;
+      if (d.base == base) d = {};                       // the block's last carrier
+      if (!d.base && !slot) slot = &d;
+   }
+   if (!slot) {
+      // All in use: take over the one watched longest.
+      slot = &g_diag[0];
+      for (CarrierDiag& d : g_diag)
+         if (d.clock > slot->clock) slot = &d;
+   }
+   *slot = {};
+   slot->base     = base;
+   slot->handleId = id;
+   slot->state    = -1;
+   return slot;
+}
+
+static float diagAngle(const float* a, const float* b)
+{
+   float dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+   if (dot > 1.0f) dot = 1.0f;
+   if (dot < -1.0f) dot = -1.0f;
+   return acosf(dot) * kDiagRad2Deg;
+}
+
+// Once per carrier per frame, after its Update.
+static void carrierDiag(char* base, const CarrierTrack* t, float dt, bool raysOff)
+{
+   CarrierDiag* d = diagAcquire(base);
+   const int    state = flightState(base);
+   const float* up    = (const float*)(base + kMatrix + 0x10);
+   const float* fwd   = (const float*)(base + kForward);
+   const float* pos   = (const float*)(base + kPosX);
+   const float* vel   = (const float*)&ef::mVelocity(base);
+
+   float rate = 0.0f;
+   if (d->haveAxes && dt > 0.0f) {
+      const float a = diagAngle(up, d->up), b = diagAngle(fwd, d->fwd);
+      rate = (a > b ? a : b) / dt;
+   }
+   static const float kWorldUp[3] = { 0.0f, 1.0f, 0.0f };
+   const float tilt = diagAngle(up, kWorldUp);
+
+   // The ground as the engine's rays would see it.
+   static const float kDown[3] = { 0.0f, -1.0f, 0.0f };
+   float normal[3] = { 0.0f, 1.0f, 0.0f };
+   void* hit  = nullptr;
+   void* self = base;
+   const float ground =
+      engine_ray_hit_normal(pos, kDown, 1024.0f, &hit, normal, &self, 1, kDiagGroundMask) * 1024.0f;
+   const float slope  = diagAngle(normal, kWorldUp);
+   const float upDotN = up[0] * normal[0] + up[1] * normal[1] + up[2] * normal[2];
+
+   const bool  changed = state != d->state;
+   const int   from    = d->state;
+   const float inState = d->stateTime;
+   if (changed) {
+      d->state     = state;
+      d->stateTime = 0.0f;
+      d->stalled   = false;
+   }
+
+   const bool spin = rate > kDiagSpinRate || tilt > kDiagSpinTilt;
+   if (spin) d->spinFrames = kDiagSpinFrames;
+
+   // How long each state may last before it counts as stuck.
+   float limit = 0.0f;
+   if (state == ef::kLanding)      limit = (t ? t->descentDuration : 20.0f) + 8.0f;
+   else if (state == ef::kLanded)  limit = 8.0f;
+   else if (state == ef::kTakeoff) limit = 20.0f;
+   const bool stall = limit > 0.0f && d->stateTime > limit && !d->stalled;
+   if (stall) d->stalled = true;
+
+   const char* tag = nullptr;
+   if (changed) {
+      tag = from < 0 ? "first seen" : "state";
+   } else if (stall) {
+      tag = "STALL";
+   } else if (d->spinFrames > 0 && d->spinLines < kDiagSpinMax) {
+      tag = spin ? "SPIN" : "after spin";
+      d->spinLines++;
+   } else if (d->sinceLine >= kDiagLineEvery) {
+      tag = "tick";
+   }
+
+   if (tag) {
+      d->sinceLine = 0.0f;
+      char head[96];
+      if (changed && from >= 0)
+         sprintf_s(head, "%s -> %s after %.2fs", stateName(from), stateName(state), inState);
+      else
+         sprintf_s(head, "%s %.2fs", stateName(state), d->stateTime);
+
+      char track[192] = "untracked";
+      if (t) {
+         const float dx = pos[0] - t->padX, dz = pos[2] - t->padZ;
+         sprintf_s(track, "pad=(%.1f %.1f %.1f) padDist=%.2f land=%d %.2f/%.2fs ascent=%d %.2fs dropped=%d",
+                   t->padX, t->padY, t->padZ, sqrtf(dx * dx + dz * dz), t->landActive ? 1 : 0, t->landElapsed,
+                   t->descentDuration, t->ascentActive ? 1 : 0, t->ascentElapsed, t->cargoDropped ? 1 : 0);
+      }
+
+      int cargo = 0;
+      for (int s = 0; s < kMaxCargo; s++)
+         if (slotCargo(base, s)) cargo++;
+
+      diagLog("%p#%d t=%.2f %s: %s | pos=(%.2f %.2f %.2f) vel=(%.2f %.2f %.2f) ratio=%.3f | tilt=%.1f "
+              "rate=%.0f up=(%.3f %.3f %.3f) fwd=(%.3f %.3f %.3f) | ground=%.2f landedHt=%.2f slope=%.1f "
+              "upDotN=%.3f hit=%p rays=%s | %s cargo=%d",
+              base, d->handleId, d->clock, tag, head, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2],
+              ef::mFlightRatio(base), tilt, rate, up[0], up[1], up[2], fwd[0], fwd[1], fwd[2], ground,
+              ef::mLandedHeight(base), slope, upDotN, hit, raysOff ? "off" : "live", track, cargo);
+   }
+
+   if (d->spinFrames > 0) d->spinFrames--;
+   memcpy(d->up, up, sizeof(d->up));
+   memcpy(d->fwd, fwd, sizeof(d->fwd));
+   d->haveAxes = true;
+   d->clock     += dt;
+   d->stateTime += dt;
+   d->sinceLine += dt;
+}
+
+// ---------------------------------------------------------------------------
 // EntityCarrierClass::SetProperty
 //   __thiscall(EntityCarrierClass* this, uint hash, const char* value)
 //
@@ -353,6 +552,9 @@ static bool __fastcall hooked_DetachCargo(void* ecx, void* /*edx*/, int slot)
    __try { cargo = slotCargo(base, slot); } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
    bool result = original_DetachCargo(ecx, nullptr, slot);
+   if (g_carrierDiag)
+      diagLog("%p DetachCargo(%d) in %s: cargo %p, returned %d", base, slot, stateName(flightState(base)),
+              cargo, result ? 1 : 0);
    if (!cargo) return result;
 
    __try {
@@ -779,6 +981,8 @@ static void __fastcall hooked_TakeOff(void* ecx, void* /*edx*/)
    __try {
       if (*(void**)base == g_carrierVtable) {
          const int state = flightState(base);
+         if (g_carrierDiag)
+            diagLog("%p TakeOff() in %s%s", base, stateName(state), state == 3 ? ": refused while landing" : "");
          if (state == 3) return;
 
          CarrierTrack* t = (state == 0) ? trackFind(base) : nullptr;
@@ -885,8 +1089,14 @@ static void updateFlight(CarrierTrack& t, char* base, float dt)
 static void dropStrandedCargo(char* base)
 {
    const int state = flightState(base);
-   if (state == 0)                 detachAllCargo(base, 1);
-   else if (state == 1 || state == 2) detachAllCargo(base, 0);
+   if (state == 0) {
+      detachAllCargo(base, 1);
+   } else if (state == 1 || state == 2) {
+      if (g_carrierDiag && slotCargo(base, 0))
+         diagLog("%p still has its cargo in %s: the landing did not finish, dropping it here", base,
+                 stateName(state));
+      detachAllCargo(base, 0);
+   }
 }
 
 // Our position writes bypass EntityFlyer::SetPosition, which is what normally
@@ -909,7 +1119,9 @@ static void syncBoundingSphere(char* base)
 // next frame.
 static void skipDeathSpin(char* base)
 {
-   if (flightState(base) == 4) ef::mState(base) = 5;
+   if (flightState(base) != 4) return;
+   if (g_carrierDiag) diagLog("%p killed in the air: exploding now instead of spinning down", base);
+   ef::mState(base) = 5;
 }
 
 static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
@@ -946,6 +1158,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
    if (neutralised) rayHitSet(false);
 
    if (!alive) {
+      if (g_carrierDiag) diagLog("%p Update returned dead: removed", base);
       if (t) *t = {};
       return false;
    }
@@ -958,6 +1171,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       }
       dropStrandedCargo(base);
       syncBoundingSphere(base);
+      if (g_carrierDiag) carrierDiag(base, t, dt, neutralised);
    } __except (EXCEPTION_EXECUTE_HANDLER) {}
    return true;
 }
@@ -1016,6 +1230,9 @@ static void padCarrierUpdate(VehicleSpawn* vs)
       if (*(void**)carrier != g_carrierVtable) return;
 
       const int state = flightState(carrier);
+      if (g_carrierDiag && (state == 0 || state == 2))
+         diagLog("%p pad %p has no live vehicle left to launch it: %s", carrier, vs,
+                 state == 0 ? "dropping and taking off" : "deleting it");
       if (state == 0) {
          detachAllCargo(carrier);
          hooked_TakeOff(carrier, nullptr);
@@ -1150,6 +1367,18 @@ static void __fastcall hooked_UpdateSpawn(void* ecx, void* /*edx*/, float dt)
 
          // Slot 0 was attached inside the original, before we tracked it.
          if (void* cargo0 = slotCargo(carrier, 0)) saveCargoTeam(*t, 0, cargo0);
+      }
+      if (g_carrierDiag) {
+         char* cls = carrierClass(carrier);
+         diagLog("%p spawned by pad %p team %d%s: pad=(%.2f %.2f %.2f) padUp=(%.3f %.3f %.3f) "
+                 "pos=(%.2f %.2f %.2f) %s LandingTime=%.2f TakeoffSpeed=%.2f landedHt=%.2f (class %.2f) "
+                 "cargoNodes=%d",
+                 carrier, vs, team, t ? "" : " (NOT tracked: flies vanilla)", vs->mMatrix._41, vs->mMatrix._42,
+                 vs->mMatrix._43, vs->mMatrix._21, vs->mMatrix._22, vs->mMatrix._23, fieldF(carrier, kPosX),
+                 fieldF(carrier, kPosY), fieldF(carrier, kPosZ), stateName(flightState(carrier)),
+                 cls ? efc::mLandingTime(cls) : 0.0f, cls ? efc::mTakeoffSpeed(cls) : 0.0f,
+                 ef::mLandedHeight(carrier), cls ? efc::mLandedHeight(cls) : 0.0f,
+                 cls ? (int)ecc::mCargoCount(cls) : 0);
       }
 
       spawnExtraCargo(vs, carrier, t, team, countAfter);

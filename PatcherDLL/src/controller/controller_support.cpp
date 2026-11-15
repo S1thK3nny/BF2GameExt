@@ -6,6 +6,7 @@
 #include "util/install_log.hpp"
 
 #include <detours.h>
+#include <math.h>
 #include <stdio.h>
 #include <wchar.h>
 
@@ -322,11 +323,15 @@ static constexpr int kActionsPerMode = 0x2B;
 static constexpr int kModeStride     = 0x102;   // ActionKey[0x2B]
 static constexpr int kActionKeySize  = 6;
 static constexpr int kPadRawInputs   = 0x40;    // raw ids above are the mouse
+static constexpr int kRawInputs      = 0x4C;    // per pad; the mouse is in pad 0's
+static constexpr int kMaxPads        = 10;
 static constexpr int kMaxPadBindings = 128;
 
 // RawControllerInputs (controller_base_global + 0x428) and tProfile fields,
 // identical on all three builds.
 static constexpr int kCtrlMode       = 0x8;
+static constexpr int kCtrlRawInputs  = 0x14;    // float mRawInputFloat[10][76]
+static constexpr int kCtrlLastInputs = 0xBF4;   // the frame before's
 static constexpr int kCtrlLiveRows   = 0x20BC;
 static constexpr int kCtrlEdgeFlag   = 0x2600;  // 0xB7 key edge pair
 static constexpr int kProfileName    = 0x2;     // ushort mName[16]
@@ -530,14 +535,61 @@ static void pad_sync_profile()
 
 static bool pad_connected() { return s_numPads && *s_numPads > 0; }
 
+// --- Which device the player is using ---
+//
+// The pad count is every DirectInput game controller (wheels, pedals, virtual
+// devices), so it cannot say whether the player is on the pad or on the mouse.
+// Mouse movement, buttons and the wheel hand over to the mouse; a pad button or
+// stick that moved hands over to the pad. An axis resting off-centre never
+// moves, so a device nobody touches never takes over.
+
+static constexpr float kPadMoved = 0.1f;   // change in one frame
+static constexpr float kPadHeld  = 0.3f;   // past any dead zone
+
+static bool s_padInUse = false;
+
+static void track_input_device(uintptr_t ctrl)
+{
+   if (!pad_connected()) {
+      s_padInUse = false;
+      return;
+   }
+   const float* now  = (const float*)(ctrl + kCtrlRawInputs);
+   const float* last = (const float*)(ctrl + kCtrlLastInputs);
+
+   for (int i = kPadRawInputs; i < kRawInputs; i++) {
+      if (now[i] != 0.0f) {
+         s_padInUse = false;
+         return;
+      }
+   }
+   for (int pad = 0; pad < kMaxPads; pad++) {
+      const float* n = now + pad * kRawInputs;
+      const float* l = last + pad * kRawInputs;
+      for (int i = 0; i < kPadRawInputs; i++) {
+         if (fabsf(n[i]) >= kPadHeld && fabsf(n[i] - l[i]) >= kPadMoved) {
+            s_padInUse = true;
+            return;
+         }
+      }
+   }
+}
+
 // --- Input: second pass with the pad keys in the live row ---
 
 using fn_standard_input_t = void(__fastcall*)(void* self, void* edx);
 static fn_standard_input_t s_origStandardInput = nullptr;
 
+bool controller_pad_in_use()
+{
+   // Without the input hook there is nothing to tell them apart by.
+   return s_origStandardInput ? s_padInUse : pad_connected();
+}
+
 static void __fastcall hooked_StandardInput(void* self, void* edx)
 {
    s_origStandardInput(self, edx);
+   if ((uintptr_t)self == s_ctrl) track_input_device(s_ctrl);
    if (!pad_connected()) return;
 
    uintptr_t ctrl = (uintptr_t)self;

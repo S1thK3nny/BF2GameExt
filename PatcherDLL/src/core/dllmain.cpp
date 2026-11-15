@@ -45,6 +45,8 @@
 #include "entity/branch_region_fix.hpp"
 #include "entity/directional_rolls.hpp"
 #include "entity/directional_jets.hpp"
+#include "entity/damage_effect_requires_pilot.hpp"
+#include "entity/flyer_carrier_fixes.hpp"
 #include "util/sound_diag.hpp"
 #include "util/game_log_lock.hpp"
 #include "util/voice_limit.hpp"
@@ -308,6 +310,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
       g_aiUpdateBudget            = cfg.get_int("AI", "AIUpdateBudget", 0);
       g_aiUpdateDiag              = cfg.get_bool("Diagnostic", "AIUpdateDiag", false);
       g_poolGrowthDiag            = cfg.get_bool("Diagnostic", "PoolGrowthDiag", false);
+      g_carrierDiag               = cfg.get_bool("Diagnostic", "CarrierDiag", false);
       g_tentacleLimitEnabled = cfg.get_bool("LimitIncreases", "TentacleLimit", true);
       g_droidekaDeathAnimEnabled = cfg.get_bool("Fixes", "DroidekaDeathAnimation", true);
       g_disableAwardBuffs = cfg.get_bool("Features", "DisableAwardBuffs", false);
@@ -394,6 +397,7 @@ static void install_patches_impl(uintptr_t exe_base, const char* ini_path)
    odf_gameext_props_install(exe_base);       // byte-patches .text — needs the RW window
    directional_rolls_install(exe_base);       // after odf_gameext_props: its ODF listeners; Detours .text
    directional_jets_install(exe_base);        // after odf_gameext_props: its ODF listeners; rewrites a CALL rel32 - needs the RW window
+   damage_effect_requires_pilot_install(exe_base); // after odf_gameext_props: its ODF listeners; Detours .text
    hero_team_switch_fix_install(exe_base);    // byte-patches .text — needs the RW window
    command_post_null_fix_install(exe_base);
    matrix_basis_fix_install(exe_base);
