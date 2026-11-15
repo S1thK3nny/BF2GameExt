@@ -101,6 +101,13 @@ static constexpr uintptr_t kForward          = 0x110;  // matrix row 2
 static constexpr uintptr_t kSphere           = 0xC4;   // scene bounding sphere x,y,z,r
 
 static constexpr int kMaxCargo = 4;
+static constexpr int kGroundRayMask = 400;   // EntityFlyer::Update's ground rays
+
+// Height above the pad below which the engine's ground rays stay live.
+static float liveRayHeight(float landedHt)
+{
+   return (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
+}
 static constexpr unsigned int kCargoNodeName_Hash   = 0x3e2c4da4u;
 static constexpr unsigned int kCargoNodeOffset_Hash = 0x910a89fcu;
 
@@ -294,7 +301,6 @@ static constexpr float kDiagSpinTilt   = 30.0f;   // deg from upright
 static constexpr int   kDiagSpinFrames = 20;      // frames logged after the last spin frame
 static constexpr int   kDiagSpinMax    = 900;     // spin lines per carrier
 static constexpr float kDiagRad2Deg    = 57.29578f;
-static constexpr int   kDiagGroundMask = 400;     // EntityFlyer::Update's ground rays
 
 struct CarrierDiag {
    char* base;              // nullptr = free
@@ -365,7 +371,7 @@ static void carrierDiag(char* base, const CarrierTrack* t, float dt, bool raysOf
    void* hit  = nullptr;
    void* self = base;
    const float ground =
-      engine_ray_hit_normal(pos, kDown, 1024.0f, &hit, normal, &self, 1, kDiagGroundMask) * 1024.0f;
+      engine_ray_hit_normal(pos, kDown, 1024.0f, &hit, normal, &self, 1, kGroundRayMask) * 1024.0f;
    const float slope  = diagAngle(normal, kWorldUp);
    const float upDotN = up[0] * normal[0] + up[1] * normal[1] + up[2] * normal[2];
 
@@ -1035,9 +1041,27 @@ static void applyAscentLock(CarrierTrack& t, char* base)
 // pad horizontally (see hooked_CarrierUpdate).
 static constexpr float kOverPadRadius = 2.0f;
 
+// Descent Y: instance LandedHeight - 1 above the ground under the pad, so
+// vanilla's ground check (groundDistance < LandedHeight) fires there.  The
+// ground is found with the engine's own ground ray from padY + LandedHeight - 1;
+// a pad standing above the terrain would otherwise park the carrier too high.
+static float landingTargetY(const CarrierTrack& t, char* base)
+{
+   const float landedHt = ef::mLandedHeight(base);
+   const float atPad    = t.padY + landedHt - 1.0f;
+   const float reach    = liveRayHeight(landedHt);
+   const float start[3] = { t.padX, atPad, t.padZ };
+   static const float kDown[3] = { 0.0f, -1.0f, 0.0f };
+   float normal[3] = { 0.0f, 1.0f, 0.0f };
+   void* hit  = nullptr;
+   void* self = base;
+   const float f = engine_ray_hit_normal(start, kDown, reach, &hit, normal, &self, 1, kGroundRayMask);
+   if (!hit) return atPad;
+   return atPad - f * reach + landedHt - 1.0f;
+}
+
 // Descent: from wherever LANDING starts, smoothstep X/Y/Z onto the pad over
-// LandingTime.  Y targets padY + instance LandedHeight - 1 so vanilla's own
-// ground check (groundDistance < LandedHeight) fires directly over the pad.
+// LandingTime, Y onto landingTargetY.
 static void updateFlight(CarrierTrack& t, char* base, float dt)
 {
    int state = flightState(base);
@@ -1049,8 +1073,11 @@ static void updateFlight(CarrierTrack& t, char* base, float dt)
       t.landStartY  = fieldF(base, kPosY);
       t.landStartZ  = fieldF(base, kPosZ);
       t.landElapsed = 0.0f;
-      t.landTargetY = t.padY + ef::mLandedHeight(base) - 1.0f;
+      t.landTargetY = landingTargetY(t, base);
       t.landActive  = true;
+      if (g_carrierDiag)
+         diagLog("%p descent target Y=%.2f (pad Y %.2f + landedHt %.2f - 1 = %.2f)", base, t.landTargetY,
+                 t.padY, ef::mLandedHeight(base), t.padY + ef::mLandedHeight(base) - 1.0f);
    }
 
    if (state == 3 && t.landActive) {
@@ -1134,7 +1161,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
       if (t) {
          applyAscentLock(*t, base);
          // Instance landed height, which includes the cargo.  The descent
-         // parks the carrier at padY + landedHeight - 1, so the rays must be
+         // parks the carrier landedHeight - 1 above the pad's ground, so the rays must be
          // live there or the landing check never passes (tall cargo such as
          // an AT-AT would hover over the pad forever).  While LANDING they also
          // stay off until the carrier is over the pad, so vanilla's landing
@@ -1142,7 +1169,7 @@ static bool __fastcall hooked_CarrierUpdate(void* ecx, void* /*edx*/, float dt)
          // SetMaxFlyHeight keeps the whole approach within the height
          // threshold, and the cargo was set down short of the pad).
          const float landedHt  = ef::mLandedHeight(base);
-         const float threshold = (landedHt * 2.0f > 10.0f) ? landedHt * 2.0f : 10.0f;
+         const float threshold = liveRayHeight(landedHt);
          const float dx = fieldF(base, kPosX) - t->padX;
          const float dz = fieldF(base, kPosZ) - t->padZ;
          const bool  approaching = flightState(base) == 3 &&

@@ -345,6 +345,8 @@ Scripts can check the running version through `GameExt.version` or
     longer crashes the game.
   - Carriers no longer set their vehicle down short of the pad on maps with a low flight
     ceiling.
+  - A carrier no longer hovers over its pad forever when the pad stands higher than the
+    ground under it. It now lands and drops its vehicle.
   - Hosting a multiplayer match on a map with carriers no longer crashes the game.
   - A carrier shot down in the air now explodes on the spot instead of spinning all the
     way to the ground.

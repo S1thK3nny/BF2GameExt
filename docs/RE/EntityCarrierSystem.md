@@ -368,8 +368,12 @@ detaches go through the hooked DetachCargo so the restore always runs.
 ### 9.5 Flight overrides
 
 - **Descent**: on entering LANDING, smoothstep X/Y/Z from the current position onto the pad
-  over `LandingTime`, targeting `padY + instance landed height - 1` so the ground check
-  fires directly over the pad.
+  over `LandingTime`, targeting `instance landed height - 1` above the ground under the
+  pad so the ground check fires directly over it. The ground comes from the engine's own
+  ground ray (mask 400) cast down from `padY + landed height - 1` at the pad's X/Z, at most
+  `max(2 * landedHeight, 10)` long; on a miss the target stays `padY + landed height - 1`.
+  A pad standing above the terrain otherwise parked the carrier too high for the check
+  and it sat in LANDING forever.
 - **Post-drop ascent**: at TakeOff after a drop, snapshot the rotation rows
   (`+0xF0..+0x11F`) and X/Z; each TAKEOFF frame restore the rotation and move X/Z along the
   saved heading, ramping to `TakeoffSpeed` over 3 s. Vanilla keeps driving Y. A
