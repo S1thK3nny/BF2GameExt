@@ -72,10 +72,28 @@ jobs:
           path: dist/BF2GameExt-*.zip
           if-no-files-found: error
 
+      - name: Extract release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          BLOB: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.ref_name }}/
+        run: |
+          python - <<'EOF'
+          import os, re, sys
+          ver, blob = os.environ["VERSION"], os.environ["BLOB"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## {re.escape(ver)}[ \t]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+          if not m or not m.group(1).strip():
+              sys.exit(f"::error::No '## {ver}' section in CHANGELOG.md")
+          body = re.sub(r"\]\((?!https?:|#|mailto:)([^)]+)\)", lambda l: f"]({blob}{l.group(1)})", m.group(1).strip())
+          open("release_notes.md", "w", encoding="utf-8").write(body + "\n")
+          EOF
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/BF2GameExt-*.zip
-          draft: true          # review the notes before it goes public
+          body_path: release_notes.md
           generate_release_notes: true
