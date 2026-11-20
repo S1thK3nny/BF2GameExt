@@ -122,3 +122,5 @@ docs/RE/              Reverse-engineering research notes
 - **[phantom567459](https://github.com/phantom567459)** - BF1 engine research and decompilation. His work on the BF1 binary made the loading screen system possible.
 - **[Ryan Hank](https://github.com/RJP1992)** - Reverse engineering, decompilation, implementation.
 - **[S1thK3nny](https://github.com/S1thK3nny)** - Reverse engineering, decompilation, implementation.
+
+> Built with AI assistance.
